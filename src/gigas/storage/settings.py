@@ -1,15 +1,15 @@
 """Read and write global application settings."""
 
+import tempfile
 from collections.abc import MutableMapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tomlkit
 from tomlkit.exceptions import ParseError, TOMLKitError
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tomlkit.toml_document import TOMLDocument
 
 
@@ -99,7 +99,7 @@ def save_settings(path: "Path", settings: Settings) -> None:
         settings: Values to persist.
 
     Raises:
-        SettingsError: The existing file cannot be read or a known setting is invalid.
+        SettingsError: The existing file is invalid, a value is invalid, or saving fails.
     """
     document = _read_document(path)
     _settings_from_document(document, path)
@@ -114,8 +114,36 @@ def save_settings(path: "Path", settings: Settings) -> None:
     _set_text(agent, "effort", settings.effort)
     _set_text(agent, "auth_method", settings.auth_method)
     _settings_from_document(document, path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(tomlkit.dumps(document).encode("utf-8"))
+    _replace_file(path, tomlkit.dumps(document))
+
+
+def _replace_file(path: Path, contents: str) -> None:
+    try:
+        data = contents.encode("utf-8")
+    except UnicodeEncodeError:
+        msg = f"{path}: settings cannot be encoded as UTF-8"
+        raise SettingsError(msg) from None
+
+    temporary_path = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(data)
+        temporary_path.replace(path)
+    except OSError as exc:
+        msg = f"{path}: could not save settings ({exc.strerror})"
+        error = SettingsError(msg)
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError as cleanup:
+                error.add_note(
+                    f"{temporary_path}: could not remove temporary file ({cleanup.strerror})"
+                )
+        raise error from exc
 
 
 def _table(

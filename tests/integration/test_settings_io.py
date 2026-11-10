@@ -1,5 +1,8 @@
+import errno
+import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Never
 
 import pytest
 
@@ -71,3 +74,27 @@ def test_save_rejects_invalid_existing_document(tmp_path: Path, original: bytes)
         settings.save_settings(path, settings.Settings())
 
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("stage", ["create", "replace"])
+def test_failed_save_preserves_original_and_removes_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    path = tmp_path / "settings.toml"
+    original = b'[agent]\nmodel = "saved"\n'
+    path.write_bytes(original)
+
+    def fail(*_args: object, **_kwargs: object) -> Never:
+        raise PermissionError(errno.EACCES, "injected failure")
+
+    if stage == "create":
+        monkeypatch.setattr(tempfile, "NamedTemporaryFile", fail)
+    else:
+        monkeypatch.setattr(Path, "replace", fail)
+
+    with pytest.raises(settings.SettingsError, match="injected failure") as error:
+        settings.save_settings(path, settings.Settings(model="edited"))
+
+    assert str(path) in str(error.value)
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]
