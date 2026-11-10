@@ -164,7 +164,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | importでは画面・スレッド・設定ファイルを作らない | new | integration | 独立プロセスで確認 |
 | refactor-skipped | 両入口で機器なしに起動・正常終了する | new | integration | 開発環境。配布物はM3 |
 | refactor-skipped | 設定を繰り返し開いても画面が増えず、編集値を保持する | new | integration | メイン画面と設定画面の閉鎖を区別 |
-| todo | ファイルなしで開閉しても保存確認・書込がなく、明示保存で既定値を作れる | edge | integration | 実M1 APIと一時パス |
+| refactor-skipped | ファイルなしで開閉しても保存確認・書込がなく、明示保存で既定値を作れる | edge | integration | 実M1 APIと一時パス |
 | todo | 全5項目を編集・クリア・保存し、再起動後に同じ値を表示する | new | integration | 日本語、前後空白、改行、未知のモデル・エフォートを保持 |
 | todo | 編集値を基準値に戻すと未保存が解除される | new | unit | 保存成功前には基準値を変えない |
 | todo | 読込失敗では保存せず、再読込成功で復帰する | edge | integration | 元ファイルと画面状態。修復の試験注入は手編集機能の保証ではない |
@@ -242,3 +242,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 2. 起動入口: test_app_entry.pyの2件は入口未登録・画面未生成でred。共通mainと主画面を追加してimportを含む3 passed。試験側のexec差替えをstaticmethodへ修正。uv lock --check・uv build成功。Qt追加時のPE更新が一時領域で拒否されたため、TEMP/TMPをworkspaceのtmp/m2-tempへ向けてuv addを再実行し成功。
 
 3. 設定画面: test_settings_reopens_same_dialog_with_editsはdialog未定義でred、主画面が所有する単一の非モーダル画面を追加して1 passed。中央案内と説明用ツールチップは置かない。
+
+4. 既定値の明示保存: defaults試験は保存処理未接続でred。M1を単一QObjectワーカーへ接続し、設定・入口4 passed。ワーカー導入に伴い、通常終了時のquit/finished/wait(0)も追加して実行中の破棄を防いだ。
