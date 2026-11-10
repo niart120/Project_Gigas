@@ -179,6 +179,14 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 
 ## 7. 設計メモとレビュー結果
 
+実装レビューで追加した確認項目:
+
+| status | item | type | layer | notes |
+|---|---|---|---|---|
+| refactor-skipped | 手編集値の改行・特殊空白を未編集の保存で変換しない | regression | integration | Qtの表示用正規化を保存へ漏らさない |
+| todo | 閉じる確認から始めた保存にも待機表示と取消しを適用する | edge | integration | 直接保存からの終了とは別経路 |
+| todo | 画面領域内に収まり、長い診断でも操作へ到達できる | edge | integration | 可視画面でも別に確認 |
+
 M0でqueued通知は限定確認済みだが、製品の画面寿命・終了競合は未検証。[QDialog公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QDialog.html)の非モーダルshow、execの入れ子ループ、Escからのrejectを確認した。closeEventだけで未保存確認を実装せず、rejectを含め同じ判断へ集約する。[QThread公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QThread.html)のfinished後の後始末とwaitによる確認もM0と照合した。公開資料の読取であり、採用版6.12.0上の本実装の動作保証ではない。
 
 | 優先度 | レビューで確認した不足・過剰指定 | 判断と反映先 |
@@ -269,3 +277,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 
 15. 起動失敗: 保存先なし・ワーカー開始前・開始後の3件でred。開始後は実行中QThreadの破棄で異常終了することを再現。起動境界で終了を待ってから診断を返し、import/入口6 passed。QApplicationの最終ウィンドウによる自動終了を無効化し、解放完了通知でquitする。
 16. 型・docstring確認: tyでQObject.thread()とappのthread属性の衝突を検出し、io_threadへ改名。ruffの遅延importにはQtをimport時に初期化しない理由を局所記載し、CLI診断はstderr.writeへ統一した。ty/ruff成功。一括pytestの初回は27件後で待機し中断、当時の原因は未特定。改名後の全56件は2.19秒で成功した。終了試験を再確認して再現性を評価する。
+
+17. Qt文字列の保持: CRLFと改行しない空白を含むM1有効値が、フォームを開くだけでdirtyになることをredで再現。Qt表示値と元の文字列を対にして保持し、未変更の欄は元値を返すよう修正。設定試験20 passed。編集した欄の改行はQtの入力値となる。

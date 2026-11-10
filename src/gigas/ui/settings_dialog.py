@@ -40,6 +40,7 @@ class SettingsDialog(QDialog):
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
         super().__init__(parent)
+        self._loaded_text: dict[QPlainTextEdit, tuple[str, str]] = {}
         self.setWindowTitle("設定")
         self.resize(560, 440)
         layout = QVBoxLayout(self)
@@ -115,21 +116,30 @@ class SettingsDialog(QDialog):
     def values(self) -> Settings:
         """Return the form's current values without stripping whitespace."""
         return Settings(
-            capture_device=self.capture_device.toPlainText(),
-            serial_port=self.serial_port.toPlainText(),
-            model=self.model.toPlainText(),
-            effort=self.effort.toPlainText(),
+            capture_device=self._text_value(self.capture_device),
+            serial_port=self._text_value(self.serial_port),
+            model=self._text_value(self.model),
+            effort=self._text_value(self.effort),
             auth_method=str(self.auth_method.currentData()),
         )
 
     def set_values(self, values: Settings) -> None:
         """Replace displayed values without emitting user-edit notifications."""
         with QSignalBlocker(self):
-            self.capture_device.setPlainText(values.capture_device)
-            self.serial_port.setPlainText(values.serial_port)
-            self.model.setPlainText(values.model)
-            self.effort.setPlainText(values.effort)
+            for field, value in (
+                (self.capture_device, values.capture_device),
+                (self.serial_port, values.serial_port),
+                (self.model, values.model),
+                (self.effort, values.effort),
+            ):
+                field.setPlainText(value)
+                self._loaded_text[field] = (value, field.toPlainText())
             self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
+
+    def _text_value(self, field: QPlainTextEdit) -> str:
+        current = field.toPlainText()
+        original, displayed = self._loaded_text.get(field, (current, current))
+        return original if current == displayed else current
 
     def set_editable(self, enabled: bool) -> None:
         """Control editing while retaining selection and copying of values."""

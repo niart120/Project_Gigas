@@ -211,3 +211,19 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
     assert shell.confirmation.button(QMessageBox.StandardButton.Save) is None
     shell.confirmation.button(QMessageBox.StandardButton.Cancel).click()
     assert shell.dialog.isVisible()
+
+
+def test_unedited_text_preserves_crlf_and_nonbreaking_space(
+    shell: ApplicationShell, qtbot: QtBot
+) -> None:
+    original = Settings(model='first\r\nsecond\u00a0word')
+    save_settings(shell.path, original)
+    shell.reload()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    shell.open_settings()
+    assert not shell.dirty
+    assert shell.dialog is not None
+    shell.dialog.effort.setPlainText('high')
+    shell.save()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert load_settings(shell.path).model == original.model
