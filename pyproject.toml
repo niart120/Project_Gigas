@@ -19,7 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "tomlkit==0.15.2",
+]
 
 [dependency-groups]
 dev = [
