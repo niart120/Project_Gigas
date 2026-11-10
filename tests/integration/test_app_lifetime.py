@@ -211,7 +211,7 @@ def test_save_from_close_confirmation_starts_wait_timer(
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText('saved-on-close')
+    shell.dialog.model.setPlainText("saved-on-close")
     shell.window.close()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Save).click()
@@ -221,4 +221,26 @@ def test_save_from_close_confirmation_starts_wait_timer(
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.window.isVisible()
-    assert load_settings(shell.path).model == 'saved-on-close'
+    assert load_settings(shell.path).model == "saved-on-close"
+
+
+def test_long_wait_target_keeps_closure_controls_inside_screen(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+) -> None:
+    shell, io = controlled
+    # No filesystem operation uses this synthetic long path.
+    shell.path = Path("C:/") / ("長い保存先" * 100) / "settings.toml"
+    io.block_load = True
+    shell.reload()
+    qtbot.waitUntil(io.entered.is_set)
+    shell.window.close()
+    shell.wait_timer.timeout.emit()
+    laid_out = Event()
+    QTimer.singleShot(0, laid_out.set)
+    qtbot.waitUntil(laid_out.is_set)
+    assert shell.window.screen().availableGeometry().contains(shell.window.frameGeometry())
+    assert shell.dialog is not None
+    assert shell.dialog.screen().availableGeometry().contains(shell.dialog.frameGeometry())
+    assert shell.window.cancel_close_button.isVisible()
+    assert shell.dialog.cancel_close_button.isVisible()
+    shell.cancel_close()
