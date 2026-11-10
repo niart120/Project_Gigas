@@ -1,0 +1,91 @@
+# U01 M3 指示同梱・配布確認
+
+## 1. 目的と状態
+
+ビルドしたアプリが開発リポジトリなしで起動し、同梱した指示を読めることを確認する。2026-11-10に実装とローカル検証を完了した。
+
+## 2. 対象範囲
+
+短い共通指示`play.md`、wheel・sdistへの同梱、隔離インストール後の読込・起動・正常終了、配布物からの利用手順。
+
+## 3. 対象外
+
+専用の指示取得API・例外型・テンプレート展開、Codexへの配送、設定保存の全経路の再試験、GUI変更、exe凍結・インストーラー・PyPI公開。
+
+## 4. 根拠と実装との接続
+
+[親仕様](../unit_001/APP_STARTUP.md)、[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)、[初期設計04](../../initial/04-agent-memory.md)・[06](../../initial/06-repository.md)・[07のT20](../../initial/07-verification.md)に従い、現行uv_buildと標準のimportlib.resourcesを使う。
+
+[M1](../unit_003/GLOBAL_SETTINGS.md)の設定APIと[M2](../unit_004/APPLICATION_SHELL.md)の画面・終了処理を使う。M3では指示を同梱し、`gigas = gigas.app:main`と`python -m gigas`の両入口を隔離インストール後に検証した。
+
+## 5. 振る舞い仕様
+
+`src/gigas/prompts/play.md`をUTF-8で追加する。初版は実画面に基づく操作、事実と推測の区別、不明点の質問、停止指示の尊重、記憶と現画面の照合を短く記す。未確定のツール引数・保存先やゲーム固有の攻略順は書かず、ダミー文章にも置き換えない。内容は文書レビューで確認する。
+
+`gigas.prompts`をパッケージとして置き、検証側から`importlib.resources.files("gigas.prompts").joinpath("play.md").read_text(encoding="utf-8")`で読む。専用ラッパーは不要。読込の標準例外や空白だけの資材は配布検査で不合格にする。指示を使わないM2の起動処理には読込を追加しない。
+
+配布確認は次の1経路にまとめる。
+
+1. **ビルド**: 空の出力先へ`uv build`し、sdist経由でwheelを生成したことをログで確認する。両形式に`play.md`が入り、UTF-8・非空白・元資材との内容一致を検査する。独立した再ビルド試験は重ねない。
+2. **隔離読込**: リポジトリ外の一時環境へwheelを通常インストールし、外部の作業ディレクトリから同じ内容を読む。開発ソースへのPYTHONPATH等を除き、import元が隔離環境内であることを確認する。
+3. **起動・終了**: 隔離先でM2の主画面とQtイベントループが動き、閉鎖要求で終了コード0になることを自動確認する。設定先は試験用LOCALAPPDATAとし、終了コードだけの無処理の入口を合格にしない。
+
+起動試験はM2の`tests/integration/test_app_entry.py`を参考に、隔離先Pythonの子プロセスからmodule入口と登録されたconsole_scriptsの呼出し先を実行し、Qtタイマーで閉じる。これは登録先の確認であり、生成された`gigas.exe`の直接実行とは区別する。製品へ試験専用の自動終了オプションを追加しない。
+
+設定の保存・再起動・失敗分岐はM1・M2の既存試験に任せる。M3でComputer Useの逐次打鍵やDPI確認は行わず、表示品質の確認範囲はM2の記録を引き継ぐ。
+
+## 6. TDD Test List
+
+| status | item | type | layer | notes |
+|---|---|---|---|---|
+| refactor-skipped | sdistとそこから作ったwheelに実指示が含まれ、隔離先から同じ内容を読める | new | package | UTF-8・非空白・内容・import元 |
+| refactor-skipped | 隔離先の両入口で主画面とイベントループが動き、閉鎖要求で正常終了する | new | package | offscreenの自動試験 |
+
+## 7. レビュー判断
+
+| 指摘 | 反映 |
+|---|---|
+| 未使用の取得APIと細かな失敗処理が先行 | 専用API・故障注入試験を削除。資材の品質は配布検査、利用側の契約はU06 |
+| sdist再ビルドが別工程となり重複しやすい | sdist経由で作ったwheelを1回検査。T20の両形式とM0の再ビルド確認は維持 |
+| 保存・再起動・打鍵をM3でも要求 | M1・M2の検証を利用し、M3は配布後の読込・起動・終了に限定 |
+| ビルド成功だけでは資材欠落や開発ソースの混入を見逃す | 内容とimport元の検査を残す |
+
+## 8. 対象ファイル
+
+`src/gigas/prompts/__init__.py`・`play.md`、配布確認スクリプト`scripts/check_package.py`、必要な試験補助、CIと利用手順。M0に従い既定の収録設定を使い、資材が漏れた場合だけ最小限のビルド設定を直す。依存追加は予定しない。
+
+## 9. 検証
+
+実装時は変更範囲の品質ゲートと配布確認スクリプトをWindows CIのPython 3.12・3.13で実行する。ビルド・依存インストールは通常のpytestから分離する。依存取得のネットワークは許容するが、起動試験は機器・Codex・認証を使わない。成果物、import元、Python/Qt版と結果を記録する。
+
+今回のレビューでは初期設計・M0〜M2、pyproject.toml、CI、設定API、起動・設定試験を照合した。変更3文書のローカルリンクをPythonで相対解決し、30件中参照切れ0件。仮テキストなし、5 unitが各1仕様書であること、`git diff --check`の成功を確認した。製品コード・依存は未変更。M3の実装検証とpytest・ruff・ty・buildはnot run（仕様のみ変更）。skill validatorはnot applicable（skill未変更）。
+
+実装後の検証（2026-11-10）:
+
+| 確認 | 結果 |
+|---|---|
+| `uv run python scripts/check_package.py`（3.12）、`uv run --locked python scripts/check_package.py`（UV_PYTHON=3.13と別の開発環境を指定） | WindowsのPython 3.12.10・3.13.5、Qt 6.12.0で成功。`gigas-0.1.0.tar.gz`から`gigas-0.1.0-py3-none-any.whl`を生成。両形式の内容が一致し、各版のリポジトリ外の一時venvでLib/site-packages内からのimport、指示読込、両入口の正常終了を確認 |
+| `uv run pytest tests/unit tests/integration -q -o faulthandler_timeout=20` | 3.12・3.13で各62件成功 |
+| `uv lock --check`、ruff format/check、ty、`git diff --check` | 成功。tyはsrc・tests・scriptsを対象に実行 |
+| CI・利用手順 | YAMLのPython行列、UV_PYTHON、配布確認コマンドをローカルで確認。READMEにwheelからの起動手順を追記 |
+
+サンドボックスで一時領域とuvキャッシュへの書き込みが拒否された試行があった。ローカル再実行ではTEMP/TMPを通常のユーザー一時領域、UV_CACHE_DIRをリポジトリのキャッシュ、UV_LINK_MODEをcopyに指定した。CIはビルド工程を配布検査にまとめ、UV_PYTHONで各ジョブの版を指定した。
+
+GitHub Actionsの実行、隔離先のgigas.exeの直接実行、可視画面での操作確認は未実施。起動の根拠はインストール済みmoduleとconsole_scripts登録先を使うoffscreen試験。表示品質はM2の記録を参照する。
+
+## 10. 先送り事項
+
+製品側の指示取得・配送・失敗時の攻略開始制御と実ツールとの整合はU06。案内はU02、整理指示はU08で追加し、同じ同梱検査へ加える。M3では指示の攻略効果を評価しない。
+
+## 11. 完了チェックリスト
+
+- [x] M0〜M2との分担を確認し、配布確認へ範囲を絞った
+- [x] 実指示の同梱と隔離先での読込を自動検証した
+- [x] 隔離先で主画面の起動・正常終了を自動検証した
+- [x] 利用手順・検証結果・未確認事項を記録し、親のU01完了条件と照合した
+
+## 12. 実装とTDDの記録
+
+1. 同梱・隔離読込。`uv run python scripts/check_package.py`は資材追加前にwheel内のplay.md欠落で失敗。共通指示を追加後、同じコマンドでsdist経由のビルド、両形式の内容一致、隔離先のUTF-8読込が成功した（Python 3.12.10、Qt 6.12.0）。ビルド設定は既定のまま。元ファイルとアーカイブの内容はそのまま比較し、インストール後のread_text比較では改行変換を考慮する。`python -I`とimport元の検査で開発ソースへの依存を検出する。
+
+2. 隔離先の起動。試験内でmodule入口の呼出しを終了コード0だけに置き換えると、主画面の開閉を観測できず不合格となった。実際のmodule入口とconsole_scriptsの登録先では、Python 3.12.10・3.13.5とも主画面の生成と閉鎖を観測し、終了コード0を確認した。試験内だけでQtタイマーを設定し、配布物の起動処理は既存実装を使った。
