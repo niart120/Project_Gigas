@@ -50,3 +50,33 @@ QApplication.exec = staticmethod(run_loop)
     # The module must actually enter Qt; a no-op entry never stops the timer.
     assert "GIGAS_WINDOW_CLOSED" in result.stdout
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize('failure', ['path', 'before_thread', 'after_thread'])
+def test_startup_failure_is_diagnosed_and_cleaned_up(tmp_path: Path, failure: str) -> None:
+    probe = 'from gigas.app import main\n'
+    if failure != 'path':
+        probe += '''
+from gigas.app.shell import ApplicationShell
+original_start = ApplicationShell.start
+def fail_start(self):
+'''
+        if failure == 'after_thread':
+            probe += '    original_start(self)\n'
+        probe += '''
+    raise RuntimeError('injected startup failure')
+ApplicationShell.start = fail_start
+'''
+    probe += 'raise SystemExit(main())'
+    env = {**os.environ, 'LOCALAPPDATA': str(tmp_path), 'QT_QPA_PLATFORM': 'offscreen'}
+    if failure == 'path':
+        env.pop('LOCALAPPDATA', None)
+    result = subprocess.run(
+        [sys.executable, '-c', probe], env=env, capture_output=True, text=True,
+        timeout=15, check=False,
+    )
+    assert result.returncode == 1
+    assert 'Traceback' not in result.stderr
+    assert 'QThread: Destroyed' not in result.stderr
+    assert ('LOCALAPPDATA' if failure == 'path' else 'RuntimeError') in result.stderr
+    assert list(tmp_path.iterdir()) == []

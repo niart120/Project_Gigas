@@ -213,7 +213,10 @@ class ApplicationShell(QObject):
         if target == "app":
             self.committed = True
             self.wait_timer.start()
-            self.thread.quit()
+            if self.thread.isRunning():
+                self.thread.quit()
+            else:
+                self._finish_shutdown()
         elif target == "dialog" and self.dialog is not None:
             self.dialog.hide()
         elif target == "reload":
