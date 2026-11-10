@@ -38,7 +38,7 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | sdistとそこから作ったwheelに実指示が含まれ、隔離先から同じ内容を読める | new | package | UTF-8・非空白・内容・import元 |
+| refactor-skipped | sdistとそこから作ったwheelに実指示が含まれ、隔離先から同じ内容を読める | new | package | UTF-8・非空白・内容・import元 |
 | todo | 隔離先の両入口で主画面とイベントループが動き、閉鎖要求で正常終了する | new | package | offscreenの自動試験 |
 
 ## 7. レビュー判断
@@ -70,3 +70,7 @@
 - [ ] 実指示の同梱と隔離先での読込を自動検証した
 - [ ] 隔離先で主画面の起動・正常終了を自動検証した
 - [ ] 利用手順・検証結果・未確認事項を記録し、親のU01完了条件と照合した
+
+## 12. 実装とTDDの記録
+
+1. 同梱・隔離読込。`uv run python scripts/check_package.py`は資材追加前にwheel内のplay.md欠落で失敗。共通指示を追加後、同じコマンドでsdist経由のビルド、両形式の内容一致、隔離先のUTF-8読込が成功した（Python 3.12.10、Qt 6.12.0）。ビルド設定は既定のまま。元ファイルとアーカイブの内容はそのまま比較し、インストール後のread_text比較では改行変換を考慮する。`python -I`とimport元の検査で開発ソースへの依存を検出する。
