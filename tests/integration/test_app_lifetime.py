@@ -4,6 +4,7 @@ from threading import Event
 
 import pytest
 from PySide6.QtCore import QThread, QTimer
+from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -203,3 +204,21 @@ def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
         cleanup_allowed.set()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
     assert real_wait(0)
+
+
+def test_save_from_close_confirmation_starts_wait_timer(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+) -> None:
+    shell, io = controlled
+    assert shell.dialog is not None
+    shell.dialog.model.setPlainText('saved-on-close')
+    shell.window.close()
+    assert shell.confirmation is not None
+    shell.confirmation.button(QMessageBox.StandardButton.Save).click()
+    qtbot.waitUntil(io.entered.is_set)
+    assert shell.wait_timer.isActive()
+    shell.window.cancel_close_button.click()
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert shell.window.isVisible()
+    assert load_settings(shell.path).model == 'saved-on-close'

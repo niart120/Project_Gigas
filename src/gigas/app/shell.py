@@ -199,6 +199,7 @@ class ApplicationShell(QObject):
             box.deleteLater()
         if result == QMessageBox.StandardButton.Save and self.ready:
             self._request("save", continuing=True)
+            self.wait_timer.start()
         elif result == QMessageBox.StandardButton.Discard:
             if self.dialog is not None and self.pending != "reload":
                 self.dialog.set_values(self.baseline)
