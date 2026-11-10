@@ -68,7 +68,7 @@ skill検査では、`SKILL_VALIDATOR`に`C:\Users\train\.codex\skills\.system\sk
 
 ## 7. 先送り事項
 
-U02〜U10の調査・設計・実装・接続検証は未着手。次の候補は[U02](../../planned/unit_007/CODEX_CONNECTION.md)冒頭の採用SDK・ランタイムと接続方式の調査・設計。各親仕様の未決事項を後続作業の起点として使う。
+U02〜U10の調査・設計・実装・接続検証は未着手。次の候補は[U02](../../wip/unit_007/CODEX_CONNECTION.md)冒頭の採用SDK・ランタイムと接続方式の調査・設計。各親仕様の未決事項を後続作業の起点として使う。
 
 ## 8. 完了チェックリスト
 
