@@ -105,7 +105,7 @@ capture.deviceはU01で保存する選択値であり、永続的な機器IDの�
 |---|---|---|---|---|
 | refactor-skipped | ファイルなしで既定値を返し、ディレクトリを作らない | new | unit | 最初の項目。redは設定モジュール未実装、greenは対象1件 |
 | refactor-skipped | 現在の値を保存して別の読込で再現する | new | integration | 日本語・空白を含む一時パス。redは保存API未実装、greenは対象1件。lock確認とbuildも成功 |
-| todo | 欠落は既定値、未知キーは未使用、既知値の不正は失敗となる | edge | unit | 旧形式変換を期待しない |
+| refactor-skipped | 欠落は既定値、未知キーは未使用、既知値の不正は失敗となる | edge | unit | 旧形式変換を期待しない。redは検証エラーAPI未実装で5件失敗、greenは対象7件 |
 | todo | 構文・文字コード不正を返し原本を変えない | edge | integration | 保存へ進めない |
 | todo | 値の更新・クリアでコメントと未編集部分を保持する | new | integration | M0の観測を本保存処理で確認 |
 | todo | 書込・置換失敗で原本を保持し、成功を返さない | edge | integration | 失敗点を注入し一時ファイルも確認 |
