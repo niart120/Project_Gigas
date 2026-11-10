@@ -92,27 +92,30 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
 
 
 def save_settings(path: "Path", settings: Settings) -> None:
-    """Write settings to a UTF-8 TOML file.
+    """Update settings while retaining comments and unrelated TOML entries.
 
     Args:
         path: Target settings file.
         settings: Values to persist.
 
     Raises:
-        SettingsError: A known setting has an invalid type or value.
+        SettingsError: The existing file cannot be read or a known setting is invalid.
     """
-    document: dict[str, object] = {
-        "capture": {"device": settings.capture_device},
-        "controller": {"serial": {"port": settings.serial_port}},
-        "agent": {
-            "model": settings.model,
-            "effort": settings.effort,
-            "auth_method": settings.auth_method,
-        },
-    }
+    document = _read_document(path)
+    _settings_from_document(document, path)
+
+    capture = _ensure_table(document, "capture", path)
+    controller = _ensure_table(document, "controller", path)
+    serial = _ensure_table(controller, "serial", path)
+    agent = _ensure_table(document, "agent", path)
+    _set_text(capture, "device", settings.capture_device)
+    _set_text(serial, "port", settings.serial_port)
+    _set_text(agent, "model", settings.model)
+    _set_text(agent, "effort", settings.effort)
+    _set_text(agent, "auth_method", settings.auth_method)
     _settings_from_document(document, path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(tomlkit.dumps(document), encoding="utf-8")
+    path.write_bytes(tomlkit.dumps(document).encode("utf-8"))
 
 
 def _table(
@@ -131,3 +134,16 @@ def _text(table: MutableMapping[str, object], key: str, path: "Path", default: s
         msg = f"{path}: {key} must be a string"
         raise SettingsError(msg)
     return str(value)
+
+
+def _ensure_table(
+    parent: MutableMapping[str, object], key: str, path: "Path"
+) -> MutableMapping[str, object]:
+    if key not in parent:
+        parent[key] = tomlkit.table()
+    return _table(parent, key, path)
+
+
+def _set_text(table: MutableMapping[str, object], key: str, value: str) -> None:
+    if table.get(key) != value:
+        table[key] = value
