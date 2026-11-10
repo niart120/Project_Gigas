@@ -7,8 +7,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
-from gigas.app.shell import ApplicationShell
 from gigas.app.settings_worker import SettingsIO
+from gigas.app.shell import ApplicationShell
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 
 
@@ -217,31 +217,74 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
 def test_unedited_text_preserves_crlf_and_nonbreaking_space(
     shell: ApplicationShell, qtbot: QtBot
 ) -> None:
-    original = Settings(model='first\r\nsecond\u00a0word')
+    original = Settings(model="first\r\nsecond\u00a0word")
     save_settings(shell.path, original)
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
     shell.open_settings()
     assert not shell.dirty
     assert shell.dialog is not None
-    shell.dialog.effort.setPlainText('high')
+    shell.dialog.effort.setPlainText("high")
     shell.save()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == original.model
+
+
+@pytest.mark.parametrize("operation", ["load", "save"])
+def test_unexpected_worker_failure_returns_without_exposing_exception_text(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
+    def fail_load(_path: Path) -> Settings:
+        message = "private-setting-value"
+        raise RuntimeError(message)
+
+    def fail_save(path: Path, _settings: Settings) -> None:
+        fail_load(path)
+
+    io = SettingsIO(load=fail_load) if operation == "load" else SettingsIO(save=fail_save)
+    application = ApplicationShell(tmp_path / "settings.toml", io)
+    application.start()
+    try:
+        qtbot.waitUntil(lambda: application.operation is None)
+        application.open_settings()
+        dialog = application.dialog
+        assert dialog is not None
+        if operation == "save":
+            dialog.model.setPlainText("unsaved")
+            dialog.save_button.click()
+            qtbot.waitUntil(lambda: application.operation is None)
+            assert dialog.model.toPlainText() == "unsaved"
+            assert application.baseline.model == ""
+        diagnostic = dialog.details.toPlainText()
+        assert "RuntimeError" in diagnostic
+        assert str(application.path) in diagnostic
+        assert "private-setting-value" not in diagnostic
+        assert dialog.save_button.isEnabled() == (operation == "save")
+        assert dialog.reload_button.isEnabled()
+        assert not application.path.exists()
+    finally:
+        if application.dialog is not None:
+            application.dialog.set_values(application.baseline)
+        application.window.close()
+        qtbot.waitUntil(lambda: not application.window.isVisible())
 
 
 def test_windows_fit_screen_and_long_error_keeps_actions_reachable(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
     def fail_save(_path: Path, _settings: Settings) -> None:
-        message = 'diagnostic-path/' * 100
+        message = "diagnostic-path/" * 100
         raise SettingsError(message)
 
-    application = ApplicationShell(tmp_path / 'settings.toml', SettingsIO(save=fail_save))
+    application = ApplicationShell(tmp_path / "settings.toml", SettingsIO(save=fail_save))
     application.start()
     try:
         qtbot.waitUntil(lambda: application.operation is None)
-        assert application.window.screen().availableGeometry().contains(application.window.frameGeometry())
+        assert (
+            application.window.screen()
+            .availableGeometry()
+            .contains(application.window.frameGeometry())
+        )
         application.open_settings()
         dialog = application.dialog
         assert dialog is not None
@@ -251,7 +294,7 @@ def test_windows_fit_screen_and_long_error_keeps_actions_reachable(
         for button in (dialog.save_button, dialog.reload_button, dialog.close_button):
             assert button.isVisible()
             assert dialog.rect().contains(button.geometry())
-        assert dialog.details.toPlainText().endswith('diagnostic-path/')
+        assert dialog.details.toPlainText().endswith("diagnostic-path/")
     finally:
         application.window.close()
         qtbot.waitUntil(lambda: not application.window.isVisible())
