@@ -86,7 +86,10 @@ class SettingsDialog(QDialog):
         self.cancel_close_button.clicked.connect(self.cancel_close_requested)
         self.cancel_close_button.hide()
         for button in (
-            self.save_button, self.reload_button, self.close_button, self.cancel_close_button
+            self.save_button,
+            self.reload_button,
+            self.close_button,
+            self.cancel_close_button,
         ):
             button.setAutoDefault(False)
             actions.addWidget(button)

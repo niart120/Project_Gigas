@@ -26,7 +26,7 @@ class ApplicationShell(QObject):
     requested = Signal(str, object)
     stopped = Signal()
 
-    def __init__(self, path: "Path", io: SettingsIO = SettingsIO()) -> None:
+    def __init__(self, path: "Path", io: SettingsIO | None = None) -> None:
         """Construct views without displaying them."""
         super().__init__()
         self.path = path
@@ -45,13 +45,13 @@ class ApplicationShell(QObject):
         self.wait_timer.setSingleShot(True)
         self.wait_timer.setInterval(5000)
         self.wait_timer.timeout.connect(self._show_wait_details)
-        self.thread = QThread(self)
-        self._worker = SettingsWorker(path, io)
-        self._worker.moveToThread(self.thread)
+        self.io_thread = QThread(self)
+        self._worker = SettingsWorker(path, SettingsIO() if io is None else io)
+        self._worker.moveToThread(self.io_thread)
         self.requested.connect(self._worker.perform)
         self._worker.completed.connect(self._complete)
-        self.thread.finished.connect(self._worker.deleteLater)
-        self.thread.finished.connect(self._finish_shutdown)
+        self.io_thread.finished.connect(self._worker.deleteLater)
+        self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
         self.window.close_requested.connect(self.request_close)
         self.window.cancel_close_requested.connect(self.cancel_close)
@@ -59,7 +59,7 @@ class ApplicationShell(QObject):
     def start(self) -> None:
         """Display the main window."""
         self.window.show()
-        self.thread.start()
+        self.io_thread.start()
         self._request("load")
 
     def open_settings(self) -> None:
@@ -213,8 +213,8 @@ class ApplicationShell(QObject):
         if target == "app":
             self.committed = True
             self.wait_timer.start()
-            if self.thread.isRunning():
-                self.thread.quit()
+            if self.io_thread.isRunning():
+                self.io_thread.quit()
             else:
                 self._finish_shutdown()
         elif target == "dialog" and self.dialog is not None:
@@ -238,7 +238,7 @@ class ApplicationShell(QObject):
 
     @Slot()
     def _finish_shutdown(self) -> None:
-        if not self.thread.wait(0):
+        if not self.io_thread.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
         self.wait_timer.stop()

@@ -1,11 +1,11 @@
-from collections.abc import Iterator
 import errno
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pytestqt.qtbot import QtBot
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
+from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
 from gigas.storage.settings import Settings, load_settings, save_settings
@@ -190,21 +190,21 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
 ) -> None:
     shell.open_settings()
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText('edited')
+    shell.dialog.model.setPlainText("edited")
     shell.dialog.reload_button.click()
     box = shell.confirmation
     assert box is not None
     assert box.button(QMessageBox.StandardButton.Save) is None
     box.button(QMessageBox.StandardButton.Cancel).click()
-    assert shell.dialog.model.toPlainText() == 'edited'
+    assert shell.dialog.model.toPlainText() == "edited"
     assert shell.operation is None
 
-    shell.path.write_text('[broken', encoding='utf-8')
+    shell.path.write_text("[broken", encoding="utf-8")
     shell.dialog.reload_button.click()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Discard).click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.dialog.model.toPlainText() == 'edited'
+    assert shell.dialog.model.toPlainText() == "edited"
     assert not shell.dialog.save_button.isEnabled()
     shell.dialog.close()
     assert shell.confirmation is not None

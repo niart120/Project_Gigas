@@ -268,3 +268,4 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 14. 解放確認: shutdown_commit試験は既存のquit/finished/wait(0)経路で1 passed（単独redなし）。wait(0)の完了だけを試験境界で遅延させ、finished後も画面が残り、GUIが応答し、取消しでワーカーを再生成しないことを確認。
 
 15. 起動失敗: 保存先なし・ワーカー開始前・開始後の3件でred。開始後は実行中QThreadの破棄で異常終了することを再現。起動境界で終了を待ってから診断を返し、import/入口6 passed。QApplicationの最終ウィンドウによる自動終了を無効化し、解放完了通知でquitする。
+16. 型・docstring確認: tyでQObject.thread()とappのthread属性の衝突を検出し、io_threadへ改名。ruffの遅延importにはQtをimport時に初期化しない理由を局所記載し、CLI診断はstderr.writeへ統一した。ty/ruff成功。一括pytestの初回は27件後で待機し中断、当時の原因は未特定。改名後の全56件は2.19秒で成功した。終了試験を再確認して再現性を評価する。

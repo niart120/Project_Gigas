@@ -12,9 +12,9 @@ def main() -> int:
         Zero after normal shutdown, or one after a handled startup failure.
     """
     try:
-        from gigas.app.bootstrap import run
+        from gigas.app.bootstrap import run  # noqa: PLC0415 -- keep imports free of Qt initialization
 
         return run()
     except Exception as error:  # noqa: BLE001 -- process entry boundary
-        print(f"GIGAS: {type(error).__name__}: {error}", file=sys.stderr)
+        sys.stderr.write(f"GIGAS: {type(error).__name__}: {error}\n")
         return 1

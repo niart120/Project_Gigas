@@ -4,7 +4,6 @@ from threading import Event
 
 import pytest
 from PySide6.QtCore import QThread, QTimer
-from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -16,6 +15,7 @@ class ControlledIO:
     """Block selected I/O until the test releases it."""
 
     def __init__(self) -> None:
+        """Create synchronization events and counters."""
         self.entered = Event()
         self.release = Event()
         self.fail = False
@@ -25,23 +25,27 @@ class ControlledIO:
         self.thread: QThread | None = None
 
     def load(self, path: Path) -> Settings:
+        """Read through M1, optionally waiting for the test's release."""
         self.loads += 1
         if self.block_load:
             self._wait()
         return load_settings(path)
 
     def save(self, path: Path, settings: Settings) -> None:
+        """Wait for release, then save through M1 or inject a failure."""
         self.saves += 1
         self._wait()
         if self.fail:
-            raise SettingsError("injected failure")
+            message = "injected failure"
+            raise SettingsError(message)
         save_settings(path, settings)
 
     def _wait(self) -> None:
         self.thread = QThread.currentThread()
         self.entered.set()
         if not self.release.wait(10):
-            raise TimeoutError("test did not release I/O")
+            message = "test did not release I/O"
+            raise TimeoutError(message)
 
 
 @pytest.fixture
@@ -74,7 +78,7 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
     pulse = Event()
     QTimer.singleShot(0, pulse.set)
     qtbot.waitUntil(pulse.is_set)
-    assert io.thread != shell.thread.currentThread()
+    assert io.thread != QThread.currentThread()
     assert shell.dialog.model.isReadOnly()
     assert not shell.dialog.save_button.isEnabled()
     assert not shell.dialog.reload_button.isEnabled()
@@ -87,18 +91,18 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
     assert not shell.dialog.model.isReadOnly()
 
 
-@pytest.mark.parametrize('target', ['dialog', 'app'])
-@pytest.mark.parametrize('fail', [False, True])
+@pytest.mark.parametrize("target", ["dialog", "app"])
+@pytest.mark.parametrize("fail", [False, True])
 def test_pending_close_follows_save_result(
     controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, target: str, fail: bool
 ) -> None:
     shell, io = controlled
     io.fail = fail
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText('edited')
+    shell.dialog.model.setPlainText("edited")
     shell.save()
     qtbot.waitUntil(io.entered.is_set)
-    if target == 'app':
+    if target == "app":
         shell.window.close()
         shell.window.close()
     else:
@@ -114,10 +118,11 @@ def test_pending_close_follows_save_result(
         assert shell.dialog.isVisible()
         assert not shell.dialog.model.isReadOnly()
         assert shell.dialog.save_button.isEnabled()
-        assert shell.dialog.model.toPlainText() == 'edited'
+        assert shell.dialog.model.toPlainText() == "edited"
     else:
-        qtbot.waitUntil(lambda: not shell.dialog.isVisible())
-        assert shell.window.isVisible() == (target == 'dialog')
+        dialog = shell.dialog
+        qtbot.waitUntil(lambda: not dialog.isVisible())
+        assert shell.window.isVisible() == (target == "dialog")
     assert io.saves == 1
 
 
@@ -135,17 +140,17 @@ def test_close_during_reload_finishes_after_result(
     assert shell.baseline == Settings()
 
 
-@pytest.mark.parametrize('operation', ['save', 'load'])
+@pytest.mark.parametrize("operation", ["save", "load"])
 def test_cancel_close_keeps_late_result_without_exiting(
     controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, operation: str
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    if operation == 'save':
-        shell.dialog.model.setPlainText('late')
+    if operation == "save":
+        shell.dialog.model.setPlainText("late")
         shell.save()
     else:
-        save_settings(shell.path, Settings(model='late'))
+        save_settings(shell.path, Settings(model="late"))
         io.block_load = True
         shell.reload()
     qtbot.waitUntil(io.entered.is_set)
@@ -161,31 +166,30 @@ def test_cancel_close_keeps_late_result_without_exiting(
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.window.isVisible()
-    assert shell.baseline.model == 'late'
-    assert shell.dialog.model.toPlainText() == 'late'
-    assert (io.saves, io.loads) == ((1, 1) if operation == 'save' else (0, 2))
+    assert shell.baseline.model == "late"
+    assert shell.dialog.model.toPlainText() == "late"
+    assert (io.saves, io.loads) == ((1, 1) if operation == "save" else (0, 2))
 
 
 def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
-    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot,
-    monkeypatch: pytest.MonkeyPatch
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     shell, _io = controlled
     cleanup_allowed = Event()
     wait_called = Event()
-    real_wait = shell.thread.wait
+    real_wait = shell.io_thread.wait
 
     def delayed_wait(milliseconds: int) -> bool:
         assert milliseconds == 0
         wait_called.set()
         return cleanup_allowed.is_set() and real_wait(milliseconds)
 
-    monkeypatch.setattr(shell.thread, 'wait', delayed_wait)
+    monkeypatch.setattr(shell.io_thread, "wait", delayed_wait)
     try:
         shell.window.close()
         qtbot.waitUntil(wait_called.is_set)
         assert shell.committed
-        assert shell.thread.isFinished()
+        assert shell.io_thread.isFinished()
         assert shell.window.isVisible()
         assert not shell.window.cancel_close_button.isVisible()
         shell.cancel_close()
