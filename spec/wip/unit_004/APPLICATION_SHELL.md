@@ -161,7 +161,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | importでは画面・スレッド・設定ファイルを作らない | new | integration | 独立プロセスで確認 |
+| refactor-skipped | importでは画面・スレッド・設定ファイルを作らない | new | integration | 独立プロセスで確認 |
 | todo | 両入口で機器なしに起動・正常終了する | new | integration | 開発環境。配布物はM3 |
 | todo | 設定を繰り返し開いても画面が増えず、編集値を保持する | new | integration | メイン画面と設定画面の閉鎖を区別 |
 | todo | ファイルなしで開閉しても保存確認・書込がなく、明示保存で既定値を作れる | edge | integration | 実M1 APIと一時パス |
@@ -234,3 +234,7 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 - [ ] Windows可視画面とプロセス終了を確認した
 - [ ] 型・docstring・依存・CI・利用手順を揃えた
 - [ ] 実装ゲートと未確認事項を記録して本unitを完了へ移した
+
+## 12. 実装・TDD記録
+
+1. importの副作用: `uv run pytest tests/integration/test_app_import.py -q`。redはapp未実装のModuleNotFoundError、greenは1 passed。import時はQtWidgets自体を読み込まない。構造整理は不要。
