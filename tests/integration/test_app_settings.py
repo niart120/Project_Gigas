@@ -1,11 +1,12 @@
 from collections.abc import Iterator
+import errno
 from pathlib import Path
 
 import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
-from gigas.storage.settings import Settings, load_settings
+from gigas.storage.settings import Settings, load_settings, save_settings
 
 
 @pytest.fixture
@@ -107,3 +108,34 @@ def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbo
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.dialog.save_button.isEnabled()
     assert shell.dialog.model.toPlainText() == "repaired"
+
+
+def test_save_failure_preserves_edits_and_reports_cleanup(
+    shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_settings(shell.path, Settings(model="original"))
+    shell.reload()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    shell.open_settings()
+    assert shell.dialog is not None
+    shell.dialog.model.setPlainText("edited")
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(errno.EACCES, "injected denial")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        patch.setattr(Path, "unlink", fail)
+        shell.dialog.save_button.click()
+        qtbot.waitUntil(lambda: shell.operation is None)
+        assert shell.dialog.model.toPlainText() == "edited"
+        assert shell.dialog.save_button.isEnabled()
+        assert "remove temporary file" in shell.dialog.status.text()
+        assert load_settings(shell.path).model == "original"
+
+    shell.dialog.model.setPlainText("retry")
+    shell.dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert load_settings(shell.path).model == "retry"
+    assert not shell.error
+    assert not shell.dirty

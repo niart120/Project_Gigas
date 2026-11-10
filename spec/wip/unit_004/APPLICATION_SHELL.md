@@ -168,7 +168,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 全5項目を編集・クリア・保存し、再起動後に同じ値を表示する | new | integration | 日本語、前後空白、改行、未知のモデル・エフォートを保持 |
 | refactor-skipped | 編集値を基準値に戻すと未保存が解除される | new | unit | 保存成功前には基準値を変えない |
 | refactor-skipped | 読込失敗では保存せず、再読込成功で復帰する | edge | integration | 元ファイルと画面状態。修復の試験注入は手編集機能の保証ではない |
-| todo | 保存失敗でも編集・再試行でき、原因と後始末の失敗を確認できる | edge | integration | 実M1の置換失敗とadd_note、一般例外の境界も確認 |
+| refactor-skipped | 保存失敗でも編集・再試行でき、原因と後始末の失敗を確認できる | edge | integration | 実M1の置換失敗とadd_note、一般例外の境界も確認 |
 | todo | 未保存の設定閉鎖・アプリ終了で保存・破棄・取消しを区別する | new | integration | ×・Esc・ボタン。保存失敗なら閉じない |
 | todo | 未保存の再読込を取消せ、失敗時も直前の表示値を失わない | edge | integration | 破棄確認前に読込を発行しない。失敗後の閉じる確認では保存不可 |
 | todo | 遅いI/O中もイベントを処理し、編集・二重I/Oを拒否する | edge | integration | 開いている画面へメインスレッドで結果を反映 |
@@ -252,3 +252,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 6. 未保存判定: restoring試験はdirty未定義でred、Settingsの値比較と編集通知による表示更新で4 passed。独立した状態クラスは増やさず、GUI通知と基準値の比較をintegrationで検証する。
 
 7. 読込失敗: failed_reload試験は失敗後も保存ボタンが有効でred。理由とパスを保持し、読込成功まで編集・保存を無効化して5 passed。検証用の修復は一時ファイルへの注入であり、起動中の手編集サポートを意味しない。
+
+8. 保存失敗: test_save_failure_preserves_edits_and_reports_cleanupは1 passed。既存のワーカー例外境界と項目7の結果処理で成立し、この項目単独のredは発生していない。Path.replace/unlinkの故障を注入し、原本・編集値・add_note診断・再試行を確認。不要な製品変更は行わない。
