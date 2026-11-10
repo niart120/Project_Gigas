@@ -2,7 +2,7 @@
 
 ## 1. 目的と状態
 
-ビルドしたアプリが開発リポジトリなしで起動し、同梱した指示を読めることを確認する。2026-11-10にレビューして範囲を縮小した。実装は未着手。
+ビルドしたアプリが開発リポジトリなしで起動し、同梱した指示を読めることを確認する。2026-11-10に実装とローカル検証を完了した。
 
 ## 2. 対象範囲
 
@@ -14,9 +14,9 @@
 
 ## 4. 根拠と実装との接続
 
-[親仕様](../unit_001/APP_STARTUP.md)、[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)、[初期設計04](../../initial/04-agent-memory.md)・[06](../../initial/06-repository.md)・[07のT20](../../initial/07-verification.md)に従い、現行uv_buildと標準のimportlib.resourcesを使う。
+[親仕様](../unit_001/APP_STARTUP.md)、[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)、[初期設計04](../../initial/04-agent-memory.md)・[06](../../initial/06-repository.md)・[07のT20](../../initial/07-verification.md)に従い、現行uv_buildと標準のimportlib.resourcesを使う。
 
-[M1](../../complete/unit_003/GLOBAL_SETTINGS.md)の設定APIと[M2](../../complete/unit_004/APPLICATION_SHELL.md)の画面・終了処理は変更しない。`gigas = gigas.app:main`と`python -m gigas`は実装済み。M2では配布物の生成まで確認したが、隔離インストールは未確認。`src/gigas/prompts/`はまだない。
+[M1](../unit_003/GLOBAL_SETTINGS.md)の設定APIと[M2](../unit_004/APPLICATION_SHELL.md)の画面・終了処理を使う。M3では指示を同梱し、`gigas = gigas.app:main`と`python -m gigas`の両入口を隔離インストール後に検証した。
 
 ## 5. 振る舞い仕様
 
@@ -60,6 +60,19 @@
 
 今回のレビューでは初期設計・M0〜M2、pyproject.toml、CI、設定API、起動・設定試験を照合した。変更3文書のローカルリンクをPythonで相対解決し、30件中参照切れ0件。仮テキストなし、5 unitが各1仕様書であること、`git diff --check`の成功を確認した。製品コード・依存は未変更。M3の実装検証とpytest・ruff・ty・buildはnot run（仕様のみ変更）。skill validatorはnot applicable（skill未変更）。
 
+実装後の検証（2026-11-10）:
+
+| 確認 | 結果 |
+|---|---|
+| `uv run python scripts/check_package.py`（3.12）、`uv run --locked python scripts/check_package.py`（UV_PYTHON=3.13と別の開発環境を指定） | WindowsのPython 3.12.10・3.13.5、Qt 6.12.0で成功。`gigas-0.1.0.tar.gz`から`gigas-0.1.0-py3-none-any.whl`を生成。両形式の内容が一致し、各版のリポジトリ外の一時venvでLib/site-packages内からのimport、指示読込、両入口の正常終了を確認 |
+| `uv run pytest tests/unit tests/integration -q -o faulthandler_timeout=20` | 3.12・3.13で各62件成功 |
+| `uv lock --check`、ruff format/check、ty、`git diff --check` | 成功。tyはsrc・tests・scriptsを対象に実行 |
+| CI・利用手順 | YAMLのPython行列、UV_PYTHON、配布確認コマンドをローカルで確認。READMEにwheelからの起動手順を追記 |
+
+サンドボックスで一時領域とuvキャッシュへの書き込みが拒否された試行があった。ローカル再実行ではTEMP/TMPを通常のユーザー一時領域、UV_CACHE_DIRをリポジトリのキャッシュ、UV_LINK_MODEをcopyに指定した。CIはビルド工程を配布検査にまとめ、UV_PYTHONで各ジョブの版を指定した。
+
+GitHub Actionsの実行、隔離先のgigas.exeの直接実行、可視画面での操作確認は未実施。起動の根拠はインストール済みmoduleとconsole_scripts登録先を使うoffscreen試験。表示品質はM2の記録を参照する。
+
 ## 10. 先送り事項
 
 製品側の指示取得・配送・失敗時の攻略開始制御と実ツールとの整合はU06。案内はU02、整理指示はU08で追加し、同じ同梱検査へ加える。M3では指示の攻略効果を評価しない。
@@ -67,9 +80,9 @@
 ## 11. 完了チェックリスト
 
 - [x] M0〜M2との分担を確認し、配布確認へ範囲を絞った
-- [ ] 実指示の同梱と隔離先での読込を自動検証した
-- [ ] 隔離先で主画面の起動・正常終了を自動検証した
-- [ ] 利用手順・検証結果・未確認事項を記録し、親のU01完了条件と照合した
+- [x] 実指示の同梱と隔離先での読込を自動検証した
+- [x] 隔離先で主画面の起動・正常終了を自動検証した
+- [x] 利用手順・検証結果・未確認事項を記録し、親のU01完了条件と照合した
 
 ## 12. 実装とTDDの記録
 

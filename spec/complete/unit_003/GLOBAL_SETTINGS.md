@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../../wip/unit_001/APP_STARTUP.md)のグローバル設定を、GUI・機器・Codexから独立して保存・再読込できる部品として実装した。2026-11-10完了。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)で決めたTOML KitとUI非依存の保存境界を使う。
+[親仕様](../unit_001/APP_STARTUP.md)のグローバル設定を、GUI・機器・Codexから独立して保存・再読込できる部品として実装した。2026-11-10完了。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)で決めたTOML KitとUI非依存の保存境界を使う。
 
 ### 1.2 起点と要求差分
 

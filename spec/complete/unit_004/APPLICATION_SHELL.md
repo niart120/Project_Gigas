@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../../wip/unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。2026-11-10にレビュー・実装を完了した。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成と、実装済みの[M1](../unit_003/GLOBAL_SETTINGS.md)を使う。検証範囲と未確認の表示条件は第9節に記録する。
+[親仕様](../unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。2026-11-10にレビュー・実装を完了した。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成と、実装済みの[M1](../unit_003/GLOBAL_SETTINGS.md)を使う。検証範囲と未確認の表示条件は第9節に記録する。
 
 ### 1.2 起点と要求差分
 
