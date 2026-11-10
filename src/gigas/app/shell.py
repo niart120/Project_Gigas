@@ -3,9 +3,11 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.storage.settings import Settings
+from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.main_window import MainWindow
 from gigas.ui.settings_dialog import SettingsDialog
 
@@ -35,7 +37,9 @@ class ApplicationShell(QObject):
         self.ready = False
         self.error = ""
         self.error_operation = ""
-        self.closing = False
+        self.pending: str | None = None
+        self.committed = False
+        self.confirmation: QMessageBox | None = None
         self.thread = QThread(self)
         self._worker = SettingsWorker(path, io)
         self._worker.moveToThread(self.thread)
@@ -60,6 +64,7 @@ class ApplicationShell(QObject):
             self.dialog.save_button.clicked.connect(self.save)
             self.dialog.reload_button.clicked.connect(self.reload)
             self.dialog.changed.connect(self._render)
+            self.dialog.close_requested.connect(lambda: self._close("dialog"))
         self._render()
         self.dialog.show()
         self.dialog.raise_()
@@ -74,8 +79,13 @@ class ApplicationShell(QObject):
         """Reload settings through the worker."""
         self._request("load")
 
-    def _request(self, operation: str) -> None:
-        if self.operation is not None or self.closing:
+    def _request(self, operation: str, *, continuing: bool = False) -> None:
+        if (
+            self.operation is not None
+            or self.committed
+            or self.confirmation is not None
+            or (self.pending is not None and not continuing)
+        ):
             return
         self.operation = operation
         self.error = ""
@@ -100,8 +110,10 @@ class ApplicationShell(QObject):
             if operation == "load":
                 self.ready = False
         self._render()
-        if self.closing:
-            self.thread.quit()
+        if self.error and operation == "save":
+            self.pending = None
+        elif self.pending is not None:
+            self._resolve_close()
 
     @property
     def dirty(self) -> bool:
@@ -117,15 +129,57 @@ class ApplicationShell(QObject):
         self.window.status.setText(state)
         if self.dialog is not None:
             self.dialog.status.setText(f"{state}\n{self.error}" if self.error else state)
-            self.dialog.form.setEnabled(self.operation is None and self.ready)
-            self.dialog.save_button.setEnabled(self.operation is None and self.ready)
-            self.dialog.reload_button.setEnabled(self.operation is None)
+            idle = self.operation is None and self.pending is None and not self.committed
+            self.dialog.form.setEnabled(idle and self.ready)
+            self.dialog.save_button.setEnabled(idle and self.ready)
+            self.dialog.reload_button.setEnabled(idle)
 
     def request_close(self) -> None:
         """Finish pending I/O before releasing the owned worker."""
-        self.closing = True
+        self._close("app")
+
+    def _close(self, target: str) -> None:
+        if self.committed or self.confirmation is not None:
+            return
+        if self.pending != "app":
+            self.pending = target
         if self.operation is None:
+            self._resolve_close()
+        self._render()
+
+    def _resolve_close(self) -> None:
+        if self.dirty:
+            parent = self.dialog if self.dialog is not None else self.window
+            self.confirmation = changes_confirmation(parent, allow_save=self.ready)
+            self.confirmation.finished.connect(self._confirmed)
+            self.confirmation.show()
+        else:
+            self._finish_action()
+
+    @Slot(int)
+    def _confirmed(self, result: int) -> None:
+        box = self.confirmation
+        self.confirmation = None
+        if box is not None:
+            box.deleteLater()
+        if result == QMessageBox.StandardButton.Save and self.ready:
+            self._request("save", continuing=True)
+        elif result == QMessageBox.StandardButton.Discard:
+            if self.dialog is not None:
+                self.dialog.set_values(self.baseline)
+            self._finish_action()
+        else:
+            self.pending = None
+        self._render()
+
+    def _finish_action(self) -> None:
+        target = self.pending
+        self.pending = None
+        if target == "app":
+            self.committed = True
             self.thread.quit()
+        elif target == "dialog" and self.dialog is not None:
+            self.dialog.hide()
 
     @Slot()
     def _finish_shutdown(self) -> None:

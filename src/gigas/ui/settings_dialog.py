@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -33,6 +34,7 @@ class SettingsDialog(QDialog):
     """
 
     changed = Signal()
+    close_requested = Signal()
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
@@ -91,6 +93,15 @@ class SettingsDialog(QDialog):
         field.setFixedHeight(44)
         field.textChanged.connect(self.changed)
         return field
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
+        """Request closure without discarding edits."""
+        event.ignore()
+        self.close_requested.emit()
+
+    def reject(self) -> None:
+        """Route Escape through the same closure decision as the close button."""
+        self.close_requested.emit()
 
     def values(self) -> Settings:
         """Return the form's current values without stripping whitespace."""

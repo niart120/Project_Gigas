@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 from pytestqt.qtbot import QtBot
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.shell import ApplicationShell
 from gigas.storage.settings import Settings, load_settings, save_settings
@@ -16,6 +18,10 @@ def shell(qtbot: QtBot, tmp_path: Path) -> Iterator[ApplicationShell]:
     qtbot.waitUntil(lambda: application.operation is None)
     yield application
     if application.window.isVisible():
+        if application.dialog is not None:
+            application.dialog.set_values(application.baseline)
+        if application.confirmation is not None:
+            application.confirmation.reject()
         application.window.close()
         qtbot.waitUntil(lambda: not application.window.isVisible())
 
@@ -92,6 +98,44 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     assert shell.dirty
     shell.dialog.model.clear()
     assert not shell.dirty
+
+
+@pytest.mark.parametrize("target", ["button", "window", "escape", "application"])
+@pytest.mark.parametrize("choice", ["save", "discard", "cancel"])
+def test_dirty_close_choices(
+    shell: ApplicationShell, qtbot: QtBot, target: str, choice: str
+) -> None:
+    shell.open_settings()
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.model.setPlainText("edited")
+    if target == "button":
+        dialog.close_button.click()
+    elif target == "window":
+        dialog.close()
+    elif target == "escape":
+        qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+    else:
+        shell.window.close()
+    box = shell.confirmation
+    assert box is not None
+    buttons = {
+        "save": QMessageBox.StandardButton.Save,
+        "discard": QMessageBox.StandardButton.Discard,
+        "cancel": QMessageBox.StandardButton.Cancel,
+    }
+    box.button(buttons[choice]).click()
+    if choice == "cancel":
+        assert dialog.isVisible()
+        assert dialog.model.toPlainText() == "edited"
+        assert not shell.path.exists()
+    else:
+        qtbot.waitUntil(lambda: not dialog.isVisible())
+        if choice == "save":
+            assert load_settings(shell.path).model == "edited"
+        else:
+            assert not shell.path.exists()
+        assert shell.window.isVisible() == (target != "application")
 
 
 def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbot: QtBot) -> None:
