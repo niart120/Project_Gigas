@@ -5,9 +5,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import tomlkit
+from tomlkit.exceptions import ParseError, TOMLKitError
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tomlkit.toml_document import TOMLDocument
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,14 +46,31 @@ def load_settings(path: "Path") -> Settings:
         Settings values with defaults for omitted fields.
 
     Raises:
-        SettingsError: A known setting has an invalid type or value.
+        SettingsError: The file cannot be read or contains invalid settings.
     """
-    try:
-        document = tomlkit.parse(path.read_bytes().decode("utf-8"))
-    except FileNotFoundError:
-        return Settings()
+    return _settings_from_document(_read_document(path), path)
 
-    return _settings_from_document(document, path)
+
+def _read_document(path: "Path") -> "TOMLDocument":
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return tomlkit.document()
+    except OSError as exc:
+        msg = f"{path}: could not read settings ({exc.strerror})"
+        raise SettingsError(msg) from exc
+
+    try:
+        return tomlkit.parse(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        msg = f"{path}: invalid UTF-8 at byte offset {exc.start}"
+        raise SettingsError(msg) from None
+    except ParseError as exc:
+        msg = f"{path}: invalid TOML at line {exc.line}, column {exc.col}"
+        raise SettingsError(msg) from None
+    except TOMLKitError:
+        msg = f"{path}: invalid TOML"
+        raise SettingsError(msg) from None
 
 
 def _settings_from_document(document: MutableMapping[str, object], path: "Path") -> Settings:
