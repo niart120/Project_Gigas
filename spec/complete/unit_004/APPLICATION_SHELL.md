@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。2026-11-10に設計をレビューし、画面構成とM1 APIへの接続を改訂した。実装未着手。[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成と、実装済みの[M1](../../complete/unit_003/GLOBAL_SETTINGS.md)を使う。
+[親仕様](../../wip/unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。2026-11-10にレビュー・実装を完了した。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成と、実装済みの[M1](../unit_003/GLOBAL_SETTINGS.md)を使う。検証範囲と未確認の表示条件は第9節に記録する。
 
 ### 1.2 起点と要求差分
 
@@ -157,7 +157,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 
 ## 6. TDD Test List
 
-すべて実装前のtodo。状態判断は機器なしのunit、Qt・M1・プロセスの境界はintegrationで確認する。テスト用I/Oは待機と成功・失敗の解除を制御し、固定sleepで順序を推測しない。
+全項目を実装・検証した。M1の値検証は既存unit、画面の状態判断とQt・M1・プロセスの境界はintegrationで確認する。テスト用I/Oは待機と成功・失敗の解除を制御し、固定sleepで順序を推測しない。既存実装で最初から成功した項目は、独立したredがなかったことを第12節へ記録した。
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
@@ -166,7 +166,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 設定を繰り返し開いても画面が増えず、編集値を保持する | new | integration | メイン画面と設定画面の閉鎖を区別 |
 | refactor-skipped | ファイルなしで開閉しても保存確認・書込がなく、明示保存で既定値を作れる | edge | integration | 実M1 APIと一時パス |
 | refactor-skipped | 全5項目を編集・クリア・保存し、再起動後に同じ値を表示する | new | integration | 日本語、前後空白、改行、未知のモデル・エフォートを保持 |
-| refactor-skipped | 編集値を基準値に戻すと未保存が解除される | new | unit | 保存成功前には基準値を変えない |
+| refactor-skipped | 編集値を基準値に戻すと未保存が解除される | new | integration | 保存成功前には基準値を変えない |
 | refactor-skipped | 読込失敗では保存せず、再読込成功で復帰する | edge | integration | 元ファイルと画面状態。修復の試験注入は手編集機能の保証ではない |
 | refactor-skipped | 保存失敗でも編集・再試行でき、原因と後始末の失敗を確認できる | edge | integration | 実M1の置換失敗とadd_note、一般例外の境界も確認 |
 | refactor-skipped | 未保存の設定閉鎖・アプリ終了で保存・破棄・取消しを区別する | new | integration | ×・Esc・ボタン。保存失敗なら閉じない |
@@ -186,8 +186,9 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 手編集値の改行・特殊空白を未編集の保存で変換しない | regression | integration | Qtの表示用正規化を保存へ漏らさない |
 | refactor-skipped | 閉じる確認から始めた保存にも待機表示と取消しを適用する | edge | integration | 直接保存からの終了とは別経路 |
 | refactor-skipped | 画面領域内に収まり、長い診断でも操作へ到達できる | edge | integration | 可視画面でも別に確認 |
+| refactor-skipped | 長い待機対象でも画面内の終了取消しへ到達できる | edge | integration | イベント処理後の形状と操作欄 |
 
-M0でqueued通知は限定確認済みだが、製品の画面寿命・終了競合は未検証。[QDialog公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QDialog.html)の非モーダルshow、execの入れ子ループ、Escからのrejectを確認した。closeEventだけで未保存確認を実装せず、rejectを含め同じ判断へ集約する。[QThread公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QThread.html)のfinished後の後始末とwaitによる確認もM0と照合した。公開資料の読取であり、採用版6.12.0上の本実装の動作保証ではない。
+実装前レビュー時点では、M0でqueued通知は限定確認済みだったが、製品の画面寿命・終了競合は未検証だった。[QDialog公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QDialog.html)の非モーダルshow、execの入れ子ループ、Escからのrejectを確認した。closeEventだけで未保存確認を実装せず、rejectを含め同じ判断へ集約する。[QThread公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QThread.html)のfinished後の後始末とwaitによる確認もM0と照合した。公開資料の読取であり、採用版6.12.0上の本実装の動作保証ではない。
 
 | 優先度 | レビューで確認した不足・過剰指定 | 判断と反映先 |
 |---|---|---|
@@ -199,7 +200,7 @@ M0でqueued通知は限定確認済みだが、製品の画面寿命・終了競
 | P1 | 終了処理中は常に取消し可能と読めるが、quit後に戻す寿命設計がない | 5.5で結果待ちと終了確定を分離。閉鎖経路・保存失敗・解放順を明示 |
 | P2 | 設定失敗と保存先未決定の扱い、例外詳細と終了コードの境界がない | 5.1・5.4で画面内の回復可能エラーと起動失敗を区別 |
 
-P1は終了時に処理やスレッドを残すおそれがある仕様の欠落、P2は契約不足・過剰指定として扱う。修正済みは文書への反映を指し、実装検証済みを意味しない。
+P1は終了時に処理やスレッドを残すおそれがある仕様の欠落、P2は契約不足・過剰指定として扱う。修正済みは文書への反映を指し、当時の実装検証済みを意味しない。実装後の結果は第9節と第12節を参照。
 
 ## 8. 対象ファイル
 
@@ -224,13 +225,38 @@ P1は終了時に処理やスレッドを残すおそれがある仕様の欠落
 
 ### 9.2 実装時のゲート
 
-依存同期・lock確認、ruff format/check、ty、unit/integration、uv build、diff checkを実施し、結果を追記する。公開型とdocstringの変更には対応skillを適用する。
+以下はWindows 11（10.0.26200）、Python 3.12.10 / 3.13.5、PySide6-Essentials / Qt 6.12.0、pytest-qt 4.5.0での実行結果。公開型とdocstringは対応skillに従って確認した。M1のAPI・保存形式は変更していない。
 
-Windows可視画面では初回起動、設定の開閉、保存失敗、未保存確認、終了、再起動、プロセス終了を確認し、OSとPython/Qt版を記録する。表示倍率100%・150%を対象に、画面を縮小しても操作可能か、長い日本語・パス・エラー、Tab移動・Esc・×、前面表示を確認する。未実施倍率や小画面は未確認として残す。offscreenの成功を表示品質・操作性の代用にしない。
+| ゲート | 実行・観測結果 |
+|---|---|
+| 同期・lock | `uv sync --locked --dev --link-mode copy`、`uv lock --check`: pass。TEMP/TMPはworkspaceのtmp/m2-temp |
+| 静的検査 | `uv run ruff format --check .`、`uv run ruff check .`、`uv run ty check --no-progress`: pass。3.13の環境でもty: pass |
+| Python 3.12 | `uv run pytest tests/unit tests/integration -q -o faulthandler_timeout=20`: **62 passed**（2.46秒）。既存22件とM2の40件 |
+| Python 3.13 | `UV_PROJECT_ENVIRONMENT=tmp/m2-python313`で`uv sync --dev --locked --python 3.13 --link-mode copy`。同環境で`uv run --python 3.13 --no-sync pytest tests/unit tests/integration -q -o faulthandler_timeout=20`: **62 passed**（2.78秒） |
+| 配布定義 | `uv build`: wheel/sdist生成成功。ZipFileでRequires-Python、Qt依存、`gigas = gigas.app:main`、app/ui/__main__の同梱を確認。隔離インストールはM3 |
+| CI定義 | Windowsの3.12 / 3.13とoffscreenを設定。PyYAMLで構文・matrix・環境変数を確認。remote CIはnot run（未push） |
+
+一括試験が途中で待機した初回の原因は特定していない。型衝突の修正後、全56件、59件、最終62件を両Python版で実行した範囲では再発せず、最終試験では20秒のスタック診断期限にも到達しなかった。解決原因を属性名の修正と断定しない。途中で独自のbasetempを指定した際は、既存のworkspace内配置試験1件が失敗したため、repo既定のtmp/pytestへ戻して全件成功を確認した。
+
+### 9.3 可視画面の代表確認と検証方法の修正
+
+`LOCALAPPDATA=tmp/m2-visible`へ隔離し、`uv run python -m gigas`と`uv run gigas`をWindowsの可視画面で起動した。設定の初回表示、日本語入力の保存、Escの未保存確認・取消し、試験ファイルの読取専用属性による保存失敗と属性解除後の再試行、設定閉鎖、主画面×による終了コード0、再起動後の保存値を確認した。読取専用属性は解除済み。画面とコードを読み、独自の案内文・説明用ツールチップがないことも確認した。
+
+Windowsの元の実効倍率は150%（QScreen.devicePixelRatio=1.5）だった。QT_SCALE_FACTOR=1で150%、1.5で225%（DPR=2.25）の表示を確認した。225%では保存値の表示と、映像取得元からシリアルポートへのTab移動を画面上のフォーカスで確認した。OSの表示設定は変更していない。
+
+当初は100%・150%や縮小操作をComputer Useで逐次確認する計画だったが、ユーザーから試験効率の指摘を受けて中止した。操作分岐はpytest-qtとプロセス試験へ集約し、Computer Useは代表画面の表示確認に限定する。全操作経路を手動で再走査しない。100%の実画面、実際に縮小した画面、複数画面間のDPI変更、3.13での可視画面はnot run。offscreenの800×800での領域試験を、これらの表示品質の確認とは扱わない。
+
+中止時の2回目の可視試験プロセスは試験セッションを停止して終了した。この強制終了を通常終了の成功根拠には含めない。通常終了の根拠は1回目の終了コード0と自動プロセス試験とする。
+
+### 9.4 最終レビュー
+
+実装をM0・M1・初期設計と照合し、UIからの直接I/O、設定の版管理、要求ID、機器・SDK接続を追加していないことを確認した。mainの終了値、SettingsIOのCallable、結果の不変dataclass、Qtのobject通知を受信側で絞る境界を確認し、Any・型検査の抑制は追加していない。利用開始はREADME、設定操作と修復手順はdocs/settings.md、開発上の判断は本書へ分けた。
+
+AGENTS.md・README・docs・specのローカルリンク111件をPythonで相対解決し、参照切れ0件。5 unitすべて1仕様書。更新した利用手順と本書の仮テキストをrgで確認し、該当なし。`git diff --check`はpass。skillは未変更のためvalidatorはnot applicable。remote CI、配布物の隔離インストール、実機・Codex接続は実施済みとして扱わない。
 
 ## 10. 先送り事項
 
-M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装試験する。インストール済み入口と配布物の結合はM3で確認する。全体配置のペイン寸法・履歴と回答操作の詳細はU03/U07の実データと操作量で調整し、その工程の独立仕様へ記載する。画面状態の永続化は必要性が観測された時点で判断する。
+非モーダル画面・reject・終了競合は本unitで検証した。配布物の隔離インストールと起動はM3へ残す。第9.3節の未確認表示条件は、後続のU03/U07で画面を拡張する際の代表画面確認へ引き継ぐ。全体配置のペイン寸法・履歴と回答操作の詳細も実データと操作量で調整し、その工程の独立仕様へ記載する。画面状態の永続化は必要性が観測された時点で判断する。
 
 サービスループと実行中の機器・Codexの終了は後続工程。現在の設定I/O終了試験を、将来の即時停止・押下解除保証として扱わない。外部手編集・複数プロセスの競合検出、設定の互換性維持は先送りではなく不採用。
 
@@ -238,10 +264,10 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 
 - [x] 主画面・設定画面・後続の配置と工程分担を定めた
 - [x] M0と実M1 APIに照合し、不足・過剰設計の採否を記録した
-- [ ] 本設定部品との結合、ダイアログ操作と終了分岐を試験した
-- [ ] Windows可視画面とプロセス終了を確認した
-- [ ] 型・docstring・依存・CI・利用手順を揃えた
-- [ ] 実装ゲートと未確認事項を記録して本unitを完了へ移した
+- [x] 本設定部品との結合、ダイアログ操作と終了分岐を試験した
+- [x] Windows可視画面の代表例とプロセス終了を確認し、未確認条件を分離した
+- [x] 型・docstring・依存・CI・利用手順を揃えた
+- [x] 実装ゲートと未確認事項を記録して本unitを完了へ移した
 
 ## 12. 実装・TDD記録
 
@@ -276,7 +302,7 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 14. 解放確認: shutdown_commit試験は既存のquit/finished/wait(0)経路で1 passed（単独redなし）。wait(0)の完了だけを試験境界で遅延させ、finished後も画面が残り、GUIが応答し、取消しでワーカーを再生成しないことを確認。
 
 15. 起動失敗: 保存先なし・ワーカー開始前・開始後の3件でred。開始後は実行中QThreadの破棄で異常終了することを再現。起動境界で終了を待ってから診断を返し、import/入口6 passed。QApplicationの最終ウィンドウによる自動終了を無効化し、解放完了通知でquitする。
-16. 型・docstring確認: tyでQObject.thread()とappのthread属性の衝突を検出し、io_threadへ改名。ruffの遅延importにはQtをimport時に初期化しない理由を局所記載し、CLI診断はstderr.writeへ統一した。ty/ruff成功。一括pytestの初回は27件後で待機し中断、当時の原因は未特定。改名後の全56件は2.19秒で成功した。終了試験を再確認して再現性を評価する。
+16. 型・docstring確認: tyでQObject.thread()とappのthread属性の衝突を検出し、io_threadへ改名。ruffの遅延importにはQtをimport時に初期化しない理由を局所記載し、CLI診断はstderr.writeへ統一した。ty/ruff成功。一括pytestの初回は27件後で待機し中断、当時の原因は未特定。改名後の全56件は2.19秒で成功した。その後の再実行結果は第9.2節に記録した。
 
 17. Qt文字列の保持: CRLFと改行しない空白を含むM1有効値が、フォームを開くだけでdirtyになることをredで再現。Qt表示値と元の文字列を対にして保持し、未変更の欄は元値を返すよう修正。設定試験20 passed。編集した欄の改行はQtの入力値となる。
 

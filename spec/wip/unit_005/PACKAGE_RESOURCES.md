@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../unit_001/APP_STARTUP.md)のU01完了条件と[07のT20](../../initial/07-verification.md)を、実際にビルドした配布物で確認する。状態は独立設計案、実装未着手。リソース設計は[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)完了後に進められ、最終確認には[M2](../unit_004/APPLICATION_SHELL.md)の起動実装が必要。
+[親仕様](../unit_001/APP_STARTUP.md)のU01完了条件と[07のT20](../../initial/07-verification.md)を、実際にビルドした配布物で確認する。状態は独立設計案、実装未着手。リソース設計は[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)完了後に進められ、最終確認には[M2](../../complete/unit_004/APPLICATION_SHELL.md)の起動実装が必要。
 
 ### 1.2 起点と利用場面
 

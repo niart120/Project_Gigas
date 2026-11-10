@@ -148,7 +148,7 @@ requirements.inの内容はPySide6-Essentials==6.12.0、tomlkit==0.15.2、pytest
 
 ## 10. 先送り事項
 
-[unit_003](../unit_003/GLOBAL_SETTINGS.md)で保存・コメント保持を確認した。[unit_004](../../wip/unit_004/APPLICATION_SHELL.md)で可視GUI・保存中終了・長いI/O、[unit_005](../../wip/unit_005/PACKAGE_RESOURCES.md)で実配布物とリポジトリ外実行を確認する。外部変更検出の先送りはM1レビューで撤回した。未検証OS/Python版、実機、SDKは各工程の根拠が揃うまで対応確認済みと記載しない。
+[unit_003](../unit_003/GLOBAL_SETTINGS.md)で保存・コメント保持を確認した。[unit_004](../unit_004/APPLICATION_SHELL.md)で可視GUIの代表例・保存中終了・長いI/Oを確認した。未確認の表示条件は同仕様9.3節へ記録した。[unit_005](../../wip/unit_005/PACKAGE_RESOURCES.md)で実配布物とリポジトリ外実行を確認する。外部変更検出の先送りはM1レビューで撤回した。未検証OS/Python版、実機、SDKは各工程の根拠が揃うまで対応確認済みと記載しない。
 
 ## 11. 完了チェックリスト
 

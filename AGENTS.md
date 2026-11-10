@@ -16,7 +16,7 @@
 | 配布名 | `gigas` |
 | import ルート | `gigas` |
 | 説明 | Windows-native interactive gaming agent system. |
-| 起動コマンド | 未実装。U01で定義する |
+| 起動コマンド | `uv run gigas` / `uv run python -m gigas` |
 
 初期設計の正本は `spec/initial/` に置く。実装、公開 API、CI、リリース、エージェント作業の流れを変更するときは、関連する仕様書と品質ゲートの整合を確認する。
 
