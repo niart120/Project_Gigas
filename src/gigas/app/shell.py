@@ -54,6 +54,7 @@ class ApplicationShell(QObject):
         """Show the single settings editor without discarding its input."""
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
+            self.dialog.set_values(self.baseline)
             self.dialog.save_button.clicked.connect(self.save)
             self.dialog.reload_button.clicked.connect(self.reload)
         self._render()
@@ -75,7 +76,8 @@ class ApplicationShell(QObject):
             return
         self.operation = operation
         self._render()
-        self.requested.emit(operation, self.baseline)
+        snapshot = self.dialog.values() if self.dialog is not None else self.baseline
+        self.requested.emit(operation, snapshot)
 
     @Slot(object)
     def _complete(self, result: object) -> None:
@@ -85,6 +87,8 @@ class ApplicationShell(QObject):
         if result.settings is not None:
             self.baseline = result.settings
             self.ready = True
+            if self.dialog is not None:
+                self.dialog.set_values(result.settings)
         self._render()
         if self.closing:
             self.thread.quit()

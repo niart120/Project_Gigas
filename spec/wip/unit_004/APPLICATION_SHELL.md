@@ -165,7 +165,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 両入口で機器なしに起動・正常終了する | new | integration | 開発環境。配布物はM3 |
 | refactor-skipped | 設定を繰り返し開いても画面が増えず、編集値を保持する | new | integration | メイン画面と設定画面の閉鎖を区別 |
 | refactor-skipped | ファイルなしで開閉しても保存確認・書込がなく、明示保存で既定値を作れる | edge | integration | 実M1 APIと一時パス |
-| todo | 全5項目を編集・クリア・保存し、再起動後に同じ値を表示する | new | integration | 日本語、前後空白、改行、未知のモデル・エフォートを保持 |
+| refactor-skipped | 全5項目を編集・クリア・保存し、再起動後に同じ値を表示する | new | integration | 日本語、前後空白、改行、未知のモデル・エフォートを保持 |
 | todo | 編集値を基準値に戻すと未保存が解除される | new | unit | 保存成功前には基準値を変えない |
 | todo | 読込失敗では保存せず、再読込成功で復帰する | edge | integration | 元ファイルと画面状態。修復の試験注入は手編集機能の保証ではない |
 | todo | 保存失敗でも編集・再試行でき、原因と後始末の失敗を確認できる | edge | integration | 実M1の置換失敗とadd_note、一般例外の境界も確認 |
@@ -244,3 +244,7 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 3. 設定画面: test_settings_reopens_same_dialog_with_editsはdialog未定義でred、主画面が所有する単一の非モーダル画面を追加して1 passed。中央案内と説明用ツールチップは置かない。
 
 4. 既定値の明示保存: defaults試験は保存処理未接続でred。M1を単一QObjectワーカーへ接続し、設定・入口4 passed。ワーカー導入に伴い、通常終了時のquit/finished/wait(0)も追加して実行中の破棄を防いだ。
+
+5. 値の往復: round_trip試験は編集値が保存へ渡らずred。フォームとSettingsの変換を追加し3 passed。保存元のアプリを閉じてから新しいappで再読込し、空欄へのクリアも確認。
+
+5補足: 試験後の破棄でpytest-qtのaddWidget自動削除とappの非同期終了が競合した。app所有画面はfixture自身が終了を待つ形へ修正し、再実行で3 passed・終了例外0件を確認した。直前のitemコミットへ修正を含める。

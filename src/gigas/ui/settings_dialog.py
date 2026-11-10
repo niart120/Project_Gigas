@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from gigas.storage.settings import Settings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,3 +91,22 @@ class SettingsDialog(QDialog):
         field.setFixedHeight(44)
         field.textChanged.connect(self.changed)
         return field
+
+    def values(self) -> Settings:
+        """Return the form's current values without stripping whitespace."""
+        return Settings(
+            capture_device=self.capture_device.toPlainText(),
+            serial_port=self.serial_port.toPlainText(),
+            model=self.model.toPlainText(),
+            effort=self.effort.toPlainText(),
+            auth_method=str(self.auth_method.currentData()),
+        )
+
+    def set_values(self, values: Settings) -> None:
+        """Replace displayed values without emitting user-edit notifications."""
+        with QSignalBlocker(self):
+            self.capture_device.setPlainText(values.capture_device)
+            self.serial_port.setPlainText(values.serial_port)
+            self.model.setPlainText(values.model)
+            self.effort.setPlainText(values.effort)
+            self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
