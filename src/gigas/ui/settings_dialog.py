@@ -121,3 +121,9 @@ class SettingsDialog(QDialog):
             self.model.setPlainText(values.model)
             self.effort.setPlainText(values.effort)
             self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
+
+    def set_editable(self, enabled: bool) -> None:
+        """Control editing while retaining selection and copying of values."""
+        for field in (self.capture_device, self.serial_port, self.model, self.effort):
+            field.setReadOnly(not enabled)
+        self.auth_method.setEnabled(enabled)

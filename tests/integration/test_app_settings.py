@@ -183,3 +183,31 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
     assert load_settings(shell.path).model == "retry"
     assert not shell.error
     assert not shell.dirty
+
+
+def test_reload_confirms_discard_and_keeps_values_on_failure(
+    shell: ApplicationShell, qtbot: QtBot
+) -> None:
+    shell.open_settings()
+    assert shell.dialog is not None
+    shell.dialog.model.setPlainText('edited')
+    shell.dialog.reload_button.click()
+    box = shell.confirmation
+    assert box is not None
+    assert box.button(QMessageBox.StandardButton.Save) is None
+    box.button(QMessageBox.StandardButton.Cancel).click()
+    assert shell.dialog.model.toPlainText() == 'edited'
+    assert shell.operation is None
+
+    shell.path.write_text('[broken', encoding='utf-8')
+    shell.dialog.reload_button.click()
+    assert shell.confirmation is not None
+    shell.confirmation.button(QMessageBox.StandardButton.Discard).click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert shell.dialog.model.toPlainText() == 'edited'
+    assert not shell.dialog.save_button.isEnabled()
+    shell.dialog.close()
+    assert shell.confirmation is not None
+    assert shell.confirmation.button(QMessageBox.StandardButton.Save) is None
+    shell.confirmation.button(QMessageBox.StandardButton.Cancel).click()
+    assert shell.dialog.isVisible()

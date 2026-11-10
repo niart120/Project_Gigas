@@ -77,7 +77,12 @@ class ApplicationShell(QObject):
 
     def reload(self) -> None:
         """Reload settings through the worker."""
-        self._request("load")
+        if self.operation is not None or self.pending is not None or self.committed:
+            return
+        if self.dirty:
+            self._close("reload")
+        else:
+            self._request("load")
 
     def _request(self, operation: str, *, continuing: bool = False) -> None:
         if (
@@ -130,7 +135,7 @@ class ApplicationShell(QObject):
         if self.dialog is not None:
             self.dialog.status.setText(f"{state}\n{self.error}" if self.error else state)
             idle = self.operation is None and self.pending is None and not self.committed
-            self.dialog.form.setEnabled(idle and self.ready)
+            self.dialog.set_editable(idle and self.ready)
             self.dialog.save_button.setEnabled(idle and self.ready)
             self.dialog.reload_button.setEnabled(idle)
 
@@ -150,7 +155,9 @@ class ApplicationShell(QObject):
     def _resolve_close(self) -> None:
         if self.dirty:
             parent = self.dialog if self.dialog is not None else self.window
-            self.confirmation = changes_confirmation(parent, allow_save=self.ready)
+            self.confirmation = changes_confirmation(
+                parent, allow_save=self.ready and self.pending != "reload"
+            )
             self.confirmation.finished.connect(self._confirmed)
             self.confirmation.show()
         else:
@@ -165,7 +172,7 @@ class ApplicationShell(QObject):
         if result == QMessageBox.StandardButton.Save and self.ready:
             self._request("save", continuing=True)
         elif result == QMessageBox.StandardButton.Discard:
-            if self.dialog is not None:
+            if self.dialog is not None and self.pending != "reload":
                 self.dialog.set_values(self.baseline)
             self._finish_action()
         else:
@@ -180,6 +187,8 @@ class ApplicationShell(QObject):
             self.thread.quit()
         elif target == "dialog" and self.dialog is not None:
             self.dialog.hide()
+        elif target == "reload":
+            self._request("load")
 
     @Slot()
     def _finish_shutdown(self) -> None:
