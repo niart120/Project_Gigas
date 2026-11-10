@@ -32,6 +32,51 @@ assert hashlib.sha256(text.encode("utf-8")).hexdigest() == sys.argv[2], resource
 print(f"Installed from {origin} (Python {sys.version.split()[0]}, Qt {qVersion()})")
 """
 
+APP_PROBE = """
+import os
+import runpy
+import sys
+from importlib.metadata import distribution
+
+os.environ["LOCALAPPDATA"] = sys.argv[2]
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QMainWindow
+
+shown = []
+closed = False
+
+def close_window():
+    for window in QApplication.topLevelWidgets():
+        if isinstance(window, QMainWindow) and window.isVisible():
+            shown.append(window)
+            window.close()
+            break
+
+original_exec = QApplication.exec
+
+def run_loop():
+    global closed
+    QTimer.singleShot(0, close_window)
+    code = original_exec()
+    closed = bool(shown) and not shown[0].isVisible()
+    return code
+
+QApplication.exec = staticmethod(run_loop)
+entry = sys.argv[1]
+if entry == "module":
+    try:
+        runpy.run_module("gigas", run_name="__main__")
+    except SystemExit as result:
+        assert result.code == 0, result.code
+else:
+    (script,) = distribution("gigas").entry_points.select(group="console_scripts", name="gigas")
+    assert script.load()() == 0
+assert closed, f"{entry}: no main window completed the Qt close cycle"
+print(f"{entry}: main window opened and closed")
+"""
+
 
 def check_resources(sdist: Path, wheel: Path) -> str:
     """Check both archives and return the expected installed text digest."""
@@ -53,13 +98,13 @@ def check_resources(sdist: Path, wheel: Path) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def run(command: list[str], cwd: Path) -> None:
+def run(command: list[str], cwd: Path, *, timeout: int = 180) -> None:
     """Run a local packaging command with a bounded wait."""
-    subprocess.run(command, cwd=cwd, check=True, timeout=180)  # noqa: S603 -- local tools
+    subprocess.run(command, cwd=cwd, check=True, timeout=timeout)  # noqa: S603 -- local tools
 
 
 def main() -> None:
-    """Build once, install the resulting wheel and read its resource."""
+    """Build once and check resources and startup from the installed wheel."""
     with TemporaryDirectory(prefix="gigas-package-") as directory:
         work = Path(directory).resolve()
         if work.is_relative_to(ROOT):
@@ -77,6 +122,12 @@ def main() -> None:
         run(["uv", "pip", "install", "--python", python, "--link-mode", "copy", str(wheel)], work)
         run([python, "-I", "-c", RESOURCE_PROBE, str(venv), digest], work)
         print(f"Resource verified in {sdist.name} and {wheel.name}", flush=True)  # noqa: T201 -- CLI
+        for entry in ("module", "script"):
+            run(
+                [python, "-I", "-c", APP_PROBE, entry, str(work / f"settings-{entry}")],
+                work,
+                timeout=15,
+            )
 
 
 if __name__ == "__main__":
