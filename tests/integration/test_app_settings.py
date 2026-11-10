@@ -91,3 +91,19 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     assert shell.dirty
     shell.dialog.model.clear()
     assert not shell.dirty
+
+
+def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbot: QtBot) -> None:
+    shell.path.write_text("[broken", encoding="utf-8")
+    shell.open_settings()
+    assert shell.dialog is not None
+    shell.dialog.reload_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert not shell.dialog.save_button.isEnabled()
+    assert str(shell.path) in shell.dialog.status.text()
+    assert shell.path.read_text(encoding="utf-8") == "[broken"
+    shell.path.write_text('[agent]\nmodel="repaired"', encoding="utf-8")
+    shell.dialog.reload_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert shell.dialog.save_button.isEnabled()
+    assert shell.dialog.model.toPlainText() == "repaired"

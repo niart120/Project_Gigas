@@ -33,6 +33,8 @@ class ApplicationShell(QObject):
         self.baseline = Settings()
         self.operation: str | None = None
         self.ready = False
+        self.error = ""
+        self.error_operation = ""
         self.closing = False
         self.thread = QThread(self)
         self._worker = SettingsWorker(path, io)
@@ -76,6 +78,7 @@ class ApplicationShell(QObject):
         if self.operation is not None or self.closing:
             return
         self.operation = operation
+        self.error = ""
         self._render()
         snapshot = self.dialog.values() if self.dialog is not None else self.baseline
         self.requested.emit(operation, snapshot)
@@ -84,12 +87,18 @@ class ApplicationShell(QObject):
     def _complete(self, result: object) -> None:
         if not isinstance(result, OperationResult):
             return
+        operation = self.operation
         self.operation = None
         if result.settings is not None:
             self.baseline = result.settings
             self.ready = True
             if self.dialog is not None:
                 self.dialog.set_values(result.settings)
+        else:
+            self.error = result.error
+            self.error_operation = "読込失敗" if operation == "load" else "保存失敗"
+            if operation == "load":
+                self.ready = False
         self._render()
         if self.closing:
             self.thread.quit()
@@ -103,9 +112,11 @@ class ApplicationShell(QObject):
         state = {"load": "読込中", "save": "保存中"}.get(
             self.operation, "未保存" if self.dirty else "変更なし"
         )
+        if self.error:
+            state = self.error_operation
         self.window.status.setText(state)
         if self.dialog is not None:
-            self.dialog.status.setText(state)
+            self.dialog.status.setText(f"{state}\n{self.error}" if self.error else state)
             self.dialog.form.setEnabled(self.operation is None and self.ready)
             self.dialog.save_button.setEnabled(self.operation is None and self.ready)
             self.dialog.reload_button.setEnabled(self.operation is None)
