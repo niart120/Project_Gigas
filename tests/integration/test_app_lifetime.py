@@ -164,3 +164,38 @@ def test_cancel_close_keeps_late_result_without_exiting(
     assert shell.baseline.model == 'late'
     assert shell.dialog.model.toPlainText() == 'late'
     assert (io.saves, io.loads) == ((1, 1) if operation == 'save' else (0, 2))
+
+
+def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shell, _io = controlled
+    cleanup_allowed = Event()
+    wait_called = Event()
+    real_wait = shell.thread.wait
+
+    def delayed_wait(milliseconds: int) -> bool:
+        assert milliseconds == 0
+        wait_called.set()
+        return cleanup_allowed.is_set() and real_wait(milliseconds)
+
+    monkeypatch.setattr(shell.thread, 'wait', delayed_wait)
+    try:
+        shell.window.close()
+        qtbot.waitUntil(wait_called.is_set)
+        assert shell.committed
+        assert shell.thread.isFinished()
+        assert shell.window.isVisible()
+        assert not shell.window.cancel_close_button.isVisible()
+        shell.cancel_close()
+        assert shell.committed
+        assert not shell.window.settings_button.isEnabled()
+        pulse = Event()
+        QTimer.singleShot(0, pulse.set)
+        qtbot.waitUntil(pulse.is_set)
+        assert shell.window.isVisible()
+    finally:
+        cleanup_allowed.set()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+    assert real_wait(0)

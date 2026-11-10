@@ -174,7 +174,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 遅いI/O中もイベントを処理し、編集・二重I/Oを拒否する | edge | integration | 開いている画面へメインスレッドで結果を反映 |
 | refactor-skipped | I/O中の閉じる要求は成功後に続行し、保存失敗時は解除する | edge | integration | 読込・保存の双方と要求の重複 |
 | refactor-skipped | 終了待ちの取消し後もI/O結果を反映し、自動で終了しない | edge | integration | 5秒表示はタイマー境界を制御。取消しで書込を巻き戻さない |
-| todo | 終了確定後は取消しを許可せず、ワーカー解放までプロセスを終了しない | edge | integration | finished直後の未終了も含む |
+| refactor-skipped | 終了確定後は取消しを許可せず、ワーカー解放までプロセスを終了しない | edge | integration | finished直後の未終了も含む |
 | todo | 保存先決定不能・捕捉可能な起動失敗は診断とコード1になり、別の場所へ書かない | edge | integration | 部分生成時の解放も確認 |
 
 ## 7. 設計メモとレビュー結果
@@ -264,3 +264,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 12. I/O中の閉鎖: 保存失敗後の編集が無効のままで2件red。保留解除後に表示を更新する順序へ修正し、lifetime試験6 passed。設定閉鎖・アプリ終了、成功・失敗、読込中の終了、重複要求を確認。
 
 13. 終了取消し: cancel_close試験は取消し操作未実装でred。主画面・設定画面の短い取消しボタンと5秒の詳細表示タイマーを追加し、設定/lifetime 27 passed。読込・保存を止めず、遅い結果を反映して画面に残る。
+
+14. 解放確認: shutdown_commit試験は既存のquit/finished/wait(0)経路で1 passed（単独redなし）。wait(0)の完了だけを試験境界で遅延させ、finished後も画面が残り、GUIが応答し、取消しでワーカーを再生成しないことを確認。
