@@ -32,6 +32,7 @@ uv run pytest tests/unit
 
 ## ドキュメント
 
+- [グローバル設定](docs/settings.md)
 - [spec/initial/README.md](spec/initial/README.md): 設計文書一覧
 - [AGENTS.md](AGENTS.md): 開発エージェントガイド
 

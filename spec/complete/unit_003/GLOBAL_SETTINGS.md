@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../unit_001/APP_STARTUP.md)のグローバル設定を、GUI・機器・Codexから独立して保存・再読込できる部品として作る。状態は2026-11-10レビュー反映案、実装未着手。[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のTOML Kit採用とUI非依存の保存境界を維持する。
+[親仕様](../../wip/unit_001/APP_STARTUP.md)のグローバル設定を、GUI・機器・Codexから独立して保存・再読込できる部品として実装した。2026-11-10完了。[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)で決めたTOML KitとUI非依存の保存境界を使う。
 
 ### 1.2 起点と要求差分
 
@@ -84,12 +84,12 @@ capture.deviceはU01で保存する選択値であり、永続的な機器IDの�
 | 状態・操作 | 期待結果 |
 |---|---|
 | ファイルなし | 既定値を返し、ディレクトリやファイルを作らない |
-| 有効なTOML | 現在の既知項目を読み、欠落を既定値で補う。元文書はstorage内部に保持 |
+| 有効なTOML | 現在の既知項目を読み、欠落を既定値で補う。文書の解析と更新はstorage内部で行う |
 | 構文・文字コード・既知項目の型不正 | 理由付き失敗を返し、原本を変更しない |
 | GUIから保存 | 現在の既知値を元文書へ反映し、未編集部分とコメントを保持 |
 | 保存失敗 | 保存成功を返さず、呼出し元が編集値を残して再試行できる |
 
-単純な設定値と読込・保存操作で構成し、汎用SettingFieldレジストリ、dotted-key API、不透明な比較トークンを先行設計しない。TOML Kitの文書はstorageだけが保持し、uiには設定値を渡す。
+呼出し側には単純な設定値と読込・保存操作を提供する。TOML Kitの文書はstorage内の処理に使い、uiには設定値を渡す。
 
 手編集はアプリ終了中に行い、起動中の外部変更は検出しない。起動中に手編集した内容はGUI保存で上書きされ得る。この制約を利用手順へ記載し、mtime/digest比較や再読込必須の競合状態を設けない。アプリ内のI/OはM0の1件ずつの実行を使う。
 
@@ -123,15 +123,34 @@ capture.deviceはU01で保存する選択値であり、永続的な機器IDの�
 
 NyXから参考にするのは項目の分類と実際の利用箇所であり、汎用SettingsSchema、SecretsSnapshot、RLock、初回読込での自動保存、非厳格読込で既定値へ戻す処理、旧swbt移行はコピーしない。TOML Kitを使う点は共通でも、GIGASでは元文書を保持して編集するM0の判断を維持する。
 
+### 7.1 実装時の判断
+
+- 保存先は `default_settings_path()` で決定する。`load_settings(path)` と `save_settings(path, settings)` は呼出し側から保存先を受け取る。設定値は変更不可の `Settings` とし、M2では編集結果を別の値として渡せる。
+- 保存時に既存ファイルを読み直し、現在の形式として検証してから、値が異なる項目と省略されていた項目を書き込む。TOML文書を操作の間に保持する必要がなく、直接保存を呼んだ場合も不正な原本を上書きしない。保存前の再読込は形式確認とコメント保持のためで、競合検出は契約に含めない。
+- CRLF入りのファイルをテキストモードで書き戻すと、Windowsの改行変換で空行が増えた。読込・保存をUTF-8のバイト列で行い、コメント保持の結合試験で確認した。
+- パス決定・読込・保存の失敗は `SettingsError` に統一した。構文エラーには行・列、文字コードエラーにはバイト位置を含める。一時ファイルの後始末に失敗した場合は同じ例外へ付記する。
+
 ## 8. 対象ファイル
 
-実装時は`src/gigas/storage/settings.py`、必要なパッケージ入口、設定のunit/integration試験、`pyproject.toml`・`uv.lock`、利用手順を対象とする。今回の変更は本書、親・M2、M0への後続判断の注記、初期設計04のみ。製品コードは変更しない。
+`src/gigas/storage/settings.py` とパッケージ入口、`tests/unit/test_settings.py`、`tests/integration/test_settings_io.py` を追加した。`pyproject.toml` と `uv.lock` に `tomlkit==0.15.2` を追加した。Windows CIの試験対象に `tests/integration` を加えた。READMEを入口とし、設定例とPythonからの利用手順は[グローバル設定](../../../docs/settings.md)に記載した。
 
 ## 9. 検証
 
-今回のレビューではNyXの固定版ソース、M0、初期設計03・04・05・06、親とM2を照合した。`uv run --no-project --python tmp/m0/venv/Scripts/python.exe python tmp/m0/check_specs.py`で関連9文書のローカル参照60件、TOML例1件、各unitが1仕様書であることを確認した。`git diff --check`と新規文書への`git diff --no-index --check -- /dev/null`は空白エラーなし（改行変換の予告のみ）。旧要件を検索し、履歴・撤回説明以外の版分岐・競合検出要求を除いた。NyXの実行とGIGASの実装試験はnot run。skill未変更のためvalidatorはnot applicable。
+実装前の仕様は `c41c82c` に保存した。各TDD項目は `uv run --locked pytest tests/unit/test_settings.py -q` または `uv run --locked pytest tests/integration/test_settings_io.py -q` でredとgreenを確認し、試験・実装・第6節の記録を同じコミットへ入れた。
 
-実装時には`uv sync --dev`、`uv lock --check`、ruff format/check、ty、pytestのunit/integration、`uv build`、`git diff --check`を実施する。unitは現在の値と検証、integrationは本保存処理を確認する。文書だけの今回、その成功を品質根拠にはしない。
+| コマンド | 結果と確認内容 |
+|---|---|
+| `uv add 'tomlkit==0.15.2'`、`uv lock`、`uv sync --locked --dev`、`uv lock --check` | 成功。採用版の追加、依存定義とlockの一致、開発環境の同期 |
+| `uv run --locked ruff format --check .`、`uv run --locked ruff check .` | 成功。フォーマット、lint、公開APIのGoogle形式docstring |
+| `uv run --locked ty check --no-progress` | 成功。外部から受け取るTOML値を検証して文字列へ絞り、公開APIにTOML Kit型を露出していない。型検査の抑制やcastの追加なし |
+| `uv run --locked pytest tests/unit`、`uv run --locked pytest tests/integration` | Windows x64・Python 3.12.10で単体13件、結合9件成功 |
+| `uv sync --locked --dev --python 3.13`、`uv run --locked --python 3.13 pytest tests/unit tests/integration` | 作業ツリー内の別環境を使い、Windows x64・Python 3.13.5で22件成功 |
+| `uv build` | wheel・sdist生成成功 |
+| `uv run --locked pytest tests/unit tests/integration` | CIと同じ試験対象をPython 3.12.10で実行し22件成功 |
+| 文書・YAML・wheelの検査 | 仕様のローカル参照62件と1 unit 1仕様書を確認。利用手順のリンクとTOML・Python例、CIのYAML、wheel内の設定モジュールと依存メタデータを確認 |
+| `git diff --cached --check` | 空白エラーなし |
+
+結合試験では一時ファイル作成と置換の失敗を注入した。電源断、実ファイルのアクセス権構成、一時ファイル削除失敗の実機再現とGitHub Actions上での実行は未実施。Qt・機器・Codex・配布物からの起動は担当工程で確認する。skill validatorはskill変更なしのためnot applicable。
 
 ## 10. 先送り事項
 
@@ -141,7 +160,7 @@ NyXから参考にするのは項目の分類と実際の利用箇所であり�
 
 - [x] NyXの設定項目とGIGASでの採否・追加工程を整理した
 - [x] 互換性を担保しない方針と、残す読込・保存契約を分けた
-- [ ] 現在の設定の読込・更新・失敗を実装・検証した
-- [ ] 公開型・docstring・利用手順を揃えた
-- [ ] 依存lock・buildを含むゲートと未検証事項を記録した
-- [ ] 本unitを完了へ移した
+- [x] 現在の設定の読込・更新・失敗を実装・検証した
+- [x] 公開型・docstring・利用手順を揃えた
+- [x] 依存lock・buildを含むゲートと未検証事項を記録した
+- [x] 本unitを完了へ移した

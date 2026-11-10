@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[親仕様](../unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。状態は独立設計案、実装未着手。[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成を採用し、[M1](../unit_003/GLOBAL_SETTINGS.md)の保存部品完成後に結合する。
+[親仕様](../unit_001/APP_STARTUP.md)の起動・編集・保存・終了を機器なしで成立させる。状態は独立設計案、実装未着手。[M0](../../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)のQt構成を採用し、完成済みの設定保存部品を結合する。[M1](../../complete/unit_003/GLOBAL_SETTINGS.md)
 
 ### 1.2 起点と利用場面
 
