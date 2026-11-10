@@ -85,3 +85,51 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
     assert (io.loads, io.saves) == (1, 1)
     assert shell.baseline.model == "snapshot"
     assert not shell.dialog.model.isReadOnly()
+
+
+@pytest.mark.parametrize('target', ['dialog', 'app'])
+@pytest.mark.parametrize('fail', [False, True])
+def test_pending_close_follows_save_result(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, target: str, fail: bool
+) -> None:
+    shell, io = controlled
+    io.fail = fail
+    assert shell.dialog is not None
+    shell.dialog.model.setPlainText('edited')
+    shell.save()
+    qtbot.waitUntil(io.entered.is_set)
+    if target == 'app':
+        shell.window.close()
+        shell.window.close()
+    else:
+        shell.dialog.close()
+        shell.dialog.close()
+    assert shell.window.isVisible()
+    assert shell.dialog.isVisible()
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    if fail:
+        assert shell.pending is None
+        assert shell.window.isVisible()
+        assert shell.dialog.isVisible()
+        assert not shell.dialog.model.isReadOnly()
+        assert shell.dialog.save_button.isEnabled()
+        assert shell.dialog.model.toPlainText() == 'edited'
+    else:
+        qtbot.waitUntil(lambda: not shell.dialog.isVisible())
+        assert shell.window.isVisible() == (target == 'dialog')
+    assert io.saves == 1
+
+
+def test_close_during_reload_finishes_after_result(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+) -> None:
+    shell, io = controlled
+    io.block_load = True
+    shell.reload()
+    qtbot.waitUntil(io.entered.is_set)
+    shell.window.close()
+    assert shell.window.isVisible()
+    io.release.set()
+    qtbot.waitUntil(lambda: not shell.window.isVisible())
+    assert shell.baseline == Settings()

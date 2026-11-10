@@ -114,11 +114,11 @@ class ApplicationShell(QObject):
             self.error_operation = "読込失敗" if operation == "load" else "保存失敗"
             if operation == "load":
                 self.ready = False
-        self._render()
         if self.error and operation == "save":
             self.pending = None
         elif self.pending is not None:
             self._resolve_close()
+        self._render()
 
     @property
     def dirty(self) -> bool:
