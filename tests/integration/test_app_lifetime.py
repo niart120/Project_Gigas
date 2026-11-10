@@ -133,3 +133,34 @@ def test_close_during_reload_finishes_after_result(
     io.release.set()
     qtbot.waitUntil(lambda: not shell.window.isVisible())
     assert shell.baseline == Settings()
+
+
+@pytest.mark.parametrize('operation', ['save', 'load'])
+def test_cancel_close_keeps_late_result_without_exiting(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, operation: str
+) -> None:
+    shell, io = controlled
+    assert shell.dialog is not None
+    if operation == 'save':
+        shell.dialog.model.setPlainText('late')
+        shell.save()
+    else:
+        save_settings(shell.path, Settings(model='late'))
+        io.block_load = True
+        shell.reload()
+    qtbot.waitUntil(io.entered.is_set)
+    shell.window.close()
+    assert shell.window.cancel_close_button.isVisible()
+    shell.wait_timer.timeout.emit()
+    assert str(shell.path) in shell.window.status.text()
+    shell.window.cancel_close_button.click()
+    assert not shell.window.cancel_close_button.isVisible()
+    assert shell.operation == operation
+    shell.save()
+    shell.reload()
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert shell.window.isVisible()
+    assert shell.baseline.model == 'late'
+    assert shell.dialog.model.toPlainText() == 'late'
+    assert (io.saves, io.loads) == ((1, 1) if operation == 'save' else (0, 2))

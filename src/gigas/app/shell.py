@@ -40,6 +40,11 @@ class ApplicationShell(QObject):
         self.pending: str | None = None
         self.committed = False
         self.confirmation: QMessageBox | None = None
+        self.wait_expired = False
+        self.wait_timer = QTimer(self)
+        self.wait_timer.setSingleShot(True)
+        self.wait_timer.setInterval(5000)
+        self.wait_timer.timeout.connect(self._show_wait_details)
         self.thread = QThread(self)
         self._worker = SettingsWorker(path, io)
         self._worker.moveToThread(self.thread)
@@ -49,6 +54,7 @@ class ApplicationShell(QObject):
         self.thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
         self.window.close_requested.connect(self.request_close)
+        self.window.cancel_close_requested.connect(self.cancel_close)
 
     def start(self) -> None:
         """Display the main window."""
@@ -65,6 +71,7 @@ class ApplicationShell(QObject):
             self.dialog.reload_button.clicked.connect(self.reload)
             self.dialog.changed.connect(self._render)
             self.dialog.close_requested.connect(lambda: self._close("dialog"))
+            self.dialog.cancel_close_requested.connect(self.cancel_close)
         self._render()
         self.dialog.show()
         self.dialog.raise_()
@@ -116,6 +123,8 @@ class ApplicationShell(QObject):
                 self.ready = False
         if self.error and operation == "save":
             self.pending = None
+            self.wait_timer.stop()
+            self.wait_expired = False
         elif self.pending is not None:
             self._resolve_close()
         self._render()
@@ -131,13 +140,28 @@ class ApplicationShell(QObject):
         )
         if self.error:
             state = self.error_operation
+        cancelable = self.pending in ("app", "dialog") and self.operation is not None
+        if cancelable or self.committed:
+            state = "閉じる待ち" if self.pending == "dialog" else "終了待ち"
+            if self.wait_expired:
+                target = {"load": "設定読込", "save": "設定保存"}.get(
+                    self.operation, "ワーカー終了"
+                )
+                state = f"{state} · {target} · {self.path}"
         self.window.status.setText(state)
+        self.window.cancel_close_button.setVisible(cancelable)
+        self.window.cancel_close_button.setText(
+            "閉じる取消し" if self.pending == "dialog" else "終了取消し"
+        )
+        self.window.settings_button.setEnabled(not self.committed)
         if self.dialog is not None:
             self.dialog.status.setText(f"{state}\n{self.error}" if self.error else state)
             idle = self.operation is None and self.pending is None and not self.committed
             self.dialog.set_editable(idle and self.ready)
             self.dialog.save_button.setEnabled(idle and self.ready)
             self.dialog.reload_button.setEnabled(idle)
+            self.dialog.cancel_close_button.setVisible(cancelable)
+            self.dialog.cancel_close_button.setText(self.window.cancel_close_button.text())
 
     def request_close(self) -> None:
         """Finish pending I/O before releasing the owned worker."""
@@ -150,9 +174,13 @@ class ApplicationShell(QObject):
             self.pending = target
         if self.operation is None:
             self._resolve_close()
+        elif not self.wait_timer.isActive():
+            self.wait_timer.start()
         self._render()
 
     def _resolve_close(self) -> None:
+        self.wait_timer.stop()
+        self.wait_expired = False
         if self.dirty:
             parent = self.dialog if self.dialog is not None else self.window
             self.confirmation = changes_confirmation(
@@ -184,17 +212,33 @@ class ApplicationShell(QObject):
         self.pending = None
         if target == "app":
             self.committed = True
+            self.wait_timer.start()
             self.thread.quit()
         elif target == "dialog" and self.dialog is not None:
             self.dialog.hide()
         elif target == "reload":
             self._request("load")
 
+    def cancel_close(self) -> None:
+        """Cancel a pending window closure without interrupting file I/O."""
+        if self.committed or self.confirmation is not None:
+            return
+        self.pending = None
+        self.wait_timer.stop()
+        self.wait_expired = False
+        self._render()
+
+    @Slot()
+    def _show_wait_details(self) -> None:
+        self.wait_expired = True
+        self._render()
+
     @Slot()
     def _finish_shutdown(self) -> None:
         if not self.thread.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
+        self.wait_timer.stop()
         if self.dialog is not None:
             self.dialog.hide()
         self.window.allow_close = True

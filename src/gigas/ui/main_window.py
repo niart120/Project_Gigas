@@ -10,6 +10,7 @@ class MainWindow(QMainWindow):
 
     settings_requested = Signal()
     close_requested = Signal()
+    cancel_close_requested = Signal()
 
     def __init__(self) -> None:
         """Create the main window without starting services."""
@@ -29,6 +30,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.status = QLabel("変更なし", self)
         self.statusBar().addWidget(self.status, 1)
+        self.cancel_close_button = QPushButton("終了取消し", self)
+        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
+        self.cancel_close_button.hide()
+        self.statusBar().addPermanentWidget(self.cancel_close_button)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Route window closure through application lifetime management."""

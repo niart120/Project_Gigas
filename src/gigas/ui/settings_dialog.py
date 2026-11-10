@@ -35,6 +35,7 @@ class SettingsDialog(QDialog):
 
     changed = Signal()
     close_requested = Signal()
+    cancel_close_requested = Signal()
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
@@ -81,7 +82,12 @@ class SettingsDialog(QDialog):
         self.save_button = QPushButton("保存", self)
         self.reload_button = QPushButton("再読込", self)
         self.close_button = QPushButton("閉じる", self)
-        for button in (self.save_button, self.reload_button, self.close_button):
+        self.cancel_close_button = QPushButton("閉じる取消し", self)
+        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
+        self.cancel_close_button.hide()
+        for button in (
+            self.save_button, self.reload_button, self.close_button, self.cancel_close_button
+        ):
             button.setAutoDefault(False)
             actions.addWidget(button)
         self.close_button.clicked.connect(self.close)
