@@ -15,8 +15,8 @@ description: "この Python repo の spec/wip、spec/initial、TDD Test List か
 
 ## Workflow
 
-1. 関連する `spec/initial/*.md` と `spec/wip` を読む。
-2. 作業仕様がなければ `spec-format` で作る。
+1. 関連する `spec/initial/*.md`、親仕様、対象の `spec/wip` を読む。対象が `planned` にある場合は前提と調査・設計の状態を確認する。
+2. `spec-format` で着手する仕様を `wip` へ移すか、必要な子仕様だけを作る。未着手の親仕様を複製せず、前提が未成立のままTDDへ入らない。
 3. `tdd-test-list` で振る舞いベースの item に分ける。
 4. 次に扱う item を 1 つだけ選ぶ。
 5. `tdd-one-cycle` で red / green / refactor を進める。

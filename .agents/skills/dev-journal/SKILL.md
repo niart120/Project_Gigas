@@ -11,7 +11,7 @@ description: "この Python repo の実装中に見つかった小さい設計�
 
 - `spec/dev-journal.md` に集約する。
 - ファイルがなければ初期テンプレートで作る。
-- 作業単位として扱える粒度になったら `spec-format` で `spec/wip/unit_XXX` に昇格する。
+- 作業単位として扱える粒度になったら `spec-format` で仕様へ昇格する。未着手は `spec/planned/unit_XXX`、今回着手する作業は `spec/wip/unit_XXX` に置く。
 
 ## Entry
 

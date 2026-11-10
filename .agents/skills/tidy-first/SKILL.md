@@ -19,7 +19,7 @@ description: "この Python repo で振る舞い変更と構造変更を分け�
 - behavior change のために小さい構造整理が必要なら、先に tidy を小さく入れてから behavior change へ進む。
 - green 後に重複や責務混在が見えたら `refactor-after-green` を使う。
 - package metadata や public API に触れる変更は、構造変更に見えても observable behavior への影響を確認する。
-- 大きい整理は今の TDD item に混ぜず `spec/dev-journal.md` または次の `spec/wip` 候補に残す。
+- 大きい整理は今の TDD item に混ぜず、仕様化前なら `spec/dev-journal.md`、対象範囲と着手条件が明確なら `spec/planned` に残す。
 
 ## Output
 

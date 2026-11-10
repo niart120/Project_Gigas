@@ -11,11 +11,13 @@ description: "この Python repo の仕様、use case、public API、package beh
 
 - `AGENTS.md`
 - 関連する `spec/initial/*.md`
+- 工程の親仕様（`spec/planned` または `spec/wip`）と着手条件
 - 対象の `spec/wip/unit_XXX/FEATURE_NAME.md`
 - 既存 test と実装状態
 
 ## Rules
 
+- 親仕様では工程の受入観点を記し、子仕様を詳細化する際に小さいTDD項目へ分ける。未着手の全工程の詳細リストを一括生成しない。
 - item は外部から観測できる入力、状態、期待結果で書く。
 - 実装順、file list、内部 helper 名だけを item にしない。
 - public API、CLI、package metadata、error behavior は観測面を明示する。
