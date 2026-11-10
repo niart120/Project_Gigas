@@ -26,6 +26,8 @@
 | ゲームMCP | 公式Python SDKの`mcp` | Streamable HTTPをアプリ内へ組み込みます |
 | 依存・品質管理 | `uv`、`ruff`、`ty`、`pytest` | GUI試験には必要に応じて`pytest-qt`を追加します |
 
+U01の採用判断は[構成・依存選定](../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)に具体化しました。開発推奨はPython 3.13系、最低版3.12は維持し、Qt追加時の許容範囲は依存に合わせて`>=3.12,<3.16`とします。直接依存は`PySide6-Essentials==6.12.0`と`tomlkit==0.15.2`、GUI試験は`pytest-qt==4.5.0`を採用します。EssentialsはPySide6の公式分割配布であり、U01で使わないWebEngine等を追加しないための選択です。ビルド基盤は現行の`uv_build>=0.11.25,<0.12`を維持します。これは採用判断で、プロジェクトの依存定義・lock・CIへの反映は各実装単位で行います。
+
 映像と入力の選定は[NyXの依存定義](https://github.com/niart120/Project_NyX/blob/648f860e5afd582f80aa58645570a16bfc68a393/pyproject.toml)、MCPは[公式Python SDK](https://github.com/modelcontextprotocol/python-sdk)を参照します。NyXのOCR、Bluetooth、別方式の画面取得などの依存までまとめて取り込みません。直接使わないHTTPサーバの内部依存も、採用ライブラリとは別に重複指定する必要はありません。
 
 # 実装単位
