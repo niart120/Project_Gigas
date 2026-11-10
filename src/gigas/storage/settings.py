@@ -1,5 +1,6 @@
 """Read and write global application settings."""
 
+import os
 import tempfile
 from collections.abc import MutableMapping
 from dataclasses import dataclass
@@ -34,6 +35,22 @@ class Settings:
 
 class SettingsError(ValueError):
     """A settings operation failed with a message suitable for display."""
+
+
+def default_settings_path() -> Path:
+    """Determine the per-user Windows settings path.
+
+    Returns:
+        The path under LOCALAPPDATA. This call creates no files or directories.
+
+    Raises:
+        SettingsError: LOCALAPPDATA is missing, empty, or not absolute.
+    """
+    directory = Path(os.environ.get("LOCALAPPDATA", ""))
+    if not directory.is_absolute():
+        msg = "LOCALAPPDATA must contain an absolute directory path"
+        raise SettingsError(msg)
+    return directory / "GIGAS" / "settings.toml"
 
 
 def load_settings(path: "Path") -> Settings:

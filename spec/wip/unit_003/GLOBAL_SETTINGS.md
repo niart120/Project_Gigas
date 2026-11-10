@@ -109,7 +109,7 @@ capture.deviceはU01で保存する選択値であり、永続的な機器IDの�
 | refactor-skipped | 構文・文字コード不正を返し原本を変えない | edge | integration | 保存へ進めない。redは未変換の構文・文字コード・I/O例外で3件失敗、greenは対象4件 |
 | refactor-skipped | 値の更新・クリアでコメントと未編集部分を保持する | new | integration | M0の観測を本保存処理で確認。redはコメント消失と不正文書の上書きで3件失敗、greenは結合7件と設定単体7件 |
 | refactor-skipped | 書込・置換失敗で原本を保持し、成功を返さない | edge | integration | 失敗点を注入し一時ファイルも確認。redは一時ファイル作成・置換失敗を扱わず2件失敗、greenは対象9件 |
-| todo | 保存先が決まらなければ別の場所へ書かない | edge | unit | 実ユーザー設定を使用しない |
+| refactor-skipped | 保存先が決まらなければ別の場所へ書かない | edge | unit | 実ユーザー設定を使用しない。redは保存先API未実装で4件失敗、greenは対象11件 |
 
 ## 7. レビュー結果と設計判断
 

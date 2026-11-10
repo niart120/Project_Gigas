@@ -46,3 +46,28 @@ def test_invalid_auth_method_cannot_be_saved(tmp_path: Path) -> None:
         settings.save_settings(path, Settings(auth_method="invalid"))
 
     assert not path.exists()
+
+
+def test_default_settings_path_uses_local_appdata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert settings.default_settings_path() == tmp_path / "GIGAS" / "settings.toml"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("value", [None, "", "relative"])
+def test_invalid_local_appdata_has_no_working_directory_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    if value is None:
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    else:
+        monkeypatch.setenv("LOCALAPPDATA", value)
+
+    with pytest.raises(settings.SettingsError, match="LOCALAPPDATA"):
+        settings.default_settings_path()
+
+    assert list(tmp_path.iterdir()) == []
