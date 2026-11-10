@@ -1,0 +1,87 @@
+from collections.abc import Iterator
+from pathlib import Path
+from threading import Event
+
+import pytest
+from PySide6.QtCore import QThread, QTimer
+from PySide6.QtWidgets import QMessageBox
+from pytestqt.qtbot import QtBot
+
+from gigas.app.settings_worker import SettingsIO
+from gigas.app.shell import ApplicationShell
+from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+
+
+class ControlledIO:
+    """Block selected I/O until the test releases it."""
+
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+        self.fail = False
+        self.block_load = False
+        self.saves = 0
+        self.loads = 0
+        self.thread: QThread | None = None
+
+    def load(self, path: Path) -> Settings:
+        self.loads += 1
+        if self.block_load:
+            self._wait()
+        return load_settings(path)
+
+    def save(self, path: Path, settings: Settings) -> None:
+        self.saves += 1
+        self._wait()
+        if self.fail:
+            raise SettingsError("injected failure")
+        save_settings(path, settings)
+
+    def _wait(self) -> None:
+        self.thread = QThread.currentThread()
+        self.entered.set()
+        if not self.release.wait(10):
+            raise TimeoutError("test did not release I/O")
+
+
+@pytest.fixture
+def controlled(qtbot: QtBot, tmp_path: Path) -> Iterator[tuple[ApplicationShell, ControlledIO]]:
+    io = ControlledIO()
+    shell = ApplicationShell(tmp_path / "settings.toml", SettingsIO(io.load, io.save))
+    shell.start()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    shell.open_settings()
+    yield shell, io
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    if shell.window.isVisible():
+        if shell.dialog is not None:
+            shell.dialog.set_values(shell.baseline)
+        if shell.confirmation is not None:
+            shell.confirmation.reject()
+        shell.window.close()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+
+
+def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+) -> None:
+    shell, io = controlled
+    assert shell.dialog is not None
+    shell.dialog.model.setPlainText("snapshot")
+    shell.dialog.save_button.click()
+    qtbot.waitUntil(io.entered.is_set)
+    pulse = Event()
+    QTimer.singleShot(0, pulse.set)
+    qtbot.waitUntil(pulse.is_set)
+    assert io.thread != shell.thread.currentThread()
+    assert shell.dialog.model.isReadOnly()
+    assert not shell.dialog.save_button.isEnabled()
+    assert not shell.dialog.reload_button.isEnabled()
+    shell.save()
+    shell.reload()
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert (io.loads, io.saves) == (1, 1)
+    assert shell.baseline.model == "snapshot"
+    assert not shell.dialog.model.isReadOnly()

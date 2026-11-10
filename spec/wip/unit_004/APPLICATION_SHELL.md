@@ -171,7 +171,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 | refactor-skipped | 保存失敗でも編集・再試行でき、原因と後始末の失敗を確認できる | edge | integration | 実M1の置換失敗とadd_note、一般例外の境界も確認 |
 | refactor-skipped | 未保存の設定閉鎖・アプリ終了で保存・破棄・取消しを区別する | new | integration | ×・Esc・ボタン。保存失敗なら閉じない |
 | refactor-skipped | 未保存の再読込を取消せ、失敗時も直前の表示値を失わない | edge | integration | 破棄確認前に読込を発行しない。失敗後の閉じる確認では保存不可 |
-| todo | 遅いI/O中もイベントを処理し、編集・二重I/Oを拒否する | edge | integration | 開いている画面へメインスレッドで結果を反映 |
+| refactor-skipped | 遅いI/O中もイベントを処理し、編集・二重I/Oを拒否する | edge | integration | 開いている画面へメインスレッドで結果を反映 |
 | todo | I/O中の閉じる要求は成功後に続行し、保存失敗時は解除する | edge | integration | 読込・保存の双方と要求の重複 |
 | todo | 終了待ちの取消し後もI/O結果を反映し、自動で終了しない | edge | integration | 5秒表示はタイマー境界を制御。取消しで書込を巻き戻さない |
 | todo | 終了確定後は取消しを許可せず、ワーカー解放までプロセスを終了しない | edge | integration | finished直後の未終了も含む |
@@ -258,3 +258,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 9. 未保存の閉鎖: dirty_close試験は確認画面未実装でred。ボタン・×・Esc・主画面終了の4経路と3選択を追加し、設定試験18 passed。確認は短い対象名と選択肢だけの非同期QMessageBox。設定だけの閉鎖ではワーカーを停止しない。
 
 10. 再読込: reload_confirms試験は確認なしで読込を始めred。破棄・取消しのみの確認を追加して19 passed。失敗時は表示値を保持し、読取専用でもコピー可能。読込失敗後の閉じる確認に保存を出さない。
+
+11. 遅いI/O: ControlledIOのEventで保存を保留し、GUIのタイマー処理・読取専用化・二重要求拒否・1回の保存を確認して1 passed。項目4以降の操作ガードで成立しており、この項目単独のredはなし。
