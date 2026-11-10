@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docstring Style"
+  short_description: "Review public docstrings"
+  default_prompt: "Review public API docstrings for style and consistency with type annotations and docs."

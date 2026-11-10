@@ -1,0 +1,116 @@
+# Allow the project's deterministic local quality gates without an approval
+# prompt when this repository is trusted. Keep each prefix narrow: remote
+# writes, destructive Git commands, shell entry points, and
+# arbitrary Python execution intentionally remain subject to approval.
+
+prefix_rule(
+    pattern = ["uv", "sync"],
+    justification = "Install the locked development environment for local quality gates.",
+    match = ["uv sync --dev"],
+    not_match = ["uv run python -c \"import os; os.remove('file')\""],
+)
+
+prefix_rule(
+    pattern = ["uv", "lock", "--check"],
+    justification = "Verify that the committed lock file is current.",
+    match = ["uv lock --check"],
+    not_match = ["uv lock"],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "ruff"],
+    justification = "Run Ruff formatting and lint checks.",
+    match = ["uv run ruff format --check .", "uv run ruff check ."],
+    not_match = ["uv run python -m ruff check ."],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "ty"],
+    justification = "Run the configured static type checks.",
+    match = ["uv run ty check --no-progress"],
+    not_match = ["uv run python -m ty check"],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "pytest"],
+    justification = "Run the project's pytest test suites.",
+    match = ["uv run pytest tests/unit", "uv run pytest tests/integration"],
+    not_match = ["uv run python -m pytest tests/unit"],
+)
+
+prefix_rule(
+    pattern = ["uv", "build"],
+    justification = "Build the local distribution artifact.",
+    match = ["uv build"],
+    not_match = ["uv run build"],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "twine", "check"],
+    justification = "Validate locally built distribution metadata.",
+    match = ["uv run twine check --strict dist/gigas-0.1.0.tar.gz"],
+    not_match = ["uv run twine upload dist/gigas-0.1.0.tar.gz"],
+)
+
+prefix_rule(
+    pattern = ["rg"],
+    justification = "Search tracked project text during review and investigation.",
+    match = ["rg -n \"TODO|TBD\" ."],
+    not_match = ["git grep TODO"],
+)
+
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log", "show"]],
+    justification = "Inspect local repository state and history.",
+    match = ["git status --short --branch", "git diff --check", "git log --oneline -5"],
+    not_match = ["git reset --hard"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["--show-current", "--list"]],
+    justification = "Inspect the current or listed local branches.",
+    match = ["git branch --show-current", "git branch --list"],
+    not_match = ["git branch -D obsolete-branch"],
+)
+
+prefix_rule(
+    pattern = ["git", "remote", "get-url"],
+    justification = "Read the configured remote URL before PR work.",
+    match = ["git remote get-url origin"],
+    not_match = ["git remote set-url origin https://example.invalid/repo.git"],
+)
+
+prefix_rule(
+    pattern = ["git", "ls-remote"],
+    justification = "Read remote references without changing the remote.",
+    match = ["git ls-remote --heads origin"],
+    not_match = ["git push origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "fetch"],
+    justification = "Read remote references into local remote-tracking refs.",
+    match = ["git fetch --prune origin"],
+    not_match = ["git push --delete origin obsolete-branch"],
+)
+
+prefix_rule(
+    pattern = ["git", "pull", "--ff-only"],
+    justification = "Synchronize a clean local branch without creating a merge commit.",
+    match = ["git pull --ff-only origin main"],
+    not_match = ["git pull origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "add"],
+    justification = "Stage explicitly selected local changes for a commit.",
+    match = ["git add template/.codex/rules/default.rules"],
+    not_match = ["git commit -am \"skip staging\""],
+)
+
+prefix_rule(
+    pattern = ["git", "commit"],
+    justification = "Create a local commit; remote publication still requires approval.",
+    match = ["git commit -m \"chore(codex): add local command rules\""],
+    not_match = ["git push origin main"],
+)

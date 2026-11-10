@@ -1,0 +1,4 @@
+# Project-scoped Codex configuration.
+#
+# `rules/default.rules` defines the narrow command prefixes that this trusted
+# repository may run outside the sandbox without an approval prompt.

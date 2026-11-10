@@ -1,0 +1,14 @@
+.venv/
+.uv-cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+.ty/
+.coverage
+htmlcov/
+tmp/*
+!tmp/.gitkeep

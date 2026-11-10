@@ -1,0 +1,4 @@
+interface:
+  display_name: "Type Boundary Review"
+  short_description: "Review public type boundaries"
+  default_prompt: "Review type-checking results and public API type boundaries."
