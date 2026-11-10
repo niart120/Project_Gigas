@@ -22,17 +22,24 @@
 
 ## 作業仕様
 
-このリポジトリは `spec/wip` 型の作業仕様を使う。仕様書は設計メモではなく、対象範囲、対象外、TDD 状態、検証結果、先送り事項を束ねる作業単位である。
+このリポジトリは `spec/planned` → `spec/wip` → `spec/complete` で作業仕様を管理する。仕様書は対象範囲、対象外、着手条件、TDD 状態、検証結果、先送り事項を束ねる作業単位である。
 
 | 目的 | パス |
 |---|---|
 | 初期設計・運用規約 | `spec/initial/` |
+| 未着手の作業仕様 | `spec/planned/unit_XXX/FEATURE_NAME.md` |
 | 着手中の作業仕様 | `spec/wip/unit_XXX/FEATURE_NAME.md` |
 | 完了した作業仕様 | `spec/complete/unit_XXX/FEATURE_NAME.md` |
 | 小さい観測・先送り判断 | `spec/dev-journal.md` |
 | 公開手順 | `spec/publishing.md` |
 
 作業仕様には、目的、対象範囲、対象外、関連文書、振る舞い仕様、TDD Test List、対象ファイル、検証、先送り事項、完了チェックリストを含める。
+
+`unit_XXX` は3つの状態ディレクトリを通した一意の連番で、工程番号 U01〜U10 とは別である。着手時・完了時は同じ unit をディレクトリごと移動し、複製せず参照リンクを更新する。
+
+マイルストーンの親仕様は未着手でも先に具体化できる。親は到達点、前提、冒頭の調査・設計、工程内の分割、受入条件、未決事項の担当・期限を持つ。子仕様は着手する範囲の詳細契約・TDD・検証結果を所有し、必要になった時点で作る。未着手の子仕様や空の雛形を一括生成しない。次の実行対象は、依存と着手条件を満たす作業を1つだけ選ぶ。
+
+親仕様を書いたことは工程への着手・実装完了を意味しない。工程の最初の調査・設計作業に着手するとき、親を `wip` へ移す。親の調査・設計、製品実装、接続・実機検証の状態を分け、子の完了だけでなく工程全体の受入条件が揃ったときに親を `complete` へ移す。
 
 ## Agent Skills
 
@@ -45,7 +52,7 @@
 - `diagnosing-bugs`: Matt Pocock 氏の第三者提供 skill。再現困難な不具合と性能退行で、赤にできる再現手順、仮説、計測、回帰テストを順に作る。
 - `type-boundary-review`: `ty` の結果、公開 API、標準ライブラリの型構文、`Any` / `Unknown` / `None` / `Protocol` / `TYPE_CHECKING` / `py.typed` の型境界を確認する。
 - `docstring-style`: 公開 API の Google 形式 docstring を、型注釈、ruff pydocstyle、README/docs と整合させる。
-- `spec-format`: `spec/wip` / `spec/complete` の作業仕様を作成、更新、完了移動する。
+- `spec-format`: `spec/planned` / `spec/wip` / `spec/complete` の作業仕様を作成、更新、着手・完了移動する。
 - `dev-journal`: 仕様書へ昇格する前の小さい観測や先送り判断を `spec/dev-journal.md` に記録する。
 - `tdd-workflow`: TDD Test List から red / green / refactor を進める。
 - `tdd-test-list`: 振る舞いベースの TDD Test List を作成、更新する。

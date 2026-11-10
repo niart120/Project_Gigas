@@ -9,11 +9,11 @@ description: "この Python repo の仕様変更、実装、TDD cycle、PR 前�
 
 ## Process
 
-1. 対象の `spec/wip`、Intent Delta、non-goals を確認する。
+1. 対象の `spec/planned` / `spec/wip` / `spec/complete`、Intent Delta、non-goals を確認する。
 2. diff と仕様の明示要件を照合する。
 3. 実行した command、validator、test、hook を evidence として記録する。
 4. 未実行 gate は `not run`、対象外は `not applicable` と書く。
-5. docs / spec / skill だけの変更でも、仮テキスト残りと skill validation を確認する。
+5. docs / spec / skill だけの変更でも、事実整合、根拠、未検証表示、リンク・参照先、仮テキスト残りを確認する。変更したskillだけにskill validationを実行する。
 6. 問題がある場合は findings を先に出す。
 7. 問題がない場合も、残る test gap と未検証事項を明記する。
 
@@ -54,6 +54,8 @@ description: "この Python repo の仕様変更、実装、TDD cycle、PR 前�
 ## Rules
 
 - evidence が弱い項目を pass にしない。
-- docs / skill のみ変更では Python test を省略できるが、skill validation と residue check は実行する。
+- docs / spec / skillのみ変更では、変更対象を検査しないPython test・型検査・package buildを必須にしない。その成功を文書品質の根拠にしない。機械的契約の検査がある場合は実行し、変更したskillはskill-creator付属validatorで確認する。
+- 工程計画では、前提の循環、担当の抜け、未決事項の担当・期限、親子間の受入条件を読む。planned仕様の執筆完了を製品工程の完了と混同しない。
+- unit番号は3状態を通して一意で、移動後の参照が成立することを確認する。調査・設計、製品実装、接続・実機検証の結果を区別する。
 - README や公開 docs の変更では、agent 向けの手順や作業履歴が混ざっていないか確認する。
 - package metadata に触れた場合は `uv build` を省略しない。
