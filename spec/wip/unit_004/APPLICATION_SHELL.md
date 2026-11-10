@@ -185,7 +185,7 @@ M0で決めたQObjectワーカーとqueued signalを使用する。実行中I/O�
 |---|---|---|---|---|
 | refactor-skipped | 手編集値の改行・特殊空白を未編集の保存で変換しない | regression | integration | Qtの表示用正規化を保存へ漏らさない |
 | refactor-skipped | 閉じる確認から始めた保存にも待機表示と取消しを適用する | edge | integration | 直接保存からの終了とは別経路 |
-| todo | 画面領域内に収まり、長い診断でも操作へ到達できる | edge | integration | 可視画面でも別に確認 |
+| refactor-skipped | 画面領域内に収まり、長い診断でも操作へ到達できる | edge | integration | 可視画面でも別に確認 |
 
 M0でqueued通知は限定確認済みだが、製品の画面寿命・終了競合は未検証。[QDialog公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QDialog.html)の非モーダルshow、execの入れ子ループ、Escからのrejectを確認した。closeEventだけで未保存確認を実装せず、rejectを含め同じ判断へ集約する。[QThread公式資料](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QThread.html)のfinished後の後始末とwaitによる確認もM0と照合した。公開資料の読取であり、採用版6.12.0上の本実装の動作保証ではない。
 
@@ -281,3 +281,5 @@ M2の採用版上で非モーダル画面・reject・終了競合・DPIを実装
 17. Qt文字列の保持: CRLFと改行しない空白を含むM1有効値が、フォームを開くだけでdirtyになることをredで再現。Qt表示値と元の文字列を対にして保持し、未変更の欄は元値を返すよう修正。設定試験20 passed。編集した欄の改行はQtの入力値となる。
 
 18. 確認後の保存待ち: 保存・終了の確認から始めた保存では5秒タイマーが動いていないことをredで確認し、起動箇所を補ってlifetime 10 passed。終了取消し後も保存自体は完了し、画面を閉じない。
+
+19. 画面領域: offscreenの800×800画面に主画面が収まらずred。表示後の装飾を含む外枠を画面内へ収め、長い診断を読取専用スクロール欄へ分離して設定試験21 passed。可視画面の品質は別に確認する。

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
+from gigas.ui.geometry import fit_to_screen
 from gigas.ui.main_window import MainWindow
 from gigas.ui.settings_dialog import SettingsDialog
 
@@ -59,6 +60,7 @@ class ApplicationShell(QObject):
     def start(self) -> None:
         """Display the main window."""
         self.window.show()
+        fit_to_screen(self.window)
         self.io_thread.start()
         self._request("load")
 
@@ -74,6 +76,7 @@ class ApplicationShell(QObject):
             self.dialog.cancel_close_requested.connect(self.cancel_close)
         self._render()
         self.dialog.show()
+        fit_to_screen(self.dialog)
         self.dialog.raise_()
         self.dialog.activateWindow()
 
@@ -155,7 +158,9 @@ class ApplicationShell(QObject):
         )
         self.window.settings_button.setEnabled(not self.committed)
         if self.dialog is not None:
-            self.dialog.status.setText(f"{state}\n{self.error}" if self.error else state)
+            self.dialog.status.setText(state)
+            self.dialog.details.setPlainText(self.error)
+            self.dialog.details.setVisible(bool(self.error))
             idle = self.operation is None and self.pending is None and not self.committed
             self.dialog.set_editable(idle and self.ready)
             self.dialog.save_button.setEnabled(idle and self.ready)

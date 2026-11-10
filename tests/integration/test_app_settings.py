@@ -8,7 +8,8 @@ from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
-from gigas.storage.settings import Settings, load_settings, save_settings
+from gigas.app.settings_worker import SettingsIO
+from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 
 
 @pytest.fixture
@@ -145,7 +146,7 @@ def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbo
     shell.dialog.reload_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.dialog.save_button.isEnabled()
-    assert str(shell.path) in shell.dialog.status.text()
+    assert str(shell.path) in shell.dialog.details.toPlainText()
     assert shell.path.read_text(encoding="utf-8") == "[broken"
     shell.path.write_text('[agent]\nmodel="repaired"', encoding="utf-8")
     shell.dialog.reload_button.click()
@@ -174,7 +175,7 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         qtbot.waitUntil(lambda: shell.operation is None)
         assert shell.dialog.model.toPlainText() == "edited"
         assert shell.dialog.save_button.isEnabled()
-        assert "remove temporary file" in shell.dialog.status.text()
+        assert "remove temporary file" in shell.dialog.details.toPlainText()
         assert load_settings(shell.path).model == "original"
 
     shell.dialog.model.setPlainText("retry")
@@ -227,3 +228,30 @@ def test_unedited_text_preserves_crlf_and_nonbreaking_space(
     shell.save()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == original.model
+
+
+def test_windows_fit_screen_and_long_error_keeps_actions_reachable(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    def fail_save(_path: Path, _settings: Settings) -> None:
+        message = 'diagnostic-path/' * 100
+        raise SettingsError(message)
+
+    application = ApplicationShell(tmp_path / 'settings.toml', SettingsIO(save=fail_save))
+    application.start()
+    try:
+        qtbot.waitUntil(lambda: application.operation is None)
+        assert application.window.screen().availableGeometry().contains(application.window.frameGeometry())
+        application.open_settings()
+        dialog = application.dialog
+        assert dialog is not None
+        dialog.save_button.click()
+        qtbot.waitUntil(lambda: application.operation is None)
+        assert dialog.screen().availableGeometry().contains(dialog.frameGeometry())
+        for button in (dialog.save_button, dialog.reload_button, dialog.close_button):
+            assert button.isVisible()
+            assert dialog.rect().contains(button.geometry())
+        assert dialog.details.toPlainText().endswith('diagnostic-path/')
+    finally:
+        application.window.close()
+        qtbot.waitUntil(lambda: not application.window.isVisible())
