@@ -57,6 +57,7 @@ class ApplicationShell(QObject):
             self.dialog.set_values(self.baseline)
             self.dialog.save_button.clicked.connect(self.save)
             self.dialog.reload_button.clicked.connect(self.reload)
+            self.dialog.changed.connect(self._render)
         self._render()
         self.dialog.show()
         self.dialog.raise_()
@@ -93,8 +94,15 @@ class ApplicationShell(QObject):
         if self.closing:
             self.thread.quit()
 
+    @property
+    def dirty(self) -> bool:
+        """Whether the current editor differs from the last successful snapshot."""
+        return self.dialog is not None and self.dialog.values() != self.baseline
+
     def _render(self) -> None:
-        state = {"load": "読込中", "save": "保存中"}.get(self.operation, "変更なし")
+        state = {"load": "読込中", "save": "保存中"}.get(
+            self.operation, "未保存" if self.dirty else "変更なし"
+        )
         self.window.status.setText(state)
         if self.dialog is not None:
             self.dialog.status.setText(state)

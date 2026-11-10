@@ -81,3 +81,13 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
     finally:
         other.window.close()
         qtbot.waitUntil(lambda: not other.window.isVisible())
+
+
+def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
+    shell.open_settings()
+    assert shell.dialog is not None
+    assert not shell.dirty
+    shell.dialog.model.setPlainText("changed")
+    assert shell.dirty
+    shell.dialog.model.clear()
+    assert not shell.dirty
