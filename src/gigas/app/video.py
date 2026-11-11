@@ -3,7 +3,7 @@
 import math
 import time
 from dataclasses import replace
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
@@ -12,7 +12,7 @@ from gigas.game_io.capture.models import CaptureError, CaptureOptions
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
-    from gigas.game_io.capture import CaptureReader
+    from gigas.game_io.capture import CaptureReader, CaptureSnapshot
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
 
@@ -80,6 +80,8 @@ class VideoController(QObject):
         self._snapshot = self.reader.snapshot()
         self._available = True
         self._settings_ready = False
+        self._commands_ready = True
+        self._pending_connection = False
         self._started = False
         self._closing = False
         self._disconnecting = False
@@ -87,14 +89,60 @@ class VideoController(QObject):
         self._revision = 0
         self._enumerating = False
         self._discovery_error = ""
+        self.apply_state: Literal["idle", "stopping", "connecting", "complete", "failed"] = "idle"
+        self._replacement: Settings | None = None
+        self._replacement_generation = 0
+        self._refresh_after_disconnect = False
         self._next_image = 0.0
         self._preview_fps = 30
-        self._last_state: tuple[str, str, str, bool] | None = None
+        self._last_state: tuple[str, str, str, bool, str, str] | None = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(34)
         self.timer.timeout.connect(self._poll)
-        self.panel.disconnect_requested.connect(self.disconnect_capture)
+
+    @property
+    def applying(self) -> bool:
+        """Whether a replacement awaits old cleanup or the new session's first frame."""
+        return self.apply_state in {"stopping", "connecting"}
+
+    @property
+    def apply_error(self) -> str:
+        """Return a local validation, cleanup, or connection failure."""
+        return self._request_error
+
+    @property
+    def cleanup_unconfirmed(self) -> bool:
+        """Whether the current worker or its resources lack confirmed cleanup."""
+        return self._snapshot.cleanup == "unconfirmed"
+
+    @property
+    def has_connection(self) -> bool:
+        """Whether a saved acquisition configuration still owns an active session."""
+        return self.active_settings is not None and self._snapshot.phase in {
+            "connecting",
+            "streaming",
+            "stopping",
+        }
+
+    @property
+    def can_connect(self) -> bool:
+        """Whether an explicit connection can begin without overlapping other work."""
+        return self.can_refresh and self._settings_ready and not self._refresh_after_disconnect
+
+    @property
+    def can_disconnect(self) -> bool:
+        """Keep cancellation available during saving and replacement cleanup."""
+        return (
+            self._available
+            and not self._closing
+            and self.service.is_alive()
+            and (
+                self._snapshot.phase in {"connecting", "streaming", "enumerating"}
+                or self.applying
+                or self._pending_connection
+            )
+        )
 
     @property
     def devices(self) -> "tuple[DeviceInfo, ...]":
@@ -121,6 +169,8 @@ class VideoController(QObject):
         """Whether application lifetime and service state permit enumeration."""
         return (
             self._available
+            and self._commands_ready
+            and not self.applying
             and not self._closing
             and self.service.is_alive()
             and self._snapshot.phase in {"idle", "error"}
@@ -152,15 +202,26 @@ class VideoController(QObject):
         self.timer.start()
         self._poll()
 
-    def set_available(self, available: bool, *, settings_ready: bool) -> None:
+    def set_available(
+        self,
+        available: bool,
+        *,
+        settings_ready: bool,
+        commands_ready: bool = True,
+        pending_connection: bool = False,
+    ) -> None:
         """Keep active-session controls independent of settings read failures.
 
         Args:
             available: Whether application lifetime permits capture commands.
             settings_ready: Whether a successfully loaded snapshot permits connecting.
+            commands_ready: Whether settings and application transitions permit discovery.
+            pending_connection: Whether a save may start video and needs a cancel action.
         """
         self._available = available
         self._settings_ready = settings_ready
+        self._commands_ready = commands_ready
+        self._pending_connection = pending_connection
         self._render()
 
     def refresh_devices(self) -> None:
@@ -177,22 +238,76 @@ class VideoController(QObject):
         Args:
             settings: Last successfully loaded or saved application settings.
         """
-        if not self.can_refresh or not self._settings_ready:
+        if not self.can_connect:
+            return
+        if not settings.capture_device:
+            self._fail_application("映像機器が未選択")
+            self._poll()
+            return
+        self._replacement = settings
+        self._start_replacement()
+        self._poll()
+
+    def apply_capture(self, settings: "Settings") -> None:
+        """Apply a successfully saved acquisition configuration after confirmed cleanup.
+
+        Args:
+            settings: Saved snapshot to connect, or an empty device to remain disconnected.
+        """
+        self._refresh_after_disconnect = False
+        self._replacement = settings
+        self._request_error = ""
+        snapshot = self.reader.snapshot()
+        if not self._available or self._closing or not self.service.is_alive():
+            self._fail_application("映像サービスを利用できない")
+        elif snapshot.cleanup == "unconfirmed":
+            self._fail_application("旧映像の終了を確認できない")
+        elif snapshot.phase in {"idle", "error"}:
+            self._start_replacement()
+        else:
+            self.apply_state = "stopping"
+            self._enumerating = False
+            self._disconnecting = True
+            self.panel.view.set_frame(None)
+            self.service.disconnect()
+        self._poll()
+
+    def cancel_pending(self) -> None:
+        """Discard unstarted replacement and discovery intents without restarting video."""
+        self._replacement = None
+        self._refresh_after_disconnect = False
+        self.apply_state = "idle"
+
+    def _fail_application(self, error: str) -> None:
+        self._replacement = None
+        self.apply_state = "failed"
+        self._request_error = error
+
+    def _start_replacement(self) -> None:
+        settings = self._replacement
+        if settings is None:
+            return
+        if not settings.capture_device:
+            self._replacement = None
+            self.apply_state = "complete"
+            self.active_settings = None
             return
         try:
             options = CaptureOptions(settings.capture_device, fps=settings.capture_fps)
         except CaptureError as error:
-            self._request_error = str(error)
-            self._render()
+            self._fail_application(str(error))
             return
         if self.service.connect(options):
             self.active_settings = settings
+            self.apply_state = "connecting"
+            self._replacement_generation = self.reader.snapshot().generation
             self._request_error = ""
             self._disconnecting = False
             self._next_image = 0.0
             self.panel.view.set_frame(None)
             self.set_preview_fps(settings.preview_fps)
-            self._poll()
+        else:
+            self._fail_application("映像接続の開始要求が受け付けられなかった")
 
     def set_preview_fps(self, fps: int) -> None:
         """Apply a saved display limit without changing the capture connection.
@@ -205,8 +320,14 @@ class VideoController(QObject):
             self._next_image = 0.0
             self.timer.setInterval(min(34, math.ceil(1000 / fps)))
 
-    def disconnect_capture(self) -> None:
-        """Clear displayed pixels before requesting asynchronous cleanup."""
+    def disconnect_capture(self, *, refresh_devices: bool = False) -> None:
+        """Clear video and request cleanup, optionally discovering once afterward.
+
+        Args:
+            refresh_devices: Refresh the settings catalog after confirmed cleanup.
+        """
+        self.cancel_pending()
+        self._refresh_after_disconnect = refresh_devices
         self._enumerating = False
         self._disconnecting = True
         self.panel.view.set_frame(None)
@@ -215,6 +336,7 @@ class VideoController(QObject):
 
     def shutdown(self) -> None:
         """Clear video and request service shutdown without joining on the GUI."""
+        self.cancel_pending()
         self._closing = True
         self.panel.view.set_frame(None)
         self.service.shutdown()
@@ -231,6 +353,9 @@ class VideoController(QObject):
         if self._started and not alive and not self._closing:
             snapshot = replace(snapshot, phase="error", frame=None, error="映像サービス終了")
         self._snapshot = snapshot
+        if self._advance_application(snapshot, alive):
+            snapshot = self.reader.snapshot()
+            self._snapshot = snapshot
         enumerating = self._enumerating
         if self._enumerating:
             self._discovery_error = snapshot.error
@@ -247,16 +372,59 @@ class VideoController(QObject):
         elif self.active_settings is not None and (now := time.perf_counter()) >= self._next_image:
             self.panel.view.set_frame(snapshot.frame)
             self._next_image = now + 1 / self._preview_fps
-        state = (snapshot.phase, snapshot.error, snapshot.cleanup, alive)
+        state = (
+            snapshot.phase,
+            snapshot.error,
+            snapshot.cleanup,
+            alive,
+            self.apply_state,
+            self._request_error,
+        )
         if state != self._last_state:
             self._last_state = state
             self.changed.emit()
+
+    def _advance_application(self, snapshot: "CaptureSnapshot", alive: bool) -> bool:
+        if self.applying:
+            if not alive or snapshot.cleanup == "unconfirmed":
+                self._fail_application(snapshot.error or "旧映像の終了を確認できない")
+            elif snapshot.phase in {"error", "closed"}:
+                self._fail_application(snapshot.error or "映像接続が終了した")
+            elif self.apply_state == "stopping" and snapshot.phase == "idle":
+                if snapshot.cleanup not in {"graceful", "forced"}:
+                    self._fail_application("旧映像の終了を確認できない")
+                else:
+                    self._start_replacement()
+                    return True
+            elif (
+                self.apply_state == "connecting"
+                and snapshot.phase == "streaming"
+                and snapshot.frame is not None
+                and snapshot.frame.generation == self._replacement_generation
+            ):
+                self._replacement = None
+                self.apply_state = "complete"
+        if self._refresh_after_disconnect:
+            if (
+                snapshot.cleanup == "unconfirmed"
+                or snapshot.phase in {"error", "closed"}
+                or not alive
+            ):
+                self._refresh_after_disconnect = False
+            elif snapshot.phase == "idle" and self.can_refresh:
+                self._refresh_after_disconnect = False
+                if snapshot.cleanup in {"graceful", "forced"} and self.service.refresh_devices():
+                    self._enumerating = True
+                    self._discovery_error = ""
+                    return True
+        return False
 
     def _render(self) -> None:
         self.panel.render_state(
             self._snapshot,
             self.active_settings,
             available=self._available and not self._closing and self.service.is_alive(),
-            settings_ready=self._settings_ready,
+            settings_ready=self.can_connect,
             error=self._request_error,
         )
+        self.panel.disconnect_button.setEnabled(self.can_disconnect)

@@ -69,12 +69,13 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T03: 要求解決と回答送信結果を区別し、tokenごとに状態を反映 | regression | unit / integration | RV07。5 failed / 4 passed→81 passed |
 | refactor-skipped | T04: 小画面の要求を優先表示し、完了内容を折り畳んで下書きを保持 | regression | integration | RV08。初期4件と通知順競合のred→39 passed |
 | refactor-skipped | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02。5 failed / 1 passed→80 passed |
-| todo | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01 |
+| refactor-skipped | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01。10 failed / 2 passed→97 passed |
 | todo | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09 |
 | todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
+| todo | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 横断レビュー後、CRLFの前置追加で選択消失を再現 |
 
 ## 6. 対象ファイルと責務
 
@@ -101,6 +102,12 @@ T11: T03完了後に選択。`uv run pytest tests/integration/test_transcript_re
 T04: 要求中の領域不足、完了カードの未折り畳み、長い選択肢による横幅拡張など4件をredで確認。入力欄の同一インスタンスを隠して下書きと選択を保持し、要求の見出しから表示する。独立レビューで、回答送信中にターン完了が先着すると非表示の下書きが送信可能になる競合もredにし、要求中の送信を無効化した。関連GUI試験39 passed、対象ruff/format・全体ty・差分検査成功。追加構造変更は不要。模擬イベントによるoffscreen描画ではHD相当の要求欄153px（修正前68px）、Full HD相当710px。8画面で見出し・判断操作・折り返しを確認した。描画時だけMeiryo UI 9ptを指定しており、実Codex・実機・IME・複数DPIの検証とは区別する。
 
 T05: `uv run --no-sync pytest tests/integration/test_device_discovery_gui.py --basetemp=tmp/pytest-t05-red -q -o faulthandler_timeout=30`で初回・再表示時の自動列挙と状態区別が未実装であるred（5 failed / 1 passed）を確認。表示時の列挙予定を設定読込後まで保持し、表示済みダイアログの再フォーカスや取得中の映像を邪魔しない。候補・未保存値を保持したまま検索中・未確認・未検出・列挙失敗を区別する。一覧と終了未確認が同時に届いた場合にも失敗を消さない回帰を追加した。関連9試験ファイル80 passed、対象ruff/format・全体ty・差分検査成功。画面試験の暗黙の取得サービスだけを無機器の制御用実装へ差し替え、明示的な実サービスと模擬backendによるプロセス試験は維持した。実spawn試験で列挙だけでは映像を開かず、接続後の設定再表示でも連番が進むことを確認した。共用fixtureの移動はred前の試験境界整理であり、green後の追加構造変更は不要。
+
+T06: `uv run --no-sync pytest tests/integration/test_video_application.py --basetemp=tmp/pytest-t06-red -q --tb=short -o faulthandler_timeout=30`で10 failed / 2 passedのredを確認。適用の保存成功後だけ映像設定を渡し、旧処理の終了確認と新世代の最初のフレームを待つ。保存失敗は旧映像・入力を維持し、切断・アプリ終了で未開始の接続予定を取り消す。取得設定以外の適用と未保存確認の保存は接続を開始しない。共通の`apply_settings`はメニュー用snapshotも受け取り、未保存編集と競合する上書きを拒否する。
+
+T06の追加redでは、未保存選択中の旧設定接続、未接続からの保存待ちを切断できない状態、未選択の明示接続、ポーリングによる切断の再無効化を確認・修正。独立レビューで旧終了未確認と新接続失敗の表示混同もredにして修正した。最終の同ファイル17 passed、関連試験97 passed、対象ruff/format・全体ty・差分検査成功。実CaptureServiceと模擬backendのspawn試験でFPS切替の解放順、新フレーム、別読み手が保持した画像の不変性を確認した。これは物理キャプチャーの実機試験とは区別する。追加構造整理は不要。
+
+横断レビューの追加観測: `before\nKEEP`の`KEEP`を選択した状態で`new\r\nbefore\nKEEP`へ更新すると、QtがCRLFを1改行へ正規化し、選択が空になることを実ウィジェットで確認した。T06へ混ぜず、そのcommit後にT12を進める。Python文字列の長さとQtへ実際に挿入される本文の差を揃える。
 
 ## 8. 先送り事項
 

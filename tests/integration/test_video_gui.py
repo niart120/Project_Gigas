@@ -82,8 +82,10 @@ def test_automatic_discovery_preserves_edits_and_connection_uses_saved_mode(
     assert dialog.values().capture_fps == 30
     assert dialog.capture_choices.currentData() == "path-b"
 
-    shell.window.video.connect_button.click()
-    assert capture.connections == [CaptureOptions("path-b", 1920, 1080, 60)]
+    assert not shell.window.video.connect_button.isEnabled()
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert capture.connections == [CaptureOptions("path-b", 1920, 1080, 30)]
     assert not shell.window.video.connect_button.isEnabled()
     assert not dialog.capture_refresh_button.isEnabled()
     capture.stream()
@@ -93,17 +95,15 @@ def test_automatic_discovery_preserves_edits_and_connection_uses_saved_mode(
             view.grab().toImage().pixelColor(view.width() // 2, view.height() // 2) == QColor("red")
         )
     )
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.baseline.capture_fps == 30
     assert shell.video.active_settings is not None
-    assert shell.video.active_settings.capture_fps == 60
+    assert shell.video.active_settings.capture_fps == 30
     assert len(capture.connections) == 1
     save_settings(shell.path, replace(shell.baseline, capture_fps=15))
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.baseline.capture_fps == 15
-    assert shell.video.active_settings.capture_fps == 60
+    assert shell.video.active_settings.capture_fps == 30
     assert len(capture.connections) == 1
 
 
@@ -168,6 +168,7 @@ def test_failed_settings_load_does_not_disable_active_capture_disconnect(
     shell.window.video.connect_button.click()
     capture.stream()
     shell.path.write_text("[broken", encoding="utf-8")
+    qtbot.waitUntil(lambda: not shell.video.applying)
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.ready
@@ -200,6 +201,7 @@ def test_saving_settings_does_not_disable_active_capture_disconnect(
         shell.window.video.connect_button.click()
         capture.stream()
         shell.open_settings()
+        qtbot.waitUntil(lambda: not shell.video.applying)
         shell.save()
         qtbot.waitUntil(entered.is_set)
         assert shell.window.video.disconnect_button.isEnabled()

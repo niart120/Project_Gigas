@@ -46,6 +46,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         qtbot.waitUntil(lambda: shell.ready)
         shell.window.video.connect_button.click()
         capture.stream()
+        qtbot.waitUntil(lambda: not shell.video.applying)
         original = capture.snapshot().frame
         original_limit = shell.window.video.view.maximumSize()
         actions = shell.window.window_size_actions
@@ -114,6 +115,8 @@ def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_me
     clock = PreviewClocks()
     monkeypatch.setattr(video, "time", clock)
     shell.window.video.connect_button.click()
+    capture.stream()
+    qtbot.waitUntil(lambda: not shell.video.applying)
     shell.video.timer.stop()
     shell.open_settings()
     dialog = shell.dialog

@@ -60,11 +60,14 @@ class ApplicationShell(QObject):
         self._worker_released = False
         self._service_unavailable = False
         self._refresh_on_open = False
+        self._capture_after_save: Settings | None = None
+        self._settings_saved = False
         self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
         self.video.changed.connect(self._video_changed)
         self.video.devices_changed.connect(self._update_capture_devices)
         self.window.video.connect_requested.connect(self.connect_video)
+        self.window.video.disconnect_requested.connect(self.disconnect_video)
         self.confirmation: QMessageBox | None = None
         self.wait_expired = False
         self.wait_timer = QTimer(self)
@@ -107,8 +110,35 @@ class ApplicationShell(QObject):
 
     def connect_video(self) -> None:
         """Connect video using the last successful settings snapshot."""
-        if self.ready and not self.committed and self.pending is None:
+        if self._can_start_video and not self.dirty and self.baseline.capture_device:
             self.video.connect_capture(self.baseline)
+
+    @property
+    def _can_start_video(self) -> bool:
+        return (
+            self.ready
+            and not self.committed
+            and self.pending is None
+            and self.operation is None
+            and self._capture_after_save is None
+            and not self.video.applying
+        )
+
+    def disconnect_video(self, *, refresh_devices: bool = False) -> None:
+        """Cancel a queued application and stop video without waiting for settings I/O.
+
+        Args:
+            refresh_devices: Discover once after a settings-dialog disconnection.
+        """
+        self._capture_after_save = None
+        self._refresh_on_open = False
+        self.video.disconnect_capture(refresh_devices=refresh_devices)
+        self._render()
+
+    def refresh_video_devices(self) -> None:
+        """Refresh only when settings and acquisition transitions permit new work."""
+        if self._can_start_video:
+            self.video.refresh_devices()
 
     @Slot()
     def _video_changed(self) -> None:
@@ -152,12 +182,16 @@ class ApplicationShell(QObject):
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
             self.dialog.set_values(self.baseline)
-            self.dialog.save_button.clicked.connect(self.save)
+            self.dialog.save_button.clicked.connect(self._apply_editor)
             self.dialog.reload_button.clicked.connect(self.reload)
             self.dialog.changed.connect(self._render)
             self.dialog.close_requested.connect(lambda: self._close("dialog"))
             self.dialog.cancel_close_requested.connect(self.cancel_close)
-            self.dialog.capture_refresh_requested.connect(self.video.refresh_devices)
+            self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
+            self.dialog.capture_connect_button.clicked.connect(self.connect_video)
+            self.dialog.capture_disconnect_button.clicked.connect(
+                lambda: self.disconnect_video(refresh_devices=True)
+            )
         self._update_capture_devices()
         self._render()
         self.dialog.show()
@@ -182,11 +216,45 @@ class ApplicationShell(QObject):
         if self.operation is not None or not self.ready:
             return
         self._refresh_on_open = False
-        self.video.refresh_devices()
+        self.refresh_video_devices()
+
+    def apply_settings(self, settings: Settings | None = None) -> bool:
+        """Save one snapshot and apply only its changed acquisition configuration.
+
+        Args:
+            settings: Menu-selected snapshot, rejected while the editor is dirty.
+                None applies the current editor or saved baseline.
+
+        Returns:
+            Whether a save was accepted; capture completion is reported separately.
+        """
+        if not self._can_start_video or self.confirmation is not None:
+            return False
+        if settings is not None and self.dirty:
+            return False
+        target = (
+            settings
+            if settings is not None
+            else (self.dialog.values() if self.dialog is not None else self.baseline)
+        )
+        capture_key = (target.capture_device, target.capture_fps)
+        active = self.video.active_settings if self.video.has_connection else None
+        if capture_key != (self.baseline.capture_device, self.baseline.capture_fps) or (
+            active is not None and capture_key != (active.capture_device, active.capture_fps)
+        ):
+            self._capture_after_save = target
+        self._refresh_on_open = False
+        self.video.cancel_pending()
+        self._request("save", settings=target)
+        return True
+
+    @Slot()
+    def _apply_editor(self) -> None:
+        self.apply_settings()
 
     def save(self) -> None:
         """Save the current settings through the worker."""
-        if self.ready:
+        if self.ready and not self.video.applying:
             self._request("save")
 
     def change_window_size(self, key: str) -> None:
@@ -197,13 +265,19 @@ class ApplicationShell(QObject):
             and self.pending is None
             and not self.committed
             and not self.dirty
+            and not self.video.applying
             and key != self.baseline.window_size_preset
         ):
             self._request("save", settings=replace(self.baseline, window_size_preset=key))
 
     def reload(self) -> None:
         """Reload settings through the worker."""
-        if self.operation is not None or self.pending is not None or self.committed:
+        if (
+            self.operation is not None
+            or self.pending is not None
+            or self.committed
+            or self.video.applying
+        ):
             return
         if self.dirty:
             self._close("reload")
@@ -234,9 +308,11 @@ class ApplicationShell(QObject):
             return
         operation = self.operation
         self.operation = None
+        capture_target, self._capture_after_save = self._capture_after_save, None
         if result.settings is not None:
             self.baseline = result.settings
             self.ready = True
+            self._settings_saved = operation == "save"
             if self.dialog is not None:
                 self.dialog.set_values(result.settings)
             self.video.set_preview_fps(self.baseline.preview_fps)
@@ -254,6 +330,13 @@ class ApplicationShell(QObject):
         elif self.pending is not None:
             self._resolve_close()
         self._render()
+        if (
+            result.settings is not None
+            and capture_target is not None
+            and not self.committed
+            and self.pending != "app"
+        ):
+            self.video.apply_capture(capture_target)
         self._refresh_open_settings()
 
     @property
@@ -263,7 +346,8 @@ class ApplicationShell(QObject):
 
     def _render(self) -> None:
         state = {"load": "読込中", "save": "保存中"}.get(
-            self.operation, "未保存" if self.dirty else "変更なし"
+            self.operation,
+            "未保存" if self.dirty else "保存済み" if self._settings_saved else "変更なし",
         )
         if self.error:
             state = self.error_operation
@@ -298,6 +382,7 @@ class ApplicationShell(QObject):
                 and self.pending is None
                 and not self.committed
                 and not self.dirty
+                and not self.video.applying
             ),
         )
         self.window.connection.set_available(
@@ -306,24 +391,47 @@ class ApplicationShell(QObject):
         )
         self.video.set_available(
             not self.committed and self.pending != "app",
-            settings_ready=self.ready and self.pending is None,
+            settings_ready=self._can_start_video
+            and not self.dirty
+            and bool(self.baseline.capture_device),
+            commands_ready=self._can_start_video,
+            pending_connection=self._capture_after_save is not None,
         )
         if self.dialog is not None:
             self.dialog.status.setText(state)
             self.dialog.details.setPlainText(self.error)
             self.dialog.details.setVisible(bool(self.error))
-            idle = self.operation is None and self.pending is None and not self.committed
+            idle = (
+                self.operation is None
+                and self.pending is None
+                and not self.committed
+                and not self.video.applying
+            )
             self.dialog.set_editable(idle and self.ready)
             self.dialog.capture_refresh_button.setEnabled(
                 idle and self.ready and self.video.can_refresh
             )
             self.dialog.save_button.setEnabled(idle and self.ready)
             self.dialog.reload_button.setEnabled(idle)
+            self.dialog.capture_connect_button.setEnabled(
+                self._can_start_video and self.video.can_connect
+            )
+            self.dialog.capture_disconnect_button.setEnabled(self.video.can_disconnect)
+            self.dialog.capture_connection_status.setText(
+                "接続失敗"
+                if self.video.apply_state == "failed" and not self.video.cleanup_unconfirmed
+                else self.window.video.status.text()
+            )
+            self.dialog.capture_connection_error.setPlainText(self.video.apply_error)
+            self.dialog.capture_connection_error.setVisible(bool(self.video.apply_error))
             self.dialog.cancel_close_button.setVisible(cancelable)
             self.dialog.cancel_close_button.setText(self.window.cancel_close_button.text())
 
     def request_close(self) -> None:
         """Interrupt the turn, then finish settings and service shutdown."""
+        self._capture_after_save = None
+        self._refresh_on_open = False
+        self.video.cancel_pending()
         if not self.committed:
             self.window.connection.interrupt()
         self._close("app")

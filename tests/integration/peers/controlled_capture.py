@@ -20,6 +20,8 @@ class ControlledCapture:
         self.disconnects = 0
         self.shutdowns = 0
         self.finish_shutdown = True
+        self.finish_disconnect = True
+        self.accept_connection = True
         self.reader_requests = 0
 
     def start(self) -> None:
@@ -28,7 +30,7 @@ class ControlledCapture:
 
     def refresh_devices(self) -> bool:
         """Accept only an idle device enumeration request."""
-        if self.state.phase not in {"idle", "error"}:
+        if self.state.phase not in {"idle", "error"} or self.state.cleanup == "unconfirmed":
             return False
         self.refreshes += 1
         self.state = replace(self.state, phase="enumerating")
@@ -51,16 +53,32 @@ class ControlledCapture:
 
     def connect(self, options: CaptureOptions) -> bool:
         """Record an immutable connection request."""
-        if self.state.phase not in {"idle", "error"}:
+        if (
+            not self.accept_connection
+            or self.state.phase not in {"idle", "error"}
+            or self.state.cleanup == "unconfirmed"
+        ):
             return False
         self.connections.append(options)
-        self.state = replace(self.state, phase="connecting", generation=len(self.connections))
+        self.state = replace(
+            self.state,
+            phase="connecting",
+            generation=len(self.connections),
+            error="",
+            cleanup="none",
+        )
         return True
 
     def disconnect(self) -> None:
-        """Complete a requested disconnection immediately."""
+        """Optionally hold cleanup so reconnect ordering can be observed."""
         self.disconnects += 1
-        self.state = replace(self.state, phase="idle", frame=None, cleanup="graceful")
+        self.state = replace(self.state, phase="stopping", frame=None)
+        if self.finish_disconnect:
+            self.complete_disconnect()
+
+    def complete_disconnect(self) -> None:
+        """Confirm release of the old worker before another connection is accepted."""
+        self.state = replace(self.state, phase="idle", frame=None, cleanup="graceful", error="")
 
     def shutdown(self) -> None:
         """Optionally keep shutdown pending for lifetime tests."""

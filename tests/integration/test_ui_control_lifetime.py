@@ -30,7 +30,7 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
         qtbot.waitUntil(lambda: shell.operation is None)
         shell.connect_video()
         capture.stream()
-        qtbot.waitUntil(shell.window.video.disconnect_button.isEnabled)
+        qtbot.waitUntil(lambda: not shell.video.applying)
         panel = shell.window.connection
         panel.activate(1)
         panel.handle_result(ServiceResult(1, "connect"))

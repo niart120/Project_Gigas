@@ -81,6 +81,24 @@ class SettingsDialog(QDialog):
         self.capture_discovery_error.setMaximumHeight(70)
         self.capture_discovery_error.hide()
         self.video_form.addRow(self.capture_discovery_error)
+        connection = QHBoxLayout()
+        self.capture_connect_button = QPushButton("接続", self)
+        self.capture_disconnect_button = QPushButton("切断", self)
+        self.capture_connection_status = QLabel("未接続", self)
+        self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
+        for widget in (
+            self.capture_connect_button,
+            self.capture_disconnect_button,
+            self.capture_connection_status,
+        ):
+            connection.addWidget(widget)
+        connection.addStretch()
+        self.video_form.addRow("映像", connection)
+        self.capture_connection_error = QPlainTextEdit(self)
+        self.capture_connection_error.setReadOnly(True)
+        self.capture_connection_error.setMaximumHeight(70)
+        self.capture_connection_error.hide()
+        self.video_form.addRow(self.capture_connection_error)
         self.capture_fps = self._rate_field(60)
         self.preview_fps = self._rate_field(30)
         for label, field in (
@@ -119,7 +137,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.details)
         actions = QHBoxLayout()
         actions.addStretch()
-        self.save_button = QPushButton("保存", self)
+        self.save_button = QPushButton("適用", self)
         self.reload_button = QPushButton("再読込", self)
         self.close_button = QPushButton("閉じる", self)
         self.cancel_close_button = QPushButton("閉じる取消し", self)
