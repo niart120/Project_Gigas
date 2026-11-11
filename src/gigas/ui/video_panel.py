@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QAction, QImage, QPainter, QPaintEvent
+from PySide6.QtGui import QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
 
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.elided_label import ElidedLabel
-from gigas.ui.geometry import fit_to_screen
-from gigas.ui.video_info import VideoInfoDialog
 
 if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureSnapshot
@@ -112,21 +110,19 @@ class VideoView(QWidget):
 
 
 class VideoPanel(QWidget):
-    """Draw video and own shared capture actions and external status labels.
+    """Draw video and own external status labels.
 
-    MainWindow places the actions in menus and the labels in its status bar.
+    MainWindow places the labels in its status bar.
 
     Args:
         parent: Owning widget, if any.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Create the preview and commands without discovering or opening devices."""
+        """Create the preview without discovering or opening devices."""
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.info_action = QAction("映像情報…", self)
-        self.info_dialog: VideoInfoDialog | None = None
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.source = ElidedLabel(parent=self)
@@ -134,25 +130,6 @@ class VideoPanel(QWidget):
         self.source.hide()
         self.view = VideoView(self)
         layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
-
-    def show_information(self, details: str) -> None:
-        """Open or explicitly refresh frozen diagnostics without changing capture.
-
-        Args:
-            details: Read-only plain text captured at the explicit request time.
-        """
-        if self.info_dialog is None:
-            self.info_dialog = VideoInfoDialog(self)
-        self.info_dialog.display(details)
-        self.info_dialog.show()
-        fit_to_screen(self.info_dialog)
-        self.info_dialog.raise_()
-        self.info_dialog.activateWindow()
-
-    def close_information(self) -> None:
-        """Close the owned diagnostic window after main-window closure is confirmed."""
-        if self.info_dialog is not None:
-            self.info_dialog.close()
 
     def render_state(
         self,

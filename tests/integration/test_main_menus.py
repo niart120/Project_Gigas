@@ -112,7 +112,6 @@ def test_file_and_codex_menus_use_live_actions_and_exit_lifetime(
     assert window.exit_action in window.file_menu.actions()
     assert [action for action in window.view_menu.actions() if not action.isSeparator()] == [
         *window.window_size_actions.values(),
-        window.video.info_action,
         window.notifications.entry_action,
     ]
     panel = window.connection

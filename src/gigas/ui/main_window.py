@@ -151,7 +151,6 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.video = VideoPanel(self.splitter)
-        self.view_menu.insertAction(self.notifications.entry_action, self.video.info_action)
         conversation = QWidget(self.splitter)
         conversation_layout = QVBoxLayout(conversation)
         conversation_layout.addWidget(QLabel("Codex", conversation))
@@ -269,7 +268,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Route window closure through application lifetime management."""
         if self.allow_close:
-            self.video.close_information()
             self.notifications.close_details()
             event.accept()
         else:
