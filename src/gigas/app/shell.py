@@ -208,10 +208,8 @@ class ApplicationShell(QObject):
         )
         self.window.settings_button.setEnabled(not self.committed)
         self.window.connection.set_available(
-            self.ready
-            and not self.committed
-            and self.pending is None
-            and not self._service_unavailable
+            not self.committed and self.pending is None and not self._service_unavailable,
+            settings_ready=self.ready,
         )
         if self.dialog is not None:
             self.dialog.status.setText(state)
