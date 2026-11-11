@@ -1,6 +1,7 @@
 import pytest
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtWidgets import QStyleFactory, QWidget
 from pytestqt.qtbot import QtBot
 
 from gigas.runtime.codex.models import (
@@ -194,3 +195,83 @@ def test_wrapped_option_accepts_click_on_caption(panel: ConnectionPanel, qtbot: 
         choice, Qt.MouseButton.LeftButton, pos=QPoint(choice.width() - 2, choice.height() // 2)
     )
     assert choice.isChecked()
+
+
+@pytest.mark.parametrize("style_name", ["Fusion", "Windows"])
+@pytest.mark.parametrize("point_size", [9, 16])
+def test_narrow_approval_keeps_header_and_each_decision_within_viewport(
+    panel: ConnectionPanel, qtbot: QtBot, style_name: str, point_size: int
+) -> None:
+    panel.resize(292, 400)
+    panel.setFont(QFont("Meiryo UI", point_size))
+    panel.handle_event(
+        ServiceEvent(
+            1,
+            HumanRequest(
+                "narrow",
+                "narrow",
+                "thread",
+                "turn",
+                "file",
+                details="path/to/file.py\n" + "+ changed line\n" * 80,
+                decisions=("accept", "decline", "cancel"),
+            ),
+        )
+    )
+    style = QStyleFactory.create(style_name)
+    assert style is not None
+    style.setParent(panel)
+    panel.setStyle(style)
+    for widget in panel.findChildren(QWidget):
+        widget.setStyle(style)
+    card = panel.cards["narrow"]
+    viewport = panel.requests.viewport()
+    qtbot.waitUntil(lambda: 0 <= card.mapTo(viewport, QPoint()).y() < 30)
+    assert viewport.width() <= 258
+    assert panel.requests.horizontalScrollBar().maximum() == 0
+    assert viewport.rect().contains(
+        QRect(card.expand_button.mapTo(viewport, QPoint()), card.expand_button.size())
+    )
+    for button in card.decision_buttons.values():
+        panel.requests.ensureWidgetVisible(button)
+        qtbot.waitUntil(
+            lambda current=button: viewport.rect().contains(
+                QRect(current.mapTo(viewport, QPoint()), current.size())
+            )
+        )
+        assert button.isEnabled()
+
+
+def test_narrow_approval_keyboard_order_requires_one_explicit_decision(
+    panel: ConnectionPanel, qtbot: QtBot
+) -> None:
+    panel.resize(292, 400)
+    panel.handle_event(
+        ServiceEvent(
+            1,
+            HumanRequest(
+                "keys",
+                "keys",
+                "thread",
+                "turn",
+                "command",
+                details="A command to review",
+                decisions=("accept", "decline", "cancel"),
+            ),
+        )
+    )
+    card = panel.cards["keys"]
+    sent: list[object] = []
+    panel.answer_requested.connect(sent.append)
+    buttons = card.decision_buttons
+    buttons["accept"].setFocus()
+    qtbot.keyClick(buttons["accept"], Qt.Key.Key_Tab)
+    assert buttons["decline"].hasFocus()
+    qtbot.keyClick(buttons["decline"], Qt.Key.Key_Tab)
+    assert buttons["cancel"].hasFocus()
+    assert not sent
+    qtbot.keyClick(buttons["cancel"], Qt.Key.Key_Space)
+    qtbot.keyClick(buttons["cancel"], Qt.Key.Key_Space)
+    assert len(sent) == 1
+    assert card.state == "sending"
+    assert all(not button.isEnabled() for button in buttons.values())

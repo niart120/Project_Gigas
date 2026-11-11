@@ -127,6 +127,9 @@ class QuestionInput(QGroupBox):
 class RequestCard(QGroupBox):
     """Keep a request visible while preventing repeated or expired submissions.
 
+    Approval decisions use a vertical column so native font and style metrics
+    determine one button's required width, without adding three minimum widths.
+
     Args:
         request: Runtime request and its allowed answers.
         parent: Owning panel content widget.
@@ -175,8 +178,9 @@ class RequestCard(QGroupBox):
             self.editors[question.id] = editor
             editor.changed.connect(self._validate)
             body_layout.addWidget(editor)
-        actions = QHBoxLayout()
-        actions.addStretch()
+        actions = QHBoxLayout() if request.kind == "question" else QVBoxLayout()
+        if request.kind == "question":
+            actions.addStretch()
         self.submit_button = QPushButton("回答", self)
         self.submit_button.setVisible(request.kind == "question")
         self.submit_button.clicked.connect(self._answer)
@@ -186,7 +190,7 @@ class RequestCard(QGroupBox):
             button = QPushButton(labels.get(decision, decision), self)
             button.clicked.connect(lambda _checked=False, value=decision: self._decide(value))
             self.decision_buttons[decision] = button
-            actions.addWidget(button)
+            actions.addWidget(button, alignment=Qt.AlignmentFlag.AlignRight)
         body_layout.addLayout(actions)
         self._validate()
 

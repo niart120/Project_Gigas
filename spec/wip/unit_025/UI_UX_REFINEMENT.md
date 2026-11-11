@@ -78,7 +78,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11。4 failed / 9 passed→関連80 passed |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
 | refactor-skipped | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 6 failed / 17 passed→35 passed |
-| todo | T13: 小画面の承認・詳細操作を横スクロールなしで表示 | regression | integration / manual | 最終描画で取消しボタンの15pxはみ出しを再現 |
+| refactor-skipped | T13: 小画面の承認・詳細操作を横スクロールなしで表示 | regression | integration / manual | 横scroll40/42pxで4件red→関連58 passed |
 
 ## 6. 対象ファイルと責務
 
@@ -127,6 +127,8 @@ T09: `uv run pytest tests/integration/test_auth_choices.py -q --basetemp=tmp/pyt
 T10: `uv run pytest tests/integration/test_keyboard_workflow.py -q`でショートカット未実装による4 failed / 9 passedを確認。設定の共通QActionへ`Ctrl+,`を登録し、入力欄の`Ctrl+Enter`は送信ボタンのクリックと同じ可否判定を通す。Enter単独は改行、テンキーEnterも対応し、IME変換中・キー自動反復・送信不可・要求回答中は送信しない。最終14件と関連8ファイルは80 passed、対象ruff/format・全体ty・差分検査成功。既存の終了取消し・保存失敗後の無再開も同時に確認した。IMEはQtのpreedit/commit/取消しイベントを模擬した検証で、Windows IME実機確認とは区別する。追加構造整理は不要。
 
 T13の起点: 最終描画で、800×600作業領域の承認欄はviewport258pxに対して294pxを必要とし、横スクロール36px、取消しボタンが右端から15pxはみ出すことを確認した。T10とは別itemとして修正する。
+
+T13: `uv run pytest tests/integration/test_request_layout.py -q`でFusion/Windowsスタイル×9/16ptの4件をredにした。承認の判断ボタンだけを縦に並べ、質問の回答行は維持した。固定幅や独自の文字計測は加えずQtの寸法計算を使う。同ファイル12 passed、`test_codex_gui.py`・`test_answer_lifecycle.py`・`test_keyboard_workflow.py`・`test_notifications.py`を含む関連58 passed、対象ruff/format・全体ty成功。横スクロール0、縦スクロールで各ボタン全体へ到達、Tab順とSpaceで1回だけ送信することを確認した。Meiryo実フォント16ptでもFusion/Windows両方の描画で確認し、独立レビューの必須指摘なし。追加構造整理は不要。
 
 ## 8. 先送り事項
 
