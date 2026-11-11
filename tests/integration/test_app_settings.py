@@ -9,6 +9,7 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
+from gigas.game_io.capture.models import DeviceInfo
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 
 
@@ -32,12 +33,12 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(dialog.isVisible)
-    dialog.model.setPlainText("edited")
+    dialog.model.setText("edited")
 
     shell.window.settings_button.click()
 
     assert shell.dialog is dialog
-    assert dialog.model.toPlainText() == "edited"
+    assert dialog.model.text() == "edited"
     assert not dialog.isModal()
 
 
@@ -59,10 +60,11 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
     dialog = shell.dialog
     assert dialog is not None
     values = Settings(" 映像\n入力 ", " COM3 ", "unknown-model", "custom-effort", "api_key")
-    dialog.capture_device.setPlainText(values.capture_device)
-    dialog.serial_port.setPlainText(values.serial_port)
-    dialog.model.setPlainText(values.model)
-    dialog.effort.setPlainText(values.effort)
+    dialog.set_capture_devices((DeviceInfo("Camera", values.capture_device),))
+    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData(values.capture_device))
+    dialog.serial_port.setText(values.serial_port)
+    dialog.model.setText(values.model)
+    dialog.effort.setText(values.effort)
     dialog.auth_method.setCurrentIndex(1)
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -76,10 +78,11 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
         qtbot.waitUntil(lambda: other.operation is None)
         other.open_settings()
         assert other.dialog is not None
-        assert other.dialog.capture_device.toPlainText() == values.capture_device
-        assert other.dialog.model.toPlainText() == values.model
+        assert other.dialog.values() == values
+        assert other.dialog.capture_choices.currentData() == values.capture_device
+        assert other.dialog.model.text() == values.model
         assert other.dialog.auth_method.currentData() == "api_key"
-        other.dialog.capture_device.clear()
+        other.dialog.capture_choices.setCurrentIndex(0)
         other.dialog.serial_port.clear()
         other.dialog.model.clear()
         other.dialog.effort.clear()
@@ -95,7 +98,7 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     shell.open_settings()
     assert shell.dialog is not None
     assert not shell.dirty
-    shell.dialog.model.setPlainText("changed")
+    shell.dialog.model.setText("changed")
     assert shell.dirty
     shell.dialog.model.clear()
     assert not shell.dirty
@@ -109,7 +112,7 @@ def test_dirty_close_choices(
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
-    dialog.model.setPlainText("edited")
+    dialog.model.setText("edited")
     if target == "button":
         dialog.close_button.click()
     elif target == "window":
@@ -128,7 +131,7 @@ def test_dirty_close_choices(
     box.button(buttons[choice]).click()
     if choice == "cancel":
         assert dialog.isVisible()
-        assert dialog.model.toPlainText() == "edited"
+        assert dialog.model.text() == "edited"
         assert not shell.path.exists()
     else:
         qtbot.waitUntil(lambda: not dialog.isVisible())
@@ -152,7 +155,7 @@ def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbo
     shell.dialog.reload_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.dialog.save_button.isEnabled()
-    assert shell.dialog.model.toPlainText() == "repaired"
+    assert shell.dialog.model.text() == "repaired"
 
 
 def test_save_failure_preserves_edits_and_reports_cleanup(
@@ -163,7 +166,7 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
     qtbot.waitUntil(lambda: shell.operation is None)
     shell.open_settings()
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText("edited")
+    shell.dialog.model.setText("edited")
 
     def fail(*_args: object, **_kwargs: object) -> None:
         raise PermissionError(errno.EACCES, "injected denial")
@@ -173,12 +176,12 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         patch.setattr(Path, "unlink", fail)
         shell.dialog.save_button.click()
         qtbot.waitUntil(lambda: shell.operation is None)
-        assert shell.dialog.model.toPlainText() == "edited"
+        assert shell.dialog.model.text() == "edited"
         assert shell.dialog.save_button.isEnabled()
         assert "remove temporary file" in shell.dialog.details.toPlainText()
         assert load_settings(shell.path).model == "original"
 
-    shell.dialog.model.setPlainText("retry")
+    shell.dialog.model.setText("retry")
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == "retry"
@@ -191,13 +194,13 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
 ) -> None:
     shell.open_settings()
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText("edited")
+    shell.dialog.model.setText("edited")
     shell.dialog.reload_button.click()
     box = shell.confirmation
     assert box is not None
     assert box.button(QMessageBox.StandardButton.Save) is None
     box.button(QMessageBox.StandardButton.Cancel).click()
-    assert shell.dialog.model.toPlainText() == "edited"
+    assert shell.dialog.model.text() == "edited"
     assert shell.operation is None
 
     shell.path.write_text("[broken", encoding="utf-8")
@@ -205,7 +208,7 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Discard).click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.dialog.model.toPlainText() == "edited"
+    assert shell.dialog.model.text() == "edited"
     assert not shell.dialog.save_button.isEnabled()
     shell.dialog.close()
     assert shell.confirmation is not None
@@ -224,7 +227,7 @@ def test_unedited_text_preserves_crlf_and_nonbreaking_space(
     shell.open_settings()
     assert not shell.dirty
     assert shell.dialog is not None
-    shell.dialog.effort.setPlainText("high")
+    shell.dialog.effort.setText("high")
     shell.save()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == original.model
@@ -250,10 +253,10 @@ def test_unexpected_worker_failure_returns_without_exposing_exception_text(
         dialog = application.dialog
         assert dialog is not None
         if operation == "save":
-            dialog.model.setPlainText("unsaved")
+            dialog.model.setText("unsaved")
             dialog.save_button.click()
             qtbot.waitUntil(lambda: application.operation is None)
-            assert dialog.model.toPlainText() == "unsaved"
+            assert dialog.model.text() == "unsaved"
             assert application.baseline.model == ""
         diagnostic = dialog.details.toPlainText()
         assert "RuntimeError" in diagnostic

@@ -24,8 +24,6 @@ class Settings:
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
         auth_method: Authentication preference, either chatgpt or api_key.
-        capture_width: Requested image width in pixels, from 16 to 3840.
-        capture_height: Requested image height in pixels, from 16 to 2160.
         capture_fps: Requested integer capture rate, from 1 to 120 frames per second.
         preview_fps: GUI update limit, from 1 to 60 frames per second.
     """
@@ -35,8 +33,6 @@ class Settings:
     model: str = ""
     effort: str = ""
     auth_method: str = "chatgpt"
-    capture_width: int = 1920
-    capture_height: int = 1080
     capture_fps: int = 60
     preview_fps: int = 30
 
@@ -113,8 +109,6 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         model=_text(agent, "model", path),
         effort=_text(agent, "effort", path),
         auth_method=auth_method,
-        capture_width=_integer(capture, "width", path, 1920, 16, 3840),
-        capture_height=_integer(capture, "height", path, 1080, 16, 2160),
         capture_fps=_integer(capture, "fps", path, 60, 1, 120),
         preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
     )
@@ -139,8 +133,6 @@ def save_settings(path: "Path", settings: Settings) -> None:
     agent = _ensure_table(document, "agent", path)
     _set_text(capture, "device", settings.capture_device)
     for key, value in (
-        ("width", settings.capture_width),
-        ("height", settings.capture_height),
         ("fps", settings.capture_fps),
         ("preview_fps", settings.preview_fps),
     ):

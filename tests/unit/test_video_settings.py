@@ -1,3 +1,4 @@
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,7 +15,6 @@ def test_legacy_settings_gain_video_defaults_without_changing_device(tmp_path: P
     values = load_settings(path)
 
     assert values.capture_device == "old name"
-    assert (values.capture_width, values.capture_height) == (1920, 1080)
     assert (values.capture_fps, values.preview_fps) == (60, 30)
     assert path.read_text(encoding="utf-8") == original
 
@@ -24,8 +24,6 @@ def test_video_mode_round_trip_preserves_comments_and_unknown_values(tmp_path: P
     path.write_text('# retained\n[capture]\ncustom = "unchanged"\n', encoding="utf-8")
     values = Settings(
         capture_device="device-path",
-        capture_width=1280,
-        capture_height=720,
         capture_fps=30,
         preview_fps=15,
     )
@@ -40,11 +38,6 @@ def test_video_mode_round_trip_preserves_comments_and_unknown_values(tmp_path: P
 @pytest.mark.parametrize(
     ("key", "invalid"),
     [
-        ("width", "true"),
-        ("width", "15"),
-        ("width", "3841"),
-        ("height", "15"),
-        ("height", "2161"),
         ("fps", "0"),
         ("fps", "121"),
         ("fps", "30.0"),
@@ -74,3 +67,27 @@ def test_invalid_video_mode_cannot_overwrite_existing_settings(
         save_settings(path, values)
 
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_old_dimensions_are_ignored_and_preserved_as_unrelated_values(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    original = '[capture]\nwidth = 0\nheight = "legacy"\n'
+    path.write_text(original, encoding="utf-8")
+
+    values = load_settings(path)
+
+    assert values == Settings()
+    save_settings(path, replace(values, capture_fps=30))
+    saved = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert saved["capture"]["width"] == 0
+    assert saved["capture"]["height"] == "legacy"
+
+
+def test_fresh_settings_do_not_create_capture_dimensions(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+
+    save_settings(path, Settings())
+
+    saved = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert "width" not in saved["capture"]
+    assert "height" not in saved["capture"]

@@ -56,7 +56,7 @@ U04はこの共有APIの上に要求後の鮮度条件・停止状態の再確�
 |---|---|---|---|---|
 | refactor-skipped | R1 読み取り専用portを分け、遅い読み手が画像を保持しても取得とプレビューが進む | new/regression | integration | reader APIの欠如でred→2件green。実spawnでopen1回・同じ世代の連番進行・保持画素不変・切断時失効を確認。MCP実接続の検証ではない |
 | refactor-done | R2 取得をcaptureパッケージへまとめる | characterization | unit/integration/package | R1のgreen後に移動。公開import・取得/GUI結合を3.12/3.13で各83 passed、配布wheelのspawn/終了も成功 |
-| todo | R3 機器を一覧だけから選択し用途別の設定を明示保存する | regression | integration | パス手入力不要、未検出・同名・更新・未保存選択・既存値保護、取得寸法固定 |
+| refactor-skipped | R3 機器を一覧だけから選択し用途別の設定を明示保存する | regression | integration | red: 旧寸法の使用・タブ/候補不足・未検出Path消失5件とpreview専用reader未使用1件。green: 対象27件。選択と旧値保護を小さい関数へ分け、追加構造変更なし |
 | todo | R4 表示プリセットを切り替えても取得と共有画像を変えない | new | unit/integration | 4段階・保存/再読込・画面内配置・接続中反映・表示診断除去 |
 
 R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。各論理変更を別コミットにする。R1の既存の非占有性については現在の設計で成立するかをまず確認し、人工的なredを作らない。新しいreader APIとR3/R4の振る舞い変更はred→greenを記録する。R2は構造変更として変更前後の同じ契約を検証する。
@@ -67,7 +67,7 @@ R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。
 
 ## 7. 検証計画と現在地
 
-NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1/R2の実装と下記模擬境界の自動試験を完了した。R3/R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R3の実装と下記模擬境界の自動試験を完了した。R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
 
 ### R1: 読み取り専用APIと複数読み手
 
@@ -91,6 +91,19 @@ NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1/R2�
 - 型/docstring: 変更Python範囲のruff/formatと全体`ty check --no-progress`、`git diff --check`は成功。公開入口は既存サービス3型とR1のReader、値型は`capture.models`に統一した。型の緩和やignore追加はない。
 - 参照: src/tests/scripts/docs/READMEの旧`game_io.models`・`frames`・`backend`・`_capture_process`参照は0件。過去の完了仕様は当時の配置を記録する履歴として維持し、恒常設計は親作業で更新する。
 - 独立レビュー: staged 21ファイルを読み、追加必須指摘なし。処理差分は公開入口の再公開とimportのみ、spawn target・peer・故障注入先・公開説明の新配置が一致することを確認した。
+
+### R3: 機器選択と用途別の設定
+
+機器パスの入力欄を取り除き、機器表示名から選択する非編集comboへ統一した。DevicePathは項目の内部データとして保持し、未検出の値も専用項目に残す。同名の候補だけ番号を添え、更新や他項目の編集で現在の選択を変えない。「未選択」の明示選択だけが保存値を空にする。3タブ、一行editor、15/30/60と既存FPS値の選択へ変更し、未編集の改行・空白を含む既存値を保持した。
+
+アプリ設定から取得幅・高さを除き、接続では`CaptureOptions`の1920×1080既定値と保存した取得FPSを使う。旧TOMLのwidth/heightは未知項目として保持するが読取・接続には使わない。サービスAPIの可変寸法試験は維持した。プレビューは専用の`CaptureReader`を1つ持ち、取得の所有コマンドとは別の口から状態・画像を読む。
+
+- red: `uv run --no-sync pytest tests/unit/test_video_settings.py tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-r3-red -q --tb=short`で5件失敗。旧寸法の読込/保存、タブ未実装、未検出値の項目欠如、FPS候補未実装を確認。GUI結合の専用reader試験も未使用で1件失敗した。
+- green: 上記2ファイルと`test_video_gui.py`を合わせて`--basetemp=tmp/pytest-r3-green`で27件成功。機器選択・更新・未保存値・旧値・固定取得寸法・保存後の接続設定維持・実spawn表示と再接続を検証した。
+- 設定と起動の回帰: `test_settings.py`、`test_video_settings.py`、`test_settings_io.py`、`test_app_entry.py`、`test_video_preview.py`の40件が成功。旧寸法以外の型・範囲、コメント・未知項目保護、起動失敗回収と描画を確認した。
+- 既存GUIの回帰: `uv run --no-sync pytest tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py --basetemp=tmp/pytest-r3-existing-gui -q -o faulthandler_timeout=30`で53件成功。QLineEdit・一覧選択への操作変更後も、保存と再起動・未編集のCRLF/NBSP保持・保存失敗・終了取消し・Codexの寿命を検証した。
+- 型/docstring/docs: `CapturePort.reader()`と`VideoController.reader`で読取境界を明示し、Settingsの公開属性から取得寸法を除いた。型緩和やignoreを追加せず、対応するruff/format・tyを検査した。現在の選択操作と旧寸法の無効化を`docs/settings.md`・`docs/video.md`へ記載した。新画面を読む検証と実機結合はR4後に行う。
+- 独立レビュー: 必須指摘なし。接続中の表示FPS反映はR4で扱うことを再確認した。3タブのQt offscreen画像を読み、表示名・一行入力・下部操作の配置を確認した。描画環境の日本語フォント不足は検証ハーネスだけでMeiryoを登録して補い、製品フォントは変更していない。R4のプリセット追加後に再確認する。
 
 ## 8. 先送り事項
 

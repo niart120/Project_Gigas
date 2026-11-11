@@ -12,7 +12,7 @@ from pytestqt.qtbot import QtBot
 from gigas.app import video
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
-from gigas.game_io.capture import CaptureService, CaptureSnapshot
+from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
 from gigas.storage.settings import Settings, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
@@ -30,6 +30,7 @@ class ControlledCapture:
         self.disconnects = 0
         self.shutdowns = 0
         self.finish_shutdown = True
+        self.reader_requests = 0
 
     def start(self) -> None:
         """Start the simulated service without discovering devices."""
@@ -76,6 +77,11 @@ class ControlledCapture:
         """Return the immutable current state."""
         return self.state
 
+    def reader(self) -> CaptureReader:
+        """Return a separate read-only port for the application preview."""
+        self.reader_requests += 1
+        return CaptureReader(self.snapshot)
+
     def stream(self, sequence: int = 1, bgr: bytes = bytes([0, 0, 255])) -> None:
         """Publish one solid image in the latest connection."""
         options = self.connections[-1]
@@ -114,7 +120,7 @@ def video_shell(
 ) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
     capture = ControlledCapture()
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-b", capture_width=16, capture_height=16))
+    save_settings(path, Settings(capture_device="path-b"))
     shell = ApplicationShell(path, capture_service=capture)
     shell.start()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -136,13 +142,14 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
 ) -> None:
     shell, capture = video_shell
     assert capture.alive
+    assert capture.reader_requests == 1
     assert capture.refreshes == 0
     assert not capture.connections
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
-    dialog.model.setPlainText("unsaved model")
-    dialog.capture_width.setValue(32)
+    dialog.model.setText("unsaved model")
+    dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
     dialog.capture_refresh_button.click()
     assert capture.refreshes == 1
     assert not dialog.capture_refresh_button.isEnabled()
@@ -154,11 +161,11 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
     )
     qtbot.waitUntil(lambda: dialog.capture_choices.count() == 3)
     assert dialog.values().model == "unsaved model"
-    assert dialog.values().capture_width == 32
+    assert dialog.values().capture_fps == 30
     assert dialog.capture_choices.currentData() == "path-b"
 
     shell.window.video.connect_button.click()
-    assert capture.connections == [CaptureOptions("path-b", 16, 16, 60)]
+    assert capture.connections == [CaptureOptions("path-b", 1920, 1080, 60)]
     assert not shell.window.video.connect_button.isEnabled()
     assert not dialog.capture_refresh_button.isEnabled()
     capture.stream()
@@ -170,15 +177,15 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
     )
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.baseline.capture_width == 32
+    assert shell.baseline.capture_fps == 30
     assert shell.video.active_settings is not None
-    assert shell.video.active_settings.capture_width == 16
+    assert shell.video.active_settings.capture_fps == 60
     assert len(capture.connections) == 1
-    save_settings(shell.path, replace(shell.baseline, capture_width=64))
+    save_settings(shell.path, replace(shell.baseline, capture_fps=15))
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.baseline.capture_width == 64
-    assert shell.video.active_settings.capture_width == 16
+    assert shell.baseline.capture_fps == 15
+    assert shell.video.active_settings.capture_fps == 60
     assert len(capture.connections) == 1
 
 
@@ -267,7 +274,7 @@ def test_saving_settings_does_not_disable_active_capture_disconnect(
 
     capture = ControlledCapture()
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-b", capture_width=16, capture_height=16))
+    save_settings(path, Settings(capture_device="path-b"))
     shell = ApplicationShell(path, SettingsIO(load_settings, slow_save), capture_service=capture)
     shell.start()
     try:
@@ -315,7 +322,7 @@ def test_real_spawn_capture_displays_and_releases_through_application(
     marker = tmp_path / "release.txt"
     service = CaptureService(backend_factory=PeerBackend(str(marker)))
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-b", capture_width=16, capture_height=16))
+    save_settings(path, Settings(capture_device="path-b"))
     shell = ApplicationShell(path, capture_service=service)
     shell.start()
     try:

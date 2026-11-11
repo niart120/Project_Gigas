@@ -110,7 +110,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         assert not snapshots
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setPlainText("unsaved")
+        shell.dialog.model.setText("unsaved")
         shell.window.connection.connect_button.click()
         assert len(snapshots) == 1
         assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")

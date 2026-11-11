@@ -73,7 +73,7 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText("snapshot")
+    shell.dialog.model.setText("snapshot")
     shell.dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     pulse = Event()
@@ -100,7 +100,7 @@ def test_pending_close_follows_save_result(
     shell, io = controlled
     io.fail = fail
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText("edited")
+    shell.dialog.model.setText("edited")
     shell.save()
     qtbot.waitUntil(io.entered.is_set)
     if target == "app":
@@ -119,7 +119,7 @@ def test_pending_close_follows_save_result(
         assert shell.dialog.isVisible()
         assert not shell.dialog.model.isReadOnly()
         assert shell.dialog.save_button.isEnabled()
-        assert shell.dialog.model.toPlainText() == "edited"
+        assert shell.dialog.model.text() == "edited"
     else:
         dialog = shell.dialog
         qtbot.waitUntil(lambda: not dialog.isVisible())
@@ -148,7 +148,7 @@ def test_cancel_close_keeps_late_result_without_exiting(
     shell, io = controlled
     assert shell.dialog is not None
     if operation == "save":
-        shell.dialog.model.setPlainText("late")
+        shell.dialog.model.setText("late")
         shell.save()
     else:
         save_settings(shell.path, Settings(model="late"))
@@ -168,7 +168,7 @@ def test_cancel_close_keeps_late_result_without_exiting(
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.window.isVisible()
     assert shell.baseline.model == "late"
-    assert shell.dialog.model.toPlainText() == "late"
+    assert shell.dialog.model.text() == "late"
     assert (io.saves, io.loads) == ((1, 1) if operation == "save" else (0, 2))
 
 
@@ -211,7 +211,7 @@ def test_save_from_close_confirmation_starts_wait_timer(
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    shell.dialog.model.setPlainText("saved-on-close")
+    shell.dialog.model.setText("saved-on-close")
     shell.window.close()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Save).click()
@@ -273,7 +273,7 @@ def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
         qtbot.waitUntil(lambda: shell.ready)
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setPlainText("saved before shutdown")
+        shell.dialog.model.setText("saved before shutdown")
         shell.save()
         qtbot.waitUntil(entered.is_set)
         shell.request_close()

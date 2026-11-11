@@ -103,7 +103,7 @@ def test_close_interrupts_before_settings_finish_and_never_resumes(
     try:
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setPlainText("changed")
+        shell.dialog.model.setText("changed")
         shell.save()
         qtbot.waitUntil(saving.is_set)
         shell.request_close()
@@ -132,7 +132,7 @@ def test_cancel_dirty_confirmation_does_not_resume_turn(qtbot: QtBot, tmp_path: 
     try:
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setPlainText("unsaved")
+        shell.dialog.model.setText("unsaved")
         shell.request_close()
         assert shell.confirmation is not None
         shell.confirmation.button(QMessageBox.StandardButton.Cancel).click()

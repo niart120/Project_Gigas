@@ -161,10 +161,7 @@ class VideoPanel(QWidget):
         )
         self.source.setText("" if settings is None else settings.capture_device)
         self.requested_mode.setText(
-            ""
-            if settings is None
-            else f"要求 {settings.capture_width} x {settings.capture_height} · "
-            f"{settings.capture_fps} FPS"
+            "" if settings is None else f"要求 1920 x 1080 · {settings.capture_fps} FPS"
         )
         frame = snapshot.frame
         self.actual_mode.setText(

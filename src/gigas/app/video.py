@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
-from gigas.game_io.capture import CaptureService, CaptureSnapshot
+from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureError, CaptureOptions
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
+    from gigas.game_io.capture import CaptureReader
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
 
@@ -39,8 +40,8 @@ class CapturePort(Protocol):
         """Request device cleanup and service termination."""
         ...
 
-    def snapshot(self) -> CaptureSnapshot:
-        """Return the latest immutable state without waiting for a device."""
+    def reader(self) -> "CaptureReader":
+        """Return a read-only port without opening another device."""
         ...
 
     def is_alive(self) -> bool:
@@ -75,7 +76,8 @@ class VideoController(QObject):
         self.panel = panel
         self.service: CapturePort = CaptureService() if service is None else service
         self.active_settings: Settings | None = None
-        self._snapshot = self.service.snapshot()
+        self.reader = self.service.reader()
+        self._snapshot = self.reader.snapshot()
         self._available = True
         self._settings_ready = False
         self._started = False
@@ -110,7 +112,7 @@ class VideoController(QObject):
     @property
     def shutdown_error(self) -> str:
         """Return the reason shutdown cannot yet be treated as complete."""
-        snapshot = self.service.snapshot()
+        snapshot = self.reader.snapshot()
         if snapshot.cleanup == "unconfirmed":
             return f"映像終了未確認 · {snapshot.error}" if snapshot.error else "映像終了未確認"
         return ""
@@ -158,12 +160,7 @@ class VideoController(QObject):
         if not self.can_refresh or not self._settings_ready:
             return
         try:
-            options = CaptureOptions(
-                settings.capture_device,
-                settings.capture_width,
-                settings.capture_height,
-                settings.capture_fps,
-            )
+            options = CaptureOptions(settings.capture_device, fps=settings.capture_fps)
         except CaptureError as error:
             self._request_error = str(error)
             self._render()
@@ -192,7 +189,7 @@ class VideoController(QObject):
         self._poll()
 
     def _poll(self) -> None:
-        snapshot = self.service.snapshot()
+        snapshot = self.reader.snapshot()
         alive = self.service.is_alive()
         if self._disconnecting:
             if snapshot.phase in {"idle", "error", "closed"}:
