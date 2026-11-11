@@ -40,6 +40,12 @@ PROMPTS = {
         "sandbox permissions with a justification. Do not run it without approval. "
         "If permission is declined, report that and finish without trying again."
     ),
+    "file-approval": (
+        "This is a file-approval integration check. Use apply_patch to add only the file "
+        "gigas-u02-approval-check.txt in the current directory, containing GIGAS_U02_FILE. "
+        "Request the required approval before writing. If permission is declined, "
+        "report that and finish without trying again. Do not use shell commands."
+    ),
 }
 
 
@@ -49,6 +55,9 @@ def _require(condition: bool, message: str) -> None:
 
 
 async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, object]:
+    probe_file = cwd / "gigas-u02-approval-check.txt"
+    if scenario == "file-approval":
+        _require(not probe_file.exists(), "The file-approval probe path already exists")
     events: asyncio.Queue[ConnectionEvent] = asyncio.Queue()
     baseline = asyncio.all_tasks()
     connection = create_connection(
@@ -94,7 +103,11 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                             for question in event.questions
                         }
                         await connection.answer(event.token, answers=answers)
-                    elif scenario == "approval":
+                    elif scenario in {"approval", "file-approval"}:
+                        _require(
+                            event.kind == ("file" if scenario == "file-approval" else "command"),
+                            f"Unexpected approval kind: {event.kind}",
+                        )
                         approval_decision = next(
                             (item for item in ("decline", "cancel") if item in event.decisions), ""
                         )
@@ -129,6 +142,8 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                 _require(bool(text.strip()), "No model response followed the answer")
     finally:
         await connection.close()
+    if scenario == "file-approval":
+        _require(not probe_file.exists(), "File was written without approval")
     _require(asyncio.all_tasks() == baseline, "Connection tasks remain after close")
     return {
         "scenario": scenario,

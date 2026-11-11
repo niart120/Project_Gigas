@@ -125,7 +125,25 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 
 TDD対象pytest、ruff format/check、ty、依存lock、build、既存unit/integration回帰、配布指示smokeを実施する。実runtimeで認証・通常turn・中断・終了を確認し、模擬peerと区別する。GUIの要求応答・応答性はM2の実画面と結合試験で受け入れる。
 
-現状: 実装・実接続受入はnot run。M0の限定初期化を本製品経路の成功に転用しない。
+### M1統合確認（2026-11-11、Windows x64 / Python 3.12）
+
+`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-m1` は **63 passed**。runtime配下と対応test/peer、`scripts/check_codex.py`のruff check・format（10 files）・ty check、`uv lock --check`は成功した。対象testは認証不要で、実接続の代替にはしない。
+
+次の実接続は製品の `create_connection` を使い、runtime `0.167.0`、既存ChatGPT認証、実際に照合したモデル `gpt-6.1-sol` / effort `low`、開発リポジトリ外の `$env:TEMP\gigas-codex-check` で実行した。検証用の資格情報複製や設定変更はしていない。
+
+| command | 結果 |
+|---|---|
+| `uv run python scripts/check_codex.py ordinary --cwd "$env:TEMP\gigas-codex-check"` | 指示資材を配送して通常ターンを開始し、検証文字列12文字を受信、readyへ遷移 |
+| `uv run python scripts/check_codex.py question --cwd "$env:TEMP\gigas-codex-check"` | 実質問を2秒保留後に回答し、要求失効と回答後の本文5文字、readyを確認 |
+| `uv run python scripts/check_codex.py interrupt --cwd "$env:TEMP\gigas-codex-check"` | 実質問を2秒保留して中断、遅い回答を拒否、runtime終端によるstoppedを確認 |
+| `uv run python scripts/check_codex.py approval --cwd "$env:TEMP\gigas-codex-check"` | local環境の実コマンド承認を2秒保留し、提示されたcancelを送信、要求失効とstoppedを確認。コマンドは許可していない |
+| `uv run python scripts/check_codex.py file-approval --cwd "$env:TEMP\gigas-codex-check"` | 実ファイル追加承認の対象と内容を受信し、2秒保留後にdecline、要求失効・本文187文字・readyを確認。検証ファイルの未作成も確認 |
+
+5件とも `close()` 後の接続タスク残存なし。実ランタイムが提示したcommand判断はaccept/cancelと永続ポリシー変更であり、存在しないdeclineを補っていない。初回試験でこの差とlocal環境IDの拒否を発見し、シナリオとC04を修正して再確認した。`local`は固定版で予約されたローカル実行環境IDである（[定義・登録](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/exec-server/src/environment.rs#L123)）。
+
+通常モードの質問は`isBlocking=false`でもcoreが回答をawaitする（[固定実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/session/mod.rs#L3458)）。実際の2秒保留中もターンが終了せず、上記の回答・中断に成功した。
+
+実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateはM2を含むU02最終確認で記録する。継続利用する実接続手順は[docs](../../../docs/codex-verification.md)に置く。
 
 ## 8. 先送り事項
 
@@ -134,6 +152,6 @@ GUIはM2、APIキー実接続はU06まで。Goal/MCP/旧書込終了はM0と親�
 ## 9. チェックリスト
 
 - [x] 明示承認と対象範囲・所有契約を記録した
-- [ ] TDD項目をcommitと対応付けて完了した
+- [x] TDD項目をcommitと対応付けて完了した
 - [ ] 製品・依存・型・docstring・配布gateを記録した
-- [ ] 実runtime確認と未検証事項を区別しM2へ引き継いだ
+- [x] 実runtime確認と未検証事項を区別しM2へ引き継いだ
