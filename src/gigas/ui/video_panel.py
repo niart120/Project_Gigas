@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRect, QSize, Qt, Signal
+from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QAction, QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QLabel,
@@ -120,16 +120,11 @@ class VideoPanel(QWidget):
         parent: Owning widget, if any.
     """
 
-    connect_requested = Signal()
-    disconnect_requested = Signal()
-
     def __init__(self, parent: QWidget | None = None) -> None:
         """Create the preview and commands without discovering or opening devices."""
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.connect_action = QAction("接続", self)
-        self.disconnect_action = QAction("映像を停止", self)
         self.info_action = QAction("映像情報…", self)
         self.info_dialog: VideoInfoDialog | None = None
         self.status = QLabel("未接続", self)
@@ -139,10 +134,6 @@ class VideoPanel(QWidget):
         self.source.hide()
         self.view = VideoView(self)
         layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
-        self.connect_action.triggered.connect(self.connect_requested)
-        self.disconnect_action.triggered.connect(self.disconnect_requested)
-        self.connect_action.setEnabled(False)
-        self.disconnect_action.setEnabled(False)
 
     def show_information(self, details: str) -> None:
         """Open or explicitly refresh frozen diagnostics without changing capture.
@@ -167,30 +158,16 @@ class VideoPanel(QWidget):
         self,
         snapshot: "CaptureSnapshot",
         settings: "Settings | None",
-        *,
-        available: bool,
-        settings_ready: bool,
     ) -> None:
         """Update controls independently of the slower image refresh rate.
 
         Args:
             snapshot: Current capture state, including cleanup confirmation.
             settings: Settings fixed when the displayed connection was accepted.
-            available: Whether the service and application accept new commands.
-            settings_ready: Whether saved settings permit connecting.
         """
         phase = snapshot.phase
         self.status.setText(
             "終了未確認" if snapshot.cleanup == "unconfirmed" else _PHASE_LABELS[phase]
-        )
-        self.connect_action.setEnabled(
-            available
-            and settings_ready
-            and phase in {"idle", "error"}
-            and snapshot.cleanup != "unconfirmed"
-        )
-        self.disconnect_action.setEnabled(
-            available and phase in {"connecting", "streaming", "enumerating"}
         )
         owned = (
             phase in {"connecting", "streaming", "stopping"} or snapshot.cleanup == "unconfirmed"

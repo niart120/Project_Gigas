@@ -35,7 +35,7 @@
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | S1 フォームは単一の編集値を保持し、一覧更新で変更せず、保存中も閉じられる | regression | integration | 既存フォーム試験を書換え |
-| todo | S2 保存後の最新機器へ旧資源解放後に切替し、未接続は未開始の接続を取り消す | regression | integration | 既存取得制御・切替試験を書換え |
+| refactor-skipped | S2 保存後の最新機器へ旧資源解放後に切替し、未接続は未開始の接続を取り消す | regression | integration | 既存取得制御・切替試験を書換え |
 | todo | S3 モーダルのOK／適用は保存までを共有し、接続成否と閉じる操作を分離する | regression | integration | 既存適用・保存失敗・受理試験を書換え |
 | todo | S4 設定中断・保存中の閉じる・アプリ終了で、I/Oとサービスの寿命を保つ | regression | integration | 既存終了・キーボード・復旧試験を整理 |
 
@@ -56,6 +56,10 @@ M0の現行状態棚卸しを踏襲する。既存captureサービスの世代�
 ### S1 フォームの編集値
 
 `uv run pytest tests/integration/test_video_settings_gui.py -q --tb=short`: 既存試験を新契約へ書換え、モーダルと保存中閉じるの2件red／6件passから8件pass。二重候補・選択意図専用の試験と表示値の重複直積を整理し、22ケースから8ケースへ削減。フォームの三重機器値、接続target API、閉じる禁止状態、非表示診断欄を撤去した。refactor-skipped（状態撤去は今回の振る舞い変更そのもの）。Shellの旧呼出しはS3で置換予定のため、全体試験はこの段階で実施しない。
+
+### S2 最新の映像反映先
+
+`uv run pytest tests/integration/test_video_application.py -q -k 'latest_target or reapplying_same' --tb=short`: 既存の一時停止・接続経路の2試験を、処理中の未接続／次機器への置換と同条件再適用へ書換え。重複切断・再接続による3件redから3件pass。最新反映先だけを保持し、接続／停止action、自動列挙予約、操作可否の重複状態を撤去。refactor-skipped。保存・失敗・実spawnの既存回帰はShell結合後に同じファイルで検証する。
 
 ## 10. 先送り
 

@@ -8,6 +8,8 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
+from gigas.app.video import VideoController
+from gigas.ui.video_panel import VideoPanel
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
 from gigas.storage.settings import Settings, load_settings, save_settings
@@ -184,27 +186,34 @@ def test_dirty_selection_cannot_connect_saved_device_but_can_refresh(
     assert capture.connections[-1].device_path == "path-b"
 
 
-def test_disconnected_save_intent_can_be_cancelled_from_menu(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, io = application
-    capture.finish_disconnect = True
-    shell.disconnect_video()
-    choose_second(shell)
-    io.release.clear()
-    dialog = shell.dialog
-    assert dialog is not None
-    dialog.save_button.click()
-    qtbot.waitUntil(io.entered.is_set)
-    shell.video.timer.timeout.emit()
-    assert shell.window.video.disconnect_action.isEnabled()
-    shell.window.video.disconnect_action.trigger()
-    io.release.set()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    for _ in range(3):
-        shell.video.timer.timeout.emit()
-    assert len(capture.connections) == 1
-    assert shell.baseline.capture_device == "path-b"
+@pytest.mark.parametrize("target", ["", "path-c"])
+def test_latest_target_replaces_unstarted_switch(qtbot: QtBot, target: str) -> None:
+    capture = ControlledCapture()
+    panel = VideoPanel()
+    qtbot.addWidget(panel)
+    controller = VideoController(panel, capture)
+    controller.start()
+    try:
+        controller.apply_capture(Settings(capture_device="path-a"))
+        capture.stream()
+        controller.timer.timeout.emit()
+        capture.finish_disconnect = False
+        controller.apply_capture(Settings(capture_device="path-b"))
+        controller.apply_capture(Settings(capture_device=target))
+        assert capture.disconnects == 1
+        assert len(capture.connections) == 1
+        capture.complete_disconnect()
+        controller.timer.timeout.emit()
+        assert [request.device_path for request in capture.connections] == (
+            ["path-a", target] if target else ["path-a"]
+        )
+        if target:
+            capture.stream()
+            controller.timer.timeout.emit()
+        assert controller.apply_state == "complete"
+    finally:
+        controller.shutdown()
+        assert controller.shutdown_complete
 
 
 def test_missing_saved_device_cannot_be_explicitly_connected(
@@ -311,24 +320,25 @@ def test_manual_stop_cancels_connection_waiting_for_save(
     assert not shell.video.applying
 
 
-def test_saved_device_connect_and_disconnect_refresh_are_explicit(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, _io = application
-    dialog = shell.dialog
-    assert dialog is not None
-    shell.window.video.disconnect_action.trigger()
-    assert capture.disconnects == 1
-    assert capture.refreshes == 0
-    capture.complete_disconnect()
-    qtbot.waitUntil(lambda: capture.refreshes == 1)
-    capture.complete_enumeration((DeviceInfo("First", "path-a"),))
-    qtbot.waitUntil(shell.window.video.connect_action.isEnabled)
-    shell.window.video.connect_action.trigger()
-    assert len(capture.connections) == 2
-    capture.stream()
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    assert capture.refreshes == 1
+def test_reapplying_same_capture_conditions_keeps_connection(qtbot: QtBot) -> None:
+    capture = ControlledCapture()
+    panel = VideoPanel()
+    qtbot.addWidget(panel)
+    controller = VideoController(panel, capture)
+    controller.start()
+    settings = Settings(capture_device="path-a")
+    try:
+        controller.apply_capture(settings)
+        controller.apply_capture(settings)
+        capture.stream(actual_size=(32, 24))
+        controller.timer.timeout.emit()
+        controller.apply_capture(replace(settings, preview_fps=15, model="changed"))
+        assert len(capture.connections) == 1
+        assert capture.disconnects == 0
+        assert controller.apply_state == "complete"
+    finally:
+        controller.shutdown()
+        assert controller.shutdown_complete
 
 
 def test_display_only_apply_and_application_close_save_do_not_start_video(
