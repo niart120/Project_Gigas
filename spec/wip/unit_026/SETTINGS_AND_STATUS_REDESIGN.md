@@ -187,7 +187,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | todo | 処理中の操作境界 | regression / integration | 二重保存防止、切断によるOK予定取消し、設定終了禁止でも既存停止とアプリ終了が可能 |
 | todo | 未接続と適用の操作境界 | regression / integration | 未接続は最後の実機を消さない、保存値と同じ機器も開始できる、要求が未接続なら一般の変更で開始しない、同機器再試行、保存待ちの停止、終了未確認、停止後の適用で開始要求を復活させない |
 | todo | 保存と取得先要求の分離 | regression / integration | 再読込で接続しない、保存B・実取得Aでも一般の保存でBを消さない、列挙・保存完了で要求を上書きしない |
-| todo | フォーム再分類と設定保持 | regression / integration | 移動したserial・未知項目・既存認証値を保持、初回列挙・未保存選択と機器名識別を維持 |
+| green | フォーム再分類と設定保持 | regression / integration | 移動したserial・未知項目・既存認証値を保持、初回列挙・未保存選択と機器名識別を維持 |
 | todo | 状態・通知・復旧への到達 | regression / integration | 分割幅追従、短い状態を保持、通知再表示とコピー維持、読込失敗時再読込、取消し可能期間 |
 | green | プレビューの比率維持と引き延ばし | new / integration | 4:3・超横長・同寸法の表示領域と黒帯、クロップなし、共通Frameの画素不変、取得自動でも切替可能 |
 | green | 画像設定の保存と移行 | new / unit | 省略時FullHD/preview_letterbox=true、不正値拒否、未知width/height保持、表示設定と取得設定を独立保存 |
@@ -249,3 +249,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### C2 可変寸法の共有
 
 新test_capture_transportとspawn実寸試験は要求寸法固定による11件red→11件green。capture関連回帰80件成功（tests/unit/test_capture_*とtests/integration/test_capture_*、--basetemp=tmp/pytest-capture）。4K容量・実寸ヘッダー・不正payload・途中寸法変更・再試行を確認。担当ruff/format/ty成功、C1のoptional型保留を解消。refactor-skipped。4K実機負荷は後続で確認する。
+
+### S2 フォーム再分類と設定保持
+
+`uv run pytest tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-settings --tb=short -q`: 新APIと配置が未実装の18件red→19件green。保存実機と取得先要求、既存認証・未知設定、処理中閉じる抑止を確認。standalone認証確認を含め20件green。担当ruff/format/ty成功、独立レビュー必須指摘なし。620×440と480×360の各3tab模擬描画は横縦scrollなし。Shell結合はA2/A3で行う。refactor-skipped。
