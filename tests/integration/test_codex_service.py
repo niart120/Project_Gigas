@@ -134,3 +134,31 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
+
+
+def test_shutdown_still_closes_when_stop_fails(qtbot: QtBot, tmp_path: Path) -> None:
+    class FailingStop(ControlledConnection):
+        """Fail interruption without changing close cleanup."""
+
+        async def stop(self) -> None:
+            """Inject an unexpected operation failure."""
+            message = "secret stop error"
+            raise OSError(message)
+
+    connections: list[FailingStop] = []
+
+    def factory(
+        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+    ) -> FailingStop:
+        connection = FailingStop(emit)
+        connections.append(connection)
+        return connection
+
+    service = CodexServiceThread(factory)
+    service.start()
+    service.connect_runtime(ConnectionOptions(tmp_path))
+    qtbot.waitUntil(lambda: bool(connections) and connections[0].opened.is_set())
+    service.shutdown()
+    qtbot.waitUntil(lambda: service.wait(0))
+    assert connections[0].closed.is_set()
+    assert not service.shutdown_error

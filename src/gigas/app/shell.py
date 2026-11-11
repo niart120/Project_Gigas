@@ -51,6 +51,7 @@ class ApplicationShell(QObject):
         self.pending: str | None = None
         self.committed = False
         self._stopped = False
+        self._service_unavailable = False
         self.service = CodexServiceThread() if service is None else service
         self.confirmation: QMessageBox | None = None
         self.wait_expired = False
@@ -77,7 +78,7 @@ class ApplicationShell(QObject):
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
-        self.service.finished.connect(self._finish_shutdown)
+        self.service.finished.connect(self._service_finished)
 
     def start(self) -> None:
         """Display the main window."""
@@ -189,10 +190,17 @@ class ApplicationShell(QObject):
         if cancelable or self.committed:
             state = "閉じる待ち" if self.pending == "dialog" else "終了待ち"
             if self.wait_expired:
-                target = {"load": "設定読込", "save": "設定保存"}.get(
-                    self.operation, "ワーカー終了"
-                )
-                state = f"{state} · {target} · {self.path}"
+                targets = []
+                if self.operation is not None:
+                    targets.append(
+                        f"{'設定読込' if self.operation == 'load' else '設定保存'} · {self.path}"
+                    )
+                else:
+                    if not self.io_thread.wait(0):
+                        targets.append(f"設定終了 · {self.path}")
+                    if not self.service.wait(0):
+                        targets.append("Codex終了")
+                state = " · ".join([state, *targets])
         self.window.status.setText(state)
         self.window.cancel_close_button.setVisible(cancelable)
         self.window.cancel_close_button.setText(
@@ -200,7 +208,10 @@ class ApplicationShell(QObject):
         )
         self.window.settings_button.setEnabled(not self.committed)
         self.window.connection.set_available(
-            self.ready and not self.committed and self.pending is None
+            self.ready
+            and not self.committed
+            and self.pending is None
+            and not self._service_unavailable
         )
         if self.dialog is not None:
             self.dialog.status.setText(state)
@@ -214,7 +225,9 @@ class ApplicationShell(QObject):
             self.dialog.cancel_close_button.setText(self.window.cancel_close_button.text())
 
     def request_close(self) -> None:
-        """Finish pending I/O before releasing the owned worker."""
+        """Interrupt the turn, then finish settings and service shutdown."""
+        if not self.committed:
+            self.window.connection.interrupt()
         self._close("app")
 
     def _close(self, target: str) -> None:
@@ -287,6 +300,13 @@ class ApplicationShell(QObject):
     def _show_wait_details(self) -> None:
         self.wait_expired = True
         self._render()
+
+    @Slot()
+    def _service_finished(self) -> None:
+        if not self.committed:
+            self._service_unavailable = True
+            self.window.connection.service_finished()
+        self._finish_shutdown()
 
     @Slot()
     def _finish_shutdown(self) -> None:

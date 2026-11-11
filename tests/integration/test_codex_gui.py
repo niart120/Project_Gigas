@@ -208,3 +208,25 @@ def test_approval_sends_only_the_clicked_advertised_decision(qtbot: QtBot) -> No
     card.decision_buttons["decline"].click()
     card.decision_buttons["accept"].click()
     assert answers == [AnswerSubmission("file", decision="decline")]
+
+
+@pytest.mark.parametrize("connection_created", [False, True])
+def test_connection_failure_persists_until_explicit_disconnect(
+    qtbot: QtBot, connection_created: bool
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    if connection_created:
+        panel.handle_event(ServiceEvent(1, SessionStatus("error", detail="認証方式エラー")))
+    panel.handle_result(ServiceResult(1, "connect", "接続失敗"))
+    panel.set_available(False)
+    panel.set_available(True)
+    assert panel.status.text() == "接続失敗"
+    assert not panel.connect_button.isEnabled()
+    assert not panel.send_button.isEnabled()
+    assert panel.disconnect_button.isEnabled()
+    panel.disconnect_button.click()
+    assert not panel.connect_button.isEnabled()
+    panel.handle_result(ServiceResult(1, "disconnect"))
+    assert panel.connect_button.isEnabled()

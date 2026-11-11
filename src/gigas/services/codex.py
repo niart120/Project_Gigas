@@ -211,6 +211,12 @@ class CodexServiceThread(QThread):
         await self._done.wait()
         try:
             if self._connection is not None:
+                try:
+                    await self._connection.stop()
+                except Exception:  # noqa: BLE001 -- interruption failure must not skip close
+                    self.completed.emit(
+                        ServiceResult(self._active_generation, "stop", "中断に失敗")
+                    )
                 await self._connection.close()
                 self._connection = None
         finally:

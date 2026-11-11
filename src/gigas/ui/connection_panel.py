@@ -74,6 +74,7 @@ class ConnectionPanel(QWidget):
         self._pending: set[str] = set()
         self._texts: dict[str, tuple[str, str]] = {}
         self._submitted = ""
+        self._error = ""
         self._stopping = False
         self.cards: dict[str, RequestCard] = {}
         layout = QVBoxLayout(self)
@@ -132,6 +133,7 @@ class ConnectionPanel(QWidget):
         self._generation = generation
         self._connected = True
         self._status = SessionStatus("connecting")
+        self._error = ""
         self._pending = {"connect"}
         self._stopping = False
         for card in self.cards.values():
@@ -150,6 +152,14 @@ class ConnectionPanel(QWidget):
         self._available = available
         self._render()
 
+    def service_finished(self) -> None:
+        """Disable commands after an unexpected service-thread exit."""
+        self._available = False
+        self._status = SessionStatus("error", detail="接続サービス終了")
+        self.login_url.clear()
+        self._expire_requests()
+        self._render()
+
     @Slot(object)
     def handle_event(self, envelope: object) -> None:
         """Apply a typed event only when it belongs to the displayed connection."""
@@ -157,6 +167,7 @@ class ConnectionPanel(QWidget):
             return
         event = envelope.event
         if isinstance(event, SessionStatus):
+            self._error = ""
             self._status = event
             if event.phase in {"stopping", "stopped", "closed", "error"}:
                 self._expire_requests()
@@ -202,6 +213,9 @@ class ConnectionPanel(QWidget):
         if not isinstance(result, ServiceResult) or result.generation != self._generation:
             return
         self._pending.discard(result.operation)
+        self._error = result.error
+        if result.operation == "connect" and result.error:
+            self._status = SessionStatus("error", detail=result.error)
         if (
             result.operation == "send"
             and not result.error
@@ -212,8 +226,6 @@ class ConnectionPanel(QWidget):
             self._connected = False
             self._status = SessionStatus("closed")
         self._render()
-        if result.error:
-            self.status.setText(result.error)
 
     def interrupt(self) -> None:
         """Immediately block repeated interruption and enqueue a stop request."""
@@ -226,6 +238,7 @@ class ConnectionPanel(QWidget):
         self.interrupt_requested.emit()
 
     def _disconnect(self) -> None:
+        self._error = ""
         self._pending.add("disconnect")
         self._expire_requests()
         self.login_url.clear()
@@ -233,6 +246,7 @@ class ConnectionPanel(QWidget):
         self.disconnect_requested.emit()
 
     def _login(self) -> None:
+        self._error = ""
         self._pending.add("login")
         self._render()
         self.login_requested.emit()
@@ -246,6 +260,7 @@ class ConnectionPanel(QWidget):
         if "send" in self._pending:
             return
         self._submitted = self.prompt.toPlainText()
+        self._error = ""
         self._stopping = False
         self._pending.add("send")
         self._render()
@@ -269,13 +284,13 @@ class ConnectionPanel(QWidget):
         self.prompt.setReadOnly(not ready)
         self.interrupt_button.setEnabled(
             available
-            and phase in {"starting", "running", "waiting"}
+            and (phase in {"starting", "running", "waiting"} or "send" in self._pending)
             and "stop" not in self._pending
         )
         visible = available and phase == "authenticating" and bool(self.login_url.text())
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
-        self.status.setText(self._status.detail or _PHASE_LABELS[phase])
+        self.status.setText(self._error or self._status.detail or _PHASE_LABELS[phase])
         self.model.setText(
             " · ".join(value for value in (self._status.model, self._status.effort) if value)
         )

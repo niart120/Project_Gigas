@@ -48,7 +48,7 @@ GUIには項目名・短い状態・エラー理由とCodex/ユーザー本文�
 | refactor-skipped | G01 接続生成・操作を専用ループで行い、待機中の中断と終了で所有処理を回収する | new / edge | integration | 起動時未接続、GUI pulse、部分失敗、shutdown先着 |
 | refactor-skipped | G02 保存済み設定で接続し、本文・認証・通常送信・中断・切断を画面から扱う | new | integration | URLは明示open、delta/replace、失敗時入力保持 |
 | refactor-skipped | G03 質問・承認をtokenの有効期間に一度だけ回答する | new / edge | integration | 複数質問、秘密入力、選択肢、承認、失効と旧世代 |
-| todo | G04 設定と接続の両終了までGUIを動かし、取消し後もターンを再開しない | regression / edge | integration | 両完了順、設定失敗、早期finished、wait(0) |
+| refactor-done | G04 設定と接続の両終了までGUIを動かし、取消し後もターンを再開しない | regression / edge | integration | 両完了順、設定失敗、早期finished、wait(0) |
 
 ## 7. 設計メモ
 
@@ -75,6 +75,12 @@ redはConnectionPanel未実装によるImportError。greenは接続操作・認�
 ### G03 実行履歴
 
 redはanswer_requested未実装により新規6件が失敗。greenは質問ごとの入力、許可された承認判断、token単位のカードと不可逆失効を実装しGUI8件がpass。回答の重複、旧世代通知、RequestResolved・停止・切断・終端後の遅いクリックを確認した。秘密入力はマスクし、提出・失効時に消去する。対象ruff/ty成功。refactor-skipped: QuestionInputとRequestCardを分離し、ConnectionPanelは世代・失効のみを管理するため追加整理は不要。実runtimeでの要求提示・回答は親の受入へ残す。
+
+### G04 実行履歴
+
+redは終了要求が設定保存・未保存確認の前に中断しない3件と、両終了の待機対象を区別しない2件が失敗。greenは中断をclose受付時へ移し、終了取消し・保存失敗後の再開を防いだ。両QThreadのwait(0)、stoppedの一回通知、GUI pulse、service早期終了、stop例外時にもcloseする経路を確認した。
+
+独立レビューの「操作失敗が次の再描画で接続中に戻る」を採用し、factory失敗相当とopen失敗相当の2件をredから修正した。エラーは保持し、明示切断の成功まで再接続を許可しない。対象30件pass、ruff/ty成功。refactor-done: 予期しないservice終了の表示と、終了確定後の合流を別slotへ分離した。設定の既存11件を維持した。
 
 ## 10. 先送り事項
 
