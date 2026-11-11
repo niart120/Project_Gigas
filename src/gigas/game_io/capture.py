@@ -2,11 +2,13 @@
 
 import math
 import multiprocessing
+import time
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from threading import Condition, Thread
 from typing import TYPE_CHECKING, Literal
 
-from gigas.game_io._capture_process import SharedSlot, WorkerMessage, worker_main
+from gigas.game_io._capture_process import SharedSlot, receive_message, worker_main
 from gigas.game_io.backend import OpenCVBackend
 from gigas.game_io.frames import FrameStore
 from gigas.game_io.models import CaptureError
@@ -85,6 +87,10 @@ class _Session:
     listed: bool = False
     error: str = ""
     stop_sent: bool = False
+    status_closed: bool = False
+    stop_at: float = 0.0
+    forced_at: float | None = None
+    unconfirmed: bool = False
 
 
 class CaptureService(Thread):
@@ -116,6 +122,7 @@ class CaptureService(Thread):
         self._pending: tuple[str, CaptureOptions | None] | None = None
         self._closing = False
         self._cancel = False
+        self._retained: list[object] = []
 
     def snapshot(self) -> CaptureSnapshot:
         """Return current state and the immutable latest image without device I/O."""
@@ -123,16 +130,20 @@ class CaptureService(Thread):
             return replace(self._state, frame=self._frames.latest())
 
     def refresh_devices(self) -> bool:
-        """Start enumeration if idle; return false while busy or shutting down."""
+        """Start enumeration unless busy, shutting down, or cleanup is unconfirmed."""
         return self._request(None)
 
     def connect(self, options: "CaptureOptions") -> bool:
-        """Start one connection with validated settings, returning request acceptance."""
+        """Accept a connection only when idle with no unconfirmed previous cleanup."""
         return self._request(options)
 
     def _request(self, options: "CaptureOptions | None") -> bool:
         with self._condition:
-            if self._closing or self._state.phase not in ("idle", "error"):
+            if (
+                self._closing
+                or self._state.phase not in ("idle", "error")
+                or self._state.cleanup == "unconfirmed"
+            ):
                 return False
             generation = self._state.generation + (options is not None)
             self._cancel = False
@@ -183,52 +194,90 @@ class CaptureService(Thread):
                     continue
                 _operation, options = pending
                 generation = self._state.generation
-            session = self._spawn(options, generation)
+            try:
+                session = self._spawn(options, generation)
+            except Exception:  # noqa: BLE001 -- thread boundary reports startup failures
+                with self._condition:
+                    self._frames.invalidate()
+                    self._state = replace(
+                        self._state,
+                        phase="error",
+                        error="映像取得プロセスの起動失敗",
+                    )
+                continue
             self._monitor(session, generation)
 
     def _spawn(self, options: "CaptureOptions | None", generation: int) -> _Session:
         context = multiprocessing.get_context("spawn")
-        slot = SharedSlot.create(context, options) if options is not None else None
-        stop_reader, stop_writer = context.Pipe(duplex=False)
-        status_reader, status_writer = context.Pipe(duplex=False)
-        process = context.Process(
-            target=worker_main,
-            args=(
-                options,
-                generation,
-                slot.memory.name if slot else None,
-                slot.lock if slot else None,
-                stop_reader,
-                status_writer,
-                self._factory,
-            ),
-            name=f"gigas-capture-{generation}",
-            daemon=True,
-        )
-        try:
-            process.start()
-        except BaseException:
-            stop_writer.close()
-            status_reader.close()
+        with ExitStack() as rollback:
+            slot = SharedSlot.create(context, options) if options is not None else None
             if slot is not None:
-                slot.close(owner=True)
-            raise
-        finally:
+                rollback.callback(self._rollback, slot, lambda: slot.close(owner=True))
+            stop_reader, stop_writer = context.Pipe(duplex=False)
+            rollback.callback(self._rollback, stop_reader, stop_reader.close)
+            rollback.callback(self._rollback, stop_writer, stop_writer.close)
+            status_reader, status_writer = context.Pipe(duplex=False)
+            rollback.callback(self._rollback, status_reader, status_reader.close)
+            rollback.callback(self._rollback, status_writer, status_writer.close)
+            process = context.Process(
+                target=worker_main,
+                args=(
+                    options,
+                    generation,
+                    slot.memory.name if slot else None,
+                    slot.lock if slot else None,
+                    stop_reader,
+                    status_writer,
+                    self._factory,
+                ),
+                name=f"gigas-capture-{generation}",
+                daemon=True,
+            )
+            rollback.callback(self._rollback, process, lambda: self._rollback_process(process))
+            process.start()
             stop_reader.close()
             status_writer.close()
+            rollback.pop_all()
         return _Session(process, status_reader, stop_writer, slot)
 
+    def _rollback(self, resource: object, close: "Callable[[], None]") -> None:
+        try:
+            close()
+        except Exception:  # noqa: BLE001 -- keep ownership when partial startup cleanup fails
+            self._retained.append(resource)
+            with self._condition:
+                self._state = replace(self._state, cleanup="unconfirmed")
+
+    def _rollback_process(self, process: "BaseProcess") -> None:
+        if process.is_alive():
+            process.terminate()
+            process.join(self._timeouts.terminate)
+        process.close()
+
     def _messages(self, session: _Session) -> None:
-        while True:
+        if session.status_closed:
+            return
+        for _ in range(8):
             try:
                 if not session.status.poll(0):
                     break
-                message: object = session.status.recv()
+                message = receive_message(session.status)
             except (EOFError, OSError):
+                session.status_closed = True
+                with self._condition:
+                    if (
+                        not self._cancel
+                        and not session.stop_sent
+                        and not session.released
+                        and not session.listed
+                        and not session.error
+                    ):
+                        session.error = "映像取得プロセスの通信終了"
                 break
-            if not isinstance(message, WorkerMessage):
+            except (CaptureError, ValueError):
                 session.error = "映像取得プロセスの通知が不正"
-                continue
+                session.status_closed = True
+                break
             with self._condition:
                 if message.kind == "devices":
                     session.listed = True
@@ -249,41 +298,113 @@ class CaptureService(Thread):
     def _monitor(self, session: _Session, generation: int) -> None:
         sequence = 0
         first: Frame | None = None
+        started = progress = time.monotonic()
         while session.process.is_alive():
-            self._messages(session)
-            with self._condition:
-                cancel = self._cancel
-            if (cancel or session.error) and not session.stop_sent:
-                session.stop.close()
-                session.stop_sent = True
-            if session.slot is not None and not cancel and not session.error:
-                frame = session.slot.read(generation, sequence)
-                if frame is not None:
-                    sequence = frame.sequence
-                    if first is None:
-                        first = frame
-                    elapsed = (frame.monotonic_ns - first.monotonic_ns) / 1_000_000_000
-                    rate = (frame.sequence - first.sequence) / elapsed if elapsed > 0 else None
-                    with self._condition:
-                        if self._frames.publish(frame):
-                            self._state = replace(self._state, phase="streaming", measured_fps=rate)
+            try:
+                self._messages(session)
+                with self._condition:
+                    cancel = self._cancel
+                if session.slot is not None and not cancel and not session.error:
+                    frame = session.slot.read(generation, sequence)
+                    if frame is not None:
+                        sequence = frame.sequence
+                        progress = time.monotonic()
+                        if first is None:
+                            first = frame
+                        self._publish(frame, first)
+            except Exception:  # noqa: BLE001 -- monitor failures must still stop/reap the worker
+                session.error = "映像監視処理が失敗"
+            self._deadlines(session, started, progress, sequence)
             with self._condition:
                 self._condition.wait(timeout=0.01)
-        self._messages(session)
-        session.process.join(0)
+        self._finalize(session)
+
+    def _publish(self, frame: "Frame", first: "Frame") -> None:
+        elapsed = (frame.monotonic_ns - first.monotonic_ns) / 1_000_000_000
+        rate = (frame.sequence - first.sequence) / elapsed if elapsed > 0 else None
+        with self._condition:
+            if self._frames.publish(frame):
+                self._state = replace(self._state, phase="streaming", measured_fps=rate)
+
+    def _deadlines(self, session: _Session, started: float, progress: float, sequence: int) -> None:
+        now = time.monotonic()
+        with self._condition:
+            cancel = self._cancel
+        if not session.stop_sent:
+            if not cancel and not session.error:
+                if sequence == 0 and not session.listed and now - started >= self._timeouts.startup:
+                    session.error = "映像取得の開始期限切れ"
+                elif sequence > 0 and now - progress >= self._timeouts.frame:
+                    session.error = "映像フレーム待機期限切れ"
+            if cancel or session.error or session.listed or session.released:
+                session.stop_sent = True
+                session.stop_at = now
+                try:
+                    session.stop.close()
+                except OSError:
+                    session.error = "映像停止通知に失敗"
+                with self._condition:
+                    self._frames.invalidate()
+                    self._state = replace(self._state, phase="stopping", error=session.error)
+        elif session.forced_at is None and now - session.stop_at >= self._timeouts.stop:
+            session.forced_at = now
+            try:
+                session.process.terminate()
+            except OSError:
+                session.unconfirmed = True
+        elif session.forced_at is not None and now - session.forced_at >= self._timeouts.terminate:
+            session.unconfirmed = True
+        if session.unconfirmed:
+            with self._condition:
+                self._state = replace(
+                    self._state,
+                    phase="stopping",
+                    cleanup="unconfirmed",
+                    error="映像取得プロセスの終了未確認",
+                )
+
+    def _finalize(self, session: _Session) -> None:
+        try:
+            self._messages(session)
+        except Exception:  # noqa: BLE001 -- final notification cannot skip resource cleanup
+            session.error = "映像監視処理が失敗"
+        join_failed = False
+        try:
+            session.process.join(0)
+        except Exception:  # noqa: BLE001 -- continue releasing handles after a join failure
+            join_failed = True
+            session.error = "映像取得プロセスの終了確認失敗"
         with self._condition:
             if not self._cancel and not session.error and not session.listed:
                 session.error = "映像取得プロセスが終了"
             self._frames.invalidate()
-        session.stop.close()
-        session.status.close()
-        session.process.close()
-        if session.slot is not None:
-            session.slot.close(owner=True)
+        cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
+        if session.forced_at is not None:
+            cleanup = "forced"
+        elif session.released or session.listed:
+            cleanup = "graceful"
+        closers: list[Callable[[], None]] = [
+            session.stop.close,
+            session.status.close,
+            session.process.close,
+        ]
+        slot = session.slot
+        if slot is not None:
+            closers.append(lambda: slot.close(owner=True))
+        for close in closers:
+            try:
+                close()
+            except Exception:  # noqa: BLE001 -- report unreleased host resources
+                cleanup = "unconfirmed"
+                session.error = "映像取得資源の解放未確認"
+        if join_failed:
+            cleanup = "unconfirmed"
+        if cleanup == "unconfirmed":
+            self._retained.append(session)
         with self._condition:
             self._state = replace(
                 self._state,
                 phase="error" if session.error else "idle",
                 error=session.error,
-                cleanup="graceful" if session.released or session.listed else "none",
+                cleanup=cleanup,
             )

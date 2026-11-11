@@ -1,5 +1,6 @@
 """Private spawn entry and bounded shared-memory frame transport."""
 
+import json
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -8,7 +9,7 @@ from struct import Struct
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from gigas.game_io.backend import acquire_frames
-from gigas.game_io.models import CaptureError, Frame
+from gigas.game_io.models import CaptureError, DeviceInfo, Frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -16,19 +17,20 @@ if TYPE_CHECKING:
     from multiprocessing.synchronize import Lock
 
     from gigas.game_io.backend import CaptureBackend
-    from gigas.game_io.models import CaptureOptions, DeviceInfo
+    from gigas.game_io.models import CaptureOptions
 
 _HEADER = Struct("<QQq")
+MESSAGE_LIMIT = 65536
 
 
 class Channel(Protocol):
     """Portable public operations of a multiprocessing pipe endpoint."""
 
-    def send(self, value: object, /) -> None:
+    def send_bytes(self, value: bytes, /) -> None:
         """Send one small control message."""
         ...
 
-    def recv(self) -> object:
+    def recv_bytes(self, maxlength: int, /) -> bytes:
         """Receive a control message after readiness was observed."""
         ...
 
@@ -49,6 +51,61 @@ class WorkerMessage:
     devices: "tuple[DeviceInfo, ...]" = ()
     fps: float | None = None
     error: str = ""
+
+
+def send_message(channel: Channel, message: WorkerMessage) -> None:
+    """Send bounded JSON control data without pickle or frame-sized pipe writes."""
+    data = json.dumps(
+        {
+            "kind": message.kind,
+            "devices": [{"name": d.name, "path": d.path} for d in message.devices],
+            "fps": message.fps,
+            "error": message.error,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    if len(data) > MESSAGE_LIMIT or len(message.devices) > 64:
+        error = "映像機器の列挙結果が上限超過"
+        raise CaptureError(error)
+    channel.send_bytes(data)
+
+
+def receive_message(channel: Channel) -> WorkerMessage:
+    """Validate a small control message after a pipe readiness check."""
+    value: object = json.loads(channel.recv_bytes(MESSAGE_LIMIT))
+    error = "映像取得プロセスの通知が不正"
+    if not isinstance(value, dict):
+        raise CaptureError(error)
+    kind = value.get("kind")
+    if kind not in ("devices", "opened", "released", "error"):
+        raise CaptureError(error)
+    raw_devices = value.get("devices")
+    if not isinstance(raw_devices, list) or len(raw_devices) > 64:
+        raise CaptureError(error)
+    devices = []
+    for device in raw_devices:
+        if not isinstance(device, dict):
+            raise CaptureError(error)
+        name, path = device.get("name"), device.get("path")
+        if not isinstance(name, str) or not isinstance(path, str) or not path:
+            raise CaptureError(error)
+        devices.append(DeviceInfo(name, path))
+    fps = value.get("fps")
+    if fps is not None and (type(fps) not in (int, float) or not 0 < fps < float("inf")):
+        raise CaptureError(error)
+    message = value.get("error")
+    if not isinstance(message, str):
+        raise CaptureError(error)
+    match kind:
+        case "devices":
+            return WorkerMessage("devices", devices=tuple(devices))
+        case "opened":
+            return WorkerMessage("opened", fps=None if fps is None else float(fps))
+        case "released":
+            return WorkerMessage("released")
+        case _:
+            return WorkerMessage("error", error=message)
 
 
 class SharedSlot:
@@ -73,7 +130,12 @@ class SharedSlot:
     def create(cls, context: "BaseContext", options: "CaptureOptions") -> "SharedSlot":
         """Allocate exactly one requested BGR image plus its acquisition metadata."""
         memory = SharedMemory(create=True, size=_HEADER.size + options.width * options.height * 3)
-        return cls(memory, context.Lock(), options.width, options.height)
+        try:
+            return cls(memory, context.Lock(), options.width, options.height)
+        except BaseException:
+            memory.close()
+            memory.unlink()
+            raise
 
     def publish(self, frame: Frame) -> None:
         """Replace the slot, dropping this frame if the reader briefly owns it."""
@@ -142,7 +204,7 @@ def worker_main(
         backend = factory()
         if options is None:
             devices = tuple(device.info for device in backend.enumerate() if device.info.path)
-            status.send(WorkerMessage("devices", devices=devices))
+            send_message(status, WorkerMessage("devices", devices=devices))
         elif memory_name is not None and lock is not None:
             slot = SharedSlot(SharedMemory(name=memory_name), lock, options.width, options.height)
             acquire_frames(
@@ -151,13 +213,13 @@ def worker_main(
                 backend,
                 lambda: _stop_requested(stop),
                 slot.publish,
-                lambda fps: status.send(WorkerMessage("opened", fps=fps)),
-                lambda: status.send(WorkerMessage("released")),
+                lambda fps: send_message(status, WorkerMessage("opened", fps=fps)),
+                lambda: send_message(status, WorkerMessage("released")),
             )
     except Exception as failure:  # noqa: BLE001 -- sanitize the native driver boundary
         error = str(failure) if isinstance(failure, CaptureError) else "映像取得処理が失敗"
         with suppress(BrokenPipeError, EOFError, OSError):
-            status.send(WorkerMessage("error", error=error))
+            send_message(status, WorkerMessage("error", error=error))
     finally:
         if slot is not None:
             slot.close(owner=False)

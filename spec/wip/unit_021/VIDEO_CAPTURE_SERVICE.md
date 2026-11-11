@@ -30,7 +30,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 | refactor-skipped | C2 最新1枚の画像・連番・時計を加工から保護する | new | unit | 受信停止と再接続世代 |
 | refactor-skipped | C3 DirectShow取得が要求を適用し実フレーム検証と解放を行う | new | unit | 読込失敗・寸法不一致・例外 |
 | refactor-skipped | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
-| todo | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
+| refactor-skipped | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
 
 一度に一項目だけをred→greenへ進め、各項目の検証と仕様状態を一つの論理コミットへまとめる。
 
@@ -50,6 +50,10 @@ C4: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_c
 
 配布物の追加検証: root担当で実wheelから機器を開かないspawn列挙・不在pathの拒否・終了を確認する予定。C1〜C5のTDDとは別の配布gateとして結果を追記する。
 
+C5: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/integration/test_capture_failures.py tests/integration/test_capture_service.py --basetemp=tmp/pytest-capture -q` は起動期限が未実装で列挙中のままとなるred後、51 passed（単体30・実spawn結合21）。短いstartup期限の試験は子の起動期限だけを検証し、各機器呼出固着の試験では子が列挙/open/read/releaseへ到達したmarkerを確認してから停止した。read停止期限、read失敗、異常死、共有Lock保持中の死亡、force後の新世代接続、過大制御通知、列挙結果後の終了固着、spawnとLock生成失敗、画像/通知監視例外、join/親close失敗、停止Pipeのclose失敗後のforce回収を確認した。終了未確認ではサービスAPIも再受付を拒否し、未回収資源の参照を保持する。
+
+制御通知を最大64 KiBのJSON、列挙を64デバイスに制限し、サイズ上限付き受信へ変更した。フレームは共有メモリに限定する。C5の担当ruff/format/tyはpass、ignore/castは追加なし。期限、最新画像、終了回収を別メソッドへ分けた実装を確認し、green後の追加構造変更は不要と判断した。実機の映像取得・プレビュー・機器再接続はroot担当で最終版を固定後に確認する。
+
 ## 8. 先送り事項
 
 保存・MCPと新フレーム待ちはU04、入力後の実映像遅延はU05。DirectShowの列挙とindexによるopenは原子的でないため、ちょうど機器構成が変わる競合を完全排除できない。ドライバ内部のバッファ遅延と物理抜去は実行した条件だけを記録する。
@@ -57,6 +61,6 @@ C4: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_c
 ## 9. 完了チェックリスト
 
 - [x] M0の採用判断と契約を照合した
-- [ ] 各TDD項目を検証しコミットした
-- [ ] 型・docstring・公開docsを整合させた
+- [x] 各TDD項目を検証しコミットした
+- [x] 型・docstring・公開docsを整合させた
 - [ ] gateと未検証事項を記録した

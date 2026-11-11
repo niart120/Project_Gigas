@@ -10,9 +10,11 @@ from tests.integration.peers.capture_peer import PeerBackend
 
 
 def wait_for(
-    service: CaptureService, predicate: Callable[[CaptureSnapshot], bool]
+    service: CaptureService,
+    predicate: Callable[[CaptureSnapshot], bool],
+    timeout: float = 8,
 ) -> CaptureSnapshot:
-    deadline = time.monotonic() + 8
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         snapshot = service.snapshot()
         if predicate(snapshot):
