@@ -18,7 +18,7 @@
 
 [03 I/O](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[07 検証](../../initial/07-verification.md)、[08 SDK](../../initial/08-sdk-compatibility.md)、[10 UI](../../initial/10-ui-interaction.md)、[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を参照する。
 
-M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/R04は現在のコード・試験で再確認し、独立した観測処理の改訂を不必要に止めない。採用候補MCP SDK 2.3.0とCodex 0.167.0の実接続・永続thread・短命Bearerの残存は未確認。SDKの模擬HTTP試験を製品の実接続と同一視しない。実接続に必要な経路が成立しない場合は依存する結合を再検討する。
+着手時はM1コードと既存試験が存在し、MCP・保存先UIは未結合だった。R02/R04を再確認・修正したうえで結合した。現在はMCP SDK 2.3.0とCodex 0.167.0による製品経路の固定画像受信、後のターンでの保存画像参照、終了後の公開thread/readを確認済み。短命Bearerは当該実会話のrolloutと今回のアプリ記録に残らなかった。走査範囲を超える非保存や実機受入の証明とはしない。詳細と残件は第9節に記録する。
 
 ## 5. 振る舞い仕様
 
@@ -40,8 +40,8 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | refactor-skipped | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | refactor-skipped | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | M2-06/07でサービスループへ配線し、次の実HTTP観測への反映も確認 |
 | refactor-skipped | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
-| green | M2-06/07 保存先操作・復元・未選択チャット・永続thread対応が接続と終了に結合する | new | GUI/integration/runtime | 製品結合と模擬検証済み。公開read・秘密値の実検証はM2-08と合わせて残す |
-| todo | M2-08 実Codexが固定画像と実映像を受信し、保存と同一、停止・終了が進む | new | runtime/hardware | 模擬試験では完了にしない |
+| refactor-skipped | M2-06/07 保存先操作・復元・未選択チャット・永続thread対応が接続と終了に結合する | new | GUI/integration/runtime | 製品・模擬検証、実会話の公開read、ネイティブ作成・開く・再起動復元を確認 |
+| todo | M2-08 実Codexが固定画像と実映像を受信し、保存と同一、停止・終了が進む | new | runtime/hardware | 固定画像・保存PNGの後参照は成功。実機受入は機器選択待ち |
 
 ## 7. 設計メモ
 
@@ -77,9 +77,9 @@ U05: 入力と事後観測・操作直前の権限照合。U06: 公開会話全�
 
 - [x] 合意済み仕様をコミットし、実装子仕様を作成した
 - [ ] 既存実装・試験を見直して各項目を実装・検証・コミットした
-- [ ] 静的検査・単体/結合・配布gateを通した
+- [x] 静的検査・単体/結合・配布gateを通した
 - [ ] 実接続・実映像の受入と残リスクを確認した
-- [ ] 公開docsと親仕様を実装実績へ更新した
+- [x] 公開docsと親仕様を実装実績へ更新した
 
 ### M2-01 実装・検証
 
@@ -169,6 +169,30 @@ observeにdestructiveHint:false、openWorldHint:falseを付けた。操作対象
 
 同じ実モデル受入を再実行した結果（tmp/m2-product-model-f0zxgi8v/results.json）、中央のランダム英数字・四隅色・観測IDが全一致した。observeは一回、保存PNGは3,802,894 bytesで加工結果とhash一致、記録失敗なし、通常終了とwriter再open成功。終了後に新しいapp-serverの公開thread/read(includeTurns:true)で同ID/cwd・ユーザー入力・観測ID付き回答を再読込できた。
 
-実MCP完了通知は切詰め済みtextで、受信JSON一行は1,049,142 bytesだった。旧受信1 MiBを超え、変更した2 MiB内に収まった。公開thread/readのMCP結果も切詰め済みで、通知や履歴のbase64から原PNGを復元する経路ではないことを実測した。モデル内部のリサイズ等までPNG bytes一致と保証するものではない。実Frameは固定値であり、実機確認・保存画像を後のターンから参照する検証・実turn時の秘密値残存・GUI目視は未完了として残す。
+実MCP完了通知は切詰め済みtextで、受信JSON一行は1,049,142 bytesだった。旧受信1 MiBを超え、変更した2 MiB内に収まった。公開thread/readのMCP結果も切詰め済みで、通知や履歴のbase64から原PNGを復元する経路ではないことを実測した。モデル内部のリサイズ等までPNG bytes一致と保証するものではない。この初回成功時点では実機確認・保存画像の後参照・実turn時の秘密値残存・GUI目視を未完了とし、後続の確認結果を以下に分けて記す。
 
 修正後の局所回帰: MCP/サービス27 passed、全体ruff format/check・ty・uv build・git diff --check成功。全体465件はa269a24時点の結果であり、この修正では影響する実HTTP/サービスと実モデルを再検証した。
+
+### M2-08 保存画像の後参照・会話記録の実検証
+
+承認経路修正はae2136bへコミット済み。`uv run --no-sync python -X utf8 tmp/m2-product-model-probe.py --run-model --verify-reopen`を同じ製品factory・認証・採用版で実行した。ignored `tmp/m2-product-model-q2zg1zw4/results.json`に、2ターンとも正常終端、observe一回、別ターンのimageView一回を記録した。初回は画像内のランダム英数字・四隅色・観測IDが一致し、次ターンは保存PNGを開き直して同じ英数字とIDを回答した。再観測はない。imageViewのturn IDと保存パスを照合しており、回答だけの一致を後参照成功の根拠にしていない。
+
+保存PNGは3,796,983 bytes、3840×2160から1920×1080への加工結果とSHA-256が一致。thread.startedとobservation.recordedの実thread IDが対応し、通常終了後のwriter再openに成功した。別app-serverの公開thread/readは同ID/cwd・2ターンの入力と回答・保存画像参照を返した。MCP完了通知のJSON一行は1,049,142 bytesで、通知と履歴のMCP結果は切詰め済みtextだった。
+
+R02/R04はM2-03の模擬RPC・実Qtによる固有境界の回帰確認に、この実モデル2ターンの通常接続回帰を合わせて修正受入とする。実runtimeで受理前中断・failed終端を誘発しておらず、両不具合の実Codex上での再現・修正確認をしたとは扱わない。当該障害経路は未検証リスクとして残し、実映像の必須受入とは区別する。
+
+Bearerはメモリ内で捕捉し、その完全値・接頭辞を除いた値とJSONエスケープ表現を照合した。当該threadの公開pathで特定したrollout 1件（10,319,942 bytes）と今回のアプリ生成ファイル7件で一致0、読取失敗0。既定HOME全体・認証ファイル・設定DBは読んでいない。隔離HOMEでの非モデル確認と、この実turnの限定走査は別の証拠として扱う。秘密値やraw応答を検証結果へ保存していない。
+
+### 実画面と最終レビューの確認範囲
+
+検証用の別ApplicationShellを`tmp/m2-ui-acceptance/settings.toml`で起動し、computer-useで「プロジェクト」→「新規作成」「開く」のメニューと新規作成のネイティブダイアログ表示・取消しを確認した。sandbox起動では入力が反映されなかったため、同じ検証アプリを通常の実行権限で再起動した。その実行では入力でき、`native-project`の作成、タイトルへの選択パス表示、TOMLのproject.last_path保存、同じフォルダーを「開く」、正常終了後の再起動による自動復元を確認した。最後に通常終了してexit 0とウィンドウ消失、別writerでの再openを確認した。製品コードに入力回避策は追加していない。
+
+設定I/Oの「観測解像度」でオリジナル/FullHD/HDの3択を目視し、HDを選択・適用してTOMLのobservation.resolutionがhdになることを確認した。検証用ウィンドウは通常終了し、process exit 0とウィンドウ消失を確認した。起動中の利用者のGigasは操作していない。sandbox起動の機器列挙は失敗表示となったため、実機接続の成功には含めない。
+
+独立レビューでは、同一Observationの分岐、符号化だけの同時実行制限、保存だけの標準Lock、終了回収用Task所有が合意した5条件に整合し、追加すべきキュー・上限・保存見送り・互換処理はないと確認した。`uv run --no-sync pytest tests/integration/test_observation_storage.py tests/integration/test_observation_service.py tests/integration/test_observation_mcp.py -q --basetemp=tmp/pytest-observation-finalreview`は66 passed。公開docsに残る旧未接続記述と保存失敗のdrain伝播説明を修正した。
+
+起動中Gigasの実行ファイル保持を避けるため、`UV_PROJECT_ENVIRONMENT=tmp/m2-clean-environment`を指定した新規環境で`uv sync --dev`を実行し、82件解決・73件導入に成功した。同環境の`uv run --no-sync pytest tests/unit tests/integration -q --basetemp=tmp/pytest-m2-clean-environment`も465 passed（64.57秒）。利用者の既存`.venv`は再同期していないが、新規導入のgateは満たした。同期のために利用者へGigas終了を求める必要はなくなった。
+
+残る受入は指定機器による実映像であり、機器選択への回答は未着。明示した機器一件だけを使うignored `tmp/m2-hardware-model-probe.py`を準備し、dry-runと構文のみ確認した。機器列挙・取得・実モデル実行はまだ行っていない。M2子・U04親はwipを維持し、固定画像の成功だけで実機まで完了にしない。
+
+今回更新した10文書を実装・上記証拠と照合し、ローカルリンク129件の参照先、3状態を通したunit番号35件の一意性、仮テキスト残りを検査した。エラー0件、`git diff --check`成功。文書だけの最終追記に対して製品テスト・型検査・buildは再実行せず、先行する製品検証と文書検証を区別した。

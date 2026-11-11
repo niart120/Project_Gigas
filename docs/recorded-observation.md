@@ -1,12 +1,12 @@
 # 記録付き観測API
 
-Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。保存先を選ぶGUIとMCP・Codexへの画像配送は、現在のアプリには接続されていません。
+Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](codex-gui.md)に結合し、MCP経由で同じ画像をCodexへ返します。
 
 入口は`gigas.storage.project.ProjectWriter`と`gigas.services.observation.ObservationService`です。元画像には[映像取得API](video-api.md)の不変な`Frame`を使います。
 
-`ProjectWriter`はアプリが原記録を書き込むための所有者です。プロジェクト選択中はアプリが一つ保持し、観測サービスはその参照を借ります。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
+`ProjectWriter`はアプリが原記録を書き込むための所有者です。アプリが現在の記録先に一つ保持し、観測サービスはその参照を借ります。プロジェクト未選択のチャットにもアプリ管理の記録先を用意します。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
 
-観測サービスは加工・符号化した画像を返し、同じ画像・取得時刻・IDを別の非同期処理で保存します。保存開始・完了は応答の前提ではありません。[MCP公開部](observation-mcp.md)は同じObservationを応答へ包装します。アプリ内の接続と終了にも結合しています。Codexが後で画像を解釈した公開応答や対話履歴は、受信した内容をアプリが別の記録として保存する対象です。解釈を待って画像保存を遅らせたり、保存済みの原観測を解釈結果で書き換えたりしません。対話履歴の保存とCodexによる`memory/`編集は、現在のAPIには未接続です。
+観測サービスは加工・符号化した画像を返し、同じ画像・取得時刻・IDを別の非同期処理で保存します。保存開始・完了は応答の前提ではありません。[MCP公開部](observation-mcp.md)は同じObservationを応答へ包装します。会話はCodexの永続threadとして保持し、原記録には実thread IDとの対応を保存します。解釈を待って画像保存を遅らせたり、保存済みの原観測を解釈結果で書き換えたりしません。公開応答・対話履歴のアプリ側への別記録と、Codexによる`memory/`編集は未対応です。
 
 ## 一枚を保存する
 
@@ -69,11 +69,13 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 `observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。アプリはサービスとwriterの参照を保持し、`await service.drain()`で進行中の符号化とすべての保存の終了を確認します。待機の取消しでは保存を取り消しません。保存エラーは別途通知するため、`drain()`完了は全画像の保存成功を意味しません。最後の符号化が失敗した場合も、それ以前の保存を回収してからその例外を返します。保存済みの観測は、要求が取り消されても削除しません。
 
-接続を切る場合は新しい観測要求を閉じて`drain()`を待ちます。プロジェクトを選択したままならwriterは保持します。保存先の切替やアプリ終了でプロジェクト自体を閉じるときにだけ、原記録処理の収束後に`writer.close()`を呼びます。
+接続を切る場合は新しい観測要求を閉じて`drain()`を待ちます。プロジェクト未選択のチャットは切断時にwriterを閉じ、記録自体は残します。明示選択したプロジェクトのwriterは切断後も保持し、保存先の切替やアプリ終了で`writer.close()`を呼びます。
 
 次の関数は、プロジェクト終了時のアプリ所有者が使う例です。呼び出す前に、このwriterを使う新しい要求を止めてください。MCPの各ツール要求から呼ぶ終了処理ではありません。
 
 ```python
+import asyncio
+
 from gigas.game_io.observation import ObservationError
 from gigas.services.observation import ObservationService
 from gigas.storage.project import ProjectWriter
@@ -83,13 +85,13 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
     try:
         await service.drain()
     except ObservationError:
-        writer.close()
+        await asyncio.to_thread(writer.close)
         raise
     else:
-        writer.close()
+        await asyncio.to_thread(writer.close)
 ```
 
-`drain()`自体も取り消された場合、保存完了はまだ確認できていません。この例でもwriterを閉じず、呼出側に残した同じサービスで改めて`drain()`を待ってください。保存失敗による`ObservationError`・`ProjectError`が返った場合は処理自体は終了しています。失敗を報告したうえでwriterを閉じられます。実処理の終了前にイベントループを閉じたり、保存先を切り替えたりしないでください。
+`drain()`自体も取り消された場合、保存完了はまだ確認できていません。この例でもwriterを閉じず、呼出側に残した同じサービスで改めて`drain()`を待ってください。最後の加工・符号化の`ObservationError`が返った場合は、それ以前の保存も終了しているため、失敗を報告したうえでwriterを閉じられます。保存失敗は`drain()`から送出せず、前述のコールバックまたはログで別途確認します。実処理の終了前にイベントループを閉じたり、保存先を切り替えたりしないでください。
 
 ## 保存形式と読込
 
@@ -120,7 +122,7 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 観測エラーの`code`は`DEVICE_UNAVAILABLE`、`BUSY`、`OBSERVATION_ENCODING_ERROR`です。作成・読込・保存の失敗は`ProjectError`、同期処理中の二重書込・再読込・終了はその派生型`ProjectBusyError`です。エラー後の自動再試行はありません。
 
-アプリの原記録writerは、選択プロジェクトにつき一つです。`.gigas.lock`のWindows OSファイルロックにより、同じ規約を使う別writerの取得を拒否します。`.gigas.lock`が存在するだけでは使用中とは判断せず、プロセス終了後は再度開けます。利用中にロックファイルを削除したり、アプリ管理の`project.json`・`events.jsonl`・`observations/`を別経路から変更したりしないでください。ネットワーク共有と外部編集の競合解決には対応していません。
+アプリの原記録writerは、現在の記録先に一つです。`.gigas.lock`のWindows OSファイルロックにより、同じ規約を使う別writerの取得を拒否します。`.gigas.lock`が存在するだけでは使用中とは判断せず、プロセス終了後は再度開けます。利用中にロックファイルを削除したり、アプリ管理の`project.json`・`events.jsonl`・`observations/`を別経路から変更したりしないでください。ネットワーク共有と外部編集の競合解決には対応していません。
 
 このロックは、画像・ログの読取や別ファイルの`memory/`編集を禁止するものではありません。後続の対話記録も同じアプリ所有writerを使い、MCPや通知処理がそれぞれ別writerを開く構成にはしません。現在のCodex接続はread-onlyのため、Codex自身による`memory/`書込権限は別途確認が必要です。
 
