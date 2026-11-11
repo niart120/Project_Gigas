@@ -26,5 +26,67 @@ def multiplex() -> None:
     sys.stdin.read()
 
 
+def eof() -> None:
+    """Close without responding to either outstanding client request."""
+    sys.stdin.readline()
+    sys.stdin.readline()
+
+
+def invalid(mode: str) -> None:
+    """Return one invalid frame without exposing its payload through errors."""
+    request = json.loads(sys.stdin.readline())
+    frames = {
+        "malformed": '{"secret":"TOP_SECRET", invalid}\n',
+        "non-object": '["TOP_SECRET"]\n',
+        "bool-id": '{"id":true,"method":"TOP_SECRET","params":{}}\n',
+        "missing-result": json.dumps({"id": request["id"], "secret": "TOP_SECRET"}) + "\n",
+        "both": json.dumps({"id": request["id"], "result": None, "error": {}}) + "\n",
+        "long": json.dumps({"secret": "TOP_SECRET" * 110000}) + "\n",
+        "partial": '{"method":"TOP_SECRET"}',
+        "non-finite": '{"method":"TOP_SECRET","params":{"value":NaN}}\n',
+    }
+    sys.stdout.write(frames[mode])
+    sys.stdout.flush()
+
+
+def late_response() -> None:
+    """Release a held response only after the following request has arrived."""
+    send({"method": "probe/ready", "params": None})
+    slow = json.loads(sys.stdin.readline())
+    send({"method": "probe/held", "params": None})
+    fast = json.loads(sys.stdin.readline())
+    send({"id": slow["id"], "result": "old"})
+    send({"id": fast["id"], "result": "current"})
+    followup = json.loads(sys.stdin.readline())
+    send({"id": fast["id"], "result": "duplicate"})
+    send({"id": "unknown", "result": "unrelated"})
+    send({"id": followup["id"], "result": "followup"})
+    sys.stdin.read()
+
+
+def rpc_error() -> None:
+    """Send a rejection containing sensitive diagnostic fields."""
+    request = json.loads(sys.stdin.readline())
+    send(
+        {
+            "id": request["id"],
+            "error": {"code": -32600, "message": "TOP_SECRET", "data": {"token": "TOP_SECRET"}},
+        }
+    )
+    request = json.loads(sys.stdin.readline())
+    send({"id": request["id"], "result": "still-connected"})
+    sys.stdin.read()
+
+
 if __name__ == "__main__":
-    multiplex()
+    mode = sys.argv[1] if len(sys.argv) > 1 else "multiplex"
+    if mode == "multiplex":
+        multiplex()
+    elif mode == "eof":
+        eof()
+    elif mode == "late":
+        late_response()
+    elif mode == "rpc-error":
+        rpc_error()
+    else:
+        invalid(mode)

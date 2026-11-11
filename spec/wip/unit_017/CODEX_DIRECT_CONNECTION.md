@@ -35,7 +35,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 実peerで文字列/整数ID、保留要求、逆順応答、通知、拒否返信を確認 |
-| todo | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | payloadを例外へ漏らさない |
+| refactor-done | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | EOFの全待機解放、不正frame8種、timeout/取消し、重複/未知応答、秘匿診断を確認 |
 | todo | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | Windows非表示、実process |
 | todo | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 認証なし・無効モデル・資材失敗も対象 |
 | todo | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 明示要求schemaと拒否既定 |
@@ -50,6 +50,14 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - 検証: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport`、対象5ファイルのruff check/format、ty checkが成功。実peerは認証不要で、実Codex受入の代替ではない。
 - refactor-skipped: transport/peer/公開イベント型の境界を確認し、追加の構造変更は不要。EOF・timeout・取消しはT02、部分起動と終了保証はT03で続ける。
 - commit: `feat(codex): 単一受信のstdio接続で要求と通知を振り分ける`。
+
+### T02 実行履歴
+
+- red: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport -x` はEOF後にRPC/イベント待機が残り、試験の5秒打切りで失敗した（1 failed、1 passed）。
+- green: 端末イベントの共有、全pending Futureの失敗、要求期限と取消し後のID除去、不正frameの秘匿エラーを実装し13 passed。時間切れ後の送信済み要求は自動再送せず、後続要求へ遅い応答を誤適用しない。
+- refactor-done: green後にUTF-8/行サイズ/JSONの検証を `_decode_frame` へ分離し、同じ試験が13 passed。上限は改行を含む1 MiBで送受信双方に適用する。
+- 検証: 対象pytest、ruff check/format、ty checkが成功。JSON payloadとstderrを診断へ転記せず、通常RPCエラー後は接続を継続できる。
+- commit: `fix(codex): 接続失敗と要求取消しで待機を解放する`。
 
 ## 6. 対象ファイル
 

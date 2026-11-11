@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import os
 import subprocess
 import sys
@@ -81,6 +82,9 @@ type TransportEvent = RpcNotification | ServerRequest | TransportClosed
 
 
 def _json_value(value: object) -> JsonValue:
+    if isinstance(value, float) and not math.isfinite(value):
+        message = "Non-finite JSON number"
+        raise TransportError(message)
     if value is None or isinstance(value, str | bool | int | float):
         return value
     if isinstance(value, list):
@@ -103,6 +107,13 @@ def _request_id(value: JsonValue) -> RpcId:
         return value
     message = "Invalid RPC request ID"
     raise TransportError(message)
+
+
+def _decode_frame(raw: bytes) -> JsonObject:
+    if not raw.endswith(b"\n") or len(raw) > MAX_FRAME_BYTES:
+        message = "Invalid RPC frame"
+        raise TransportError(message)
+    return _object(_json_value(json.loads(raw.decode("utf-8"))))
 
 
 class StdioTransport:
@@ -140,6 +151,7 @@ class StdioTransport:
         self._events: asyncio.Queue[TransportEvent] = asyncio.Queue()
         self._pending: dict[str, tuple[str, asyncio.Future[JsonValue]]] = {}
         self._counter = 0
+        self._closed: TransportClosed | None = None
 
     async def start(self) -> None:
         """Start the child process and its stdout and stderr readers."""
@@ -170,7 +182,9 @@ class StdioTransport:
             The peer's JSON result.
 
         Raises:
-            TransportError: The process is not connected.
+            TransportError: The connection failed, the frame is invalid, or the
+                request exceeded its deadline. A timed-out request may have
+                reached the peer and is never resent automatically.
             RpcError: The peer returned an error response.
         """
         self._counter += 1
@@ -178,10 +192,18 @@ class StdioTransport:
         future: asyncio.Future[JsonValue] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = (method, future)
         try:
-            await self._write({"id": request_id, "method": method, "params": params})
-            return await future
+            async with asyncio.timeout(self._request_timeout):
+                await self._write({"id": request_id, "method": method, "params": params})
+                return await future
+        except TimeoutError:
+            message = "RPC request timed out"
+            raise TransportError(message) from None
         finally:
             self._pending.pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()
 
     async def notify(self, method: str, params: JsonObject | None = None) -> None:
         """Send a notification without expecting a response."""
@@ -198,11 +220,19 @@ class StdioTransport:
         )
 
     async def next_event(self) -> TransportEvent:
-        """Wait for the next server request, notification, or closure event."""
-        return await self._events.get()
+        """Return the next event, repeating the terminal event after closure.
+
+        Repeating the terminal event releases concurrent and future consumers.
+        Previously received events remain ordered before the terminal event.
+        """
+        event = await self._events.get()
+        if isinstance(event, TransportClosed):
+            self._events.put_nowait(event)
+        return event
 
     async def close(self) -> None:
         """Stop the owned child and release its reader tasks."""
+        self._finish("Transport closed")
         process = self._process
         if process is None:
             return
@@ -221,23 +251,45 @@ class StdioTransport:
         if process is None or process.stdin is None:
             message = "Transport is not connected"
             raise TransportError(message)
-        data = (json.dumps(frame, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        try:
+            data = (
+                json.dumps(_json_value(frame), ensure_ascii=False, allow_nan=False) + "\n"
+            ).encode("utf-8")
+            if len(data) > MAX_FRAME_BYTES:
+                message = "Outgoing RPC frame exceeds 1 MiB"
+                raise TransportError(message)
+        except (ValueError, RecursionError):
+            message = "Invalid outgoing RPC frame"
+            raise TransportError(message) from None
         async with self._writer_lock:
-            process.stdin.write(data)
-            await process.stdin.drain()
+            if self._closed is not None:
+                raise TransportError(self._closed.reason)
+            try:
+                process.stdin.write(data)
+                await process.stdin.drain()
+            except (ConnectionError, OSError):
+                self._finish("Write failed")
+                message = "Write failed"
+                raise TransportError(message) from None
 
     async def _read_stdout(self) -> None:
         process = self._process
         if process is None or process.stdout is None:
             return
-        while raw := await process.stdout.readline():
-            frame = _object(_json_value(json.loads(raw)))
-            self._route(frame)
+        try:
+            while raw := await process.stdout.readline():
+                self._route(_decode_frame(raw))
+        except (TransportError, ValueError, RecursionError):
+            self._finish("Invalid RPC frame")
+        except (ConnectionError, OSError):
+            self._finish("Read failed")
+        else:
+            self._finish("Peer closed stdout")
 
     def _route(self, frame: JsonObject) -> None:
         if "method" in frame:
             method = frame["method"]
-            if not isinstance(method, str):
+            if not isinstance(method, str) or not method or "result" in frame or "error" in frame:
                 message = "Invalid RPC method"
                 raise TransportError(message)
             params = frame.get("params")
@@ -248,6 +300,9 @@ class StdioTransport:
                 self._events.put_nowait(RpcNotification(method, parameters))
             return
         request_id = _request_id(frame.get("id"))
+        if ("result" in frame) == ("error" in frame):
+            message = "Invalid RPC response"
+            raise TransportError(message)
         pending = self._pending.get(request_id) if isinstance(request_id, str) else None
         if pending is None:
             return
@@ -262,7 +317,16 @@ class StdioTransport:
                 raise TransportError(message)
             future.set_exception(RpcError(code, method))
         else:
-            future.set_result(frame.get("result"))
+            future.set_result(frame["result"])
+
+    def _finish(self, reason: str) -> None:
+        if self._closed is not None:
+            return
+        self._closed = TransportClosed(reason)
+        for _, future in self._pending.values():
+            if not future.done():
+                future.set_exception(TransportError(reason))
+        self._events.put_nowait(self._closed)
 
     async def _discard_stderr(self) -> None:
         process = self._process
