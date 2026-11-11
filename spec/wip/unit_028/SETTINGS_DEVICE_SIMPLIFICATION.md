@@ -34,7 +34,7 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | S1 フォームは単一の編集値を保持し、一覧更新で変更せず、保存中も閉じられる | regression | integration | 既存フォーム試験を書換え |
+| refactor-skipped | S1 フォームは単一の編集値を保持し、一覧更新で変更せず、保存中も閉じられる | regression | integration | 既存フォーム試験を書換え |
 | todo | S2 保存後の最新機器へ旧資源解放後に切替し、未接続は未開始の接続を取り消す | regression | integration | 既存取得制御・切替試験を書換え |
 | todo | S3 モーダルのOK／適用は保存までを共有し、接続成否と閉じる操作を分離する | regression | integration | 既存適用・保存失敗・受理試験を書換え |
 | todo | S4 設定中断・保存中の閉じる・アプリ終了で、I/Oとサービスの寿命を保つ | regression | integration | 既存終了・キーボード・復旧試験を整理 |
@@ -52,6 +52,10 @@ M0の現行状態棚卸しを踏襲する。既存captureサービスの世代�
 各項目のred／greenと整理結果を以下へ追記する。最終gateはruff format/check、ty、unit/integration、uv lock --check、uv build、git diff --check。公開API・docstring・利用者docsの整合、代表画面のモーダル／保存失敗／中断導線を確認する。実機・外部Codex接続は未実施なら明記する。
 
 開始時: `codex/implementation-scope-review`。M0までの未コミット文書を保持。製品変更前の試験・型検査結果は未取得。
+
+### S1 フォームの編集値
+
+`uv run pytest tests/integration/test_video_settings_gui.py -q --tb=short`: 既存試験を新契約へ書換え、モーダルと保存中閉じるの2件red／6件passから8件pass。二重候補・選択意図専用の試験と表示値の重複直積を整理し、22ケースから8ケースへ削減。フォームの三重機器値、接続target API、閉じる禁止状態、非表示診断欄を撤去した。refactor-skipped（状態撤去は今回の振る舞い変更そのもの）。Shellの旧呼出しはS3で置換予定のため、全体試験はこの段階で実施しない。
 
 ## 10. 先送り
 
