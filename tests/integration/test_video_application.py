@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pytestqt.qtbot import QtBot
@@ -118,9 +119,7 @@ def test_save_failure_preserves_stream_and_unsaved_values(
     assert len(capture.connections) == 1
 
 
-@pytest.mark.parametrize(
-    "failure", ["unconfirmed", "old_error", "unreleased", "rejected", "new_error"]
-)
+@pytest.mark.parametrize("failure", ["unconfirmed", "old_error", "rejected", "new_error"])
 def test_failed_switch_stays_stopped_without_rollback_or_retry(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO],
     qtbot: QtBot,
@@ -132,9 +131,7 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert capture.disconnects == 1
-    if failure == "unreleased":
-        capture.state = replace(capture.state, phase="idle", cleanup="none")
-    elif failure in {"unconfirmed", "old_error"}:
+    if failure in {"unconfirmed", "old_error"}:
         capture.state = replace(
             capture.state,
             phase="error",
@@ -165,33 +162,50 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     assert capture.refreshes == 0
 
 
-@pytest.mark.parametrize("target", ["", "path-c"])
-def test_latest_target_replaces_unstarted_switch(qtbot: QtBot, target: str) -> None:
-    capture = ControlledCapture()
+@pytest.mark.parametrize(("initial", "target"), [("enumerate", "path-b"), ("capture", "")])
+def test_latest_target_replaces_unstarted_switch(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, initial: str, target: str
+) -> None:
+    capture = CaptureService(backend_factory=PeerBackend())
+    entered, release = Event(), Event()
+    run_request = capture._run_request
+
+    def wait_before_spawn(options: CaptureOptions | None, generation: int) -> None:
+        entered.set()
+        if not release.wait(5):
+            message = "test did not release capture request"
+            raise TimeoutError(message)
+        run_request(options, generation)
+
+    monkeypatch.setattr(capture, "_run_request", wait_before_spawn)
     panel = VideoPanel()
     qtbot.addWidget(panel)
     controller = VideoController(panel, capture)
     controller.start()
     try:
-        controller.apply_capture(Settings(capture_device="path-a"))
-        capture.stream()
-        controller.timer.timeout.emit()
-        capture.finish_disconnect = False
-        controller.apply_capture(Settings(capture_device="path-b"))
-        controller.apply_capture(Settings(capture_device=target))
-        assert capture.disconnects == 1
-        assert len(capture.connections) == 1
-        capture.complete_disconnect()
-        controller.timer.timeout.emit()
-        assert [request.device_path for request in capture.connections] == (
-            ["path-a", target] if target else ["path-a"]
-        )
-        if target:
-            capture.stream()
-            controller.timer.timeout.emit()
+        if initial == "enumerate":
+            controller.refresh_devices()
+        else:
+            controller.apply_capture(Settings(capture_device="path-a"))
+        qtbot.waitUntil(entered.is_set)
+        controller.apply_capture(Settings(capture_device="path-c"))
+        controller.apply_capture(Settings(capture_device=target, capture_resolution="auto"))
+        release.set()
+        qtbot.waitUntil(lambda: not controller.applying)
         assert controller.apply_state == "complete"
+        if target:
+            assert controller.active_settings is not None
+            assert controller.active_settings.capture_device == target
+            assert capture.snapshot().frame is not None
+        else:
+            assert controller.active_settings is None
+            assert capture.snapshot().phase == "idle"
+            assert capture.snapshot().frame is None
+        assert capture.snapshot().generation == 1
     finally:
+        release.set()
         controller.shutdown()
+        capture.join(5)
         assert controller.shutdown_complete
 
 

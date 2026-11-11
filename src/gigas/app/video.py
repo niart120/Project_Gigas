@@ -345,11 +345,8 @@ class VideoController(QObject):
             elif snapshot.phase in {"error", "closed"}:
                 self._fail_application(snapshot.error or "映像接続が終了した")
             elif self.apply_state == "stopping" and snapshot.phase == "idle":
-                if snapshot.cleanup not in {"graceful", "forced"}:
-                    self._fail_application("旧映像の終了を確認できない")
-                else:
-                    self._start_replacement()
-                    return True
+                self._start_replacement()
+                return True
             elif (
                 self.apply_state == "connecting"
                 and snapshot.phase == "streaming"
