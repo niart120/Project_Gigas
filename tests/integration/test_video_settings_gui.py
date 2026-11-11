@@ -86,7 +86,7 @@ def test_missing_device_and_legacy_text_are_preserved_until_explicit_edit(
     assert dialog.values().model == "changed"
     dialog.capture_choices.setCurrentIndex(0)
     assert dialog.capture_target == ""
-    assert dialog.values().capture_device == values.capture_device
+    assert dialog.values().capture_device == ""
 
 
 def test_video_settings_are_read_only_during_save(qtbot: QtBot, tmp_path: Path) -> None:
@@ -202,7 +202,7 @@ def test_display_edits_preserve_saved_camera_while_another_camera_is_active(
     assert dialog.values().capture_device == "path-a"
     dialog.capture_choices.setCurrentIndex(0)
     assert dialog.capture_target == ""
-    assert dialog.values().capture_device == "path-b"
+    assert dialog.values().capture_device == ""
 
 
 def test_refresh_and_save_keep_pending_target_separate_from_saved_device(

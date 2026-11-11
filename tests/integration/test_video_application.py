@@ -267,7 +267,7 @@ def test_real_spawn_applies_saved_fps_after_release_and_keeps_held_frame(
     assert marker.read_text(encoding="utf-8") == "released\nreleased\n"
 
 
-def test_empty_selection_preserves_saved_device_and_only_disconnects(
+def test_empty_selection_clears_saved_device_and_disconnects(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
@@ -275,8 +275,8 @@ def test_empty_selection_preserves_saved_device_and_only_disconnects(
     shell.dialog.capture_choices.setCurrentIndex(0)
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.baseline.capture_device == "path-a"
-    assert load_settings(shell.path).capture_device == "path-a"
+    assert shell.baseline.capture_device == ""
+    assert load_settings(shell.path).capture_device == ""
     assert shell.dialog.capture_target == ""
     assert capture.disconnects == 1
     capture.complete_disconnect()

@@ -270,7 +270,7 @@ class SettingsDialog(QDialog):
         if isinstance(path, str):
             previous = self._selected_device, self._edited_device
             self._selected_device = path
-            self._edited_device = path or None
+            self._edited_device = path
             if previous != (self._selected_device, self._edited_device):
                 self.changed.emit()
 
@@ -311,13 +311,15 @@ class SettingsDialog(QDialog):
             self.close_requested.emit()
 
     def values(self) -> Settings:
-        """Return settings, retaining the saved device unless a real device was chosen.
+        """Return settings, retaining the saved device until an explicit source choice.
 
-        The connection target is separate: selecting disconnection cancels an unsaved
-        device choice and preserves the last saved device. Text whitespace is retained.
+        An explicit disconnected choice clears the saved device on Apply. Synchronizing
+        a stopped live target does not clear it. Text whitespace is retained.
         """
         return Settings(
-            capture_device=self._edited_device or self._saved_device,
+            capture_device=(
+                self._saved_device if self._edited_device is None else self._edited_device
+            ),
             serial_port=self._text_value(self.serial_port),
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),

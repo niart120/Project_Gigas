@@ -55,7 +55,7 @@ def open_editor(shell: ApplicationShell, capture: ControlledCapture) -> Settings
     return dialog
 
 
-def test_offline_apply_remembers_device_and_same_device_can_start(
+def test_explicit_offline_apply_clears_saved_device_after_same_device_can_start(
     app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = app
@@ -72,8 +72,44 @@ def test_offline_apply_remembers_device_and_same_device_can_start(
     dialog.capture_choices.setCurrentIndex(0)
     dialog.save_button.click()
     qtbot.waitUntil(lambda: capture.snapshot().phase == "idle")
-    assert shell.baseline.capture_device == "path-a"
+    assert shell.baseline.capture_device == ""
+    assert load_settings(shell.path).capture_device == ""
+
+
+def test_explicit_offline_choice_clears_device_even_when_already_stopped(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    dialog = open_editor(shell, capture)
+    assert not shell.dirty
+    dialog.capture_choices.activated.emit(0)
+    assert shell.dirty
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert load_settings(shell.path).capture_device == ""
+    assert not capture.connections
+
+
+def test_menu_stop_preserves_device_for_restart(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    shell.connect_video()
+    capture.stream()
+    qtbot.waitUntil(lambda: not shell.video.applying)
+    dialog = open_editor(shell, capture)
+    shell.window.video.disconnect_action.trigger()
+    qtbot.waitUntil(lambda: capture.snapshot().phase == "enumerating")
+    capture.complete_enumeration((DeviceInfo("Camera A", "path-a"),))
+    shell.video.timer.timeout.emit()
+    assert dialog.capture_target == ""
+    assert dialog.values().capture_device == "path-a"
     assert load_settings(shell.path).capture_device == "path-a"
+    dialog.model.setText("changed")
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert load_settings(shell.path).capture_device == "path-a"
+    assert len(capture.connections) == 1
 
 
 def test_offline_general_apply_does_not_open_remembered_device(
