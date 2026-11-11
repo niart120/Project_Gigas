@@ -39,7 +39,7 @@ class Camera(Protocol):
         ...
 
     def set(self, prop_id: int, value: float, /) -> bool:
-        """Request a device property; actual image dimensions are checked separately."""
+        """Request a device property without guaranteeing that it will be honored."""
         ...
 
     def get(self, prop_id: int, /) -> float:
@@ -107,14 +107,16 @@ def acquire_frames(
         generation: Host-assigned connection identifier.
         backend: Synchronous device adapter owned by this process.
         stopped: Nonblocking cancellation check, including after a blocking read.
-        publish: Receives each valid frame; may skip it if the reader is busy.
+        publish: Receives actual pixels and dimensions without resizing; may skip a
+            frame if the reader is busy. The first dimensions remain fixed until stop.
         opened: Receives device-reported FPS, or None for an unavailable value.
         released: Optional notification after the native release returned normally.
         enumerated: Optional notification of selectable identities from the same
             enumeration used to resolve the device, before selection and opening.
 
     Raises:
-        CaptureError: Selection, opening, reading, or the actual frame format fails.
+        CaptureError: Selection, opening, or reading fails, pixels are not uint8 BGR
+            within 16..3840 by 16..2160, or dimensions change after the first frame.
     """
     devices = backend.enumerate()
     identities = tuple(device.info for device in devices if device.info.path)
@@ -129,12 +131,14 @@ def acquire_frames(
         if not camera.isOpened():
             message = "映像取得元を開けない"
             raise CaptureError(message)
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, options.width)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, options.height)
+        if options.width is not None and options.height is not None:
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, options.width)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, options.height)
         camera.set(cv2.CAP_PROP_FPS, options.fps)
         rate = camera.get(cv2.CAP_PROP_FPS)
         opened(rate if math.isfinite(rate) and rate > 0 else None)
         sequence = 0
+        dimensions: tuple[int, int] | None = None
         while not stopped():
             success, pixels = camera.read()
             tick = monotonic_ns()
@@ -147,16 +151,24 @@ def acquire_frames(
             if (
                 not isinstance(pixels, np.ndarray)
                 or pixels.dtype != np.uint8
-                or pixels.shape != (options.height, options.width, 3)
+                or pixels.ndim != 3
+                or pixels.shape[2] != 3
+                or not 16 <= pixels.shape[1] <= 3840
+                or not 16 <= pixels.shape[0] <= 2160
             ):
-                message = "取得映像の解像度または形式が要求と不一致"
+                message = "取得映像は幅16〜3840・高さ16〜2160のuint8 BGR画像が必要"
                 raise CaptureError(message)
+            height, width, _channels = pixels.shape
+            if dimensions is not None and dimensions != (width, height):
+                message = "取得中に映像寸法が変化したため停止。再接続が必要"
+                raise CaptureError(message)
+            dimensions = (width, height)
             sequence += 1
             publish(
                 Frame(
                     pixels.tobytes(),
-                    options.width,
-                    options.height,
+                    width,
+                    height,
                     generation,
                     sequence,
                     captured_at,
