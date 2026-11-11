@@ -10,12 +10,20 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from gigas.runtime.codex.models import LoginEvent, SessionStatus, TextEvent
+from gigas.runtime.codex.models import (
+    HumanRequest,
+    LoginEvent,
+    RequestResolved,
+    SessionStatus,
+    TextEvent,
+)
 from gigas.services.codex import ServiceEvent, ServiceResult
+from gigas.ui.request_card import RequestCard
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,6 +56,7 @@ class ConnectionPanel(QWidget):
     login_requested = Signal()
     send_requested = Signal(str)
     interrupt_requested = Signal()
+    answer_requested = Signal(object)
 
     def __init__(
         self,
@@ -65,6 +74,8 @@ class ConnectionPanel(QWidget):
         self._pending: set[str] = set()
         self._texts: dict[str, tuple[str, str]] = {}
         self._submitted = ""
+        self._stopping = False
+        self.cards: dict[str, RequestCard] = {}
         layout = QVBoxLayout(self)
         actions = QHBoxLayout()
         self.connect_button = QPushButton("接続", self)
@@ -89,6 +100,14 @@ class ConnectionPanel(QWidget):
         self.transcript = QPlainTextEdit(self)
         self.transcript.setReadOnly(True)
         layout.addWidget(self.transcript, 3)
+        self.requests = QScrollArea(self)
+        self.requests.setWidgetResizable(True)
+        self._request_content = QWidget(self.requests)
+        self._request_layout = QVBoxLayout(self._request_content)
+        self._request_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.requests.setWidget(self._request_content)
+        self.requests.hide()
+        layout.addWidget(self.requests, 2)
         self.prompt = QPlainTextEdit(self)
         self.prompt.setMaximumHeight(130)
         layout.addWidget(self.prompt, 1)
@@ -114,6 +133,13 @@ class ConnectionPanel(QWidget):
         self._connected = True
         self._status = SessionStatus("connecting")
         self._pending = {"connect"}
+        self._stopping = False
+        for card in self.cards.values():
+            card.invalidate()
+            self._request_layout.removeWidget(card)
+            card.deleteLater()
+        self.cards.clear()
+        self.requests.hide()
         self._texts.clear()
         self.transcript.clear()
         self.login_url.clear()
@@ -132,6 +158,8 @@ class ConnectionPanel(QWidget):
         event = envelope.event
         if isinstance(event, SessionStatus):
             self._status = event
+            if event.phase in {"stopping", "stopped", "closed", "error"}:
+                self._expire_requests()
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, LoginEvent):
@@ -152,6 +180,20 @@ class ConnectionPanel(QWidget):
             )
             scrollbar = self.transcript.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
+        elif isinstance(event, HumanRequest):
+            if (
+                event.token not in self.cards
+                and not self._stopping
+                and "disconnect" not in self._pending
+                and self._status.phase in {"starting", "running", "waiting"}
+            ):
+                card = RequestCard(event, self._request_content)
+                card.submitted.connect(self.answer_requested)
+                self.cards[event.token] = card
+                self._request_layout.addWidget(card)
+                self.requests.show()
+        elif isinstance(event, RequestResolved) and event.token in self.cards:
+            self.cards[event.token].invalidate()
         self._render()
 
     @Slot(object)
@@ -178,11 +220,14 @@ class ConnectionPanel(QWidget):
         if not self._connected or "stop" in self._pending or "disconnect" in self._pending:
             return
         self._pending.add("stop")
+        self._stopping = True
+        self._expire_requests()
         self._render()
         self.interrupt_requested.emit()
 
     def _disconnect(self) -> None:
         self._pending.add("disconnect")
+        self._expire_requests()
         self.login_url.clear()
         self._render()
         self.disconnect_requested.emit()
@@ -201,9 +246,15 @@ class ConnectionPanel(QWidget):
         if "send" in self._pending:
             return
         self._submitted = self.prompt.toPlainText()
+        self._stopping = False
         self._pending.add("send")
         self._render()
         self.send_requested.emit(self._submitted)
+
+    def _expire_requests(self) -> None:
+        for card in self.cards.values():
+            if card.is_live:
+                card.invalidate()
 
     def _render(self) -> None:
         available = self._available and "disconnect" not in self._pending

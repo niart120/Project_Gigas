@@ -12,6 +12,7 @@ from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
 from gigas.ui.main_window import MainWindow
+from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.settings_dialog import SettingsDialog
 
 if TYPE_CHECKING:
@@ -73,6 +74,7 @@ class ApplicationShell(QObject):
         panel.login_requested.connect(self.service.login)
         panel.send_requested.connect(self.service.send)
         panel.interrupt_requested.connect(self.service.interrupt)
+        panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
         self.service.finished.connect(self._finish_shutdown)
@@ -96,6 +98,13 @@ class ApplicationShell(QObject):
             self.baseline.auth_method,
         )
         self.window.connection.activate(self.service.connect_runtime(options))
+
+    @Slot(object)
+    def _answer_codex(self, submission: object) -> None:
+        if isinstance(submission, AnswerSubmission) and not self.committed:
+            self.service.answer(
+                submission.token, decision=submission.decision, answers=submission.answers
+            )
 
     def open_settings(self) -> None:
         """Show the single settings editor without discarding its input."""

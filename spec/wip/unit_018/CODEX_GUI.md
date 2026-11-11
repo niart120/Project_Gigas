@@ -47,7 +47,7 @@ GUIには項目名・短い状態・エラー理由とCodex/ユーザー本文�
 |---|---|---|---|---|
 | refactor-skipped | G01 接続生成・操作を専用ループで行い、待機中の中断と終了で所有処理を回収する | new / edge | integration | 起動時未接続、GUI pulse、部分失敗、shutdown先着 |
 | refactor-skipped | G02 保存済み設定で接続し、本文・認証・通常送信・中断・切断を画面から扱う | new | integration | URLは明示open、delta/replace、失敗時入力保持 |
-| todo | G03 質問・承認をtokenの有効期間に一度だけ回答する | new / edge | integration | 複数質問、秘密入力、選択肢、承認、失効と旧世代 |
+| refactor-skipped | G03 質問・承認をtokenの有効期間に一度だけ回答する | new / edge | integration | 複数質問、秘密入力、選択肢、承認、失効と旧世代 |
 | todo | G04 設定と接続の両終了までGUIを動かし、取消し後もターンを再開しない | regression / edge | integration | 両完了順、設定失敗、早期finished、wait(0) |
 
 ## 7. 設計メモ
@@ -71,6 +71,10 @@ redは`gigas.services`の未実装によるImportError。greenは専用loopでfa
 ### G02 実行履歴
 
 redはConnectionPanel未実装によるImportError。greenは接続操作・認証URLの明示openと破棄・本文delta/replace・送信失敗時の入力保持・保存済みsnapshotを実装して新規2件と既存終了11件がpass。アプリへのservice組込に伴い、基本の両スレッド終了待ちを先行実装した。取消し時の中断契約と終了競合はG04で検証する。対象ruff/ty成功。refactor-skipped: 表示・操作・shellの設定snapshotを分離済み。実画面の読み取り確認と実runtimeは親の受入で行う。
+
+### G03 実行履歴
+
+redはanswer_requested未実装により新規6件が失敗。greenは質問ごとの入力、許可された承認判断、token単位のカードと不可逆失効を実装しGUI8件がpass。回答の重複、旧世代通知、RequestResolved・停止・切断・終端後の遅いクリックを確認した。秘密入力はマスクし、提出・失効時に消去する。対象ruff/ty成功。refactor-skipped: QuestionInputとRequestCardを分離し、ConnectionPanelは世代・失効のみを管理するため追加整理は不要。実runtimeでの要求提示・回答は親の受入へ残す。
 
 ## 10. 先送り事項
 

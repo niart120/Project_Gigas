@@ -2,12 +2,23 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QUrl
+from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
-from gigas.runtime.codex.models import ConnectionOptions, LoginEvent, SessionStatus, TextEvent
+from gigas.runtime.codex.models import (
+    ConnectionOptions,
+    HumanRequest,
+    LoginEvent,
+    Question,
+    QuestionOption,
+    RequestResolved,
+    SessionStatus,
+    TextEvent,
+)
 from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
+from gigas.ui.request_card import AnswerSubmission
 
 
 def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) -> None:
@@ -86,3 +97,114 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         shell.dialog.set_values(shell.baseline)
         shell.request_close()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
+
+
+def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(5)
+    panel.handle_event(ServiceEvent(5, SessionStatus("running")))
+    answers: list[object] = []
+    panel.answer_requested.connect(answers.append)
+    request = HumanRequest(
+        "token",
+        7,
+        "thread",
+        "turn",
+        "question",
+        questions=(
+            Question(
+                "choice",
+                "方針",
+                "どれにしますか?",
+                (QuestionOption("A", "説明A"), QuestionOption("B", "説明B")),
+            ),
+            Question("text", "入力", "秘密の値は?", is_secret=True),
+            Question(
+                "other", "経路", "別の経路?", (QuestionOption("既定", "説明"),), is_other=True
+            ),
+        ),
+    )
+    panel.handle_event(ServiceEvent(5, request))
+    card = panel.cards["token"]
+    assert not card.submit_button.isEnabled()
+    assert card.editors["text"].answer.echoMode() == QLineEdit.EchoMode.Password
+    card.editors["choice"].choices[1].click()
+    card.editors["text"].answer.setText("secret")
+    card.editors["other"].choices[-1].click()
+    card.editors["other"].answer.setText("custom")
+    card.submit_button.click()
+    card.submit_button.click()
+    assert len(answers) == 1
+    assert answers[0] == AnswerSubmission(
+        "token", answers={"choice": "B", "text": "secret", "other": "custom"}
+    )
+    panel.handle_event(ServiceEvent(5, RequestResolved("token")))
+    assert not card.is_live
+    assert "secret" not in panel.transcript.toPlainText()
+    panel.activate(6)
+    panel.handle_event(ServiceEvent(5, request))
+    assert not panel.cards
+
+
+@pytest.mark.parametrize("ending", ["resolved", "stop", "disconnect", "terminal"])
+def test_approval_is_explicit_and_invalidated_locally(qtbot: QtBot, ending: str) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    answers: list[object] = []
+    panel.answer_requested.connect(answers.append)
+    request = HumanRequest(
+        "approval",
+        "7",
+        "thread",
+        "turn",
+        "command",
+        details="echo test",
+        decisions=("accept", "decline", "cancel"),
+    )
+    panel.handle_event(ServiceEvent(1, request))
+    card = panel.cards["approval"]
+    assert not answers
+    assert set(card.decision_buttons) == {"accept", "decline", "cancel"}
+    if ending == "resolved":
+        panel.handle_event(ServiceEvent(1, RequestResolved("approval")))
+    elif ending == "stop":
+        panel.interrupt()
+    elif ending == "disconnect":
+        panel.disconnect_button.click()
+    else:
+        panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
+    card.decision_buttons["accept"].click()
+    assert not answers
+    assert not card.is_live
+    panel.handle_event(ServiceEvent(1, request))
+    assert not panel.cards["approval"].is_live
+
+
+def test_approval_sends_only_the_clicked_advertised_decision(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    answers: list[object] = []
+    panel.answer_requested.connect(answers.append)
+    panel.handle_event(
+        ServiceEvent(
+            1,
+            HumanRequest(
+                "file",
+                8,
+                "thread",
+                "turn",
+                "file",
+                details="a.txt\n+new",
+                decisions=("accept", "decline"),
+            ),
+        )
+    )
+    card = panel.cards["file"]
+    card.decision_buttons["decline"].click()
+    card.decision_buttons["accept"].click()
+    assert answers == [AnswerSubmission("file", decision="decline")]
