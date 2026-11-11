@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
 )
 
 from gigas.ui.connection_panel import ConnectionPanel
+from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.geometry import fit_to_screen
 from gigas.ui.layout import WINDOW_SIZE_PRESETS, fit_window_size_preset
+from gigas.ui.notifications import NotificationCenter
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
@@ -60,6 +62,8 @@ class MainWindow(QMainWindow):
         self.settings_button.clicked.connect(self.settings_requested)
         actions.addWidget(self.settings_button)
         layout.addLayout(actions)
+        self.notifications = NotificationCenter(self)
+        layout.addWidget(self.notifications.banner)
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.video = VideoPanel(self.splitter)
@@ -67,6 +71,7 @@ class MainWindow(QMainWindow):
         conversation_layout = QVBoxLayout(conversation)
         conversation_layout.addWidget(QLabel("Codex", conversation))
         self.connection = ConnectionPanel(conversation)
+        self.connection.failed.connect(self.notifications.publish)
         conversation_layout.addWidget(self.connection, 1)
         self.splitter.addWidget(self.video)
         self.splitter.addWidget(conversation)
@@ -74,8 +79,9 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 2)
         layout.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
-        self.status = QLabel("変更なし", self)
+        self.status = ElidedLabel("変更なし", self)
         self.statusBar().addWidget(self.status, 1)
+        self.statusBar().addPermanentWidget(self.notifications.entry_button)
         self.cancel_close_button = QPushButton("終了取消し", self)
         self.cancel_close_button.clicked.connect(self.cancel_close_requested)
         self.cancel_close_button.hide()
@@ -111,6 +117,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Route window closure through application lifetime management."""
         if self.allow_close:
+            self.notifications.close_details()
             event.accept()
         else:
             event.ignore()

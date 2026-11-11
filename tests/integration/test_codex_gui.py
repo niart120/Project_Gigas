@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QPoint, QUrl
@@ -21,6 +22,9 @@ from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
+
+if TYPE_CHECKING:
+    from gigas.ui.notifications import Notice
 
 
 def test_settings_load_failure_preserves_session_stop(qtbot: QtBot, tmp_path: Path) -> None:
@@ -237,6 +241,8 @@ def test_connection_failure_persists_until_explicit_disconnect(
     qtbot: QtBot, connection_created: bool
 ) -> None:
     panel = ConnectionPanel()
+    failures: list[Notice] = []
+    panel.failed.connect(failures.append)
     qtbot.addWidget(panel)
     panel.activate(1)
     if connection_created:
@@ -244,7 +250,8 @@ def test_connection_failure_persists_until_explicit_disconnect(
     panel.handle_result(ServiceResult(1, "connect", "接続失敗"))
     panel.set_available(False)
     panel.set_available(True)
-    assert panel.status.text() == "接続失敗"
+    assert panel.status.text() == "エラー"
+    assert failures[-1].details == "接続失敗"
     assert not panel.connect_button.isEnabled()
     assert not panel.send_button.isEnabled()
     assert panel.disconnect_button.isEnabled()

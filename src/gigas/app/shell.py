@@ -14,6 +14,7 @@ from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
 from gigas.ui.main_window import MainWindow
+from gigas.ui.notifications import Notice
 from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.settings_dialog import SettingsDialog
 
@@ -62,10 +63,12 @@ class ApplicationShell(QObject):
         self._refresh_on_open = False
         self._capture_after_save: Settings | None = None
         self._settings_saved = False
+        self._shutdown_failure = ""
         self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
         self.video.changed.connect(self._video_changed)
         self.video.devices_changed.connect(self._update_capture_devices)
+        self.video.failed.connect(self.window.notifications.publish)
         self.window.video.connect_requested.connect(self.connect_video)
         self.window.video.disconnect_requested.connect(self.disconnect_video)
         self.confirmation: QMessageBox | None = None
@@ -84,6 +87,7 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
+        self.window.notifications.settings_requested.connect(self.open_settings)
         self.window.window_size_requested.connect(self.change_window_size)
         self.window.close_requested.connect(self.request_close)
         self.window.cancel_close_requested.connect(self.cancel_close)
@@ -178,6 +182,8 @@ class ApplicationShell(QObject):
 
     def open_settings(self) -> None:
         """Show the single settings editor without discarding its input."""
+        if self.committed or self.pending == "app":
+            return
         newly_shown = self.dialog is None or not self.dialog.isVisible()
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
@@ -321,6 +327,17 @@ class ApplicationShell(QObject):
         else:
             self.error = result.error
             self.error_operation = "読込失敗" if operation == "load" else "保存失敗"
+            explanation = (
+                "設定を読み込めませんでした。設定ファイルと詳細を確認して、再読込してください。"
+                if operation == "load"
+                else (
+                    "保存の完了を確認できず、設定を適用しませんでした。"
+                    "編集内容と詳細を確認してください。"
+                )
+            )
+            self.window.notifications.publish(
+                Notice("settings", self.error_operation, explanation, result.error)
+            )
             if operation == "load":
                 self.ready = False
         if self.error and operation == "save":
@@ -374,6 +391,9 @@ class ApplicationShell(QObject):
             "閉じる取消し" if self.pending == "dialog" else "終了取消し"
         )
         self.window.settings_button.setEnabled(not self.committed)
+        self.window.notifications.set_settings_available(
+            not self.committed and self.pending != "app"
+        )
         self.window.set_window_size_state(
             self.baseline.window_size_preset,
             enabled=(
@@ -399,7 +419,8 @@ class ApplicationShell(QObject):
         )
         if self.dialog is not None:
             self.dialog.status.setText(state)
-            self.dialog.details.setPlainText(self.error)
+            if self.dialog.details.toPlainText() != self.error:
+                self.dialog.details.setPlainText(self.error)
             self.dialog.details.setVisible(bool(self.error))
             idle = (
                 self.operation is None
@@ -422,7 +443,8 @@ class ApplicationShell(QObject):
                 if self.video.apply_state == "failed" and not self.video.cleanup_unconfirmed
                 else self.window.video.status.text()
             )
-            self.dialog.capture_connection_error.setPlainText(self.video.apply_error)
+            if self.dialog.capture_connection_error.toPlainText() != self.video.apply_error:
+                self.dialog.capture_connection_error.setPlainText(self.video.apply_error)
             self.dialog.capture_connection_error.setVisible(bool(self.video.apply_error))
             self.dialog.cancel_close_button.setVisible(cancelable)
             self.dialog.cancel_close_button.setText(self.window.cancel_close_button.text())
@@ -526,17 +548,32 @@ class ApplicationShell(QObject):
     def _finish_shutdown(self) -> None:
         if not self.committed or self._stopped:
             return
+        failure = "\n".join(
+            reason for reason in (self.video.shutdown_error, self.service.shutdown_error) if reason
+        )
+        if failure and failure != self._shutdown_failure:
+            self._shutdown_failure = failure
+            self.window.notifications.publish(
+                Notice(
+                    "shutdown",
+                    "終了未確認",
+                    "終了処理の完了を確認できないため、画面を閉じていません。詳細を確認してください。",
+                    failure,
+                )
+            )
+        if failure:
+            self.window.status.setText("終了未確認")
         if not self.io_thread.wait(0) or not self._worker_released or not self.service.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
         if not self.video.shutdown_complete:
             if self.video.shutdown_error:
-                self.window.status.setText(self.video.shutdown_error)
+                self.window.status.setText("終了未確認")
             else:
                 QTimer.singleShot(10, self._finish_shutdown)
             return
         if self.service.shutdown_error:
-            self.window.status.setText(self.service.shutdown_error)
+            self.window.status.setText("終了未確認")
             return
         self._stopped = True
         self.wait_timer.stop()

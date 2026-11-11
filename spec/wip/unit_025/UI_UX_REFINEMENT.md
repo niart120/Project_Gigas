@@ -34,6 +34,8 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 
 「ファイル」に設定・終了、「接続」に映像・Codex、「表示」に4プリセットを配置する。右上の独立した設定ボタン行とプレビュー上の接続ボタン・状態・機器名を除く。映像状態と現在の機器名はステータスバーへ置く。FPS・解像度を常設しない。Codexの送信・中断は会話の近くに残す。
 
+映像メニューも、未接続で開いた際に一覧を非同期取得する。取得中は既存候補を使う。設定画面と同じ表示名・同名番号・保存値を参照し、更新ボタンを押すまで候補が出ない構成をメニュー側へ再導入しない。メニューの選択印は保存値、ステータスバーの名前は現在の取得先を表す。
+
 保存状態は設定ダイアログへ置き、映像状態を上書きしない。設定保存中・ダイアログ終了待ちでも既存接続の中断・切断を受け付ける。アプリ終了の既存順序は維持し、終了取消しで自動再開しない。
 
 設定は`Ctrl+,`、送信は`Ctrl+Enter`を提供する。Enter単独は入力・改行・IME確定のために残す。質問・承認を既定値で自動送信しない。現在未対応のAPIキーは選べる新規選択肢にせず、保存済みの値を読み込んだ場合は未対応として表示し、無関係な保存で値を消さない。
@@ -70,7 +72,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T04: 小画面の要求を優先表示し、完了内容を折り畳んで下書きを保持 | regression | integration | RV08。初期4件と通知順競合のred→39 passed |
 | refactor-skipped | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02。5 failed / 1 passed→80 passed |
 | refactor-skipped | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01。10 failed / 2 passed→97 passed |
-| todo | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09 |
+| refactor-skipped | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09。GUI 7 failed→146 passed、core 10 failed→65 passed |
 | todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
@@ -84,6 +86,8 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 ## 7. 検証計画・実績
 
 実装前に失敗を確認し、各itemの実績を本節へ追記する。全体gateは`uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`、`uv run ruff check .`、`uv run ty check --no-progress`、unit/integration、`uv build`、`git diff --check`。Python3.12/3.13、代表画面の描画、実機映像切替、終了後プロセスの状態を確認する。実機・IME・DPIの結果は自動試験と分ける。
+
+画面・実機の詳細は[受入記録](UI_ACCEPTANCE.md)へ集約する。T06後の実機適用は確認済みだが、最終メニュー・通知の画面受入とは分ける。
 
 T01: `uv run pytest tests/integration/test_ui_control_lifetime.py -q`で中断ボタン無効の期待したredを確認。設定画面終了待ちとアプリ終了を分け、設定画面終了待ちでは既存の中断・切断を維持した。新規接続は引き続き設定状態で制限する。`uv run pytest tests/integration/test_ui_control_lifetime.py tests/integration/test_app_lifetime.py tests/integration/test_codex_shutdown.py -q`は19 passed。対象ruff check成功、format適用後に対象1 passed。構造変更は不要と判断。
 
@@ -109,6 +113,10 @@ T06の追加redでは、未保存選択中の旧設定接続、未接続から�
 
 T12: 横断レビューで`before\nKEEP`の`KEEP`を選択した状態から`new\r\nbefore\nKEEP`へ更新すると選択が消えることを実ウィジェットで確認。T06のcommit後、`uv run pytest tests/integration/test_transcript_reading.py -q --basetemp=tmp/pytest-t12-red --tb=short`でCRLF・ソフト改行・非改行空白を含む6 failed / 17 passedのredを確認した。本文の比較元をQtの`toRawText()`へ変え、段落改行だけを1文字へ揃えて23 passed。通常空白への置換は行わず、非改行空白とソフト改行を保持する。同ファイルと`test_codex_gui.py`は35 passed、対象ruff/format・全体ty成功。正逆の選択、閲覧位置、更新後の再追記を検証し、追加構造変更は不要。
 
+T07: `uv run pytest tests/integration/test_notifications.py -q --basetemp=tmp/pytest-review-t07`で初期7件のredを確認。発生元別の最近の失敗、非モーダル通知、モデルレスの詳細snapshot、選択・コピーの維持を実装した。追加redで詳細画面のEnter誤発火、旧失敗の取消し時再通知、成功した適用と後の取得失敗の混同、過去のローカルエラーがサービス終了を隠す経路を修正した。同ファイルは13 passed、関連GUI 13ファイル146 passed。
+
+T07のCodex側は`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_service.py -q --basetemp=tmp/pytest-t07-correlation-red`で10 failed / 53 passed。省略可能な`failure_id`を状態・例外・結果へ渡し、同じ失敗だけを対応付けた。独立レビューで終了時の中断失敗にも相関が必要と分かり、追加red→修正後は65 passed。型/docstring・API docsを確認し、ignore/castは追加していない。担当ruff/format・全体ty・差分検査成功、独立レビューの必須指摘はすべて解消。追加構造整理は不要。
+
 ## 8. 先送り事項
 
 APIキー認証とモデル候補の取得・接続後切替はU06、シリアル機器接続はU05。マルチモニターDPI、長時間運転、スクリーンリーダーは環境で確認できない場合に未検証として残す。RV01〜RV10の現行不具合を未実装のまま完了扱いにしない。
@@ -120,4 +128,6 @@ APIキー認証とモデル候補の取得・接続後切替はU06、シリア�
 - [ ] エラー説明文の例外を規約・製品・docsで整合させた
 - [ ] 代表画面と可能な実機確認を記録した
 - [ ] 品質gateと独立レビューを通過した
-- [ ] PRのcheck・レビュー・mergeを確認し、main同期・安全なブランチ整理を完了した
+- [ ] PRへ渡す変更・検証結果・未検証事項を揃えた
+
+このunitの`complete`への移動は、実装・受入・ローカルgateを終えたPR提出可能な状態を表す。依頼全体の完了には、その後のPR check・レビュー・merge、main同期、安全なローカル／リモートブランチ整理も必要である。将来のmergeを本書で完了済みとはせず、実際のPR状態・merge SHA・最終Git同期結果で確認する。

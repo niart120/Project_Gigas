@@ -51,6 +51,8 @@ class SessionStatus:
         effort: Validated reasoning effort, empty before catalog validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
         detail: A short application-owned reason safe for display.
+        failure_id: Connection-local failure identity shared with an operation result;
+            None when no correlated failure identity is supplied.
     """
 
     phase: ConnectionPhase
@@ -58,6 +60,7 @@ class SessionStatus:
     effort: str = ""
     authenticated: bool = False
     detail: str = ""
+    failure_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

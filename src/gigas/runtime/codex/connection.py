@@ -32,7 +32,18 @@ if TYPE_CHECKING:
 
 
 class CodexConnectionError(RuntimeError):
-    """A Codex operation failed with a display-safe application-owned reason."""
+    """A Codex operation failed with a display-safe application-owned reason.
+
+    Args:
+        message: Application-owned reason safe to display.
+        failure_id: Connection-local identity of an already emitted failure status,
+            or None when only the rejected operation reports this failure.
+    """
+
+    def __init__(self, message: str, *, failure_id: int | None = None) -> None:
+        """Retain the optional identity without changing the exception message."""
+        super().__init__(message)
+        self.failure_id = failure_id
 
 
 class AnswerDeliveryError(CodexConnectionError):
@@ -214,6 +225,7 @@ class CodexConnection:
         self._interrupted_turns: set[str] = set()
         self._login_starting = False
         self._login_completions: dict[str, JsonObject] = {}
+        self._failure_serial = 0
 
     async def open(self) -> None:
         """Initialize, read authentication and validate model settings against the catalog.
@@ -265,8 +277,8 @@ class CodexConnection:
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
-            self._status("error", reason)
-            raise CodexConnectionError(reason) from None
+            failure_id = self._failure("error", reason)
+            raise CodexConnectionError(reason, failure_id=failure_id) from None
         finally:
             self._opening = False
 
@@ -297,9 +309,9 @@ class CodexConnection:
             else:
                 self._emit(LoginEvent(_login_url(result.get("authUrl"))))
         except (TransportError, CodexConnectionError):
-            self._status("login_required", "ログイン開始に失敗")
             message = "ログイン開始に失敗"
-            raise CodexConnectionError(message) from None
+            failure_id = self._failure("login_required", message)
+            raise CodexConnectionError(message, failure_id=failure_id) from None
         finally:
             self._login_starting = False
             self._login_completions.clear()
@@ -356,11 +368,13 @@ class CodexConnection:
                 await self._interrupt()
             else:
                 self._update_waiting()
-        except (TransportError, CodexConnectionError, OSError, UnicodeError):
+        except (TransportError, CodexConnectionError, OSError, UnicodeError) as error:
             await self.close()
-            self._status("error", "ターン開始に失敗")
+            if isinstance(error, CodexConnectionError) and error.failure_id is not None:
+                raise
             message = "ターン開始に失敗"
-            raise CodexConnectionError(message) from None
+            failure_id = self._failure("error", message)
+            raise CodexConnectionError(message, failure_id=failure_id) from None
         finally:
             self._sending = False
             self._starting_turn = False
@@ -407,9 +421,9 @@ class CodexConnection:
             await self._peer.respond(request.rpc_id, payload)
         except TransportError:
             await self.close()
-            self._status("error", "回答の送信結果を確認できない")
             message = "回答の送信結果を確認できない"
-            raise AnswerDeliveryError(message) from None
+            failure_id = self._failure("error", message)
+            raise AnswerDeliveryError(message, failure_id=failure_id) from None
         self._update_waiting()
 
     async def stop(self) -> None:
@@ -492,9 +506,9 @@ class CodexConnection:
             )
         except TransportError:
             await self.close()
-            self._status("error", "中断結果を確認できない")
             message = "中断結果を確認できない"
-            raise CodexConnectionError(message) from None
+            failure_id = self._failure("error", message)
+            raise CodexConnectionError(message, failure_id=failure_id) from None
 
     def _require_open(self) -> None:
         if not self._opened or self._closed:
@@ -539,9 +553,18 @@ class CodexConnection:
             raise CodexConnectionError(message)
         self._thread_id = _text(_object(result.get("thread")).get("id"))
 
-    def _status(self, phase: "ConnectionPhase", detail: str = "") -> None:
+    def _failure(self, phase: "ConnectionPhase", detail: str) -> int:
+        self._failure_serial += 1
+        self._status(phase, detail, failure_id=self._failure_serial)
+        return self._failure_serial
+
+    def _status(
+        self, phase: "ConnectionPhase", detail: str = "", *, failure_id: int | None = None
+    ) -> None:
         self._phase = phase
-        self._emit(SessionStatus(phase, self._model, self._effort, self._authenticated, detail))
+        self._emit(
+            SessionStatus(phase, self._model, self._effort, self._authenticated, detail, failure_id)
+        )
 
     async def _read_account(self) -> None:
         result = _object(await self._peer.request("account/read", {"refreshToken": False}))
@@ -599,15 +622,16 @@ class CodexConnection:
                 if isinstance(event, TransportClosed):
                     if not self._closed:
                         await self.close()
-                        self._status("error", "Codexとの接続が終了")
+                        self._failure("error", "Codexとの接続が終了")
                     return
                 if isinstance(event, ServerRequest):
                     await self._server_request(event)
                 elif isinstance(event, RpcNotification):
                     await self._notification(event)
-        except (TransportError, CodexConnectionError):
+        except (TransportError, CodexConnectionError) as error:
             await self.close()
-            self._status("error", "Codexの通知処理に失敗")
+            if not isinstance(error, CodexConnectionError) or error.failure_id is None:
+                self._failure("error", "Codexの通知処理に失敗")
 
     async def _notification(self, event: RpcNotification) -> None:
         params = event.params or {}
@@ -647,9 +671,11 @@ class CodexConnection:
 
     async def _complete_login(self, params: "JsonObject") -> None:
         self._login_id = None
-        if params.get("success") is True:
-            await self._read_account()
-            await self._read_models()
+        if params.get("success") is not True:
+            self._failure("login_required", "ログインに失敗")
+            return
+        await self._read_account()
+        await self._read_models()
         self._status("ready" if self._authenticated else "login_required")
 
     def _adopt_turn(self, turn_id: str) -> None:
@@ -678,7 +704,7 @@ class CodexConnection:
         self._turn_id = None
         self._file_details.clear()
         if turn.get("status") == "failed":
-            self._status("error", "ターンが失敗")
+            self._failure("error", "ターンが失敗")
         elif self._stopping or turn.get("status") == "interrupted":
             self._status("stopped")
         else:
@@ -745,7 +771,7 @@ class CodexConnection:
             request = self._decode_request(event, params)
         except CodexConnectionError as error:
             await self._peer.reject(event.id, -32602, "Invalid request parameters")
-            self._status(self._phase, str(error))
+            self._failure(self._phase, str(error))
             return
         self._requests[request.token] = request
         self._request_tokens[event.id] = request.token

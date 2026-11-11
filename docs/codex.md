@@ -16,6 +16,8 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `CodexConnectionError` は表示可能な短い理由を持ちます。通信で受付を確認できなかった要求を自動再送しません。最後に `close()` を待ち、所有するapp-serverとイベント受信処理を終了してからasyncioループを停止してください。
 
+失敗の`SessionStatus`と同じ失敗を返す`CodexConnectionError`には、共通の`failure_id`が入ります。接続内で一意の番号なので、接続世代と組み合わせて二重表示を防げます。同じ理由でも別の試行には別の番号が付きます。既定の`None`は対応付ける番号がないことを表し、成功を意味しません。
+
 質問・承認は `HumanRequest` として届きます。回答にはその `token` を使い、質問は `answer(token, answers={質問ID: 回答})`、承認は `answer(token, decision=判断)` を呼びます。判断は `decisions` に含まれる値から明示的に選びます。自動許可や永続許可への変換はありません。`RequestResolved(token)` が届いた要求は回答操作を無効にしてください。解決済み、停止後、ターン完了後の回答は送信しません。MCPの追加情報要求は現在未対応として拒否します。
 
 `RequestResolved`は送信前にも届くため、回答送信の成功通知として扱わないでください。`answer()`の正常終了は通信への書込完了だけを表します。送信前の無効な要求は`CodexConnectionError`、通信への送信結果が不明な失敗はその派生型`AnswerDeliveryError`になります。取消しも送信結果不明として扱い、自動再送しません。これらの結果は許可対象の実行成功を保証しません。

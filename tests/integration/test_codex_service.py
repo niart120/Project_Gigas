@@ -72,6 +72,100 @@ class WaitingAnswerConnection(ControlledConnection):
         await asyncio.Event().wait()
 
 
+@pytest.mark.parametrize("delivery", [False, True])
+def test_failure_id_is_shared_by_worker_status_and_operation_result(
+    qtbot: QtBot, tmp_path: Path, delivery: bool
+) -> None:
+    class FailedAnswerConnection(ControlledConnection):
+        """Publish one failure before returning its associated operation error."""
+
+        async def answer(
+            self,
+            token: str,
+            *,
+            decision: str | None = None,
+            answers: Mapping[str, str] | None = None,
+        ) -> None:
+            """Attach correlation without exposing any transport implementation."""
+            assert (token, decision, answers) == ("token", "accept", None)
+            message = "回答失敗"
+            self.emit(SessionStatus("error", detail=message, failure_id=17))
+            error_type = AnswerDeliveryError if delivery else CodexConnectionError
+            raise error_type(message, failure_id=17)
+
+    events: list[ServiceEvent] = []
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(lambda _options, emit: FailedAnswerConnection(emit))
+    service.received.connect(events.append)
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        generation = service.connect_runtime(ConnectionOptions(tmp_path))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.answer("token", decision="accept")
+        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
+        result = next(result for result in results if result.operation == "answer")
+        status = events[-1].event
+        assert isinstance(status, SessionStatus)
+        assert status.failure_id == result.failure_id == 17
+        assert result.generation == events[-1].generation == generation
+        assert result.answer == AnswerResult("token", "unknown" if delivery else "not_sent")
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+@pytest.mark.parametrize("correlated", [False, True])
+def test_shutdown_stop_failure_preserves_correlation_and_still_closes(
+    qtbot: QtBot, tmp_path: Path, correlated: bool
+) -> None:
+    class FailedStopConnection(ControlledConnection):
+        """Keep cleanup observable when the shutdown interrupt fails."""
+
+        async def stop(self) -> None:
+            """Model a known failure and an unexpected exception independently."""
+            if correlated:
+                message = "中断結果を確認できない"
+                self.emit(SessionStatus("error", detail=message, failure_id=23))
+                raise CodexConnectionError(message, failure_id=23)
+            message = "PRIVATE-SHUTDOWN-ERROR"
+            raise OSError(message)
+
+    connections: list[FailedStopConnection] = []
+    events: list[ServiceEvent] = []
+    results: list[ServiceResult] = []
+
+    def factory(
+        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+    ) -> FailedStopConnection:
+        connection = FailedStopConnection(emit)
+        connections.append(connection)
+        return connection
+
+    service = CodexServiceThread(factory)
+    service.received.connect(events.append)
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        generation = service.connect_runtime(ConnectionOptions(tmp_path))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+    qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+    stopped = [result for result in results if result.operation == "stop"]
+    assert len(stopped) == 1
+    assert stopped[0].generation == generation
+    assert stopped[0].failure_id == (23 if correlated else None)
+    assert stopped[0].error
+    assert "PRIVATE" not in stopped[0].error
+    assert connections[0].closed.is_set()
+    if correlated:
+        status = events[-1].event
+        assert isinstance(status, SessionStatus)
+        assert status.failure_id == stopped[0].failure_id
+
+
 def test_answer_without_connection_reports_not_sent(qtbot: QtBot) -> None:
     service = CodexServiceThread()
     results: list[ServiceResult] = []
@@ -83,6 +177,7 @@ def test_answer_without_connection_reports_not_sent(qtbot: QtBot) -> None:
         result = results[0]
         assert result.error
         assert result.answer == AnswerResult("missing", "not_sent")
+        assert result.failure_id is None
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))

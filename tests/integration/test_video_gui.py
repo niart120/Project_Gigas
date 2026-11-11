@@ -229,7 +229,8 @@ def test_shutdown_waits_for_capture_cleanup_and_keeps_gui_responsive(
     capture.state = replace(
         capture.state, phase="error", cleanup="unconfirmed", error="child alive"
     )
-    qtbot.waitUntil(lambda: "child alive" in shell.window.status.text())
+    qtbot.waitUntil(lambda: "shutdown" in shell.window.notifications.notices)
+    assert "child alive" in shell.window.notifications.notices["shutdown"].details
     assert shell.window.isVisible()
     assert not shell.window.allow_close
     capture.state = replace(capture.state, phase="closed", cleanup="forced", error="")
@@ -282,7 +283,8 @@ def test_long_device_paths_and_errors_keep_video_controls_within_the_screen(
     capture.state = replace(
         capture.state, phase="error", error=error, devices=(DeviceInfo(name, path),)
     )
-    qtbot.waitUntil(lambda: shell.window.video.details.toPlainText() == error)
+    qtbot.waitUntil(lambda: "video" in shell.window.notifications.notices)
+    assert shell.window.notifications.notices["video"].details == error
     assert shell.window.video.source.text() == name
     assert shell.window.screen().availableGeometry().contains(shell.window.frameGeometry())
     panel = shell.window.video

@@ -7,7 +7,6 @@ from PySide6.QtGui import QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -93,7 +92,7 @@ class VideoView(QWidget):
 
 
 class VideoPanel(QWidget):
-    """Present capture controls, diagnostics, and the latest video image.
+    """Present capture controls, current state, and the latest video image.
 
     Args:
         parent: Owning widget, if any.
@@ -122,11 +121,6 @@ class VideoPanel(QWidget):
         layout.addWidget(self.source)
         self.view = VideoView(self)
         layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
-        self.details = QPlainTextEdit(self)
-        self.details.setReadOnly(True)
-        self.details.setMaximumHeight(70)
-        self.details.hide()
-        layout.addWidget(self.details)
         self.connect_button.clicked.connect(self.connect_requested)
         self.disconnect_button.clicked.connect(self.disconnect_requested)
         self.connect_button.setEnabled(False)
@@ -139,7 +133,6 @@ class VideoPanel(QWidget):
         *,
         available: bool,
         settings_ready: bool,
-        error: str = "",
     ) -> None:
         """Update controls independently of the slower image refresh rate.
 
@@ -148,7 +141,6 @@ class VideoPanel(QWidget):
             settings: Settings fixed when the displayed connection was accepted.
             available: Whether the service and application accept new commands.
             settings_ready: Whether saved settings permit connecting.
-            error: Local validation error, shown ahead of a service error.
         """
         phase = snapshot.phase
         self.status.setText(
@@ -169,7 +161,3 @@ class VideoPanel(QWidget):
             if settings is not None and device.path == settings.capture_device
         ]
         self.source.setText(names[0] if len(names) == 1 else "")
-        detail = error or snapshot.error
-        if self.details.toPlainText() != detail:
-            self.details.setPlainText(detail)
-        self.details.setVisible(bool(detail))

@@ -91,12 +91,15 @@ class ServiceResult:
     reported separately through SessionStatus. Errors contain no raw exception text.
     Answer operations include token-specific delivery evidence in answer, including
     rejected or cancelled calls. The generation still identifies the connection.
+    failure_id correlates this result with an already emitted SessionStatus from
+    that generation. None identifies an uncorrelated result, not a successful call.
     """
 
     generation: int
     operation: ServiceOperation
     error: str = ""
     answer: AnswerResult | None = None
+    failure_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,9 +249,14 @@ class CodexServiceThread(QThread):
             if self._connection is not None:
                 try:
                     await self._connection.stop()
-                except Exception:  # noqa: BLE001 -- interruption failure must not skip close
+                except Exception as error:  # noqa: BLE001 -- still close after interruption failure
+                    failure_id = (
+                        error.failure_id if isinstance(error, CodexConnectionError) else None
+                    )
                     self.completed.emit(
-                        ServiceResult(self._active_generation, "stop", "中断に失敗")
+                        ServiceResult(
+                            self._active_generation, "stop", "中断に失敗", failure_id=failure_id
+                        )
                     )
                 await self._connection.close()
                 self._connection = None
@@ -282,12 +290,21 @@ class CodexServiceThread(QThread):
         if command.operation == "answer":
             self._complete(command, "回答は送信されていない", "not_sent")
 
-    def _complete(self, command: _Command, error: str, outcome: AnswerOutcome) -> None:
+    def _complete(
+        self,
+        command: _Command,
+        error: str,
+        outcome: AnswerOutcome,
+        failure_id: int | None = None,
+    ) -> None:
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
-        self.completed.emit(ServiceResult(command.generation, command.operation, error, answer))
+        self.completed.emit(
+            ServiceResult(command.generation, command.operation, error, answer, failure_id)
+        )
 
     async def _execute(self, command: _Command) -> None:
         error = ""
+        failure_id: int | None = None
         outcome: AnswerOutcome = "sent"
         try:
             await self._perform(command)
@@ -298,13 +315,15 @@ class CodexServiceThread(QThread):
         except AnswerDeliveryError as failure:
             error = str(failure)
             outcome = "unknown"
+            failure_id = failure.failure_id
         except CodexConnectionError as failure:
             error = str(failure)
             outcome = "not_sent"
+            failure_id = failure.failure_id
         except Exception:  # noqa: BLE001 -- sanitize the service/GUI boundary
             error = "Codex操作に失敗"
             outcome = "unknown"
-        self._complete(command, error, outcome)
+        self._complete(command, error, outcome, failure_id)
 
     async def _perform(self, command: _Command) -> None:
         if command.operation == "connect":

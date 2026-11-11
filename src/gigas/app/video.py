@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureError, CaptureOptions
+from gigas.ui.notifications import Notice
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
@@ -56,14 +57,19 @@ class CapturePort(Protocol):
 class VideoController(QObject):
     """Pull capture state and the latest image without queuing every frame.
 
+    The failed signal carries a Notice once per observed failure in an operation.
+    A new explicit attempt may notify the same diagnostic again. Notification
+    history does not participate in acquisition availability or cleanup decisions.
+
     Args:
-        panel: View receiving controls, diagnostics, and display images.
+        panel: View receiving controls, current state, and display images.
         service: Unstarted service to own; None creates the production service.
         parent: Owning application object.
     """
 
     changed = Signal()
     devices_changed = Signal()
+    failed = Signal(object)
 
     def __init__(
         self,
@@ -82,6 +88,9 @@ class VideoController(QObject):
         self._settings_ready = False
         self._commands_ready = True
         self._pending_connection = False
+        self._attempt = 0
+        self._attempt_name = "映像取得"
+        self._last_failure: tuple[int, int, str] | None = None
         self._started = False
         self._closing = False
         self._disconnecting = False
@@ -227,6 +236,7 @@ class VideoController(QObject):
     def refresh_devices(self) -> None:
         """Request enumeration when idle without changing pending settings or video."""
         if self.can_refresh and self.service.refresh_devices():
+            self._begin_attempt("機器確認")
             self._enumerating = True
             self._discovery_error = ""
             self._request_error = ""
@@ -240,6 +250,7 @@ class VideoController(QObject):
         """
         if not self.can_connect:
             return
+        self._begin_attempt("映像接続")
         if not settings.capture_device:
             self._fail_application("映像機器が未選択")
             self._poll()
@@ -254,6 +265,7 @@ class VideoController(QObject):
         Args:
             settings: Saved snapshot to connect, or an empty device to remain disconnected.
         """
+        self._begin_attempt("映像適用")
         self._refresh_after_disconnect = False
         self._replacement = settings
         self._request_error = ""
@@ -326,6 +338,8 @@ class VideoController(QObject):
         Args:
             refresh_devices: Refresh the settings catalog after confirmed cleanup.
         """
+        if self.reader.snapshot().phase not in {"idle", "error", "closed"}:
+            self._begin_attempt("映像切断")
         self.cancel_pending()
         self._refresh_after_disconnect = refresh_devices
         self._enumerating = False
@@ -336,6 +350,7 @@ class VideoController(QObject):
 
     def shutdown(self) -> None:
         """Clear video and request service shutdown without joining on the GUI."""
+        self._begin_attempt("映像終了")
         self.cancel_pending()
         self._closing = True
         self.panel.view.set_frame(None)
@@ -366,6 +381,7 @@ class VideoController(QObject):
             if not enumerating:
                 self._discovery_error = ""
             self.devices_changed.emit()
+        self._notify_failure(snapshot, alive=alive)
         self._render()
         if self._closing or snapshot.phase != "streaming" or snapshot.frame is None:
             self.panel.view.set_frame(None)
@@ -404,6 +420,7 @@ class VideoController(QObject):
             ):
                 self._replacement = None
                 self.apply_state = "complete"
+                self._attempt_name = "映像取得"
         if self._refresh_after_disconnect:
             if (
                 snapshot.cleanup == "unconfirmed"
@@ -414,10 +431,46 @@ class VideoController(QObject):
             elif snapshot.phase == "idle" and self.can_refresh:
                 self._refresh_after_disconnect = False
                 if snapshot.cleanup in {"graceful", "forced"} and self.service.refresh_devices():
+                    self._begin_attempt("機器確認")
                     self._enumerating = True
                     self._discovery_error = ""
                     return True
         return False
+
+    def _begin_attempt(self, name: str) -> None:
+        self._attempt += 1
+        self._attempt_name = name
+        self._request_error = ""
+
+    def _notify_failure(self, snapshot: "CaptureSnapshot", *, alive: bool) -> None:
+        detail = self._request_error
+        service_exited = self._started and not alive and not self._closing
+        if service_exited:
+            detail = snapshot.error
+        elif snapshot.cleanup == "unconfirmed":
+            detail = snapshot.error or detail or "映像機器の終了を確認できない"
+        elif not detail and snapshot.phase == "error":
+            detail = snapshot.error
+        key = (self._attempt, snapshot.generation, detail)
+        if not detail or key == self._last_failure:
+            return
+        self._last_failure = key
+        title = f"{self._attempt_name}失敗"
+        explanation = "映像の処理に失敗しました。設定で機器と接続状態を確認してください。"
+        if service_exited:
+            title = "映像サービス終了"
+            explanation = "映像サービスが終了しました。詳細を確認してください。"
+        elif snapshot.cleanup == "unconfirmed":
+            explanation = (
+                "映像機器の終了を確認できません。新しい接続は開始できません。"
+                "詳細を確認してください。"
+            )
+        elif self._attempt_name == "映像適用":
+            explanation = (
+                "設定は保存されましたが、映像への適用に失敗しました。"
+                "設定で機器と接続状態を確認してください。"
+            )
+        self.failed.emit(Notice("video", title, explanation, detail))
 
     def _render(self) -> None:
         self.panel.render_state(
@@ -425,6 +478,5 @@ class VideoController(QObject):
             self.active_settings,
             available=self._available and not self._closing and self.service.is_alive(),
             settings_ready=self.can_connect,
-            error=self._request_error,
         )
         self.panel.disconnect_button.setEnabled(self.can_disconnect)

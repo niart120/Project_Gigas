@@ -23,6 +23,8 @@ from gigas.runtime.codex.models import (
     TextEvent,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
+from gigas.ui.elided_label import ElidedLabel
+from gigas.ui.notifications import Notice
 from gigas.ui.request_card import RequestCard
 from gigas.ui.transcript import Transcript
 
@@ -47,6 +49,10 @@ _PHASE_LABELS = {
 class ConnectionPanel(QWidget):
     """Render connection events and emit explicit user actions.
 
+    The failed signal carries a Notice for display-safe failures. A generation's
+    failure IDs correlate state events with command results; activating a new
+    connection discards those IDs, without modifying retained notification history.
+
     Args:
         parent: Owning widget, if any.
         open_url: Browser opener called only after the URL button is pressed.
@@ -58,6 +64,7 @@ class ConnectionPanel(QWidget):
     send_requested = Signal(str)
     interrupt_requested = Signal()
     answer_requested = Signal(object)
+    failed = Signal(object)
 
     def __init__(
         self,
@@ -78,6 +85,7 @@ class ConnectionPanel(QWidget):
         self._submitted = ""
         self._error = ""
         self._stopping = False
+        self._failure_ids: set[int] = set()
         self.cards: dict[str, RequestCard] = {}
         layout = QVBoxLayout(self)
         self._layout = layout
@@ -87,13 +95,15 @@ class ConnectionPanel(QWidget):
         self.login_button = QPushButton("ログイン", self)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
-        self.model = QLabel(self)
-        self.model.setTextFormat(Qt.TextFormat.PlainText)
-        for widget in (self.connect_button, self.disconnect_button, self.login_button, self.status):
+        self.model = ElidedLabel(parent=self)
+        for widget in (self.connect_button, self.disconnect_button, self.login_button):
             actions.addWidget(widget)
         actions.addStretch()
-        actions.addWidget(self.model)
         layout.addLayout(actions)
+        state = QHBoxLayout()
+        state.addWidget(self.status, 1)
+        state.addWidget(self.model, 3)
+        layout.addLayout(state)
         login = QHBoxLayout()
         self.login_url = QLineEdit(self)
         self.login_url.setReadOnly(True)
@@ -133,6 +143,7 @@ class ConnectionPanel(QWidget):
     def activate(self, generation: int) -> None:
         """Reset the view for a newly submitted connection generation."""
         self._generation = generation
+        self._failure_ids.clear()
         self._connected = True
         self._status = SessionStatus("connecting")
         self._error = ""
@@ -164,6 +175,7 @@ class ConnectionPanel(QWidget):
         """Disable commands after an unexpected service-thread exit."""
         self._available = False
         self._status = SessionStatus("error", detail="接続サービス終了")
+        self._notify_failure(self._status.detail)
         self.login_url.clear()
         self._expire_requests()
         self._render()
@@ -177,6 +189,8 @@ class ConnectionPanel(QWidget):
         if isinstance(event, SessionStatus):
             self._error = ""
             self._status = event
+            if event.failure_id is not None or (event.phase == "error" and event.detail):
+                self._notify_failure(event.detail, event.failure_id)
             if event.phase in {"stopping", "stopped", "closed", "error"}:
                 self._expire_requests()
             if event.phase != "authenticating":
@@ -231,6 +245,8 @@ class ConnectionPanel(QWidget):
                 card.finish_submission(result.answer.outcome)
         self._pending.discard(result.operation)
         self._error = result.error
+        if result.error:
+            self._notify_failure(result.error, result.failure_id, operation=result.operation)
         if result.operation == "connect" and result.error:
             self._status = SessionStatus("error", detail=result.error)
         if (
@@ -288,6 +304,21 @@ class ConnectionPanel(QWidget):
             card.invalidate()
             card.mark_unconfirmed()
 
+    def _notify_failure(
+        self, detail: str, failure_id: int | None = None, *, operation: str = ""
+    ) -> None:
+        if failure_id is not None:
+            if failure_id in self._failure_ids:
+                return
+            self._failure_ids.add(failure_id)
+        explanation = "Codexの処理に失敗しました。接続状態と詳細を確認してください。"
+        if operation == "answer":
+            explanation = (
+                "回答・承認の送信に失敗しました。各要求の送信状態を確認してください。"
+                "送信結果が不明な要求は自動再送しません。"
+            )
+        self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
+
     def _reveal_request(self, generation: int, token: str) -> None:
         if generation == self._generation and token in self.cards:
             self._request_layout.activate()
@@ -322,7 +353,7 @@ class ConnectionPanel(QWidget):
         visible = available and phase == "authenticating" and bool(self.login_url.text())
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
-        self.status.setText(self._error or self._status.detail or _PHASE_LABELS[phase])
+        self.status.setText(_PHASE_LABELS[phase])
         self.model.setText(
             " · ".join(value for value in (self._status.model, self._status.effort) if value)
         )
