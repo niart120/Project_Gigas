@@ -157,7 +157,7 @@ def test_settings_fields_are_grouped_by_display_io_and_codex(qtbot: QtBot, tmp_p
     assert buttons.standardButton(dialog.close_button) == QDialogButtonBox.StandardButton.Cancel
 
 
-@pytest.mark.parametrize("resolution, letterbox", [("auto", True), ("full_hd", False)])
+@pytest.mark.parametrize(("resolution", "letterbox"), [("auto", True), ("full_hd", False)])
 def test_image_settings_round_trip_with_selected_device(
     qtbot: QtBot, tmp_path: Path, resolution: str, letterbox: bool
 ) -> None:

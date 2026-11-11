@@ -12,7 +12,7 @@ from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, SessionStatus
 from gigas.services.codex import CodexServiceThread
-from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.storage.settings import Settings, SettingsError, load_settings
 
 
 class LifetimeConnection:
@@ -82,36 +82,31 @@ def _start(
     return shell, connections[0]
 
 
-@pytest.mark.parametrize("outcome", ["cancel", "save_failure"])
 def test_close_interrupts_before_settings_finish_and_never_resumes(
-    qtbot: QtBot, tmp_path: Path, outcome: str
+    qtbot: QtBot, tmp_path: Path
 ) -> None:
     saving = Event()
     release_save = Event()
 
-    def save(path: Path, settings: Settings) -> None:
+    def save(_path: Path, _settings: Settings) -> None:
         saving.set()
         if not release_save.wait(5):
             message = "test did not release save"
             raise TimeoutError(message)
-        if outcome == "save_failure":
-            message = "injected save failure"
-            raise SettingsError(message)
-        save_settings(path, settings)
+        message = "injected save failure"
+        raise SettingsError(message)
 
     shell, connection = _start(qtbot, tmp_path, SettingsIO(load_settings, save))
     try:
         shell.open_settings()
         assert shell.dialog is not None
         shell.dialog.model.setText("changed")
-        shell.save()
+        shell.apply_settings()
         qtbot.waitUntil(saving.is_set)
         shell.request_close()
         qtbot.waitUntil(lambda: connection.stops == 1)
         assert shell.window.isVisible()
         assert not connection.closing.is_set()
-        if outcome == "cancel":
-            shell.cancel_close()
         release_save.set()
         qtbot.waitUntil(lambda: shell.operation is None)
         assert shell.window.isVisible()

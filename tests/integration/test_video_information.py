@@ -22,7 +22,7 @@ def video(qtbot: QtBot) -> Iterator[tuple[MainWindow, VideoController, Controlle
     controller = VideoController(window.video, capture, window)
     controller.failed.connect(window.notifications.publish)
     controller.start()
-    controller.set_available(True, settings_ready=True)
+    controller.set_available(True)
     window.show()
     yield window, controller, capture
     controller.shutdown()
@@ -35,7 +35,7 @@ def test_view_menu_opens_successful_capture_information_without_a_failure_notice
     video: tuple[MainWindow, VideoController, ControlledCapture],
 ) -> None:
     window, controller, capture = video
-    controller.connect_capture(Settings(capture_device="camera", capture_fps=60))
+    controller.apply_capture(Settings(capture_device="camera", capture_fps=60))
     capture.stream(sequence=7, actual_size=(640, 480))
     capture.state = replace(
         capture.state,
@@ -68,7 +68,7 @@ def test_information_stays_frozen_for_copy_until_explicit_reopen(
     video: tuple[MainWindow, VideoController, ControlledCapture], qtbot: QtBot
 ) -> None:
     window, controller, capture = video
-    controller.connect_capture(Settings(capture_device="camera"))
+    controller.apply_capture(Settings(capture_device="camera"))
     capture.stream(sequence=4, actual_size=(32, 24))
     capture.state = replace(capture.state, diagnostics=("diagnostic\n" * 100,))
     window.video.info_action.trigger()
@@ -115,7 +115,7 @@ def test_idle_and_automatic_information_do_not_request_or_guess_a_resolution(
     assert "未要求" in dialog.details.toPlainText()
     assert "未取得" in dialog.details.toPlainText()
 
-    controller.connect_capture(Settings(capture_device="camera", capture_resolution="auto"))
+    controller.apply_capture(Settings(capture_device="camera", capture_resolution="auto"))
     capture.stream(actual_size=(720, 480))
     window.video.info_action.trigger()
     assert "要求解像度: 自動" in dialog.details.toPlainText()

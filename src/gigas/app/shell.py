@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SettingsRequest:
+class _SettingsRequest:
     """One settings I/O submission and its post-save effects.
 
     Attributes:
@@ -67,10 +67,8 @@ class ApplicationShell(QObject):
         self.window = MainWindow()
         self.dialog: SettingsDialog | None = None
         self.baseline = Settings()
-        self._io_request: SettingsRequest | None = None
+        self._io_request: _SettingsRequest | None = None
         self.ready = False
-        self.error = ""
-        self.error_operation = ""
         self._settings_error_notice: Notice | None = None
         self._exit_requested = False
         self.committed = False
@@ -123,13 +121,20 @@ class ApplicationShell(QObject):
         self._worker.moveToThread(self.io_thread)
         self.service.start()
         self.video.start()
-        self._request(SettingsRequest())
+        self._request(_SettingsRequest())
 
     @property
     def operation(self) -> str | None:
         """Return the active settings I/O kind, if any."""
         request = self._io_request
         return None if request is None else "load" if request.snapshot is None else "save"
+
+    @property
+    def error(self) -> str:
+        """Return the current settings failure details, if any."""
+        return (
+            self._settings_error_notice.details if self._settings_error_notice is not None else ""
+        )
 
     @property
     def dirty(self) -> bool:
@@ -278,8 +283,7 @@ class ApplicationShell(QObject):
                 else self.baseline
             )
         )
-        request = SettingsRequest(target, capture=True, close_dialog=close_after)
-        self.error = ""
+        request = _SettingsRequest(target, capture=True, close_dialog=close_after)
         self._settings_error_notice = None
         if target != self.baseline or not self.path.exists():
             self._request(request)
@@ -294,18 +298,17 @@ class ApplicationShell(QObject):
             and (self.dialog is None or not self.dialog.isVisible())
             and key != self.baseline.window_size_preset
         ):
-            self._request(SettingsRequest(replace(self.baseline, window_size_preset=key)))
+            self._request(_SettingsRequest(replace(self.baseline, window_size_preset=key)))
 
-    def _request(self, request: SettingsRequest) -> None:
+    def _request(self, request: _SettingsRequest) -> None:
         if self._io_request is not None or self.committed:
             return
         self._io_request = request
-        self.error = ""
         self._settings_error_notice = None
         self._render()
         self.requested.emit(self.operation, request.snapshot or self.baseline)
 
-    def _apply_saved(self, request: SettingsRequest, settings: Settings) -> None:
+    def _apply_saved(self, request: _SettingsRequest, settings: Settings) -> None:
         self.baseline = settings
         self.ready = True
         if self.dialog is not None and self.dialog.isVisible():
@@ -329,8 +332,7 @@ class ApplicationShell(QObject):
         if result.settings is not None:
             self._apply_saved(request, result.settings)
         else:
-            self.error = result.error
-            self.error_operation = "読込失敗" if request.snapshot is None else "保存失敗"
+            title = "読込失敗" if request.snapshot is None else "保存失敗"
             if request.snapshot is None:
                 self.ready = False
                 explanation = (
@@ -345,9 +347,7 @@ class ApplicationShell(QObject):
                 self._exit_requested = False
                 self.wait_timer.stop()
                 self.wait_expired = False
-            self._settings_error_notice = Notice(
-                "settings", self.error_operation, explanation, result.error
-            )
+            self._settings_error_notice = Notice("settings", title, explanation, result.error)
             self.window.notifications.publish(self._settings_error_notice)
         if self._exit_requested:
             self._resolve_close()
@@ -384,7 +384,11 @@ class ApplicationShell(QObject):
         self._render_capture_menu()
         if self.dialog is not None and self.dialog.isVisible():
             message = (
-                self.error_operation if self.error else "保存中" if self.operation == "save" else ""
+                self._settings_error_notice.title
+                if self._settings_error_notice is not None
+                else "保存中"
+                if self.operation == "save"
+                else ""
             )
             self.dialog.status.setText(message)
             self.dialog.status.setVisible(bool(message))
@@ -429,7 +433,7 @@ class ApplicationShell(QObject):
         if box is not None:
             box.deleteLater()
         if result == QMessageBox.StandardButton.Save and self.ready and self.dialog is not None:
-            self._request(SettingsRequest(self.dialog.values()))
+            self._request(_SettingsRequest(self.dialog.values()))
             self.wait_timer.start()
         elif result == QMessageBox.StandardButton.Discard:
             self._commit_close()

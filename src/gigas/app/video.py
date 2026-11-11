@@ -119,7 +119,7 @@ class VideoController(QObject):
         self._discovery_error = ""
         self.apply_state: Literal["idle", "stopping", "connecting", "complete", "failed"] = "idle"
         self._replacement: Settings | None = None
-        self._replacement_generation = 0
+        self._generation = 0
         self._next_image = 0.0
         self._preview_fps = 30
         self._last_state: tuple[str, str, str, bool, str, str] | None = None
@@ -144,23 +144,9 @@ class VideoController(QObject):
         return self._snapshot.cleanup == "unconfirmed"
 
     @property
-    def has_connection(self) -> bool:
-        """Whether a saved acquisition configuration still owns an active session."""
-        return self.active_settings is not None and self._snapshot.phase in {
-            "connecting",
-            "streaming",
-            "stopping",
-        }
-
-    @property
     def devices(self) -> "tuple[DeviceInfo, ...]":
         """Return the most recent successful enumeration for an opened dialog."""
         return self._snapshot.devices
-
-    @property
-    def devices_checked(self) -> bool:
-        """Whether any successful enumeration has supplied the current catalog."""
-        return self._snapshot.devices_revision > 0
 
     @property
     def discovering(self) -> bool:
@@ -305,7 +291,7 @@ class VideoController(QObject):
         return settings.capture_device, settings.capture_fps, settings.capture_resolution
 
     def cancel_pending(self) -> None:
-        """Discard unstarted replacement and discovery intents without restarting video."""
+        """Discard an unstarted replacement without restarting video."""
         self._replacement = None
         self.apply_state = "idle"
 
@@ -333,9 +319,10 @@ class VideoController(QObject):
             self._fail_application(str(error))
             return
         if self.service.connect(options):
+            self._replacement = None
             self.active_settings = settings
             self.apply_state = "connecting"
-            self._replacement_generation = self.reader.snapshot().generation
+            self._generation = self.reader.snapshot().generation
             self._request_error = ""
             self._next_image = 0.0
             self.panel.view.set_frame(None)
@@ -390,7 +377,7 @@ class VideoController(QObject):
             self._closing
             or snapshot.phase != "streaming"
             or snapshot.frame is None
-            or snapshot.frame.generation != self._replacement_generation
+            or snapshot.frame.generation != self._generation
         ):
             self.panel.view.set_frame(None)
         elif self.active_settings is not None and (now := time.perf_counter()) >= self._next_image:
@@ -424,9 +411,8 @@ class VideoController(QObject):
                 self.apply_state == "connecting"
                 and snapshot.phase == "streaming"
                 and snapshot.frame is not None
-                and snapshot.frame.generation == self._replacement_generation
+                and snapshot.frame.generation == self._generation
             ):
-                self._replacement = None
                 self.apply_state = "complete"
                 self._attempt_name = "映像取得"
         return False

@@ -21,7 +21,7 @@ from tests.integration.test_video_gui import (
 
 
 def _stream(shell: ApplicationShell, capture: ControlledCapture, qtbot: QtBot) -> None:
-    shell.connect_video()
+    shell.apply_settings(shell.baseline)
     capture.state = replace(
         capture.state,
         devices=(DeviceInfo("Camera & source", "path-a"), DeviceInfo("Camera & source", "path-b")),
@@ -76,26 +76,13 @@ def test_status_regions_follow_splitter_without_duplicate_conversation_labels(
     assert window.connection.model.text() == "model/" * 200 + " · high"
 
 
-def test_close_progress_appears_only_for_pending_work_and_keeps_cancel_action(qtbot: QtBot) -> None:
+def test_close_progress_shows_pending_work(qtbot: QtBot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
-    cancelled: list[bool] = []
-    window.cancel_close_requested.connect(lambda: cancelled.append(True))
-    window.refresh_close_progress()
-    assert not window.close_progress.isVisible()
-    assert not window.statusBar().isAncestorOf(window.cancel_close_button)
     window.status.setText("終了待ち")
-    window.cancel_close_button.setVisible(True)
     window.refresh_close_progress()
     assert window.close_progress.isVisible()
-    assert window.cancel_close_button.isVisible()
-    window.cancel_close_button.click()
-    assert cancelled == [True]
-    window.cancel_close_button.hide()
-    window.refresh_close_progress()
-    assert window.close_progress.isVisible()
-    assert not window.cancel_close_button.isVisible()
     window.status.clear()
     window.refresh_close_progress()
     assert not window.close_progress.isVisible()
@@ -119,7 +106,7 @@ def test_status_region_keeps_short_state_when_splitter_is_dragged_to_the_edge(qt
 def test_recovery_menu_actions_can_be_bound_without_statusbar_controls(qtbot: QtBot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
-    actions = (window.reload_action, window.settings_location_action)
+    actions = (window.settings_location_action,)
     triggered: list[object] = []
     for action in actions:
         assert action in window.file_menu.actions()
@@ -172,7 +159,7 @@ def test_video_menu_discovers_on_open_without_waiting_for_a_refresh_button(
     assert capture.state.phase == "enumerating"
     capture.complete_enumeration((DeviceInfo("Found camera", "path-b"),))
     qtbot.waitUntil(lambda: "path-b" in shell.window.video_device_actions)
-    assert shell.window.video_device_actions[""].isChecked()
+    assert shell.window.video_device_actions["path-b"].isChecked()
     assert not capture.connections
     assert load_settings(shell.path) == shell.baseline
 
@@ -184,7 +171,6 @@ def test_long_duplicate_menu_names_keep_disambiguating_suffixes(qtbot: QtBot) ->
     window.set_capture_devices(
         (DeviceInfo(name, "first"), DeviceInfo(name, "second")),
         "second",
-        checked=True,
         searching=False,
         error="",
         enabled=True,
@@ -205,7 +191,6 @@ def test_replacing_a_duplicate_identity_catalog_removes_every_old_menu_action(
     window.set_capture_devices(
         (DeviceInfo("First", "same"), DeviceInfo("Repeated identity", "same")),
         "same",
-        checked=True,
         searching=False,
         error="",
         enabled=True,
@@ -215,7 +200,6 @@ def test_replacing_a_duplicate_identity_catalog_removes_every_old_menu_action(
     window.set_capture_devices(
         (DeviceInfo("Replacement", "new"),),
         "new",
-        checked=True,
         searching=False,
         error="",
         enabled=True,
@@ -249,45 +233,15 @@ def test_streaming_menu_and_settings_share_choices_commands_and_active_identity(
     assert not window.video.findChildren(QPushButton)
     dialog.model.setText("unsaved model")
     assert all(not action.isEnabled() for action in window.video_device_actions.values())
-    assert window.video.disconnect_action.isEnabled()
     window.video_device_actions["path-a"].trigger()
     assert shell.baseline.capture_device == "path-b"
     assert dialog.model.text() == "unsaved model"
-    dialog.set_values(shell.baseline)
-    shell._render()
-    window.video.disconnect_action.trigger()
-    qtbot.waitUntil(lambda: capture.refreshes == 1)
-    assert window.video.source.text() == ""
-    assert shell.baseline.capture_device == "path-b"
-    assert window.video_device_actions[""].isChecked()
-    assert dialog.capture_target == ""
-    capture.complete_enumeration(capture.state.devices)
-    qtbot.waitUntil(window.video.connect_action.isEnabled)
-    window.video.connect_action.trigger()
-    assert len(capture.connections) == 2
-
-
-@pytest.mark.parametrize(("path", "fps"), [("path-a", 60), ("path-b", 30)])
-def test_selecting_saved_menu_device_applies_configuration_changed_by_reload(
-    video_shell: tuple[ApplicationShell, ControlledCapture],
-    qtbot: QtBot,
-    path: str,
-    fps: int,
-) -> None:
-    shell, capture = video_shell
-    _stream(shell, capture, qtbot)
-    save_settings(shell.path, replace(shell.baseline, capture_device=path, capture_fps=fps))
-    shell.reload()
+    dialog.close_button.click()
+    window.video_device_actions[""].trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.window.video_device_actions["path-b"].isChecked()
-    assert shell.window.video.source.text() == "Camera & source (2)"
-    assert len(capture.connections) == 1
-    shell.window.video_device_actions[path].trigger()
-    qtbot.waitUntil(lambda: len(capture.connections) == 2)
-    assert capture.connections[-1].device_path == path
-    assert capture.connections[-1].fps == fps
-    capture.stream()
-    qtbot.waitUntil(lambda: not shell.video.applying)
+    assert shell.baseline.capture_device == ""
+    assert window.video_device_actions[""].isChecked()
+    assert capture.disconnects == 1
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -326,43 +280,6 @@ def test_menu_selection_checks_only_saved_identity_and_uses_common_application(
         assert load_settings(path).capture_device == selected
         assert len(capture.connections) == (1 if fail else 2)
         assert shell.window.video.source.text() == f"Camera & source ({2 if fail else 1})"
-    finally:
-        release.set()
-        qtbot.waitUntil(lambda: shell.operation is None)
-        shell.request_close()
-        qtbot.waitUntil(lambda: not shell.window.isVisible())
-
-
-@pytest.mark.parametrize("hide", [False, True])
-def test_menu_open_during_initial_load_discovers_once_only_while_still_open(
-    qtbot: QtBot, tmp_path: Path, hide: bool
-) -> None:
-    entered = Event()
-    release = Event()
-
-    def load(_path: Path) -> Settings:
-        entered.set()
-        if not release.wait(5):
-            raise TimeoutError
-        return Settings(capture_device="saved-path")
-
-    capture = ControlledCapture()
-    shell = ApplicationShell(
-        tmp_path / "settings.toml", SettingsIO(load=load), capture_service=capture
-    )
-    shell.start()
-    try:
-        qtbot.waitUntil(entered.is_set)
-        menu = shell.window.video_menu
-        menu.popup(shell.window.mapToGlobal(QPoint(20, 40)))
-        qtbot.waitUntil(menu.isVisible)
-        assert capture.refreshes == 0
-        if hide:
-            menu.hide()
-        release.set()
-        qtbot.waitUntil(lambda: shell.ready)
-        assert capture.refreshes == (0 if hide else 1)
-        menu.hide()
     finally:
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)

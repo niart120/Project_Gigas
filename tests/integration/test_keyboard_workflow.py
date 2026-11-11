@@ -29,7 +29,7 @@ def ready_panel(qtbot: QtBot) -> ConnectionPanel:
     return panel
 
 
-def test_settings_shortcut_opens_and_refocuses_the_single_editor(
+def test_settings_shortcut_reopens_editor_after_escape(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = video_shell
@@ -43,14 +43,15 @@ def test_settings_shortcut_opens_and_refocuses_the_single_editor(
     assert dialog is not None
     qtbot.waitUntil(dialog.isActiveWindow)
     dialog.model.setText("unsaved keyboard draft")
+    qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible()
     shell.window.activateWindow()
     qtbot.waitUntil(shell.window.isActiveWindow)
     qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
     qtbot.waitUntil(dialog.isActiveWindow)
-    qtbot.keyClick(dialog.capture_choices, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
-    assert opened == [True, True, True]
+    assert opened == [True, True]
     assert shell.dialog is dialog
-    assert dialog.model.text() == "unsaved keyboard draft"
+    assert dialog.model.text() == shell.baseline.model
     assert capture.refreshes == 1
 
 
@@ -73,7 +74,6 @@ def test_settings_shortcut_does_not_displace_an_unsaved_exit_confirmation(
     assert not opened
     assert dialog.model.text() == "unsaved"
     confirmation.button(QMessageBox.StandardButton.Cancel).click()
-    assert shell.pending is None
     assert shell.window.isVisible()
     assert dialog.isVisible()
     assert dialog.model.text() == "unsaved"
