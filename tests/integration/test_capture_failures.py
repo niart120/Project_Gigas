@@ -137,6 +137,7 @@ def test_failed_acquisition_invalidates_image_and_fresh_generation_can_connect(
             if scenario in {"failed-read", "changed-size"}
             else "none"
         )
+        service._factory = PeerBackend(str(marker))
         assert service.connect(options)
         second = wait_for(service, lambda state: state.frame is not None).frame
         assert second is not None
