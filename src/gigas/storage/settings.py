@@ -19,7 +19,7 @@ class Settings:
     """Global settings values independent of the UI and device libraries.
 
     Attributes:
-        capture_device: DirectShow device path. An empty string leaves it unset.
+        capture_device: Opaque capture-device identifier. An empty string leaves it unset.
         serial_port: Selected serial port. An empty string leaves it unset.
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
