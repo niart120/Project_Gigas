@@ -49,6 +49,7 @@ GUIには項目名・短い状態・エラー理由とCodex/ユーザー本文�
 | refactor-skipped | G02 保存済み設定で接続し、本文・認証・通常送信・中断・切断を画面から扱う | new | integration | URLは明示open、delta/replace、失敗時入力保持 |
 | refactor-skipped | G03 質問・承認をtokenの有効期間に一度だけ回答する | new / edge | integration | 複数質問、秘密入力、選択肢、承認、失効と旧世代 |
 | refactor-done | G04 設定と接続の両終了までGUIを動かし、取消し後もターンを再開しない | regression / edge | integration | 両完了順、設定失敗、早期finished、wait(0) |
+| refactor-skipped | G05 過去の要求が長くても新しい質問・承認を表示範囲へ入れる | edge | integration | 親の画面レビューで追加した表示位置の回帰 |
 
 ## 7. 設計メモ
 
@@ -62,7 +63,16 @@ CodexServiceThreadは接続所有とasyncio寿命、ConnectionPanelは表示・�
 
 計画: 各itemのred/green、対象ruff/ty、既存U01回帰を行う。公開API変更のためuv lock --check・uv build、最終のunit/integration試験を実行する。GUI実画面と実runtimeでの接続・送信・質問回答・中断・終了は親の受入で確認する。
 
-実績: 仕様具体化のみ。製品実装・自動試験・GUI実runtime確認はnot run。
+実績: G01〜G05を実装。以下の対象gateを実行した。全体のunit/integration・lock/buildと実GUIの最終受入は親の完了確認で合流する。
+
+| command / 確認 | result | 検査範囲 |
+|---|---|---|
+| `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py tests/integration/test_codex_service.py tests/integration/test_app_lifetime.py -q -o faulthandler_timeout=10 --basetemp=tmp/pytest-gui-debug` | 31 passed | 新規GUI・service・終了と既存設定寿命 |
+| 対象13ファイルへの`ruff format --check`・`ruff check`・`ty check --no-progress` | pass | 公開型、docstring、静的検査 |
+| `git diff --check` | pass | 差分の空白エラー |
+| 実Qt画面・実runtime | 親で受入中 | 通常・質問回答・承認取消し・質問中断の4経路成功報告を受領。G05後の表示位置は親で最終確認 |
+
+G05途中の1回のpytestは最初の1件後に応答が止まり、担当コマンド行を確認したPython processだけを停止した。原因は未特定。faulthandlerを有効にした同suiteと上表の全対象再実行では再現せず、31件が完了した。この観測を成功記録へ置き換えない。
 
 ### G01 実行履歴
 
@@ -82,6 +92,10 @@ redは終了要求が設定保存・未保存確認の前に中断しない3件�
 
 独立レビューの「操作失敗が次の再描画で接続中に戻る」を採用し、factory失敗相当とopen失敗相当の2件をredから修正した。エラーは保持し、明示切断の成功まで再接続を許可しない。対象30件pass、ruff/ty成功。refactor-done: 予期しないservice終了の表示と、終了確定後の合流を別slotへ分離した。設定の既存11件を維持した。
 
+### G05 実行履歴
+
+親の画面レビューで追加。redは長い既存カードの後ろに来た承認がviewport外に残るため1 failed、10 passed。単なる次のQtイベントへの延期だけではレイアウトサイズが古いケースもredで確認。greenはlayout.activateとcontent.adjustSize後のensureWidgetVisibleで新しいカードを表示範囲へ移し、11 passed。遅延callbackでも世代とカードの存在を再確認する。対象ruff/ty成功。refactor-skipped: 表示位置調整の小さい関数に限定した。
+
 ## 10. 先送り事項
 
 Goal・プロジェクト・実機入力は親仕様のU04〜U06へ引き継ぐ。実行中の追加指示はU06。APIキー認証は親の期限を維持する。
@@ -89,6 +103,6 @@ Goal・プロジェクト・実機入力は親仕様のU04〜U06へ引き継ぐ�
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test Listを完了した
+- [x] TDD Test Listを完了した
 - [ ] 型・docstring・既存回帰・配布gateを記録した
 - [ ] 実画面と実runtime受入の結果・未検証範囲を親へ引き継いだ

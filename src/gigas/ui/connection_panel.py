@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QUrl, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -203,6 +203,12 @@ class ConnectionPanel(QWidget):
                 self.cards[event.token] = card
                 self._request_layout.addWidget(card)
                 self.requests.show()
+                QTimer.singleShot(
+                    0,
+                    lambda generation=envelope.generation, token=event.token: self._reveal_request(
+                        generation, token
+                    ),
+                )
         elif isinstance(event, RequestResolved) and event.token in self.cards:
             self.cards[event.token].invalidate()
         self._render()
@@ -270,6 +276,12 @@ class ConnectionPanel(QWidget):
         for card in self.cards.values():
             if card.is_live:
                 card.invalidate()
+
+    def _reveal_request(self, generation: int, token: str) -> None:
+        if generation == self._generation and token in self.cards:
+            self._request_layout.activate()
+            self._request_content.adjustSize()
+            self.requests.ensureWidgetVisible(self.cards[token])
 
     def _render(self) -> None:
         available = self._available and "disconnect" not in self._pending
