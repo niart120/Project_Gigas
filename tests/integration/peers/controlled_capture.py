@@ -105,13 +105,20 @@ class ControlledCapture:
         self.reader_requests += 1
         return CaptureReader(self.snapshot)
 
-    def stream(self, sequence: int = 1, bgr: bytes = bytes([0, 0, 255])) -> None:
-        """Publish one solid image in the latest connection."""
+    def stream(
+        self,
+        sequence: int = 1,
+        bgr: bytes = bytes([0, 0, 255]),
+        *,
+        actual_size: tuple[int, int] | None = None,
+    ) -> None:
+        """Publish actual dimensions, defaulting to the request or 16x16 for auto."""
         options = self.connections[-1]
+        width, height = actual_size or (options.width or 16, options.height or 16)
         frame = Frame(
-            bgr * (options.width * options.height),
-            options.width,
-            options.height,
+            bgr * (width * height),
+            width,
+            height,
             len(self.connections),
             sequence,
             datetime.now(UTC),

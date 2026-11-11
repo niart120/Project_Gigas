@@ -109,7 +109,9 @@ def test_blocked_native_boundary_is_forced_closed_after_explicit_stop(
     )
 
 
-@pytest.mark.parametrize("scenario", ["hang-read", "crash-read", "failed-read", "lock-death"])
+@pytest.mark.parametrize(
+    "scenario", ["hang-read", "crash-read", "failed-read", "lock-death", "changed-size"]
+)
 def test_failed_acquisition_invalidates_image_and_fresh_generation_can_connect(
     tmp_path: Path,
     scenario: str,
@@ -132,7 +134,7 @@ def test_failed_acquisition_invalidates_image_and_fresh_generation_can_connect(
             "forced"
             if scenario == "hang-read"
             else "graceful"
-            if scenario == "failed-read"
+            if scenario in {"failed-read", "changed-size"}
             else "none"
         )
         assert service.connect(options)

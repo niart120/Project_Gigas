@@ -150,6 +150,43 @@ def test_shutdown_before_start_rejects_new_requests() -> None:
     assert service.snapshot().phase == "closed"
 
 
+@pytest.mark.parametrize(
+    ("requested", "actual"), [(None, (16, 16)), ((1920, 1080), (32, 24)), (None, (3840, 2160))]
+)
+def test_spawn_shares_actual_size_with_independent_readers(
+    requested: tuple[int, int] | None, actual: tuple[int, int]
+) -> None:
+    service = CaptureService(backend_factory=PeerBackend(actual_size=actual))
+    preview, observation = service.reader(), service.reader()
+    service.start()
+    try:
+        width, height = requested or (None, None)
+        assert service.connect(CaptureOptions("path-b", width, height))
+        first = wait_for(preview, lambda state: state.frame is not None or state.phase == "error")
+        retained = first.frame
+        assert retained is not None, first.error
+        assert (retained.width, retained.height) == actual
+        assert retained.bgr == bytes([retained.sequence % 256]) * (actual[0] * actual[1] * 3)
+        later = wait_for(
+            observation,
+            lambda state: state.frame is not None and state.frame.sequence >= retained.sequence + 3,
+        ).frame
+        assert later is not None
+        assert (later.width, later.height) == actual
+        assert later.bgr == bytes([later.sequence % 256]) * (actual[0] * actual[1] * 3)
+        assert later.monotonic_ns > retained.monotonic_ns
+        assert later.captured_at >= retained.captured_at
+        service.disconnect()
+        assert wait_for(service, lambda state: state.phase == "idle").cleanup == "graceful"
+        assert preview.snapshot().frame is None
+        assert observation.snapshot().frame is None
+        assert retained.bgr == bytes([retained.sequence % 256]) * (actual[0] * actual[1] * 3)
+    finally:
+        service.shutdown()
+        service.join(6)
+        assert not service.is_alive()
+
+
 def test_reader_has_no_ownership_commands_and_observes_state_without_starting() -> None:
     service = CaptureService(backend_factory=PeerBackend())
     reader = service.reader()

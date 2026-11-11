@@ -192,7 +192,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | green | プレビューの比率維持と引き延ばし | new / integration | 4:3・超横長・同寸法の表示領域と黒帯、クロップなし、共通Frameの画素不変、取得自動でも切替可能 |
 | green | 画像設定の保存と移行 | new / unit | 省略時FullHD/preview_letterbox=true、不正値拒否、未知width/height保持、表示設定と取得設定を独立保存 |
 | green | 自動と固定解像度の要求 | new / integration | 自動で寸法要求せず実寸法を返す、固定要求と違う実画像を加工せず共有、不正形式・上限超過・途中寸法変更を通知 |
-| todo | 可変寸法の共有と独立読取 | new / integration | 画素と寸法の原子性、容量検証、古い読取保持中も新プレビューが進む、取得時刻を保持 |
+| green | 可変寸法の共有と独立読取 | new / integration | 画素と寸法の原子性、容量検証、古い読取保持中も新プレビューが進む、取得時刻を保持 |
 | green | 取得解像度の要求への結合 | new / integration | 保存された5候補を対応する幅・高さの要求へ変換する |
 | todo | 取得設定適用の世代境界 | new / integration | 旧取得の解放を待つ、新設定の最初の画像で完了、失敗後旧画像を現在扱いしない、要求と実到着が違っても同じ要求値は適用済み、レターボックスを含む表示変更は再接続なし |
 | todo | OS別の列挙と機器照合 | new / unit | 方式ごとに番号が違う同一機器、同名同型2台、欠落・空・重複ID、利用不可方式、既存Windows設定の保持 |
@@ -245,3 +245,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### A1 保存解像度の取得要求への結合
 
 `uv run pytest tests/integration/test_capture_configuration.py -q --basetemp=tmp/pytest-root`: FHD固定による4件red→5件green。autoは両None、固定4候補は実際の要求寸法へ変換しFPSを維持。対象ruff成功。refactor-skipped（小さい対応表で条件を一か所へ保持）。
+
+### C2 可変寸法の共有
+
+新test_capture_transportとspawn実寸試験は要求寸法固定による11件red→11件green。capture関連回帰80件成功（tests/unit/test_capture_*とtests/integration/test_capture_*、--basetemp=tmp/pytest-capture）。4K容量・実寸ヘッダー・不正payload・途中寸法変更・再試行を確認。担当ruff/format/ty成功、C1のoptional型保留を解消。refactor-skipped。4K実機負荷は後続で確認する。

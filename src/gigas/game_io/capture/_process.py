@@ -19,7 +19,8 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.backend import CaptureBackend
     from gigas.game_io.capture.models import CaptureOptions
 
-_HEADER = Struct("<QQq")
+_HEADER = Struct("<QQqII")
+_MAX_PIXELS = 3840 * 2160 * 3
 MESSAGE_LIMIT = 65536
 
 
@@ -111,13 +112,13 @@ def receive_message(channel: Channel) -> WorkerMessage:
 class SharedSlot:
     """Copy one frame atomically, with bounded lock acquisition on both sides."""
 
-    def __init__(self, memory: SharedMemory, lock: "Lock", width: int, height: int) -> None:
+    def __init__(self, memory: SharedMemory, lock: "Lock") -> None:
         """Attach already owned shared storage and its generation-specific lock."""
+        if memory.size < _HEADER.size + _MAX_PIXELS:
+            message = "映像共有メモリの容量不足"
+            raise CaptureError(message)
         self.memory = memory
         self.lock = lock
-        self.width = width
-        self.height = height
-        self._end = _HEADER.size + width * height * 3
 
     def _buffer(self) -> memoryview:
         buffer = self.memory.buf
@@ -127,11 +128,11 @@ class SharedSlot:
         return buffer
 
     @classmethod
-    def create(cls, context: "BaseContext", options: "CaptureOptions") -> "SharedSlot":
-        """Allocate exactly one requested BGR image plus its acquisition metadata."""
-        memory = SharedMemory(create=True, size=_HEADER.size + options.width * options.height * 3)
+    def create(cls, context: "BaseContext", _options: "CaptureOptions") -> "SharedSlot":
+        """Allocate one 4K BGR capacity regardless of the requested device resolution."""
+        memory = SharedMemory(create=True, size=_HEADER.size + _MAX_PIXELS)
         try:
-            return cls(memory, context.Lock(), options.width, options.height)
+            return cls(memory, context.Lock())
         except BaseException:
             memory.close()
             memory.unlink()
@@ -139,17 +140,20 @@ class SharedSlot:
 
     def publish(self, frame: Frame) -> None:
         """Replace the slot, dropping this frame if the reader briefly owns it."""
+        self._validate_dimensions(frame.width, frame.height)
         if not self.lock.acquire(timeout=0.01):
             return
         try:
             buffer = self._buffer()
-            buffer[_HEADER.size : self._end] = frame.bgr
+            buffer[_HEADER.size : _HEADER.size + len(frame.bgr)] = frame.bgr
             _HEADER.pack_into(
                 buffer,
                 0,
                 frame.sequence,
                 frame.monotonic_ns,
                 int(frame.captured_at.timestamp() * 1_000_000),
+                frame.width,
+                frame.height,
             )
         finally:
             self.lock.release()
@@ -160,13 +164,14 @@ class SharedSlot:
             return None
         try:
             buffer = self._buffer()
-            sequence, tick, timestamp = _HEADER.unpack_from(buffer)
+            sequence, tick, timestamp, width, height = _HEADER.unpack_from(buffer)
             if sequence <= after_sequence:
                 return None
+            self._validate_dimensions(width, height)
             return Frame(
-                bytes(buffer[_HEADER.size : self._end]),
-                self.width,
-                self.height,
+                bytes(buffer[_HEADER.size : _HEADER.size + width * height * 3]),
+                width,
+                height,
                 generation,
                 sequence,
                 datetime.fromtimestamp(timestamp / 1_000_000, UTC),
@@ -174,6 +179,12 @@ class SharedSlot:
             )
         finally:
             self.lock.release()
+
+    @staticmethod
+    def _validate_dimensions(width: int, height: int) -> None:
+        if not 16 <= width <= 3840 or not 16 <= height <= 2160:
+            message = "共有映像の寸法が受入範囲外"
+            raise CaptureError(message)
 
     def close(self, *, owner: bool) -> None:
         """Release the local mapping and, for the host, unlink its owned allocation."""
@@ -206,7 +217,7 @@ def worker_main(
             devices = tuple(device.info for device in backend.enumerate() if device.info.path)
             send_message(status, WorkerMessage("devices", devices=devices))
         elif memory_name is not None and lock is not None:
-            slot = SharedSlot(SharedMemory(name=memory_name), lock, options.width, options.height)
+            slot = SharedSlot(SharedMemory(name=memory_name), lock)
             acquire_frames(
                 options,
                 generation,

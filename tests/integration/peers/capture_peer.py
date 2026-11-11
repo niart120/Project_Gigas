@@ -32,11 +32,13 @@ def _entered(marker: str, operation: str) -> None:
 class PeerCamera:
     """Produce numbered solid frames and record release without a device."""
 
-    def __init__(self, marker: str, scenario: str = "normal") -> None:
+    def __init__(
+        self, marker: str, scenario: str = "normal", actual_size: tuple[int, int] | None = None
+    ) -> None:
         """Prepare the test marker and requested dimensions."""
         self.marker = marker
-        self.width = 16
-        self.height = 16
+        self.width, self.height = actual_size or (16, 16)
+        self.actual_size = actual_size
         self.sequence = 0
         self.scenario = scenario
 
@@ -46,6 +48,8 @@ class PeerCamera:
 
     def set(self, prop_id: int, value: float) -> bool:
         """Apply dimensions exactly as the real worker requests them."""
+        if self.actual_size is not None:
+            return False
         if prop_id == cv2.CAP_PROP_FRAME_WIDTH:
             self.width = int(value)
         elif prop_id == cv2.CAP_PROP_FRAME_HEIGHT:
@@ -66,6 +70,8 @@ class PeerCamera:
                 os._exit(19)
             elif self.scenario == "failed-read":
                 return False, None
+            elif self.scenario == "changed-size":
+                self.height += 16
         time.sleep(0.01)
         self.sequence += 1
         return True, np.full((self.height, self.width, 3), self.sequence % 256, dtype=np.uint8)
@@ -86,6 +92,7 @@ class PeerBackend:
 
     marker: str = ""
     scenario: str = "normal"
+    actual_size: tuple[int, int] | None = None
 
     def __call__(self) -> "PeerBackend":
         """Instantiate the adapter within the spawned interpreter."""
@@ -119,7 +126,7 @@ class PeerBackend:
         if self.marker:
             with Path(self.marker + ".opened").open("a", encoding="utf-8") as stream:
                 stream.write("opened\n")
-        return PeerCamera(self.marker, self.scenario)
+        return PeerCamera(self.marker, self.scenario, self.actual_size)
 
 
 def oversized_control_worker(
