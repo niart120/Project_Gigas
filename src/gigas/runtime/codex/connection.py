@@ -25,7 +25,7 @@ from gigas.runtime.codex.transport import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Coroutine, Mapping
 
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ConnectionPhase
     from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, TransportEvent
@@ -174,6 +174,15 @@ class CodexConnection:
         self._request_tokens: dict[RpcId, str] = {}
         self._seen_requests: set[RpcId] = set()
         self._file_details: dict[str, str] = {}
+        self._operations: set[asyncio.Task[None]] = set()
+        self._cleanup: asyncio.Task[None] | None = None
+        self._opening = False
+        self._sending = False
+        self._starting_turn = False
+        self._completed_turns: set[str] = set()
+        self._interrupted_turns: set[str] = set()
+        self._login_starting = False
+        self._login_completions: dict[str, JsonObject] = {}
 
     async def open(self) -> None:
         """Initialize, read authentication and validate model settings against the catalog.
@@ -185,9 +194,13 @@ class CodexConnection:
             CodexConnectionError: Authentication mode, catalog, startup or protocol
                 validation failed.
         """
-        if self._closed or self._opened:
+        await self._operate(self._open())
+
+    async def _open(self) -> None:
+        if self._closed or self._opened or self._opening:
             message = "接続を開始できない状態"
             raise CodexConnectionError(message)
+        self._opening = True
         self._status("connecting")
         try:
             self._validate_options()
@@ -218,14 +231,13 @@ class CodexConnection:
             await self._read_models()
             self._opened = True
             self._status("ready" if self._authenticated else "login_required")
-        except asyncio.CancelledError:
-            await self.close()
-            raise
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
             self._status("error", reason)
             raise CodexConnectionError(reason) from None
+        finally:
+            self._opening = False
 
     async def login(self) -> None:
         """Begin an explicit ChatGPT login and emit its browser URL.
@@ -236,19 +248,30 @@ class CodexConnection:
         Raises:
             CodexConnectionError: Login is unavailable, already pending or failed.
         """
+        await self._operate(self._login())
+
+    async def _login(self) -> None:
         self._require_open()
-        if self._authenticated or self._login_id is not None:
+        if self._authenticated or self._login_id is not None or self._login_starting:
             message = "ログインを開始できない状態"
             raise CodexConnectionError(message)
+        self._login_starting = True
         self._status("authenticating")
         try:
             result = _object(await self._peer.request("account/login/start", {"type": "chatgpt"}))
             self._login_id = _text(result.get("loginId"))
-            self._emit(LoginEvent(_login_url(result.get("authUrl"))))
+            completion = self._login_completions.get(self._login_id)
+            if completion is not None:
+                await self._complete_login(completion)
+            else:
+                self._emit(LoginEvent(_login_url(result.get("authUrl"))))
         except (TransportError, CodexConnectionError):
             self._status("login_required", "ログイン開始に失敗")
             message = "ログイン開始に失敗"
             raise CodexConnectionError(message) from None
+        finally:
+            self._login_starting = False
+            self._login_completions.clear()
 
     async def send(self, prompt: str) -> None:
         """Start one ordinary turn after delivering the packaged developer instructions.
@@ -260,15 +283,30 @@ class CodexConnection:
             CodexConnectionError: The connection is not ready, instructions fail,
                 runtime policy differs, or the request fails.
         """
+        await self._operate(self._send(prompt))
+
+    async def _send(self, prompt: str) -> None:
         self._require_open()
-        if not self._authenticated or self._phase not in {"ready", "stopped"} or not prompt.strip():
+        if (
+            not self._authenticated
+            or self._phase not in {"ready", "stopped"}
+            or not prompt.strip()
+            or self._sending
+        ):
             message = "ターンを開始できない状態"
             raise CodexConnectionError(message)
         self._status("starting")
         self._stopping = False
+        self._sending = True
         try:
             if self._thread_id is None:
                 await self._start_thread()
+            if self._stopping:
+                self._status("stopped")
+                return
+            self._starting_turn = True
+            self._user_items += 1
+            self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
             result = _object(
                 await self._peer.request(
                     "turn/start",
@@ -280,14 +318,21 @@ class CodexConnection:
                     },
                 )
             )
-            self._turn_id = _text(_object(result.get("turn")).get("id"))
-            self._user_items += 1
-            self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
-            self._status("running")
+            turn = _object(result.get("turn"))
+            if not self._accept_start_response(turn):
+                return
+            if self._stopping:
+                await self._interrupt()
+            else:
+                self._update_waiting()
         except (TransportError, CodexConnectionError, OSError, UnicodeError):
+            await self.close()
             self._status("error", "ターン開始に失敗")
             message = "ターン開始に失敗"
             raise CodexConnectionError(message) from None
+        finally:
+            self._sending = False
+            self._starting_turn = False
 
     async def answer(
         self,
@@ -307,6 +352,11 @@ class CodexConnection:
             CodexConnectionError: The request is stale, the answer is invalid or
                 transmission fails. Failed transmissions are not retried.
         """
+        await self._operate(self._answer(token, decision=decision, answers=answers))
+
+    async def _answer(
+        self, token: str, *, decision: str | None, answers: "Mapping[str, str] | None"
+    ) -> None:
         self._require_open()
         request = self._requests.get(token)
         if request is None or self._stopping:
@@ -317,10 +367,11 @@ class CodexConnection:
         try:
             await self._peer.respond(request.rpc_id, payload)
         except TransportError:
+            await self.close()
             self._status("error", "回答の送信結果を確認できない")
             message = "回答の送信結果を確認できない"
             raise CodexConnectionError(message) from None
-        if decision == "cancel":
+        if decision == "cancel" and request.turn_id == self._turn_id:
             self._stopping = True
             self._expire_requests()
             self._status("stopping")
@@ -336,38 +387,80 @@ class CodexConnection:
         Raises:
             CodexConnectionError: The interrupt request failed.
         """
+        await self._operate(self._stop())
+
+    async def _stop(self) -> None:
         self._require_open()
         self._stopping = True
         self._expire_requests()
         self._status("stopping")
         if self._thread_id is not None and self._turn_id is not None:
-            try:
-                await self._peer.request(
-                    "turn/interrupt",
-                    {
-                        "threadId": self._thread_id,
-                        "turnId": self._turn_id,
-                    },
-                )
-            except TransportError:
-                self._status("error", "中断結果を確認できない")
-                message = "中断結果を確認できない"
-                raise CodexConnectionError(message) from None
-        else:
+            await self._interrupt()
+        elif not self._sending:
             self._status("stopped")
 
     async def close(self) -> None:
-        """Release the event consumer and wait for the owned peer to close."""
-        if self._closed:
-            return
-        self._closed = True
-        self._expire_requests()
+        """Wait for owned operations, event consumer and peer to close.
+
+        Concurrent callers share cleanup. Cancelling a caller does not cancel
+        cleanup; another close call can wait for the same completion.
+        """
+        if self._cleanup is None:
+            self._closed = True
+            self._expire_requests()
+            self._cleanup = asyncio.create_task(
+                self._shutdown(asyncio.current_task()), name="gigas-codex-close"
+            )
+        await asyncio.shield(self._cleanup)
+        current = asyncio.current_task()
+        pending = [task for task in self._operations if task is not current and not task.done()]
+        if self._pump is not None and self._pump is not current and not self._pump.done():
+            pending.append(self._pump)
+        if pending:
+            await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
+
+    async def _shutdown(self, origin: asyncio.Task[object] | None) -> None:
+        pending = [task for task in self._operations if task is not origin]
+        if self._pump is not None and self._pump is not origin:
+            pending.append(self._pump)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if self._login_id is not None:
+            with suppress(TransportError, TimeoutError):
+                async with asyncio.timeout(2):
+                    await self._peer.request("account/login/cancel", {"loginId": self._login_id})
+            self._login_id = None
         await self._peer.close()
-        if self._pump is not None and self._pump is not asyncio.current_task():
-            self._pump.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._pump
         self._status("closed")
+
+    async def _operate(self, operation: "Coroutine[object, object, None]") -> None:
+        task = asyncio.create_task(operation, name="gigas-codex-operation")
+        self._operations.add(task)
+        try:
+            await task
+        except asyncio.CancelledError:
+            if not self._closed:
+                await self.close()
+            raise
+        finally:
+            self._operations.discard(task)
+
+    async def _interrupt(self) -> None:
+        turn_id = self._turn_id
+        if turn_id is None or turn_id in self._interrupted_turns:
+            return
+        self._interrupted_turns.add(turn_id)
+        try:
+            await self._peer.request(
+                "turn/interrupt", {"threadId": self._thread_id, "turnId": turn_id}
+            )
+        except TransportError:
+            await self.close()
+            self._status("error", "中断結果を確認できない")
+            message = "中断結果を確認できない"
+            raise CodexConnectionError(message) from None
 
     def _require_open(self) -> None:
         if not self._opened or self._closed:
@@ -471,6 +564,7 @@ class CodexConnection:
                 event = await self._peer.next_event()
                 if isinstance(event, TransportClosed):
                     if not self._closed:
+                        await self.close()
                         self._status("error", "Codexとの接続が終了")
                     return
                 if isinstance(event, ServerRequest):
@@ -478,19 +572,24 @@ class CodexConnection:
                 elif isinstance(event, RpcNotification):
                     await self._notification(event)
         except (TransportError, CodexConnectionError):
+            await self.close()
             self._status("error", "Codexの通知処理に失敗")
 
     async def _notification(self, event: RpcNotification) -> None:
         params = event.params or {}
-        if event.method == "account/login/completed" and params.get("loginId") == self._login_id:
-            self._login_id = None
-            if params.get("success") is True:
-                await self._read_account()
-                await self._read_models()
-            self._status("ready" if self._authenticated else "login_required")
+        if event.method == "account/login/completed":
+            login_id = params.get("loginId")
+            if isinstance(login_id, str):
+                if login_id == self._login_id:
+                    await self._complete_login(params)
+                elif self._login_starting:
+                    self._login_completions[login_id] = params
             return
         if params.get("threadId") != self._thread_id:
             return
+        incoming_turn = params.get("turnId")
+        if isinstance(incoming_turn, str):
+            self._adopt_turn(incoming_turn)
         if event.method == "serverRequest/resolved":
             request_id = params.get("requestId")
             if isinstance(request_id, str | int) and not isinstance(request_id, bool):
@@ -498,16 +597,71 @@ class CodexConnection:
                 if token is not None:
                     self._resolve(token)
                     self._update_waiting()
-        elif event.method == "turn/completed":
+        elif event.method in {"turn/started", "turn/completed"}:
             turn = _object(params.get("turn"))
-            if turn.get("id") == self._turn_id:
-                self._expire_requests()
-                self._turn_id = None
-                self._file_details.clear()
-                self._status("stopped" if self._stopping else "ready")
-        elif event.method == "item/started" and params.get("turnId") == self._turn_id:
+            self._adopt_turn(_text(turn.get("id")))
+            if turn.get("id") != self._turn_id:
+                return
+            if event.method == "turn/completed":
+                self._complete_turn(turn)
+            elif self._stopping:
+                await self._interrupt()
+            else:
+                self._update_waiting()
+        elif self._turn_id is not None and params.get("turnId") == self._turn_id:
+            self._item_notification(event.method, params)
+
+    async def _complete_login(self, params: "JsonObject") -> None:
+        self._login_id = None
+        if params.get("success") is True:
+            await self._read_account()
+            await self._read_models()
+        self._status("ready" if self._authenticated else "login_required")
+
+    def _adopt_turn(self, turn_id: str) -> None:
+        if self._starting_turn and self._turn_id is None and turn_id not in self._completed_turns:
+            self._turn_id = turn_id
+
+    def _accept_start_response(self, turn: "JsonObject") -> bool:
+        turn_id = _text(turn.get("id"))
+        self._adopt_turn(turn_id)
+        if turn_id in self._completed_turns:
+            return False
+        if self._turn_id != turn_id:
+            message = "ターンIDが不一致"
+            raise CodexConnectionError(message)
+        if turn.get("status") in {"completed", "interrupted", "failed"}:
+            self._complete_turn(turn)
+            return False
+        return True
+
+    def _complete_turn(self, turn: "JsonObject") -> None:
+        turn_id = _text(turn.get("id"))
+        if turn_id != self._turn_id:
+            return
+        self._completed_turns.add(turn_id)
+        self._expire_requests()
+        self._turn_id = None
+        self._file_details.clear()
+        if turn.get("status") == "failed":
+            self._status("error", "ターンが失敗")
+        elif self._stopping or turn.get("status") == "interrupted":
+            self._status("stopped")
+        else:
+            self._status("ready")
+
+    def _item_notification(self, method: str, params: "JsonObject") -> None:
+        if method == "item/agentMessage/delta":
+            delta = params.get("delta")
+            if isinstance(delta, str):
+                self._emit(TextEvent(_text(params.get("itemId")), delta))
+        elif method in {"item/started", "item/completed"}:
             item = _object(params.get("item"))
-            if item.get("type") == "fileChange":
+            if item.get("type") == "agentMessage" and method == "item/completed":
+                text = item.get("text")
+                if isinstance(text, str):
+                    self._emit(TextEvent(_text(item.get("id")), text, replace=True))
+            elif item.get("type") == "fileChange":
                 changes = item.get("changes")
                 if isinstance(changes, list):
                     self._file_details[_text(item.get("id"))] = "\n".join(
@@ -531,6 +685,11 @@ class CodexConnection:
             return
         self._seen_requests.add(event.id)
         params = event.params or {}
+        incoming_turn = params.get("turnId")
+        if params.get("threadId") == self._thread_id and isinstance(incoming_turn, str):
+            self._adopt_turn(incoming_turn)
+            if self._stopping:
+                await self._interrupt()
         if (
             self._stopping
             or params.get("threadId") != self._thread_id

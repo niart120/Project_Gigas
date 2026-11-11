@@ -39,7 +39,8 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | refactor-done | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | 起動/終了取消し・並行呼出し・Windows非表示・terminate/kill後waitを実peerで確認 |
 | refactor-done | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 公開RPC境界のfakeで認証、全cursor、モデル/effort、資材失敗、要求設定照合を確認 |
 | refactor-skipped | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 型付き質問/command/file、明示判断、resolved/完了/停止後の回答拒否を確認 |
-| todo | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | turn終了と中断受付を分ける |
+| refactor-done | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | 開始応答前の停止・通知、login競合、EOF、並行closeと取消しを確認 |
+| todo | C04 拡張承認や確認対象欠落を許可へ変換しない | edge | unit | network/追加権限/writeStdin/grantRootとfile詳細欠落を明示拒否 |
 
 各itemをred→green→必要なrefactor→検証→commitの順に進め、履歴を本書へ記録する。固定語句の文書検査は製品テストにしない。
 
@@ -85,6 +86,15 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - 検証: `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-connection` は17 passed。対象ruff format/checkとtyが成功。実質問・実承認の受入はrootの製品経路試験に残す。
 - refactor-skipped: wire変換、回答検証、token失効をそれぞれ小さい関数へ分けた状態を確認し、このcycle後の追加構造変更は不要と判断した。
 - commit: `feat(codex): 質問と承認の回答を要求の有効期間に制限する`。
+
+### C03 実行履歴
+
+- red: 対象pytestはthread/start応答前のstopが `stopped` を早期表示するため1 failed、17 passedだった。
+- green: 停止意思を保持し、thread開始待ちならturnを抑止、turn受付待ちならID確定後に一度だけinterruptする。先着のturn/started・本文差分・確定本文・質問・終端を扱い、遅い開始応答や回答送信完了で実行状態を復活させない。failed/interruptedを通常成功と分ける。
+- login完了の先着と重複開始を扱い、失効したURLを出さない。EOFでは質問受付を閉じる。open/sendの取消しは所有接続を回収し、共有closeは呼出し側の取消し後も継続する。既知の保留loginは終了時にcancelを要求する。
+- refactor-done: 開始応答の検証、本文通知、turn終端、login完了、所有operation/cleanupを分離して通知分岐と寿命管理を整理した。
+- 検証: `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-connection` は30 passed。対象ruff format/checkとtyが成功。公開型・Google style docstring・docsを更新。実runtime受入は別に実施し、このfake成功だけでは完了扱いにしない。
+- commit: `fix(codex): 開始停止と通知の競合から接続状態を保護する`。
 
 ## 6. 対象ファイル
 

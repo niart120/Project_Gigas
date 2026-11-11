@@ -13,6 +13,7 @@ from gigas.runtime.codex.models import (
     LoginEvent,
     RequestResolved,
     SessionStatus,
+    TextEvent,
 )
 from gigas.runtime.codex.transport import (
     JsonObject,
@@ -55,6 +56,10 @@ class FakePeer:
         self.authenticated = True
         self.failure: str | None = None
         self.responses: dict[str, JsonValue] = {}
+        self.gates: dict[str, asyncio.Event] = {}
+        self.close_gate: asyncio.Event | None = None
+        self.close_calls = 0
+        self.respond_gate: asyncio.Event | None = None
 
     async def start(self) -> None:
         """Record process startup."""
@@ -63,6 +68,8 @@ class FakePeer:
     async def request(self, method: str, params: JsonObject | None) -> JsonValue:
         """Return protocol fixtures, preserving observable call ordering."""
         self.calls.append((method, params))
+        if method in self.gates:
+            await self.gates[method].wait()
         if method == self.failure:
             message = "PRIVATE-UPSTREAM-TEXT"
             raise TransportError(message)
@@ -106,6 +113,8 @@ class FakePeer:
     async def respond(self, request_id: RpcId, result: JsonValue) -> None:
         """Record server-request answers."""
         self.replies.append((request_id, result))
+        if self.respond_gate is not None:
+            await self.respond_gate.wait()
 
     async def reject(self, request_id: RpcId, code: int, message: str) -> None:
         """Record explicit protocol rejection."""
@@ -117,6 +126,9 @@ class FakePeer:
 
     async def close(self) -> None:
         """Publish the terminal event without retaining a worker."""
+        self.close_calls += 1
+        if self.close_gate is not None:
+            await self.close_gate.wait()
         self.closed = True
         self.events.put_nowait(TransportClosed("closed"))
 
@@ -504,6 +516,272 @@ def test_unknown_and_unsupported_mcp_requests_are_explicitly_rejected(tmp_path: 
         assert [request_id for request_id, _, _ in peer.rejections] == [1, 2]
         assert not peer.replies
         assert not any(isinstance(event, HumanRequest) for event in events)
+        await connection.close()
+
+    _run(scenario())
+
+
+def _terminal(status: str = "completed") -> RpcNotification:
+    return RpcNotification(
+        "turn/completed",
+        {"threadId": "thread-1", "turn": {"id": "turn-1", "status": status}},
+    )
+
+
+@pytest.mark.parametrize("method", ["thread/start", "turn/start"])
+def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates[method] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        send = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        await connection.stop()
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopping"
+        peer.gates[method].set()
+        await send
+        if method == "thread/start":
+            assert not any(name == "turn/start" for name, _ in peer.calls)
+        else:
+            await connection.stop()
+            assert sum(name == "turn/interrupt" for name, _ in peer.calls) == 1
+            peer.events.put_nowait(_terminal("interrupted"))
+            await _events_processed()
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_notifications_before_start_response_preserve_text_requests_and_completion(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["turn/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        send = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+        )
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/agentMessage/delta",
+                {"threadId": "thread-1", "turnId": "turn-1", "itemId": "a", "delta": "応"},
+            )
+        )
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/completed",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {"type": "agentMessage", "id": "a", "text": "応答"},
+                },
+            )
+        )
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.gates["turn/start"].set()
+        await send
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert RequestResolved(request.token) in events
+        assert TextEvent("a", "応") in events
+        assert TextEvent("a", "応答", replace=True) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        peer.gates["account/login/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        login = asyncio.create_task(connection.login())
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.login()
+        peer.authenticated = True
+        peer.events.put_nowait(
+            RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
+        )
+        await _events_processed()
+        peer.gates["account/login/start"].set()
+        await login
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        assert not any(isinstance(event, LoginEvent) for event in events)
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        peer.events.put_nowait(TransportClosed("PRIVATE-UPSTREAM-TEXT"))
+        for _ in range(8):
+            await asyncio.sleep(0)
+        assert peer.closed
+        assert RequestResolved(request.token) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "error"
+        assert "PRIVATE" not in repr(events)
+        with pytest.raises(CodexConnectionError):
+            await connection.send("再送しない")
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("method", ["initialize", "turn/start"])
+def test_cancelled_operation_closes_owned_peer(tmp_path: Path, method: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates[method] = asyncio.Event()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        if method == "initialize":
+            operation = asyncio.create_task(connection.open())
+        else:
+            await connection.open()
+            operation = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+        assert peer.closed
+        assert sum(name == method for name, _ in peer.calls) == 1
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_close_is_shared_and_survives_caller_cancellation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.close_gate = asyncio.Event()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        first = asyncio.create_task(connection.close())
+        await _events_processed()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        second = asyncio.create_task(connection.close())
+        await _events_processed()
+        assert not second.done()
+        peer.close_gate.set()
+        await second
+        assert peer.closed
+        assert peer.close_calls == 1
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_close_cancels_login_and_never_emits_a_late_url(tmp_path: Path, pending: bool) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        if pending:
+            peer.gates["account/login/start"] = asyncio.Event()
+            login = asyncio.create_task(connection.login())
+            await _events_processed()
+            await connection.close()
+            with pytest.raises(asyncio.CancelledError):
+                await login
+            assert not any(isinstance(event, LoginEvent) for event in events)
+        else:
+            await connection.login()
+            await connection.close()
+            assert ("account/login/cancel", {"loginId": "login-1"}) in peer.calls
+        assert peer.closed
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "closed"
+
+    _run(scenario())
+
+
+def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.respond_gate = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        requests = [event for event in events if isinstance(event, HumanRequest)]
+        assert len(requests) == 1
+        answer = asyncio.create_task(connection.answer(requests[0].token, answers={"route": "東"}))
+        await _events_processed()
+        peer.events.put_nowait(_terminal())
+        peer.events.put_nowait(
+            RpcNotification(
+                "serverRequest/resolved", {"threadId": "thread-1", "requestId": "question-1"}
+            )
+        )
+        await _events_processed()
+        peer.respond_gate.set()
+        await answer
+        assert len(peer.replies) == 1
+        assert events.count(RequestResolved(requests[0].token)) == 1
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_terminal_status_and_late_text_do_not_masquerade_as_success(
+    tmp_path: Path, status: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_terminal(status))
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/agentMessage/delta",
+                {"threadId": "thread-1", "turnId": "turn-1", "itemId": "old", "delta": "遅い本文"},
+            )
+        )
+        await _events_processed()
+        assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == ("error" if status == "failed" else "stopped")
         await connection.close()
 
     _run(scenario())
