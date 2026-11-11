@@ -223,6 +223,10 @@ class ConnectionPanel(QWidget):
         """Release operation controls and retain unsent text on failure."""
         if not isinstance(result, ServiceResult) or result.generation != self._generation:
             return
+        if result.operation == "answer" and result.answer is not None:
+            card = self.cards.get(result.answer.token)
+            if card is not None:
+                card.finish_submission(result.answer.outcome)
         self._pending.discard(result.operation)
         self._error = result.error
         if result.operation == "connect" and result.error:
@@ -279,8 +283,8 @@ class ConnectionPanel(QWidget):
 
     def _expire_requests(self) -> None:
         for card in self.cards.values():
-            if card.is_live:
-                card.invalidate()
+            card.invalidate()
+            card.mark_unconfirmed()
 
     def _reveal_request(self, generation: int, token: str) -> None:
         if generation == self._generation and token in self.cards:

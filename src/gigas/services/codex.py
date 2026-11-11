@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from PySide6.QtCore import QThread, Signal
 
-from gigas.runtime.codex.connection import CodexConnectionError
+from gigas.runtime.codex.connection import AnswerDeliveryError, CodexConnectionError
 from gigas.runtime.codex.launch import create_connection
 
 if TYPE_CHECKING:
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
 
 type ServiceOperation = Literal["connect", "login", "send", "answer", "stop", "disconnect"]
+type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
 
 
 class ServiceConnection(Protocol):
@@ -36,7 +37,13 @@ class ServiceConnection(Protocol):
     async def answer(
         self, token: str, *, decision: str | None = None, answers: "Mapping[str, str] | None" = None
     ) -> None:
-        """Answer a live local request token once."""
+        """Answer a live local request token once.
+
+        Returning confirms transport write completion only. Raise
+        CodexConnectionError for rejection before transmission, and
+        AnswerDeliveryError when delivery is unknown. Cancellation and unexpected
+        exceptions also leave delivery unknown; callers must not retry them.
+        """
         ...
 
     async def stop(self) -> None:
@@ -62,16 +69,34 @@ class ServiceEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class AnswerResult:
+    """Delivery evidence for one answer, independent of request resolution.
+
+    Attributes:
+        token: Connection-unique token supplied to answer.
+        outcome: sent confirms only transport write completion; not_sent means
+            rejection before submission; unknown must never be retried automatically.
+            None of these outcomes assert execution of an approved operation.
+    """
+
+    token: str
+    outcome: AnswerOutcome
+
+
+@dataclass(frozen=True, slots=True)
 class ServiceResult:
     """Operation completion; empty error means the call returned successfully.
 
     A successful stop result is only interrupt acceptance. Turn termination is
     reported separately through SessionStatus. Errors contain no raw exception text.
+    Answer operations include token-specific delivery evidence in answer, including
+    rejected or cancelled calls. The generation still identifies the connection.
     """
 
     generation: int
     operation: ServiceOperation
     error: str = ""
+    answer: AnswerResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +175,10 @@ class CodexServiceThread(QThread):
             token: Live connection-unique request token.
             decision: One of the request's advertised approval decisions.
             answers: Text indexed by all question identifiers, or None for approval.
+
+        The completed signal reports this token's AnswerResult. Calls rejected
+        before dispatch report not_sent; interrupted writes report unknown.
+        Results never assert that an approved operation executed successfully.
         """
         self._submit(
             _Command(
@@ -173,9 +202,11 @@ class CodexServiceThread(QThread):
         """Reject new commands and asynchronously close all owned resources."""
         with self._lock:
             self._ending = True
-            self._queued.clear()
+            queued, self._queued = self._queued, []
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._signal_shutdown)
+        for command in queued:
+            self._reject_answer(command)
 
     def run(self) -> None:
         """Run and finally close the private asyncio loop on this QThread."""
@@ -191,12 +222,14 @@ class CodexServiceThread(QThread):
 
     def _submit(self, command: _Command) -> None:
         with self._lock:
-            if self._ending:
-                return
-            if self._loop is None:
-                self._queued.append(command)
-            else:
-                self._loop.call_soon_threadsafe(self._dispatch, command)
+            ending = self._ending
+            if not ending:
+                if self._loop is None:
+                    self._queued.append(command)
+                else:
+                    self._loop.call_soon_threadsafe(self._dispatch, command)
+        if ending:
+            self._reject_answer(command)
 
     async def _serve(self) -> None:
         self._done = asyncio.Event()
@@ -231,24 +264,47 @@ class CodexServiceThread(QThread):
 
     def _dispatch(self, command: _Command) -> None:
         if self._ending:
+            self._reject_answer(command)
             return
         task = asyncio.create_task(
             self._execute(command), name=f"gigas-service-{command.operation}"
         )
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(lambda finished: self._task_finished(finished, command))
+
+    def _task_finished(self, task: asyncio.Task[None], command: _Command) -> None:
+        self._tasks.discard(task)
+        if task.cancelled():
+            # _execute handles cancellation once entered; this call never started.
+            self._reject_answer(command)
+
+    def _reject_answer(self, command: _Command) -> None:
+        if command.operation == "answer":
+            self._complete(command, "回答は送信されていない", "not_sent")
+
+    def _complete(self, command: _Command, error: str, outcome: AnswerOutcome) -> None:
+        answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
+        self.completed.emit(ServiceResult(command.generation, command.operation, error, answer))
 
     async def _execute(self, command: _Command) -> None:
         error = ""
+        outcome: AnswerOutcome = "sent"
         try:
             await self._perform(command)
         except asyncio.CancelledError:
+            if command.operation == "answer":
+                self._complete(command, "回答の送信結果を確認できない", "unknown")
             return
+        except AnswerDeliveryError as failure:
+            error = str(failure)
+            outcome = "unknown"
         except CodexConnectionError as failure:
             error = str(failure)
+            outcome = "not_sent"
         except Exception:  # noqa: BLE001 -- sanitize the service/GUI boundary
             error = "Codex操作に失敗"
-        self.completed.emit(ServiceResult(command.generation, command.operation, error))
+            outcome = "unknown"
+        self._complete(command, error, outcome)
 
     async def _perform(self, command: _Command) -> None:
         if command.operation == "connect":
@@ -265,6 +321,9 @@ class CodexServiceThread(QThread):
             return
         connection = self._connection
         if connection is None or command.generation != self._active_generation:
+            if command.operation == "answer":
+                message = "この接続では回答を受け付けない"
+                raise CodexConnectionError(message)
             return
         match command.operation:
             case "login":

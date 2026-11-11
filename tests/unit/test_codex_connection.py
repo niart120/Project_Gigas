@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gigas.runtime.codex.connection import CodexConnection, CodexConnectionError
+from gigas.runtime.codex.connection import (
+    AnswerDeliveryError,
+    CodexConnection,
+    CodexConnectionError,
+)
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     HumanRequest,
@@ -347,6 +351,42 @@ def _question(request_id: RpcId = "question-1", *, blocking: bool = True) -> Ser
             ],
         },
     )
+
+
+def test_answer_transport_failure_is_distinct_from_validation_rejection(tmp_path: Path) -> None:
+    class FailedWritePeer(FakePeer):
+        """Fail a response after transport submission begins."""
+
+        async def respond(self, request_id: RpcId, result: JsonValue) -> None:
+            """Leave the delivery outcome deliberately unknown."""
+            self.replies.append((request_id, result))
+            message = "PRIVATE-WRITE-ERROR"
+            raise TransportError(message)
+
+    async def scenario() -> None:
+        peer = FailedWritePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        with pytest.raises(CodexConnectionError) as invalid:
+            await connection.answer(request.token, answers={})
+        assert not isinstance(invalid.value, AnswerDeliveryError)
+        assert peer.replies == []
+        with pytest.raises(AnswerDeliveryError) as uncertain:
+            await connection.answer(request.token, answers={"route": "東"})
+        assert "PRIVATE-WRITE-ERROR" not in str(uncertain.value)
+        assert len(peer.replies) == 1
+        assert RequestResolved(request.token) in events
+        assert peer.closed
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert len(peer.replies) == 1
+
+    _run(scenario())
 
 
 def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: Path) -> None:

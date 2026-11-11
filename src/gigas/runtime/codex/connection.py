@@ -35,6 +35,10 @@ class CodexConnectionError(RuntimeError):
     """A Codex operation failed with a display-safe application-owned reason."""
 
 
+class AnswerDeliveryError(CodexConnectionError):
+    """An answer write failed without confirming whether the peer received it."""
+
+
 class RpcPeer(Protocol):
     """The single asynchronous I/O boundary owned by a Codex connection."""
 
@@ -376,8 +380,12 @@ class CodexConnection:
             answers: One nonempty answer per question ID for a question request.
 
         Raises:
-            CodexConnectionError: The request is stale, the answer is invalid or
-                transmission fails. Failed transmissions are not retried.
+            AnswerDeliveryError: Transport completion is unknown; do not retry.
+            CodexConnectionError: The request is stale or the answer is invalid;
+                no response was submitted to the transport.
+
+        Returning confirms transport write completion only, not peer acceptance
+        or execution of an approved operation. Cancellation leaves delivery unknown.
         """
         await self._operate(self._answer(token, decision=decision, answers=answers))
 
@@ -401,7 +409,7 @@ class CodexConnection:
             await self.close()
             self._status("error", "回答の送信結果を確認できない")
             message = "回答の送信結果を確認できない"
-            raise CodexConnectionError(message) from None
+            raise AnswerDeliveryError(message) from None
         self._update_waiting()
 
     async def stop(self) -> None:

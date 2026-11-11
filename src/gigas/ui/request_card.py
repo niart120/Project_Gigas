@@ -1,7 +1,7 @@
 """Explicit question and approval controls with local validity guards."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -21,6 +21,18 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from gigas.runtime.codex.models import HumanRequest, Question
+    from gigas.services.codex import AnswerOutcome
+
+type RequestState = Literal["waiting", "sending", "sent", "expired", "not_sent", "unknown"]
+
+_STATE_LABELS: dict[RequestState, str] = {
+    "waiting": "回答待ち",
+    "sending": "送信中",
+    "sent": "送信済み",
+    "expired": "失効",
+    "not_sent": "未送信",
+    "unknown": "送信結果不明",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +131,8 @@ class RequestCard(QGroupBox):
             parent,
         )
         self.request = request
-        self.is_live = True
+        self.state: RequestState = "waiting"
+        self._result_received = False
         self.editors: dict[str, QuestionInput] = {}
         self.decision_buttons: dict[str, QPushButton] = {}
         layout = QVBoxLayout(self)
@@ -151,10 +164,37 @@ class RequestCard(QGroupBox):
         layout.addLayout(actions)
         self._validate()
 
-    def invalidate(self, *, submitted: bool = False) -> None:
-        """Permanently close answer controls without erasing the runtime's request."""
-        self.is_live = False
-        self.status.setText("送信済み" if submitted else "失効")
+    @property
+    def is_live(self) -> bool:
+        """Whether the card still accepts one explicit submission."""
+        return self.state == "waiting"
+
+    def invalidate(self) -> None:
+        """Expire unanswered requests without changing submitted delivery evidence."""
+        if self.is_live:
+            self._set_state("expired")
+
+    def mark_unconfirmed(self) -> None:
+        """End a pending display when the connection or service stops."""
+        if self.state == "sending":
+            self._set_state("unknown")
+
+    def finish_submission(self, outcome: "AnswerOutcome") -> None:
+        """Apply the first delivery result only to a locally submitted request.
+
+        A result queued before service exit may refine its provisional unknown state.
+        Resolution and later connection status never overwrite a confirmed result.
+
+        Args:
+            outcome: Token-matched transport delivery evidence, not execution success.
+        """
+        if not self._result_received and self.state in {"sending", "unknown"}:
+            self._result_received = True
+            self._set_state(outcome)
+
+    def _set_state(self, state: RequestState) -> None:
+        self.state = state
+        self.status.setText(_STATE_LABELS[state])
         for editor in self.editors.values():
             editor.setEnabled(False)
             if editor.question.is_secret:
@@ -174,11 +214,11 @@ class RequestCard(QGroupBox):
         if not self.is_live or not self.submit_button.isEnabled():
             return
         answers = {key: editor.value() for key, editor in self.editors.items()}
-        self.invalidate(submitted=True)
+        self._set_state("sending")
         self.submitted.emit(AnswerSubmission(self.request.token, answers=answers))
 
     def _decide(self, decision: str) -> None:
         if not self.is_live or decision not in self.decision_buttons:
             return
-        self.invalidate(submitted=True)
+        self._set_state("sending")
         self.submitted.emit(AnswerSubmission(self.request.token, decision=decision))

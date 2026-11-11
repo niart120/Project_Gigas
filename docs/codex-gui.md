@@ -22,6 +22,8 @@
 
 承認カードにはCodexが提示したコマンド・変更内容と、利用できる「許可」「拒否」「取消し」を表示します。既定の許可や自動回答はありません。送信した回答、中断・切断・ターン終了で失効した要求には再回答できません。
 
+回答・判断を送る間は「送信中」と表示し、通信への書込完了を確認して「送信済み」に変えます。送信前に拒否されたものは「未送信」、通信途中の終了などで完了を確認できないものは「送信結果不明」です。「送信済み」は許可対象の実行成功を意味しません。どの結果でも同じ要求を自動再送しません。
+
 `ConnectionPanel.cards[token]`は表示中の`RequestCard`です。`editors[question_id]`に選択肢と回答欄、`decision_buttons[decision]`に承認操作があります。`answer_requested`は`AnswerSubmission`を通知し、元のRPC IDではなく接続固有tokenを接続へ返します。
 
 ## アプリの終了
@@ -35,5 +37,7 @@
 `gigas.services.codex.CodexServiceThread` は専用QThread内のasyncioループで接続を所有します。`start()`だけではCodexに接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
 
 GUIスレッドから`login()`、`send(prompt)`、`answer(token, decision=..., answers=...)`、`interrupt()`、`disconnect_runtime()`を呼べます。呼出しは処理を予約して戻ります。`completed`は操作呼出しの終了を通知し、ターン終端は`SessionStatus`で判定します。`interrupt()`の完了だけではターン終了を意味しません。
+
+回答の`ServiceResult.answer`は`AnswerResult(token, outcome)`です。`outcome`は`sent`（通信への書込完了）、`not_sent`（送信前の拒否）、`unknown`（送信結果不明）のいずれかです。世代とtokenの両方を照合してください。`RequestResolved`は回答受付の終了を表し、送信成功の根拠にはなりません。終了中の未処理回答にも結果を通知します。
 
 `shutdown()`は新規操作を閉じ、接続と所有taskを回収します。GUIを動かしたまま`finished`と`wait(0)`を確認し、`shutdown_error`が空である場合に終了成功とします。`QThread.quit()`ではこのサービスのasyncioループは終了しません。

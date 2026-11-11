@@ -64,7 +64,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 |---|---|---|---|---|
 | refactor-skipped | T01: 設定画面の終了待ちでも中断・切断が可能 | regression | integration | RV04。中断無効でred→19 passed |
 | refactor-done | T02: 応答更新で閲覧位置・選択を保持し、末尾追従を区別 | regression | integration | RV06。選択消失・折返し位置ずれでred→21 passed |
-| todo | T03: 要求解決と回答送信結果を区別し、tokenごとに状態を反映 | regression | unit / integration | RV07 |
+| refactor-skipped | T03: 要求解決と回答送信結果を区別し、tokenごとに状態を反映 | regression | unit / integration | RV07。5 failed / 4 passed→81 passed |
 | todo | T04: 小画面の要求を優先表示し、完了内容を折り畳んで下書きを保持 | regression | integration | RV08 |
 | todo | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02 |
 | todo | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01 |
@@ -72,6 +72,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
+| todo | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。ASCII選択→emoji置換でQt位置1が文字途中になる |
 
 ## 6. 対象ファイルと責務
 
@@ -86,6 +87,10 @@ T01: `uv run pytest tests/integration/test_ui_control_lifetime.py -q`で中断�
 現時点: 製品修正を進行中。画面・実機確認、全体品質gate、PRは未完了。
 
 T02: `uv run pytest tests/integration/test_transcript_reading.py -q --basetemp=tmp/pytest-review-t02`で選択消失・方向リセットの6 failed / 2 passedを確認し、変更範囲の編集で8 passed。折返し段落の前置追加で閲覧位置が588pxずれる回帰を追加してred、可視文字の折返し行を保持して9 passed。green後に`Transcript`へ責務を分離し、`uv run pytest tests/integration/test_transcript_reading.py tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-review-t02`で21 passed。対象ruff・format、全体ty、差分検査成功。QtのUTF-16位置とPython文字位置の違いをemojiで検証し、型ignore/castは追加していない。
+
+T02の独立レビューで、変更範囲内の端点が新しいemojiのUTF-16途中へ入る候補を指摘された。実ウィジェットで`abcd`の先頭1文字選択→`🐉XY`への置換を調べ、位置0–1のまま選択文字が空になることを確認。進行中のT03へ混ぜず、T11として回帰試験と修正を追加する。
+
+T03: 回答直後の誤った送信済み表示・解決通知での上書き・サービスの結果未通知を先にred（5 failed / 4 passed）で確認。`AnswerResult(token, outcome)`と送信失敗の`AnswerDeliveryError`を追加し、未実行の拒否・途中取消し・未接続・旧世代・サービス終了を区別した。確定結果を上書きせず、暫定unknownだけ遅延結果で確定できる。`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-review-t03`は81 passed。対象ruff/format・全体ty・差分検査成功。独立レビューで必須指摘なし。task生成直後の取消しという追加観点も検証し、未送信の1回通知を確認した。結果生成・拒否処理を共通化し、公開説明と型・docstringの契約を揃えた。green後の追加構造変更は不要と判断。
 
 ## 8. 先送り事項
 
