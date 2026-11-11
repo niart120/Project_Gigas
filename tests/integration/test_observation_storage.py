@@ -13,7 +13,7 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
-from gigas.game_io.observation import ObservationError
+from gigas.game_io.observation import Observation
 from gigas.storage import project
 from gigas.storage.project import ProjectError, ProjectWriter
 
@@ -86,7 +86,7 @@ def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) 
         assert opened.project_id == project_id
         opened.reload()
         assert (path / "events.jsonl").read_text(encoding="utf-8") == original
-        opened.record(sample_frame())
+        opened.record(Observation.from_frame(sample_frame()))
         lines = (path / "events.jsonl").read_text(encoding="utf-8").splitlines()
         assert json.loads(lines[-1])["sequence"] == 10
         assert "\n".join(lines[:-1]) + "\n" == original
@@ -241,8 +241,10 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
     writer = ProjectWriter.create(tmp_path / "game")
     frame = sample_frame(width, height)
     try:
-        first = writer.record(frame)
-        second = writer.record(frame)
+        first = Observation.from_frame(frame)
+        second = Observation.from_frame(frame)
+        writer.record(first)
+        writer.record(second)
         assert first.observation_id != second.observation_id
         assert first.frame is frame
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
@@ -261,15 +263,20 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
             "captured_at": "2000-01-01T00:00:00Z",
             "image_path": first.image_path,
             "source_frame": {"generation": 2, "sequence": 7, "width": width, "height": height},
-            "analysis": {},
         }
         assert datetime.fromisoformat(records[0]["occurred_at"]) > frame.captured_at
     finally:
         writer.close()
+    log = writer.path / "events.jsonl"
+    records[0]["payload"]["analysis"] = {}  # Existing schema-1 rows keep their extra fields.
+    original = ("\n".join(json.dumps(record) for record in records) + "\n").encode()
+    log.write_bytes(original)
     (writer.path / first.image_path).unlink()
     reopened = ProjectWriter.open(writer.path)
     try:
-        reopened.record(frame)
+        assert log.read_bytes() == original
+        reopened.record(Observation.from_frame(frame))
+        assert log.read_bytes().startswith(original)
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
@@ -284,7 +291,6 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
         ("image_path", "../other.png"),
         ("observation_id", "obs-invalid"),
         ("source_frame", {}),
-        ("analysis", []),
         ("captured_at", "yesterday"),
     ],
 )
@@ -293,7 +299,7 @@ def test_invalid_recorded_observation_is_rejected_without_rewriting(
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "broken")
     try:
-        writer.record(sample_frame())
+        writer.record(Observation.from_frame(sample_frame()))
     finally:
         writer.close()
     log = writer.path / "events.jsonl"
@@ -314,29 +320,28 @@ def test_invalid_source_identifiers_cannot_create_unreadable_records(
     try:
         invalid = replace(sample_frame(), **{field: True})
         with pytest.raises(ProjectError):
-            writer.record(invalid)
+            writer.record(Observation.from_frame(invalid))
         assert (writer.path / "events.jsonl").read_bytes() == b""
         assert list((writer.path / "observations").iterdir()) == []
-        writer.record(sample_frame())
+        writer.record(Observation.from_frame(sample_frame()))
     finally:
         writer.close()
     reopened = ProjectWriter.open(writer.path)
     reopened.close()
 
 
-@pytest.mark.parametrize("failure", ["encode", "png_sync", "collision"])
+@pytest.mark.parametrize("failure", ["png_sync", "collision"])
 def test_image_failure_preserves_log_and_writer_remains_usable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
-        first = writer.record(sample_frame())
+        first = Observation.from_frame(sample_frame())
+        writer.record(first)
         log = writer.path / "events.jsonl"
         before = log.read_bytes()
         with monkeypatch.context() as patch:
-            if failure == "encode":
-                patch.setattr(observation_module, "MAX_PNG_BYTES", 1)
-            elif failure == "collision":
+            if failure == "collision":
                 patch.setattr(observation_module, "uuid4", lambda: UUID(first.observation_id[4:]))
             else:
 
@@ -345,12 +350,12 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
                     raise OSError(message)
 
                 patch.setattr(project.os, "fsync", broken_sync)
-            with pytest.raises((ProjectError, ObservationError)):
-                writer.record(sample_frame())
+            with pytest.raises(ProjectError):
+                writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == before
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
         assert len(list((writer.path / "observations").iterdir())) == 1
-        writer.record(sample_frame())
+        writer.record(Observation.from_frame(sample_frame()))
         assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 2
     finally:
         writer.close()
@@ -362,7 +367,7 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
-        writer.record(sample_frame())
+        writer.record(Observation.from_frame(sample_frame()))
         log = writer.path / "events.jsonl"
         before = log.read_bytes()
         fsync = os.fsync
@@ -387,13 +392,13 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
 
                 patch.setattr(project.os, "fsync", broken_log_sync)
             with pytest.raises(ProjectError, match="未確定"):
-                writer.record(sample_frame())
+                writer.record(Observation.from_frame(sample_frame()))
         after = log.read_bytes()
         assert after.startswith(before)
         assert len(after) > len(before)
         assert len(list((writer.path / "observations").glob("*.png"))) == 2
         with pytest.raises(ProjectError, match="再読込"):
-            writer.record(sample_frame())
+            writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == after
         assert len(list((writer.path / "observations").glob("*.png"))) == 2
         if failure == "partial":
@@ -402,7 +407,7 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
             assert log.read_bytes() == after
         else:
             writer.reload()
-            writer.record(sample_frame())
+            writer.record(Observation.from_frame(sample_frame()))
             assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 3
     finally:
         writer.close()

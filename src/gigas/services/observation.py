@@ -3,23 +3,24 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-from gigas.game_io.observation import ObservationError
+from gigas.game_io.observation import Observation, ObservationError
 
 if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader
-    from gigas.game_io.observation import Observation
+    from gigas.game_io.capture.models import Frame
     from gigas.storage.project import ProjectWriter
 
 
 class ObservationService:
-    """Record snapshots using one reader and one fixed project writer.
+    """Record snapshots using one reader and a borrowed project writer.
 
-    All async methods belong to a single event loop. The caller owns the writer
-    and must await drain() before closing it or switching the selected project.
+    All async methods belong to a single event loop. The application owns the
+    writer beyond individual calls and Codex connections. Await drain() before
+    ending this service; only the project owner decides when to close the writer.
 
     Args:
         reader: Read-only access to the existing capture service.
-        writer: Validated project held for this service's lifetime.
+        writer: Application-owned archive writer borrowed by this service.
     """
 
     def __init__(self, reader: "CaptureReader", writer: "ProjectWriter") -> None:
@@ -48,9 +49,14 @@ class ObservationService:
         if snapshot.phase != "streaming" or snapshot.frame is None:
             message = "観測できる映像がありません"
             raise ObservationError("DEVICE_UNAVAILABLE", message)
-        self._worker = asyncio.create_task(asyncio.to_thread(self._writer.record, snapshot.frame))
+        self._worker = asyncio.create_task(asyncio.to_thread(self._record, snapshot.frame))
         self._worker.add_done_callback(_retrieve_exception)
         return await asyncio.shield(self._worker)
+
+    def _record(self, frame: "Frame") -> Observation:
+        observation = Observation.from_frame(frame)
+        self._writer.record(observation)
+        return observation
 
     async def drain(self) -> None:
         """Wait for the submitted recording, including after requester cancellation.

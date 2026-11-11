@@ -12,8 +12,6 @@ from threading import Lock
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
-from gigas.game_io.observation import Observation
-
 if sys.platform == "win32":
     import msvcrt
 
@@ -21,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from typing import BinaryIO
 
-    from gigas.game_io.capture.models import Frame
+    from gigas.game_io.observation import Observation
 
 
 class ProjectError(ValueError):
@@ -36,9 +34,11 @@ class ProjectWriter:
     """An explicitly closed Windows owner of one project's observation records.
 
     Construct through create() or open(), not by calling the initializer.
-    An OS lock excludes other writers until close or process exit. Operations are
-    synchronous; run them outside the GUI/event loop. Do not edit files externally
-    while this owner is open, or change its path or project_id attributes.
+    The application owns one writer; observation tools borrow it. An OS lock on
+    .gigas.lock excludes cooperating writers until close or process exit, without
+    blocking archive reads or edits to memory/. Only this owner writes project.json,
+    events.jsonl and observations/. Run synchronous operations outside the GUI/event
+    loop, and do not change this owner's path or project_id attributes.
 
     Attributes:
         path: Absolute project directory, fixed for this owner's lifetime.
@@ -143,27 +143,24 @@ class ProjectWriter:
                 self._lock_file.close()
                 self._lock_file = None
 
-    def record(self, frame: "Frame") -> Observation:
-        """Encode and persist one frame while retaining exclusive ownership.
+    def record(self, observation: "Observation") -> None:
+        """Persist an encoded observation before its bytes are delivered to a caller.
 
         Args:
-            frame: An already selected immutable capture frame.
-
-        Returns:
-            The exact bytes and ID saved as PNG and referenced by a synced JSONL row.
+            observation: Immutable PNG and source metadata from Observation.from_frame.
+                The bytes are saved unchanged; this method does not encode an image.
 
         Raises:
             ProjectBusyError: A recording or reload is already running.
             ProjectError: The owner is closed, needs reload, or persistence failed.
                 A JSONL failure disables further append until a successful reload.
-            ObservationError: PNG encoding failed; the writer remains usable.
         """
         with self._operation():
             self._require_open()
             if self._next_sequence is None:
                 message = "追記結果が未確定です。プロジェクトを明示的に再読込してください"
                 raise ProjectError(message)
-            observation = Observation.from_frame(frame)
+            frame = observation.frame
             event = {
                 "schema_version": 1,
                 "event_id": f"evt-{uuid4()}",
@@ -181,7 +178,6 @@ class ProjectWriter:
                         "width": frame.width,
                         "height": frame.height,
                     },
-                    "analysis": {},
                 },
             }
             try:
@@ -202,7 +198,6 @@ class ProjectWriter:
                 message = f"{self.path}: JSONL追記結果が未確定です。原本を保持します: {error}"
                 raise ProjectError(message) from error
             self._next_sequence += 1
-            return observation
 
     @contextmanager
     def _operation(self) -> "Generator[None]":
@@ -377,11 +372,8 @@ def _validate_observation(value: object) -> None:
     payload = _object(value)
     observation_id = _identifier(payload.get("observation_id"), "obs-")
     _timestamp(payload.get("captured_at"))
-    if (
-        payload.get("image_path") != f"observations/{observation_id}.png"
-        or payload.get("analysis") != {}
-    ):
-        message = "観測画像パスまたはanalysisが不正です"
+    if payload.get("image_path") != f"observations/{observation_id}.png":
+        message = "観測画像パスが不正です"
         raise ValueError(message)
     frame = _object(payload.get("source_frame"))
     _positive(frame.get("generation"))
