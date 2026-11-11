@@ -208,7 +208,7 @@ class VideoController(QObject):
         self._render()
         if self._closing or snapshot.phase != "streaming" or snapshot.frame is None:
             self.panel.view.set_frame(None)
-        elif self.active_settings is not None and (now := time.monotonic()) >= self._next_image:
+        elif self.active_settings is not None and (now := time.perf_counter()) >= self._next_image:
             self.panel.view.set_frame(snapshot.frame)
             self._next_image = now + 1 / self.active_settings.preview_fps
         state = (snapshot.phase, snapshot.error, snapshot.cleanup, alive)

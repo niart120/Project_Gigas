@@ -23,7 +23,7 @@ TOML設定の追加、機器一覧からの選択、縦横比を維持する表�
 - 状態・要求モード・実寸法・FPS報告値と実測値を短いラベルと値で表示する。接続開始・切断・取得失敗で画像を消去し、理由を表示する。説明文や説明用ツールチップは置かない。
 - 接続開始と一覧更新は重複受付しない。設定読込失敗・保存中でも既存接続の切断を受付ける。アプリ終了では映像を停止し、GUIを応答可能に保ちながらワーカーと子の終了確認を待つ。終了未確認を正常終了にしない。
 
-P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合する。Qtタイマーは最長34 ms間隔で状態を参照し、画像変換だけを接続時に確定した表示FPSで制限する。表示60 FPSでは監視間隔も17 msとする。`VideoView`は同じ世代・連番を再変換せず、表示待ちのフレームキューを持たない。映像とCodexは左右のsplitterで同時表示する。機器パスは読取専用の一行欄、エラーは高さを制限したスクロール可能なPlainText欄で示す。
+P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合する。Qtタイマーは最長34 ms間隔で状態を参照し、画像変換だけを接続時に確定した表示FPSで制限する。表示60 FPSでは監視間隔も17 msとする。表示間隔の計測には高分解能の`perf_counter()`を使い、Frameの取得時刻には影響させない。`VideoView`は同じ世代・連番を再変換せず、表示待ちのフレームキューを持たない。映像とCodexは左右のsplitterで同時表示する。機器パスは読取専用の一行欄、エラーは高さを制限したスクロール可能なPlainText欄で示す。
 
 ## 5. TDD Test List
 
@@ -34,6 +34,7 @@ P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合�
 | refactor-skipped | P2a 未選択へ戻したときに接続対象を消去する | regression | integration | 独立レビューで選択表示と保存値の不一致を発見。red: path-aが残る、green: 空文字へ同期 |
 | refactor-skipped | P3 最新画像をコピーし実画像の比率で描画する | new | integration | red: widget未実装。green: 描画画素・比率・再接続・消去。QImage変換と描画のみで構造変更不要 |
 | refactor-skipped | P4 設定snapshotで接続し遅い表示・切断・終了を結合する | new | integration | red: shellのサービス注入・GUI結合が未実装で6件失敗。green: 新規8件と既存55件。最初から表示・監視・shell寿命を分離しており追加の構造変更なし |
+| refactor-skipped | P4a Windowsの粗い時計で表示更新が隔回になる退行を防ぐ | regression | integration | red: 30/60 FPSとも60枚中32枚だけ表示、2回再現。green: 各60枚を欠落なく表示し同時刻の重複イベントは抑制。表示時計の1行変更で構造変更不要 |
 
 各itemをred→green→構造整理判断→検証→コミットの順で進める。
 
@@ -52,6 +53,8 @@ P1の最終結果は36件成功。P2: `uv run --no-sync pytest tests/integration
 P3: `uv run --no-sync pytest tests/integration/test_video_preview.py --basetemp=tmp/pytest-video-preview -q --tb=short`成功。実際の描画画像の画素を読み、4:2画像の余白・リサイズ・最新画像への切替・切断消去・新世代の低い連番の表示を確認した。元Frameのbytesは変化しない。対象ruff・ty成功。
 
 P4: `uv run --no-sync pytest tests/integration/test_video_gui.py --basetemp=tmp/pytest-video-shell -q --tb=short`で8件成功。明示列挙と未保存入力の保持、保存・再読込後も接続時の設定を維持すること、表示1 FPSで最新画像だけへ進むこと、読込失敗・保存中の切断、終了未確認で画面を閉じないこと、待機中のGUI応答、長い機器パス・PlainTextエラーでも800×800画面内に操作部品が収まること、サービス異常終了時の画像失効を確認した。1件は実際のspawnサービスと模擬機器peerを使い、画像表示・切断・再接続・アプリ終了・release記録を照合した。物理機器は開いていない。
+
+P4a: 実機計測で表示30 FPSに対し約15.6 FPSの到着が観測されたため、表示の間隔判定を調査した。WindowsのPython 3.12.10では`time.get_clock_info()`が`monotonic`を`GetTickCount64()`・分解能0.015625秒、`perf_counter`を`QueryPerformanceCounter()`・分解能0.0000001秒と報告した。34 msごとのイベントでも粗い時計では31.25 msの差となり、次回表示期限33.33 msに届かず省略する。30/60 FPSに対する34/17 msのQtイベントを固定時計で60回再生する試験を追加し、変更前は両方で28枚の欠落を2回再現した。表示判定だけを`perf_counter()`へ変えた後、`uv run --no-sync pytest tests/integration/test_video_gui.py --basetemp=tmp/pytest-video-clock-green -q --tb=short`で10件成功。各イベントで最新画像を表示し、同時刻の重複イベントは抑制した。タイマーや描画処理の負荷によらず一定FPSを保証する試験ではない。実機の表示頻度改善はこの変更の試験時点では未検証で、統合検証で再測定する。
 
 回帰は`uv run --no-sync pytest tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_app_entry.py tests/integration/test_codex_gui.py tests/integration/test_video_preview.py tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-video-regression -q --tb=short`で55件成功。起動途中の失敗、設定保存の待機、終了取消し、既存Codex操作、設定選択・映像描画を検査した。
 

@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
+from gigas.app import video
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService, CaptureSnapshot
@@ -90,6 +91,21 @@ class ControlledCapture:
         self.state = replace(
             self.state, phase="streaming", frame=frame, reported_fps=59.94, measured_fps=59.5
         )
+
+
+@dataclass
+class PreviewClocks:
+    """Replay precise timer events beside a coarse Windows elapsed clock."""
+
+    elapsed: float = 0.0
+
+    def monotonic(self) -> float:
+        """Return elapsed time quantized to the Windows 15.625 ms tick."""
+        return 1000.0 + int(self.elapsed * 64) / 64
+
+    def perf_counter(self) -> float:
+        """Return the precise elapsed time of the same event."""
+        return 1000.0 + self.elapsed
 
 
 @pytest.fixture
@@ -187,6 +203,37 @@ def test_slow_preview_uses_latest_frame_and_clears_disconnect_without_waiting_fo
     shell.window.video.disconnect_button.click()
     assert capture.disconnects == 1
     assert color() == QColor("black")
+
+
+@pytest.mark.parametrize(("fps", "interval_ms"), [(30, 34), (60, 17)])
+def test_preview_does_not_skip_due_frames_on_coarse_clock_ticks(
+    video_shell: tuple[ApplicationShell, ControlledCapture],
+    monkeypatch: pytest.MonkeyPatch,
+    fps: int,
+    interval_ms: int,
+) -> None:
+    shell, capture = video_shell
+    clock = PreviewClocks()
+    monkeypatch.setattr(video, "time", clock)
+    shell.video.timer.stop()
+    shell.baseline = replace(shell.baseline, preview_fps=fps)
+    shell.window.video.connect_button.click()
+    delivered: list[int] = []
+    view = shell.window.video.view
+    set_frame = view.set_frame
+
+    def record(frame: Frame | None) -> None:
+        if frame is not None:
+            delivered.append(frame.sequence)
+        set_frame(frame)
+
+    monkeypatch.setattr(view, "set_frame", record)
+    for tick in range(1, 61):
+        clock.elapsed = tick * interval_ms / 1000
+        capture.stream(tick)
+        shell.video.timer.timeout.emit()
+        shell.video.timer.timeout.emit()
+    assert delivered == list(range(1, 61))
 
 
 def test_failed_settings_load_does_not_disable_active_capture_disconnect(
