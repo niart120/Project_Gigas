@@ -34,7 +34,8 @@
 |---|---|---|---|---|
 | refactor-skipped | R1 映像の取得・失敗・解放を維持して、情報画面と専用計測・旧選択APIを撤去する | regression | unit / integration | 専用試験を削除し、取得の既存試験から計測assertだけを除く。削除そのもののredは作らない |
 | refactor-skipped | R2 回答処理後は短い結果へ移り、二重送信防止と秘密入力の消去を維持する | regression | integration | 再展開試験を結果表示へ書換え、手動折りたたみ専用試験を削除 |
-| todo | R3 次ターンの開始確認で処理済みカードを片付け、失敗・遅延結果を保持する | regression | unit / integration | 既存の開始競合・カード寿命試験を拡張／統合 |
+| refactor-skipped | R3 次ターンの開始確認で処理済みカードを片付け、失敗・遅延結果を保持する | regression | unit / integration | 既存の開始競合・カード寿命試験を拡張／統合 |
+| todo | R4 残した設定・表示・閲覧操作の試験を代表例へ整理する | characterization | unit / integration | 全体green後、不要な直積を削り、異なる入力・障害・境界は維持 |
 
 整理対象は`test_video_information`、`test_capture_models`の旧helper試験、取得backend/service/protocolの計測部分、回答layout/lifecycle/GUIの重複観点。異なる障害・公開契約の試験を、件数削減だけのために一つの巨大試験へまとめない。全体の件数と削除理由を最後に記録する。
 
@@ -59,6 +60,8 @@ R1検証: 映像情報専用の試験ファイルと旧`select_device`の6ケー
 既存の再展開試験をコンパクトな結果表示と通常入力の下書き保持へ書き換え、変更前後とも`uv run pytest tests/integration/test_request_layout.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py -q --tb=short`で26件成功。既存の秘密入力試験へ提出後の消去確認を加えた。手動折りたたみ専用1件、詳しい狭幅試験と重複する旧スクロール試験1件を削除。フォント×スタイルの4ケースは代表2ケースへ絞った。削除対象以外の振る舞いは変えず、撤去専用のredや不在検査は追加しない。refactor-skipped。ruff成功。
 
 ## 10. 先送り
+
+R3検証: 既存の回答寿命2試験を書換え、開始競合試験を「開始通知が先／質問が先」に拡張（1ケース追加）。同じ試験内で完了通知が開始応答より先に届く次ターンも確認した。イベント型追加後は、通知なし・カード残存による4件失敗／52件成功。既存のターンID受理で`TurnStarted`を一度発行し、GUIは前ターンの失効／結果受領済みだけを撤去するよう変更して56件成功。中断で仮にunknownになった送信は、既存の結果受領フラグから未確定と判定して保持する。追加の待機状態・履歴・破棄予約は設けていない。refactor-skipped。`uv run pytest tests/unit tests/integration -q --tb=short`は499件成功（36.27秒）。型検査も成功。
 
 全体UI/UXは実装整理後の別議論。U06でGoal・回答履歴の設計、U07で終了中の操作、U05で物理入力の即時停止を扱う。
 

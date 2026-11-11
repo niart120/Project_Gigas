@@ -1,7 +1,7 @@
 import pytest
 from pytestqt.qtbot import QtBot
 
-from gigas.runtime.codex.models import HumanRequest, RequestResolved, SessionStatus
+from gigas.runtime.codex.models import HumanRequest, RequestResolved, SessionStatus, TurnStarted
 from gigas.services.codex import AnswerResult, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
 
@@ -11,6 +11,7 @@ def panel(qtbot: QtBot) -> ConnectionPanel:
     """Present two independent approval requests in the same live connection."""
     widget = ConnectionPanel()
     qtbot.addWidget(widget)
+    widget.show()
     widget.activate(1)
     widget.handle_event(ServiceEvent(1, SessionStatus("running")))
     for token in ("first", "second"):
@@ -23,14 +24,21 @@ def panel(qtbot: QtBot) -> ConnectionPanel:
     return widget
 
 
-def test_request_resolution_does_not_claim_answer_was_sent(panel: ConnectionPanel) -> None:
+def test_pending_request_and_late_result_survive_next_turn(panel: ConnectionPanel) -> None:
     card = panel.cards["first"]
     card.decision_buttons["accept"].click()
-    assert card.status.text() == "送信中"
     panel.handle_event(ServiceEvent(1, RequestResolved("first")))
-    assert card.status.text() == "送信中"
-    assert not card.is_live
+    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    assert card.state == "sending"
+    assert panel.cards["first"] is card
+    assert panel.cards["second"].is_live
     assert not card.decision_buttons["accept"].isEnabled()
+    panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
+    assert card.state == "sent"
+    assert panel.cards["first"] is card
+    panel.handle_event(ServiceEvent(1, TurnStarted("later")))
+    assert list(panel.cards) == ["second"]
+    assert panel.cards["second"].is_live
 
 
 def test_service_exit_marks_only_unconfirmed_submissions_unknown(panel: ConnectionPanel) -> None:
@@ -42,14 +50,41 @@ def test_service_exit_marks_only_unconfirmed_submissions_unknown(panel: Connecti
     assert not card.decision_buttons["accept"].isEnabled()
 
 
-def test_resolution_without_submission_expires_and_cannot_send(panel: ConnectionPanel) -> None:
-    submissions: list[object] = []
-    panel.answer_requested.connect(submissions.append)
-    panel.handle_event(ServiceEvent(1, RequestResolved("first")))
+def test_results_remain_until_next_turn_is_confirmed(panel: ConnectionPanel) -> None:
     card = panel.cards["first"]
     card.decision_buttons["accept"].click()
-    assert card.status.text() == "失効"
-    assert submissions == []
+    panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
+    panel.handle_event(ServiceEvent(1, RequestResolved("second")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    assert set(panel.cards) == {"first", "second"}
+    panel.prompt.setPlainText("次の依頼")
+    panel.send_button.click()
+    panel.handle_event(ServiceEvent(1, SessionStatus("starting")))
+    assert set(panel.cards) == {"first", "second"}
+    panel.handle_result(ServiceResult(1, "send", "開始失敗"))
+    assert set(panel.cards) == {"first", "second"}
+    panel.handle_event(ServiceEvent(0, TurnStarted("old-generation")))
+    assert set(panel.cards) == {"first", "second"}
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    panel.send_button.click()
+    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    assert not panel.cards
+    assert not panel.requests.isVisible()
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.handle_event(
+        ServiceEvent(
+            1,
+            HumanRequest("current", "current", "thread", "next", "command", decisions=("decline",)),
+        )
+    )
+    current = panel.cards["current"]
+    current.decision_buttons["decline"].click()
+    panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("current", "sent")))
+    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    panel.handle_event(ServiceEvent(1, RequestResolved("first")))
+    panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "unknown")))
+    assert list(panel.cards) == ["current"]
+    assert current.state == "sent"
 
 
 def test_results_match_tokens_and_survive_later_resolution(panel: ConnectionPanel) -> None:
@@ -94,6 +129,8 @@ def test_result_queued_before_service_exit_refines_provisional_unknown(
     card.decision_buttons["accept"].click()
     panel.service_finished()
     assert card.state == "unknown"
+    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    assert panel.cards["first"] is card
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
     assert card.state == "sent"
     assert not card.decision_buttons["accept"].isEnabled()

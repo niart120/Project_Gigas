@@ -16,6 +16,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    TurnStarted,
 )
 from gigas.runtime.codex.transport import (
     RpcNotification,
@@ -681,6 +682,7 @@ class CodexConnection:
     def _adopt_turn(self, turn_id: str) -> None:
         if self._starting_turn and self._turn_id is None and turn_id not in self._completed_turns:
             self._turn_id = turn_id
+            self._emit(TurnStarted(turn_id))
 
     def _accept_start_response(self, turn: "JsonObject") -> bool:
         turn_id = _text(turn.get("id"))

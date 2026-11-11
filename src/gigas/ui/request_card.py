@@ -188,6 +188,14 @@ class RequestCard(QGroupBox):
         """Whether the card still accepts one explicit submission."""
         return self.state == "waiting"
 
+    @property
+    def is_settled(self) -> bool:
+        """Whether expiry or a delivery result permits removal at the next turn.
+
+        A provisional unknown after interruption still awaits its queued result.
+        """
+        return self.state == "expired" or self._result_received
+
     def invalidate(self) -> None:
         """Expire unanswered requests without changing submitted delivery evidence."""
         if self.is_live:
