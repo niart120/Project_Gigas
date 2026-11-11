@@ -56,6 +56,9 @@ def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: 
 
 
 def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot) -> None:
+    save_settings(shell.path, Settings(auth_method="api_key"))
+    shell.reload()
+    qtbot.waitUntil(lambda: shell.operation is None)
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
@@ -65,7 +68,6 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
     dialog.serial_port.setText(values.serial_port)
     dialog.model.setText(values.model)
     dialog.effort.setText(values.effort)
-    dialog.auth_method.setCurrentIndex(1)
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path) == values

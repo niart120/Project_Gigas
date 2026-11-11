@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -117,8 +117,9 @@ class SettingsDialog(QDialog):
         self.model = self._text_field()
         self.effort = self._text_field()
         self.auth_method = QComboBox(self)
-        self.auth_method.addItem("ChatGPT", "chatgpt")
-        self.auth_method.addItem("APIキー", "api_key")
+        self._auth_choices = QStandardItemModel(self.auth_method)
+        self.auth_method.setModel(self._auth_choices)
+        self._set_auth_method("chatgpt")
         self.auth_method.currentIndexChanged.connect(self.changed)
         agent_form.addRow("モデル", self.model)
         agent_form.addRow("エフォート", self.effort)
@@ -174,6 +175,19 @@ class SettingsDialog(QDialog):
         self._set_rate(field, default)
         field.currentIndexChanged.connect(self.changed)
         return field
+
+    def _set_auth_method(self, value: str) -> None:
+        with QSignalBlocker(self.auth_method):
+            self._auth_choices.clear()
+            supported = QStandardItem("ChatGPT")
+            supported.setData("chatgpt", Qt.ItemDataRole.UserRole)
+            self._auth_choices.appendRow(supported)
+            if value == "api_key":
+                legacy = QStandardItem("APIキー (未対応)")
+                legacy.setData("api_key", Qt.ItemDataRole.UserRole)
+                legacy.setEnabled(False)
+                self._auth_choices.appendRow(legacy)
+            self.auth_method.setCurrentIndex(self.auth_method.findData(value))
 
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
@@ -269,7 +283,7 @@ class SettingsDialog(QDialog):
             ):
                 field.setText(value)
                 self._loaded_text[field] = (value, field.text())
-            self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
+            self._set_auth_method(values.auth_method)
             for field, value in (
                 (self.capture_fps, values.capture_fps),
                 (self.preview_fps, values.preview_fps),

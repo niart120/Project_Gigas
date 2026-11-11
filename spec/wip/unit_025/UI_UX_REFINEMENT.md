@@ -74,7 +74,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01。10 failed / 2 passed→97 passed |
 | refactor-skipped | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09。GUI 7 failed→146 passed、core 10 failed→65 passed |
 | refactor-skipped | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03。新規11件、関連117 passed |
-| todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
+| refactor-skipped | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10。2 failed→29 passed |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
 | refactor-skipped | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 6 failed / 17 passed→35 passed |
@@ -120,6 +120,8 @@ T07のCodex側は`uv run pytest tests/unit/test_codex_connection.py tests/integr
 T08: メニューと設定の共有QAction、表示時の非同期列挙、保存前の選択印、取得中の名前、終了経路を先に7 failedのredで確認し、7 passedへ進めた。ファイル・接続・表示のメニューへ操作を集約し、映像領域は画像だけ、状態・表示名はステータスバーとした。旧button互換aliasを残さず、既存試験も実際のメニュー操作へ移行した。明示切断後の一覧更新はメニューと設定で共通化した。
 
 T08の追加redでは、長い同名機器の末尾番号が消える問題、重複IDを含む一覧更新後の旧action残存、設定再読込後に保存値と取得中の値が異なると選択済み項目から適用できない問題を確認・修正。`test_main_menus.py`の11件と関連11ファイル117 passed、対象18 Pythonファイルのruff/format・全体ty・差分検査成功。独立レビューの必須指摘を解消した。表示名の組立は設定とメニューで共用し、追加のgreen後構造整理は不要。
+
+T09: `uv run pytest tests/integration/test_auth_choices.py -q --basetemp=tmp/pytest-t09-red --tb=short`で、新規APIキー選択と既存値の選択可否の2件をredにした。新規候補はChatGPTだけとし、保存済みAPIキー方式は無効な候補として保持する。無関係な編集・保存では保持し、ChatGPTへ変更した後は再選択できない。同ファイルと`test_app_settings.py`、`test_video_settings_gui.py`は29 passed。対象ruff/format・全体ty・差分検査成功。認証機能や設定schemaは変えていない。green後の追加構造整理は不要。
 
 ## 8. 先送り事項
 
