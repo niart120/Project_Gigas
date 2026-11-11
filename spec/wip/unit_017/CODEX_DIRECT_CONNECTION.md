@@ -37,7 +37,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | refactor-skipped | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 実peerで文字列/整数ID、保留要求、逆順応答、通知、拒否返信を確認 |
 | refactor-done | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | EOFの全待機解放、不正frame8種、timeout/取消し、重複/未知応答、秘匿診断を確認 |
 | refactor-done | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | 起動/終了取消し・並行呼出し・Windows非表示・terminate/kill後waitを実peerで確認 |
-| todo | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 認証なし・無効モデル・資材失敗も対象 |
+| refactor-done | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 公開RPC境界のfakeで認証、全cursor、モデル/effort、資材失敗、要求設定照合を確認 |
 | todo | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 明示要求schemaと拒否既定 |
 | todo | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | turn終了と中断受付を分ける |
 
@@ -67,6 +67,15 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - Windows実行: python launcherと実processのPIDを混同しないようpeerはbase interpreterを使う。非表示起動、cwd/env、320 KiBのstderr排出を確認。kill分岐はterminateだけをno-opへ故障注入し、実peerへのkillとwait完了を観測した。
 - 検証: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport` は20 passed。対象ruff check/format・ty check、`uv lock --check`、`uv build` が成功。公開型はAny/cast/ignoreを追加せず、Google style docstringで寿命・取消し・失敗契約を記載した。
 - commit: `fix(codex): 起動取消しと終了競合から子プロセスを回収する`。
+
+### C01 実行履歴
+
+- red: `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-connection` は `gigas.runtime.codex.connection` 未実装の `ModuleNotFoundError` で失敗した。
+- green: 認証を変更しないaccount/read、明示ログインと完了後の再確認、全cursorのモデル取得、モデル/effort照合、resourcesからの指示読込とthread/start配送を実装。未認証・未対応APIキー・資材不正・実行設定不一致ではturn/startへ進まない。
+- refactor-done: green後に起動設定検証・URL検証・thread開始を分離。表示イベントとJSON境界を分け、Protocolは実I/O境界の一つに限定した。
+- 検証: 対象pytestは10 passed。対象ruff format/check、ty、`uv lock --check`、`uv build`が成功。`uv add openai-codex-cli-bin==0.167.0`を実施し固定依存をlockへ記録。sandbox内のWindows PE生成拒否後、通常権限の同じuv addで成功した。
+- 公開APIの型・docstring・利用者向け `docs/codex.md` を照合した。実runtimeのconnection経路・GUI受入は後続で行い、このfake成功で代替しない。
+- commit: `feat(codex): 認証とモデルを確認して同梱指示を配送する`。
 
 ## 6. 対象ファイル
 
