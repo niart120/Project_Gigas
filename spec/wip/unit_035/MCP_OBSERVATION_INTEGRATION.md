@@ -35,7 +35,7 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
+| refactor-done | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
 | todo | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
 | todo | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | todo | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 既存settings試験へ統合 |
@@ -84,4 +84,6 @@ Observationはcaptured_at、FrameSource（世代・連番・元寸法）、png_b
 
 RED: `uv run pytest tests/integration/test_observation_storage.py -q --tb=short`は9 failed / 36 passed。新しい取得時刻・解像度引数・画像メタデータ未対応を確認。GREEN: 同commandで45 passed、storage/service/capture_serviceで62 passed。既存試験へoriginal・HD・既定FullHD・縦横比・整数丸め・色/全画面保持を統合した。Frame本体不在だけをassertする試験は追加していない。
 
-rootで`uv run pytest tests/unit tests/integration -q`: 415 passed。`uv run ruff format --check .`（168 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv build`、`git diff --check`成功。追加の構造整理は不要と判断。サービスの保存待ちはM2-02で変更するため、現時点の公開docsは同期保存の実装事実を維持する。実MCP/実機は未実施。
+rootで`uv run pytest tests/unit tests/integration -q`: 415 passed。`uv run ruff format --check .`（168 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv build`、`git diff --check`成功。追加の構造整理は不要と判断。サービスの保存待ちはM2-02で変更するため、現時点の公開docsは同期保存の実装事実を維持する。実MCP/実機は未実施。M2-01は9e80a31へコミット済み。
+
+M2-01の独立レビューで必須修正なし。既存試験に残っていたJSONLの再シリアライズ・書戻しを除き、writerが生成した実バイト列をそのまま再読込検証へ使うよう整理した。`uv run pytest tests/integration/test_observation_storage.py -q`: 45 passed。新規試験や製品動作の変更なし。

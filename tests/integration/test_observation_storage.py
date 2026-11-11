@@ -331,8 +331,7 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
     finally:
         writer.close()
     log = writer.path / "events.jsonl"
-    original = ("\n".join(json.dumps(record) for record in records) + "\n").encode()
-    log.write_bytes(original)
+    original = log.read_bytes()
     (writer.path / first.image_path).unlink()
     reopened = ProjectWriter.open(writer.path)
     try:
