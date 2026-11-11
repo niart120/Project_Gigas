@@ -273,12 +273,12 @@ class ApplicationShell(QObject):
             ),
         )
         self.window.connection.set_available(
-            not self.committed and self.pending is None and not self._service_unavailable,
-            settings_ready=self.ready,
+            not self.committed and self.pending != "app" and not self._service_unavailable,
+            settings_ready=self.ready and self.pending is None,
         )
         self.video.set_available(
-            not self.committed and self.pending is None,
-            settings_ready=self.ready,
+            not self.committed and self.pending != "app",
+            settings_ready=self.ready and self.pending is None,
         )
         if self.dialog is not None:
             self.dialog.status.setText(state)
