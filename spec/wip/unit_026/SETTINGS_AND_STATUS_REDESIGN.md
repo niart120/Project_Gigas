@@ -185,8 +185,8 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 |---|---|---|---|
 | todo | OK・適用・キャンセルの完了条件 | regression / integration | 保存と最初のフレームまで待つ、失敗時保持、適用後の取消しは巻き戻さない、失敗後再試行や終了取消しで旧OKを復活させない |
 | todo | 処理中の操作境界 | regression / integration | 二重保存防止、切断によるOK予定取消し、設定終了禁止でも既存停止とアプリ終了が可能 |
-| todo | 未接続と適用の操作境界 | regression / integration | 未接続は最後の実機を消さない、保存値と同じ機器も開始できる、要求が未接続なら一般の変更で開始しない、同機器再試行、保存待ちの停止、終了未確認、停止後の適用で開始要求を復活させない |
-| todo | 保存と取得先要求の分離 | regression / integration | 再読込で接続しない、保存B・実取得Aでも一般の保存でBを消さない、列挙・保存完了で要求を上書きしない |
+| green | 未接続と適用の操作境界 | regression / integration | 未接続は最後の実機を消さない、保存値と同じ機器も開始できる、要求が未接続なら一般の変更で開始しない、同機器再試行、保存待ちの停止、終了未確認、停止後の適用で開始要求を復活させない |
+| green | 保存と取得先要求の分離 | regression / integration | 再読込で接続しない、保存B・実取得Aでも一般の保存でBを消さない、列挙・保存完了で要求を上書きしない |
 | green | フォーム再分類と設定保持 | regression / integration | 移動したserial・未知項目・既存認証値を保持、初回列挙・未保存選択と機器名識別を維持 |
 | green | 状態・通知・復旧への到達 | regression / integration | 分割幅追従、短い状態を保持、通知再表示とコピー維持、読込失敗時再読込、取消し可能期間 |
 | green | プレビューの比率維持と引き延ばし | new / integration | 4:3・超横長・同寸法の表示領域と黒帯、クロップなし、共通Frameの画素不変、取得自動でも切替可能 |
@@ -261,3 +261,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### V2 状態・通知・復旧への到達
 
 状態領域・メニュー・進捗表示の5件red→green、splitter端で短い状態が1pxになる追加1件red→green。`uv run pytest tests/integration/test_main_menus.py tests/integration/test_notifications.py tests/integration/test_window_presets.py tests/integration/test_video_gui.py tests/integration/test_video_preview.py -q --basetemp=tmp/pytest-ui`は50件成功。担当ruff/format/ty、独立レビュー成功。800×550/1100×680、9pt/16ptの合成画面確認。refactor-done（2状態領域の幅追従を小さい部品へ分離）。設定場所を開く操作と終了異常時の進捗更新はroot結合で確認する。
+
+### A2 取得先要求と設定保存の分離
+
+`uv run pytest tests/integration/test_settings_apply_contract.py -q --basetemp=tmp/pytest-root --tb=short`: 新Dialog API未結合で4件red→4件green。未接続でも機器を記憶、同じ保存機器へ開始、一般変更で誤接続なし、失敗後の無編集再試行、保存B/実取得Aの保持を確認。要求と実到着の差は再適用の原因にしない。担当ruff/ty成功。refactor-done（fixtureの明示列挙完了をhelper化後同4件成功）。OK/取消しの完了条件はA3。

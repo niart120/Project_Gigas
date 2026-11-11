@@ -1,0 +1,130 @@
+from collections.abc import Iterator
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from pytestqt.qtbot import QtBot
+
+from gigas.app.shell import ApplicationShell
+from gigas.game_io.capture.models import DeviceInfo
+from gigas.storage.settings import Settings, load_settings, save_settings
+from gigas.ui.settings_dialog import SettingsDialog
+from tests.integration.peers.controlled_capture import ControlledCapture
+
+
+@pytest.fixture
+def app(qtbot: QtBot, tmp_path: Path) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
+    path = tmp_path / "settings.toml"
+    save_settings(path, Settings(capture_device="path-a"))
+    capture = ControlledCapture()
+    shell = ApplicationShell(path, capture_service=capture)
+    shell.start()
+    qtbot.waitUntil(lambda: shell.ready)
+    capture.state = replace(
+        capture.state,
+        devices=(DeviceInfo("Camera A", "path-a"), DeviceInfo("Camera B", "path-b")),
+        devices_revision=1,
+    )
+    shell.video.timer.timeout.emit()
+    try:
+        yield shell, capture
+    finally:
+        capture.finish_disconnect = True
+        capture.finish_shutdown = True
+        capture.state = replace(capture.state, cleanup="graceful")
+        qtbot.waitUntil(lambda: shell.operation is None)
+        if shell.dialog is not None:
+            shell.dialog.hide()
+            shell.dialog = None
+        if shell.confirmation is not None:
+            shell.confirmation.reject()
+        shell.request_close()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+
+
+def open_editor(shell: ApplicationShell, capture: ControlledCapture) -> SettingsDialog:
+    """Open settings and complete the explicitly controlled discovery request."""
+    shell.open_settings()
+    if capture.snapshot().phase == "enumerating":
+        capture.complete_enumeration(
+            (DeviceInfo("Camera A", "path-a"), DeviceInfo("Camera B", "path-b"))
+        )
+        shell.video.timer.timeout.emit()
+    dialog = shell.dialog
+    assert dialog is not None
+    return dialog
+
+
+def test_offline_apply_remembers_device_and_same_device_can_start(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    dialog = open_editor(shell, capture)
+    assert dialog.capture_target == ""
+    assert dialog.values().capture_device == "path-a"
+    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
+    assert not shell.dirty
+    assert dialog.save_button.isEnabled()
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: len(capture.connections) == 1)
+    capture.stream()
+    qtbot.waitUntil(lambda: not shell.video.applying)
+    dialog.capture_choices.setCurrentIndex(0)
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: capture.snapshot().phase == "idle")
+    assert shell.baseline.capture_device == "path-a"
+    assert load_settings(shell.path).capture_device == "path-a"
+
+
+def test_offline_general_apply_does_not_open_remembered_device(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    dialog = open_editor(shell, capture)
+    dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert not shell.baseline.preview_letterbox
+    assert dialog.capture_target == ""
+    assert not capture.connections
+    assert not dialog.save_button.isEnabled()
+
+
+def test_failed_target_can_be_retried_without_an_edit(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    dialog = open_editor(shell, capture)
+    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: len(capture.connections) == 1)
+    capture.state = replace(capture.state, phase="error", cleanup="graceful", error="open failed")
+    qtbot.waitUntil(lambda: shell.video.apply_state == "failed")
+    assert not shell.dirty
+    assert dialog.capture_target == "path-b"
+    assert dialog.save_button.isEnabled()
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: len(capture.connections) == 2)
+    capture.stream()
+    qtbot.waitUntil(lambda: not shell.video.applying)
+
+
+def test_reload_keeps_active_target_and_general_save_preserves_remembered_device(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+) -> None:
+    shell, capture = app
+    shell.connect_video()
+    capture.stream(actual_size=(32, 24))
+    qtbot.waitUntil(lambda: not shell.video.applying)
+    save_settings(shell.path, Settings(capture_device="path-b"))
+    shell.reload()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    dialog = open_editor(shell, capture)
+    assert dialog.capture_target == "path-a"
+    assert dialog.values().capture_device == "path-b"
+    dialog.model.setText("model-change")
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert len(capture.connections) == 1
+    assert load_settings(shell.path).capture_device == "path-b"
+    assert dialog.capture_target == "path-a"
