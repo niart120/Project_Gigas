@@ -165,6 +165,26 @@ def test_non_rfc3339_time_is_rejected(tmp_path: Path, timestamp: str) -> None:
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize("name", ["project.json", "events.jsonl"])
+def test_json_depth_failure_releases_owner_even_while_error_is_retained(
+    tmp_path: Path, name: str
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    writer.close()
+    path = writer.path / name
+    original = path.read_bytes()
+    deep = b"[" * 5000 + b"0" + b"]" * 5000 + b"\n"
+    path.write_bytes(deep)
+    with pytest.raises(ProjectError) as retained:
+        ProjectWriter.open(writer.path)
+    assert retained.value.__cause__ is not None
+    assert path.read_bytes() == deep
+    # External editing is permitted only after the failed owner has released its lock.
+    path.write_bytes(original)
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
+
+
 LOCK_PROBE = """
 import sys
 from pathlib import Path

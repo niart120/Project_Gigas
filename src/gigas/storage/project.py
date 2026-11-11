@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sys
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -61,28 +61,28 @@ class ProjectWriter:
         """
         path = path.resolve()
         project_id = f"project-{uuid4()}"
-        lock_file = None
         try:
-            path.mkdir()
-            lock_file = _acquire_lock(path)
-            (path / "observations").mkdir()
-            with (path / "events.jsonl").open("xb"):
-                pass
-            metadata = {
-                "schema_version": 1,
-                "project_id": project_id,
-                "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-            with (path / "project.json").open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
-                stream.flush()
-                os.fsync(stream.fileno())
+            with ExitStack() as resources:
+                path.mkdir()
+                lock_file = resources.enter_context(_acquire_lock(path))
+                (path / "observations").mkdir()
+                with (path / "events.jsonl").open("xb"):
+                    pass
+                metadata = {
+                    "schema_version": 1,
+                    "project_id": project_id,
+                    "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                }
+                with (path / "project.json").open("x", encoding="utf-8", newline="\n") as stream:
+                    stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                owner = cls(path, project_id, lock_file)
+                resources.pop_all()
+                return owner
         except (OSError, ProjectError) as error:
-            if lock_file is not None:
-                lock_file.close()
             message = f"{path}: プロジェクト作成失敗。作成途中の資材は保持します: {error}"
             raise ProjectError(message) from error
-        return cls(path, project_id, lock_file)
 
     @classmethod
     def open(cls, path: Path) -> Self:
@@ -98,15 +98,13 @@ class ProjectWriter:
             ProjectError: Metadata or a record is unreadable or invalid.
         """
         path = path.resolve()
-        lock_file = _acquire_lock(path)
-        try:
+        with ExitStack() as resources:
+            lock_file = resources.enter_context(_acquire_lock(path))
             project_id, next_sequence = _read_project(path)
-        except ProjectError:
-            lock_file.close()
-            raise
-        owner = cls(path, project_id, lock_file)
-        owner._next_sequence = next_sequence
-        return owner
+            owner = cls(path, project_id, lock_file)
+            owner._next_sequence = next_sequence
+            resources.pop_all()
+            return owner
 
     def reload(self) -> None:
         """Revalidate the held project before explicitly resuming writes.
@@ -316,7 +314,7 @@ def _read_metadata(path: Path) -> str:
 def _read_project(path: Path) -> tuple[str, int]:
     try:
         project_id = _read_metadata(path)
-    except (OSError, ValueError, TypeError) as error:
+    except (OSError, ValueError, TypeError, RecursionError) as error:
         message = f"{path}/project.json: 読込失敗: {error}"
         raise ProjectError(message) from error
     previous = 0
@@ -325,7 +323,7 @@ def _read_project(path: Path) -> tuple[str, int]:
             for line, raw in enumerate(stream, 1):
                 try:
                     previous = _read_record(raw, project_id, previous)
-                except (ValueError, TypeError) as error:
+                except (ValueError, TypeError, RecursionError) as error:
                     message = (
                         f"{path}/events.jsonl 行{line}: {error}。正常範囲: 先頭から{line - 1}行"
                     )
