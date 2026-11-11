@@ -22,8 +22,15 @@ def dialog(qtbot: QtBot, tmp_path: Path) -> Iterator[SettingsDialog]:
     editor.hide()
 
 
-@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
-@pytest.mark.parametrize("field_name", ["location", "serial", "model", "effort"])
+@pytest.mark.parametrize(
+    ("field_name", "key"),
+    [
+        ("location", Qt.Key.Key_Return),
+        ("serial", Qt.Key.Key_Enter),
+        ("model", Qt.Key.Key_Return),
+        ("effort", Qt.Key.Key_Enter),
+    ],
+)
 def test_enter_in_a_field_never_submits_after_ok_had_focus(
     dialog: SettingsDialog, qtbot: QtBot, field_name: str, key: Qt.Key
 ) -> None:
@@ -52,8 +59,10 @@ def test_enter_in_a_field_never_submits_after_ok_had_focus(
     assert dialog.isVisible()
 
 
-@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space])
-@pytest.mark.parametrize("command", ["ok", "cancel", "apply"])
+@pytest.mark.parametrize(
+    ("command", "key"),
+    [("ok", Qt.Key.Key_Return), ("cancel", Qt.Key.Key_Enter), ("apply", Qt.Key.Key_Space)],
+)
 def test_focused_footer_button_runs_only_its_own_explicit_command(
     dialog: SettingsDialog, qtbot: QtBot, command: str, key: Qt.Key
 ) -> None:
@@ -70,8 +79,10 @@ def test_focused_footer_button_runs_only_its_own_explicit_command(
     assert clicked == [command]
 
 
-@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
-@pytest.mark.parametrize("field_name", ["resolution", "preview_mode"])
+@pytest.mark.parametrize(
+    ("field_name", "key"),
+    [("resolution", Qt.Key.Key_Return), ("preview_mode", Qt.Key.Key_Enter)],
+)
 def test_enter_accepts_combo_popup_selection_without_submitting_settings(
     dialog: SettingsDialog, qtbot: QtBot, field_name: str, key: Qt.Key
 ) -> None:

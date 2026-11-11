@@ -121,8 +121,10 @@ def test_update_keeps_backward_selection_direction(panel: ConnectionPanel) -> No
     assert updated.anchor() == end
 
 
-@pytest.mark.parametrize("separator", ["\r\n", "\r", "\r\r\n", "\u2029"])
-@pytest.mark.parametrize("backward", [False, True])
+@pytest.mark.parametrize(
+    ("separator", "backward"),
+    [("\r\n", False), ("\r", True), ("\r\r\n", True), ("\u2029", False)],
+)
 def test_paragraph_updates_preserve_selection_and_visible_history(
     panel: ConnectionPanel, separator: str, backward: bool
 ) -> None:

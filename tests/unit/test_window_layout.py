@@ -36,15 +36,9 @@ def test_preset_choices_have_four_distinct_stable_keys() -> None:
     )
 
 
-@pytest.mark.parametrize("limit", ["width", "height"])
 @pytest.mark.parametrize(
-    ("key", "dimensions"),
-    [
-        ("hd", (640, 360, 384, 216)),
-        ("full_hd", (960, 540, 640, 360)),
-        ("wqhd", (1280, 720, 800, 450)),
-        ("four_k", (1920, 1080, 1280, 720)),
-    ],
+    ("key", "dimensions", "limit"),
+    [("full_hd", (960, 540, 640, 360), "width"), ("four_k", (1920, 1080, 1280, 720), "height")],
 )
 def test_small_screen_scales_window_and_preview_together(
     key: str, dimensions: tuple[int, int, int, int], limit: str

@@ -2,7 +2,7 @@
 
 ## 1. 概要・起点
 
-状態: **wip**。[unit_027 M2](../unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のM2着手指示により、親5.6節の残項目を実装する。M1は[unit_028](../../complete/unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)で完了。既存試験の書換え・削除を優先し、撤去した機能の不在だけを検査する試験は追加しない。
+状態: **complete**。[unit_027 M2](../unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のM2着手指示により、親5.6節の残項目を実装する。M1は[unit_028](../unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)で完了。既存試験の書換え・削除を優先し、撤去した機能の不在だけを検査する試験は追加しない。
 
 ## 2. 対象範囲
 
@@ -35,7 +35,7 @@
 | refactor-skipped | R1 映像の取得・失敗・解放を維持して、情報画面と専用計測・旧選択APIを撤去する | regression | unit / integration | 専用試験を削除し、取得の既存試験から計測assertだけを除く。削除そのもののredは作らない |
 | refactor-skipped | R2 回答処理後は短い結果へ移り、二重送信防止と秘密入力の消去を維持する | regression | integration | 再展開試験を結果表示へ書換え、手動折りたたみ専用試験を削除 |
 | refactor-skipped | R3 次ターンの開始確認で処理済みカードを片付け、失敗・遅延結果を保持する | regression | unit / integration | 既存の開始競合・カード寿命試験を拡張／統合 |
-| todo | R4 残した設定・表示・閲覧操作の試験を代表例へ整理する | characterization | unit / integration | 全体green後、不要な直積を削り、異なる入力・障害・境界は維持 |
+| refactor-done | R4 残した設定・表示・閲覧操作の試験を代表例へ整理する | characterization | unit / integration | 全体green後、不要な直積を削り、異なる入力・障害・境界は維持 |
 
 整理対象は`test_video_information`、`test_capture_models`の旧helper試験、取得backend/service/protocolの計測部分、回答layout/lifecycle/GUIの重複観点。異なる障害・公開契約の試験を、件数削減だけのために一つの巨大試験へまとめない。全体の件数と削除理由を最後に記録する。
 
@@ -59,15 +59,44 @@ R1検証: 映像情報専用の試験ファイルと旧`select_device`の6ケー
 
 既存の再展開試験をコンパクトな結果表示と通常入力の下書き保持へ書き換え、変更前後とも`uv run pytest tests/integration/test_request_layout.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py -q --tb=short`で26件成功。既存の秘密入力試験へ提出後の消去確認を加えた。手動折りたたみ専用1件、詳しい狭幅試験と重複する旧スクロール試験1件を削除。フォント×スタイルの4ケースは代表2ケースへ絞った。削除対象以外の振る舞いは変えず、撤去専用のredや不在検査は追加しない。refactor-skipped。ruff成功。
 
-## 10. 先送り
+### R3
 
 R3検証: 既存の回答寿命2試験を書換え、開始競合試験を「開始通知が先／質問が先」に拡張（1ケース追加）。同じ試験内で完了通知が開始応答より先に届く次ターンも確認した。イベント型追加後は、通知なし・カード残存による4件失敗／52件成功。既存のターンID受理で`TurnStarted`を一度発行し、GUIは前ターンの失効／結果受領済みだけを撤去するよう変更して56件成功。中断で仮にunknownになった送信は、既存の結果受領フラグから未確定と判定して保持する。追加の待機状態・履歴・破棄予約は設けていない。refactor-skipped。`uv run pytest tests/unit tests/integration -q --tb=short`は499件成功（36.27秒）。型検査も成功。
+
+### R4・テスト品質レビュー
+
+全体499件greenの後、製品コードを変えずに4ファイルの120ケースを93ケースへ整理した。`uv run pytest tests/integration/test_settings_keyboard.py tests/unit/test_video_settings.py tests/integration/test_transcript_reading.py tests/unit/test_window_layout.py -q --tb=short`は93件成功（0.67秒）。件数を隠すループへの置換や試験関数の一括結合はしていない。refactor-done。
+
+| 既存試験 | 判断・残す観点 |
+|---|---|
+| 設定キーボード21→9 | 各欄、3操作、Enter／Return／Space、コンボ確定の代表例を維持。全キー×全欄・全ボタンの直積を削除 |
+| 映像設定59→54 | 解像度×表示方式10ケースを5組へ縮小。全解像度、両表示方式、保存・再読込、未知項目・コメント保持は維持。不正型・境界値・原本保護の試験は削らない |
+| 閲覧位置23→19 | 各改行種別と選択方向の直積8ケースを4組へ縮小。各改行、両方向、選択内容と表示位置を維持。Unicode境界や追従条件は別の契約として残す |
+| 表示寸法17→11 | 各プリセットの値を検証する4ケースを残し、共通縮小処理は幅制約／高さ制約の2ケースへ。端数・最小寸法・未知キーも維持 |
+
+削減の代償として全組合せの検査は行わない。各項目が独立して通る処理を代表例で確認し、別々の失敗条件・入力検証・資源解放は統合しなかった。最終件数は512→472（M2で40減）、M1前556から合計84減。新しい試験ファイルは追加せず、削除機能の不在だけを調べる試験も追加していない。
+
+### 最終gate・自己レビュー
+
+| 確認 | 結果 |
+|---|---|
+| `uv run pytest tests/unit tests/integration -q --tb=short` | 472件成功、35.85秒。模擬peer、Qt結合、実spawnの終了・失敗・解放を含む |
+| `uv lock --check` | 成功。55パッケージのlock整合、依存変更なし |
+| `uv run ruff format --check .` / `uv run ruff check .` | 成功。166ファイル整形済み、lint指摘なし |
+| `uv run ty check --no-progress` | 成功。FPS公開属性とcallback撤去、TurnStarted追加の型境界を確認。Any・ignore・互換stubの追加なし |
+| `uv build` | sdist・wheel生成成功。公開API撤去後の配布を確認 |
+| Windows Qt実画面 | `QT_QPA_PLATFORM=windows`のインラインプローブ成功。回答入力・結果のみ表示・原稿保持・開始要求時の保持・開始確認後の撤去を確認。3枚の画像を目視確認 |
+| 文書・差分 | API docsとdocstringを実装へ照合。Markdown参照、unit番号、仮テキスト、`git diff --check`を確認 |
+| 実機映像・外部Codex接続 | not run。模擬peer・画像による今回の整理検証であり、実機の再受入は行っていない |
+| 全体UI/UX・Goal・履歴保存 | not applicable。今回の対象外 |
+
+## 10. 先送り
 
 全体UI/UXは実装整理後の別議論。U06でGoal・回答履歴の設計、U07で終了中の操作、U05で物理入力の即時停止を扱う。
 
 ## 11. 完了チェックリスト
 
 - [x] 合意範囲と対象外、既存試験の整理方針を記録した
-- [ ] R1〜R3を実装・検証した
-- [ ] 残存経路・重複試験を確認し、docsを更新した
-- [ ] 品質gate・実画面・未検証事項を記録した
+- [x] R1〜R4を実装・検証した
+- [x] 残存経路・重複試験を確認し、docsを更新した
+- [x] 品質gate・実画面・未検証事項を記録した

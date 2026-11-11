@@ -2,7 +2,7 @@
 
 ## 1. 概要・起点
 
-状態: **complete**。[unit_027 M1](../../wip/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のユーザー指示により、合意したM0の操作を実装する。既存状態に分岐を追加して温存せず、旧経路とそれを固定する試験を整理する。
+状態: **complete**。[unit_027 M1](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のユーザー指示により、合意したM0の操作を実装する。既存状態に分岐を追加して温存せず、旧経路とそれを固定する試験を整理する。
 
 ## 2. 対象範囲
 
@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[親仕様](../../wip/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[初期I/O設計](../../initial/03-game-io.md)、[実装計画](../../initial/05-implementation.md)、[前回実装記録](../unit_026/SETTINGS_AND_STATUS_REDESIGN.md)を参照する。M0の操作仕様は記録済み、製品実装の検証は本書で行う。
+[親仕様](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[初期I/O設計](../../initial/03-game-io.md)、[実装計画](../../initial/05-implementation.md)、[前回実装記録](../unit_026/SETTINGS_AND_STATUS_REDESIGN.md)を参照する。M0の操作仕様は記録済み、製品実装の検証は本書で行う。
 
 ## 5. 振る舞いと試験の整理
 
