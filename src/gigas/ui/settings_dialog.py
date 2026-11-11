@@ -162,12 +162,13 @@ class SettingsDialog(QDialog):
     def _sync_capture_choice(self) -> None:
         path = self._text_value(self.capture_device)
         with QSignalBlocker(self.capture_choices):
-            self.capture_choices.setItemText(0, "一覧外" if path else "未選択")
-            self.capture_choices.setCurrentIndex(max(0, self.capture_choices.findData(path)))
+            selected = self.capture_choices.findData(path)
+            self.capture_choices.setItemText(0, "一覧外" if selected < 0 else "未選択")
+            self.capture_choices.setCurrentIndex(max(0, selected))
 
     def _choose_capture_device(self) -> None:
         path = self.capture_choices.currentData()
-        if isinstance(path, str) and path:
+        if isinstance(path, str):
             self.capture_device.setPlainText(path)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override

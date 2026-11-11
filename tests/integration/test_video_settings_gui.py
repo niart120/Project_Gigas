@@ -74,3 +74,16 @@ def test_video_settings_are_read_only_during_save(qtbot: QtBot, tmp_path: Path) 
     ):
         assert not widget.isEnabled()
     assert dialog.capture_device.isReadOnly()
+
+
+def test_unselecting_camera_clears_saved_selection(qtbot: QtBot, tmp_path: Path) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SettingsDialog(tmp_path / "settings.toml", parent)
+    qtbot.addWidget(dialog)
+    dialog.set_capture_devices((DeviceInfo("Camera", "path-a"),))
+    dialog.capture_choices.setCurrentIndex(1)
+
+    dialog.capture_choices.setCurrentIndex(0)
+
+    assert dialog.values().capture_device == ""

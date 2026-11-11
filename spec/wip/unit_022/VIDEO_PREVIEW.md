@@ -29,6 +29,7 @@ TOML設定の追加、機器一覧からの選択、縦横比を維持する表�
 |---|---|---|---|---|
 | refactor-skipped | P1 映像モードを検査し既定値・コメント付きTOMLへ保存する | new | unit/integration | red: 属性不存在・不正型を拒否しない14失敗。green: 下記検証。独立した4数値の変換のみで構造変更不要 |
 | refactor-skipped | P2 機器を選んでモードとともに明示保存する | new | integration | red: モード消失・選択部品未実装。green: 25件。設定選択の同期を局所化し、大きい構造変更なし |
+| refactor-skipped | P2a 未選択へ戻したときに接続対象を消去する | regression | integration | 独立レビューで選択表示と保存値の不一致を発見。red: path-aが残る、green: 空文字へ同期 |
 | refactor-skipped | P3 最新画像をコピーし実画像の比率で描画する | new | integration | red: widget未実装。green: 描画画素・比率・再接続・消去。QImage変換と描画のみで構造変更不要 |
 | todo | P4 設定snapshotで接続し遅い表示・切断・終了を結合する | new | integration | 実サービス模擬子、設定失敗中切断、GUI応答 |
 
