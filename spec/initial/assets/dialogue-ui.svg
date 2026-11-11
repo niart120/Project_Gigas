@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="620" viewBox="0 0 1440 620">
+  <style>text{font-family:'Yu Gothic UI',Meiryo,sans-serif;fill:#222;font-size:14px}.small{font-size:11px;fill:#68717c}.heading{font-size:16px;font-weight:bold}.muted{fill:#59616c}.label{font-size:12px;fill:#59616c}.frame{fill:#f5f6f7;stroke:#aeb6bf}.pane{fill:#fff;stroke:#d4d9df}.button{fill:#f5f6f7;stroke:#b8c0ca}.video{fill:#789671}</style>
+  <text x="22" y="23" class="heading">通常実行中</text><text x="742" y="23" class="heading">質問待ち</text>
+  <g transform="translate(20 35)">
+    <rect width="690" height="565" rx="5" class="frame"/><text x="15" y="24" class="small">GIGAS　　ファイル　　接続　　設定</text><path d="M0 36H690" stroke="#d4d9df"/>
+    <rect x="0" y="36" width="315" height="529" class="pane"/>
+    <text x="15" y="59" class="label">Goal　◎</text><text x="15" y="82" class="heading">ニビシティでタケシを倒す</text>
+    <text x="15" y="108" class="label">Plan</text><text x="22" y="130" class="muted">✓　森を抜ける</text><text x="22" y="152">▸　ニビシティで回復する</text><text x="22" y="174" class="muted">•　ジムに向かう</text>
+    <path d="M0 187H315" stroke="#e2e5e9"/><text x="15" y="207" class="label">History</text>
+    <rect x="15" y="218" width="285" height="48" fill="#edf1f6"/><text x="25" y="236" class="small">あなた</text><text x="25" y="254">タケシを倒すところまで進めて。</text>
+    <text x="15" y="291">森を抜けて街へ向かいます。</text><text x="28" y="319" class="small">reasoning</text><text x="28" y="339" class="muted">回復してからジムに向かいます。</text>
+    <text x="15" y="367" class="small">activity</text><text x="15" y="386" class="muted">observe</text>
+    <path d="M0 417H315" stroke="#d4d9df"/><text x="15" y="438" class="label">Message</text><rect x="15" y="448" width="285" height="45" rx="2" class="pane"/><text x="25" y="475" class="small">メッセージを入力…</text>
+    <rect x="15" y="510" width="64" height="30" rx="3" class="button"/><text x="26" y="530">◎ 目標</text><rect x="166" y="510" width="35" height="30" rx="3" class="button"/><text x="177" y="530">Ⅱ</text><rect x="208" y="510" width="35" height="30" rx="3" class="button"/><text x="219" y="530">■</text><rect x="250" y="510" width="50" height="30" rx="3" class="button"/><text x="261" y="530">送信</text>
+    <rect x="329" y="191" width="345" height="194" class="video"/><path d="M329 266H674V311H329 M475 191H527V385H475" fill="#c6b68c"/><text x="462" y="299" fill="#273d36">ゲーム映像（例）</text>
+  </g>
+  <g transform="translate(740 35)">
+    <rect width="680" height="565" rx="5" class="frame"/><text x="15" y="24" class="small">GIGAS　　ファイル　　接続　　設定</text><path d="M0 36H680" stroke="#d4d9df"/>
+    <rect x="0" y="36" width="315" height="529" class="pane"/>
+    <text x="15" y="59" class="label">Goal　◎</text><text x="15" y="82" class="heading">ニビシティでタケシを倒す</text>
+    <text x="15" y="108" class="label">Plan</text><text x="22" y="130" class="muted">✓　森を抜ける</text><text x="22" y="152">▸　ニビシティで回復する</text><text x="22" y="174" class="muted">•　ジムに向かう</text>
+    <path d="M0 187H315" stroke="#e2e5e9"/><text x="15" y="207" class="label">History</text>
+    <rect x="15" y="218" width="285" height="48" fill="#edf1f6"/><text x="25" y="236" class="small">あなた</text><text x="25" y="254">タケシを倒すところまで進めて。</text>
+    <text x="15" y="291">街に到着しました。</text><text x="28" y="317" class="small">reasoning</text><text x="28" y="337" class="muted">先に方針を確認します。</text>
+    <text x="15" y="365" class="small">質問</text><text x="15" y="385">捕獲の方針はどちらを優先しますか？</text>
+    <path d="M0 417H315" stroke="#d4d9df"/><text x="15" y="438" class="label">Message</text><rect x="15" y="448" width="285" height="45" rx="2" class="pane"/><text x="25" y="475" class="small">回答やメッセージを入力…</text>
+    <rect x="15" y="510" width="64" height="30" rx="3" class="button"/><text x="26" y="530">◎ 目標</text><rect x="166" y="510" width="35" height="30" rx="3" class="button"/><text x="177" y="530">Ⅱ</text><rect x="208" y="510" width="35" height="30" rx="3" class="button"/><text x="219" y="530">■</text><rect x="250" y="510" width="50" height="30" rx="3" class="button"/><text x="261" y="530">送信</text>
+    <rect x="329" y="191" width="335" height="194" class="video"/><path d="M329 266H664V311H329 M475 191H527V385H475" fill="#c6b68c"/><text x="457" y="299" fill="#273d36">ゲーム映像（例）</text>
+  </g>
+</svg>
