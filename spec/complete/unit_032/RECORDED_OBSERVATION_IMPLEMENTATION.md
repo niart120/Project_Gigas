@@ -2,7 +2,7 @@
 
 ## 1. 目的・起点
 
-状態: wip。2026-11-12着手。親は[U04](../unit_009/RECORDED_OBSERVATION.md)。ユーザーのM1実装・検証依頼を受け、[M0の採用方針](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)を実行可能な観測・保存APIにする。M0は調査作業の完了であり、本書は製品実装と検証の完了を管理する。
+状態: complete（M1の独立API実装・検証完了）。2026-11-12着手・完了。親は[U04](../../wip/unit_009/RECORDED_OBSERVATION.md)。ユーザーのM1実装・検証依頼を受け、[M0の採用方針](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)を実行可能な観測・保存APIにする。M0は調査作業の完了であり、本書は製品実装と検証の完了を管理する。
 
 利用者は、作成または開いたプロジェクトへ最新のFrameを記録し、同じPNG bytesと観測IDを受け取る。再読込後も画像を参照でき、破損・部分失敗を成功として扱わない。
 
@@ -39,9 +39,8 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 | refactor-skipped | P3: 別プロセスのwriterを拒否し、終了後に同じプロジェクトを開ける | new | integration | 実Windows OSロック、明示的reload |
 | refactor-skipped | O1: 元寸法・画素・時刻を持つPNGとIDを保存し再読込後も対応する | new | integration | 最大3840×2160、同Frameに別ID |
 | refactor-done | O2: 最新snapshotの採用条件と取得停止前後の境界を守る | new | integration | 既存の遅いreader試験を実保存へ統合 |
-| refactor-skipped | F1: 画像失敗とJSONL追記結果不明を区別して原本を保持する | edge | integration | 既存ファイル衝突、flush/fsync失敗 |
+| refactor-skipped | F1: 画像失敗とJSONL追記結果不明を区別して原本を保持する | edge | integration | 画像衝突、部分追記、画像/JSONL fsync失敗 |
 | refactor-skipped | C1: 同時要求を拒否し、要求取消し後も保存と所有権を回収する | edge | integration | 強いTask参照、drain、保存中close拒否 |
-
 | refactor-skipped | R1: 非RFC3339の時刻を拒否する | regression | integration | レビューで基本ISO形式の受理を発見 |
 | refactor-done | R2: 深すぎるJSONの読込失敗でもロックを残さない | regression | integration | レビューでRecursionError経路を発見 |
 | refactor-skipped | R3: 不正な元Frameの識別値を永続化しない | regression | integration | boolを受理する既存Frameと保存schemaの境界 |
@@ -52,23 +51,31 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 
 ## 8. 対象ファイル
 
-`src/gigas/storage/project.py`、`src/gigas/game_io/observation.py`、`src/gigas/services/observation.py`、必要なexport、対応するintegration試験、`docs/recorded-observation.md`、親・初期仕様を対象とする。依存追加は不要。
+`src/gigas/storage/project.py`、`src/gigas/game_io/observation.py`、`src/gigas/services/observation.py`、対応するintegration試験、`docs/recorded-observation.md`、親・初期仕様を対象とする。依存追加は不要。
 
 ## 9. 検証計画・結果
 
-各itemでred/greenを確認して記録・コミットする。最終gateは`uv lock --check`、ruff format/check、ty、unit/integration全体、`uv build`、`git diff --check`。文書のAPI・事実・リンクをレビューする。現時点では未実行。
+各項目の記録は下記。P1〜C1とレビュー修正R1〜R3は個別にコミットした。F1はO1で実装済みの失敗契約を追加検証したため初回greenであり、redの実績を捏造しない。
 
-## 10. 先送り事項
+| command / 確認 | result | 検査した契約 |
+|---|---|---|
+| `uv sync --dev --locked` / `uv lock --check` | pass | 既存依存とlockの整合。依存追加なし |
+| `uv run ruff format --check .` | pass（165 files） | コード・docsのPython例。初回の例1箇所の整形漏れを修正後に再実行 |
+| `uv run ruff check .` | pass | lint・型注釈/docstring規則 |
+| `uv run ty check --no-progress` | pass | 公開API・JSON/I/O・Taskの型境界。ignore/cast追加なし |
+| `uv run pytest tests/unit tests/integration -q` | 411 passed、33.78秒 | 既存全体と観測/保存の実ファイル・Windows排他・模擬故障/取得・取消し |
+| `uv build` | wheel/sdist成功 | 公開モジュールの配布物生成 |
+| `uv run python -` のwheel取出しプローブ | pass | 作成したwheel内から3モジュールをimportし、保存・bytes/ID対応・drain・再open。既存依存環境を使用し、新規環境への依存導入試験ではない |
+| 公開docsのPython例・リンク確認 | pass | 同期保存、async成功・取消しと終了後再open。文書の固定文言テストは追加していない |
+| `git diff --check` / 文書機械検査 | pass | 空白・変更Markdown 16件の参照246件・32 unitの一意性・仮テキストなし |
+| MCP/実Codex/実機観測 | not run | M2で実施。模擬取得成功を実機受入に数えない |
+| 指示資材の変更とT20再検証、PR/merge | not applicable | 今回の対象外 |
 
-MCP画像応答と実Codex受信、保存先GUI、接続・終了との配線はM2。R02/R04は接続・会話画面拡張前に修正する。ネットワーク共有・外部同時編集・電源断を跨ぐ二ファイル原子性は提供しない。
+`type-boundary-review` / `docstring-style` / `agentic-self-review`でAPI・例外・取消しの所有と文書を照合した。元Frame→一回の符号化→同bytes保存/返却を維持し、設定・加工・監視・UIを増やしていない。
 
-## 11. 完了チェックリスト
+独立レビューの日時形式、JSON解析失敗時のロック残留、不正Frame値による再読込不能はすべて採用しR1〜R3で修正した。async所有レビューは追加欠陥なし。M2では受付を閉じてdrain完了後にwriter/loopを閉じ、既存の一括Task取消しで保存Taskを失わないことが条件である。
 
-- [x] 対象範囲・対象外と既存検証を確認した
-- [ ] TDD項目を実装・検証・コミットした
-- [ ] 公開API・型・docstring・利用者docsを照合した
-- [ ] gateと未検証事項を記録した
-- [ ] 親のM1状態を更新した（U04全体はwip）
+### 項目別記録
 
 P1: `uv run pytest tests/integration/test_observation_storage.py -q` は未実装importでred、その後2 passed。対象ruff/ty成功。新規作成の所有と既存・部分資材の保全を確認。構造整理は不要。
 
@@ -89,3 +96,15 @@ R1: `pytest ...test_observation_storage.py -k non_rfc3339` 4 failed→4 passed�
 R2: JSON深さ超過2 failed→storage 39 passed。解析限界をProjectErrorへ変換し、create/openの未成立所有者はExitStackで例外種別に依存せず解放する。例外を保持したまま元ファイルを明示復元後に再open可能。対象ruff/ty成功。
 
 R3: 不正Frame識別値の2 failed→storage 41 passed。保存前にも既存payload検証を使い、boolの世代・連番を原記録へ書かない。拒否後の正常保存・再openを確認し、取得サービス側の状態や世代整合検査を重複追加していない。対象ruff/ty成功。
+
+## 10. 先送り事項
+
+MCP画像応答と実Codex受信、保存先GUI、接続・終了との配線はM2。R02/R04は接続・会話画面拡張前に修正する。ネットワーク共有・外部同時編集・電源断を跨ぐ二ファイル原子性は提供しない。
+
+## 11. 完了チェックリスト
+
+- [x] 対象範囲・対象外と既存検証を確認した
+- [x] TDD項目を実装・検証・コミットした
+- [x] 公開API・型・docstring・利用者docsを照合した
+- [x] gateと未検証事項を記録した
+- [x] 親のM1状態を更新した（U04全体はwip）

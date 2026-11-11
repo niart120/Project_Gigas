@@ -33,9 +33,16 @@ class ProjectBusyError(ProjectError):
 
 
 class ProjectWriter:
-    """An explicitly closed owner of one project's observation records.
+    """An explicitly closed Windows owner of one project's observation records.
 
     Construct through create() or open(), not by calling the initializer.
+    An OS lock excludes other writers until close or process exit. Operations are
+    synchronous; run them outside the GUI/event loop. Do not edit files externally
+    while this owner is open, or change its path or project_id attributes.
+
+    Attributes:
+        path: Absolute project directory, fixed for this owner's lifetime.
+        project_id: Validated project identity, fixed for this owner's lifetime.
     """
 
     def __init__(self, path: Path, project_id: str, lock_file: "BinaryIO") -> None:
@@ -57,7 +64,8 @@ class ProjectWriter:
             An owner that must be explicitly closed after use.
 
         Raises:
-            ProjectError: Creation failed. Existing and partial data are preserved.
+            ProjectError: Creation or OS locking failed, or the OS is unsupported.
+                Existing and partial data are preserved.
         """
         path = path.resolve()
         project_id = f"project-{uuid4()}"
@@ -95,7 +103,8 @@ class ProjectWriter:
             An owner ready to append after the last valid sequence.
 
         Raises:
-            ProjectError: Metadata or a record is unreadable or invalid.
+            ProjectError: Metadata or a record is unreadable or invalid, another
+                writer owns the project, or the OS is unsupported.
         """
         path = path.resolve()
         with ExitStack() as resources:
@@ -110,6 +119,7 @@ class ProjectWriter:
         """Revalidate the held project before explicitly resuming writes.
 
         Raises:
+            ProjectBusyError: A recording or reload is already running.
             ProjectError: This owner is closed, identity changed, or data is invalid.
                 Append remains disabled after a failed revalidation.
         """
