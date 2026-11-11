@@ -5,6 +5,8 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
+import cv2
+import numpy as np
 import pytest
 
 from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
@@ -247,7 +249,9 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
         finally:
             resume.set()
             observed = await request
-        assert observed.frame.bgr == bytes([observed.frame.sequence % 256]) * (16 * 16 * 3)
+        decoded = cv2.imdecode(np.frombuffer(observed.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert decoded is not None
+        assert decoded.tobytes() == bytes([observed.source_frame.sequence % 256]) * (16 * 16 * 3)
         assert (writer.path / observed.image_path).read_bytes() == observed.png_bytes
 
     try:

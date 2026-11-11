@@ -40,14 +40,16 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
         writer.record(observation)
         saved_image = writer.path / observation.image_path
         assert saved_image.read_bytes() == observation.png_bytes
-        assert observation.frame is frame
+        assert observation.captured_at == frame.captured_at
     finally:
         writer.close()
 ```
 
-`Observation.from_frame(frame)`が元寸法のPNGを一度だけ符号化し、観測IDを発行します。`writer.record(observation)`はそのPNGとJSONL一行を保存し、成功時は`None`を返します。保存時の再符号化は行いません。`observation_id`は`obs-`にUUID4を続けた値、`image_path`は`observations/<observation_id>.png`です。同じFrameから再び`Observation`を作れば新しいIDになります。既に保存した同じ観測を再度保存しようとすると、既存画像の上書きを拒否します。
+`Observation.from_frame(frame, resolution="full_hd")`が全画面を比率維持で縮小してPNGへ一度だけ符号化し、観測IDを発行します。`resolution`は`original`（元寸法）、`full_hd`（1920×1080の枠、既定）、`hd`（1280×720の枠）です。小さい画像は拡大しません。`writer.record(observation)`はそのPNGとJSONL一行を保存し、成功時は`None`を返します。保存時の再符号化は行いません。`observation_id`は`obs-`にUUID4を続けた値、`image_path`は`observations/<observation_id>.png`です。同じFrameから再び`Observation`を作れば新しいIDになります。既に保存した同じ観測を再度保存しようとすると、既存画像の上書きを拒否します。
 
-画像の対応範囲は幅16〜3840、高さ16〜2160、符号化後32 MiB以下です。切り抜き・縮小・拡大を行わず、プレビューの黒帯や表示倍率も持ち込みません。`Observation.from_frame(frame)`は符号化だけを行い、プロジェクトへ保存しません。
+入力画像の対応範囲は幅16〜3840、高さ16〜2160、符号化後32 MiB以下です。切り抜き・拡大を行わず、プレビューの黒帯や表示倍率も持ち込みません。`Observation.from_frame()`は加工・符号化だけを行い、プロジェクトへ保存しません。
+
+`Observation`は確定した`png_bytes`、`width`・`height`、固定の`mime_type == "image/png"`と、観測ID・元取得時刻`captured_at`・`source_frame`を持ちます。`source_frame`は`FrameSource`型の世代・連番・元幅・元高さだけで、元FrameやBGR画像本体は保持しません。保存と配送には同じPNG bytesを使用できます。
 
 ## 最新画像を非同期で観測する
 
@@ -87,9 +89,9 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 プロジェクトには`project.json`、`events.jsonl`、`observations/`、OSロック用の`.gigas.lock`を置きます。管理情報はスキーマ版、プロジェクトID、作成UTC時刻です。ログの共通項目はスキーマ版、イベントID、追記順、記録UTC時刻、イベント種別、プロジェクトID、payloadです。
 
-`observation.recorded`のpayloadには、観測ID、元Frameの取得UTC時刻、画像相対パス、元Frameの世代・連番・幅・高さを記録します。世代・連番は取得サービスの寿命内の補助情報で、観測の永続識別には観測IDを使います。記録時刻と画像取得時刻は別です。
+`observation.recorded`のpayloadには、観測ID、元Frameの取得UTC時刻、画像相対パス、元Frameの世代・連番・幅・高さを記録します。`image`には確定したPNGの`mime_type`・`width`・`height`を記録し、元寸法と区別します。世代・連番は取得サービスの寿命内の補助情報で、観測の永続識別には観測IDを使います。記録時刻と画像取得時刻は別です。
 
-旧schema 1の行にある`analysis`は余剰項目として読み飛ばし、原本を保持します。新しい観測には生成しません。Codexの解釈を後から埋める欄としても使いません。
+`analysis`欄は生成しません。Codexの解釈を後から原観測へ埋める欄も設けません。開発途中の旧保存形式の読込・移行には対応しません。
 
 `open()`と`reload()`は管理情報とJSONLを検査します。未知のイベント種別や余剰項目は共通形式が正常なら保持し、連番の欠番も許容します。次の記録は最後のsequenceに1を加えて追記します。過去の画像を全件読み込む検査はせず、過去画像の欠損だけでは新規記録を拒否しません。
 

@@ -5,6 +5,7 @@ import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import cv2
@@ -249,24 +250,70 @@ def sample_frame(width: int = 16, height: int = 16) -> Frame:
     return Frame(pixels.tobytes(), width, height, 2, 7, datetime(2000, 1, 1, tzinfo=UTC), 123)
 
 
-@pytest.mark.parametrize(("width", "height"), [(16, 16), (3840, 2160)])
+@pytest.mark.parametrize(
+    ("width", "height", "resolution", "output_width", "output_height"),
+    [
+        (16, 16, None, 16, 16),
+        (3840, 2160, "original", 3840, 2160),
+        (3840, 2160, None, 1920, 1080),
+        (3840, 2160, "hd", 1280, 720),
+        (1920, 1440, "hd", 960, 720),
+        (1921, 1081, "hd", 1279, 720),
+    ],
+)
 def test_record_preserves_pixels_bytes_id_and_source_time(
-    tmp_path: Path, width: int, height: int
+    tmp_path: Path,
+    width: int,
+    height: int,
+    resolution: Literal["original", "full_hd", "hd"] | None,
+    output_width: int,
+    output_height: int,
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     frame = sample_frame(width, height)
+    if (width, height) != (output_width, output_height):
+        # Four broad color regions reveal cropping, channel swaps and aspect distortion.
+        pixels = np.zeros((height, width, 3), dtype=np.uint8)
+        pixels[: height // 2, : width // 2] = [255, 0, 0]
+        pixels[: height // 2, width // 2 :] = [0, 255, 0]
+        pixels[height // 2 :, : width // 2] = [0, 0, 255]
+        pixels[height // 2 :, width // 2 :] = [255, 255, 255]
+        frame = replace(frame, bgr=pixels.tobytes())
     try:
-        first = Observation.from_frame(frame)
+        first = (
+            Observation.from_frame(frame)
+            if resolution is None
+            else Observation.from_frame(frame, resolution=resolution)
+        )
         second = Observation.from_frame(frame)
         writer.record(first)
         writer.record(second)
         assert first.observation_id != second.observation_id
-        assert first.frame is frame
+        assert first.captured_at == frame.captured_at
+        assert (first.source_frame.generation, first.source_frame.sequence) == (2, 7)
+        assert (first.source_frame.width, first.source_frame.height) == (width, height)
+        assert (first.width, first.height, first.mime_type) == (
+            output_width,
+            output_height,
+            "image/png",
+        )
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
         decoded = cv2.imdecode(np.frombuffer(first.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         assert decoded is not None
-        assert decoded.shape == (height, width, 3)
-        assert decoded.tobytes() == frame.bgr
+        assert decoded.shape == (output_height, output_width, 3)
+        if (width, height) == (output_width, output_height):
+            assert decoded.tobytes() == frame.bgr
+        else:
+            assert decoded[0, 0].tolist() == [255, 0, 0]
+            assert decoded[0, -1].tolist() == [0, 255, 0]
+            assert decoded[-1, 0].tolist() == [0, 0, 255]
+            assert decoded[-1, -1].tolist() == [255, 255, 255]
+            assert decoded[output_height // 4, output_width // 4].tolist() == [255, 0, 0]
+            assert decoded[3 * output_height // 4, 3 * output_width // 4].tolist() == [
+                255,
+                255,
+                255,
+            ]
         assert len(first.png_bytes) <= 32 * 1024 * 1024
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
@@ -277,13 +324,13 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
             "observation_id": first.observation_id,
             "captured_at": "2000-01-01T00:00:00Z",
             "image_path": first.image_path,
+            "image": {"mime_type": "image/png", "width": output_width, "height": output_height},
             "source_frame": {"generation": 2, "sequence": 7, "width": width, "height": height},
         }
         assert datetime.fromisoformat(records[0]["occurred_at"]) > frame.captured_at
     finally:
         writer.close()
     log = writer.path / "events.jsonl"
-    records[0]["payload"]["analysis"] = {}  # Existing schema-1 rows keep their extra fields.
     original = ("\n".join(json.dumps(record) for record in records) + "\n").encode()
     log.write_bytes(original)
     (writer.path / first.image_path).unlink()
@@ -307,6 +354,9 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
         ("observation_id", "obs-invalid"),
         ("source_frame", {}),
         ("captured_at", "yesterday"),
+        ("image", {"mime_type": "image/jpeg", "width": 16, "height": 16}),
+        ("image", {"mime_type": "image/png", "width": 0, "height": 16}),
+        ("image", {"mime_type": "image/png", "width": 32, "height": 16}),
     ],
 )
 def test_invalid_recorded_observation_is_rejected_without_rewriting(
@@ -323,7 +373,7 @@ def test_invalid_recorded_observation_is_rejected_without_rewriting(
     original = (json.dumps(record) + "\n").encode()
     log.write_bytes(original)
     with pytest.raises(ProjectError, match="行1"):
-        ProjectWriter.open(writer.path)
+        ProjectWriter.open(writer.path).close()
     assert log.read_bytes() == original
 
 

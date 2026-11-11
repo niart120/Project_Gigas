@@ -35,7 +35,9 @@ def test_observe_uses_cached_frame_and_retains_its_time(
         assert (writer.path / "events.jsonl").read_bytes() == b""
         first = await asyncio.wait_for(service.observe(), timeout=3)
         second = await asyncio.wait_for(service.observe(), timeout=3)
-        assert first.frame is second.frame is frame
+        assert first.source_frame == second.source_frame
+        assert first.source_frame.sequence == frame.sequence
+        assert first.captured_at == second.captured_at == frame.captured_at
         assert first.observation_id != second.observation_id
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
 

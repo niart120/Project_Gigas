@@ -144,7 +144,7 @@ class ProjectWriter:
                 self._lock_file = None
 
     def record(self, observation: "Observation") -> None:
-        """Persist an encoded observation before its bytes are delivered to a caller.
+        """Persist the final observation image and its corresponding metadata.
 
         Args:
             observation: Immutable PNG and source metadata from Observation.from_frame.
@@ -160,7 +160,7 @@ class ProjectWriter:
             if self._next_sequence is None:
                 message = "追記結果が未確定です。プロジェクトを明示的に再読込してください"
                 raise ProjectError(message)
-            frame = observation.frame
+            frame = observation.source_frame
             event = {
                 "schema_version": 1,
                 "event_id": f"evt-{uuid4()}",
@@ -170,8 +170,13 @@ class ProjectWriter:
                 "project_id": self.project_id,
                 "payload": {
                     "observation_id": observation.observation_id,
-                    "captured_at": frame.captured_at.isoformat().replace("+00:00", "Z"),
+                    "captured_at": observation.captured_at.isoformat().replace("+00:00", "Z"),
                     "image_path": observation.image_path,
+                    "image": {
+                        "mime_type": observation.mime_type,
+                        "width": observation.width,
+                        "height": observation.height,
+                    },
                     "source_frame": {
                         "generation": frame.generation,
                         "sequence": frame.sequence,
@@ -381,4 +386,10 @@ def _validate_observation(value: object) -> None:
     width, height = _positive(frame.get("width")), _positive(frame.get("height"))
     if not (16 <= width <= 3840 and 16 <= height <= 2160):
         message = "観測画像寸法が範囲外です"
+        raise ValueError(message)
+    image = _object(payload.get("image"))
+    image_width = _positive(image.get("width"))
+    image_height = _positive(image.get("height"))
+    if image.get("mime_type") != "image/png" or image_width > width or image_height > height:
+        message = "観測出力画像の形式または寸法が不正です"
         raise ValueError(message)

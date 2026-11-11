@@ -33,7 +33,7 @@ class ObservationService:
         """Record the latest streaming frame, even if acquired before this request.
 
         Returns:
-            The persisted PNG bytes, observation ID, and original frame.
+            The persisted PNG bytes, observation ID, and source metadata.
 
         Raises:
             ObservationError: Busy, no streaming image is available, or encoding fails.

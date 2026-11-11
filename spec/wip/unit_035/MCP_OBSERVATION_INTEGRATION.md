@@ -35,7 +35,7 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
+| green | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
 | todo | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
 | todo | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | todo | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 既存settings試験へ統合 |
@@ -45,6 +45,10 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | todo | M2-08 実Codexが固定画像と実映像を受信し、保存と同一、停止・終了が進む | new | runtime/hardware | 模擬試験では完了にしない |
 
 ## 7. 設計メモ
+
+着手調査で、プロジェクト操作・writer所有・MCP終了回収は既存CodexServiceThreadのループへ統合できると判断した。SettingsWorkerの汎用化や別管理サービスを前提にしない。明示選択writerは切断後も保持し、未選択チャットのwriterは切断後に閉じても記録を削除しない。最終配線はM2-05/06で検証する。
+
+設定結合の注意: 現SettingsDialog.valuesはSettingsを再構築するため、UIに出さない前回パスを失わないよう保存済みsnapshotから更新する必要がある。Shellの既存適用はcapture=Trueなので、観測解像度だけの変更では取得の反映を行わない。一般設定の既存適用・明示再試行を壊さないことも確認する。
 
 新しいサービス用ループ、監視・自動復旧、保存段階の状態表を追加しない。後続の公開会話記録はU06。並列実装を前提にせず、必要な排他範囲を現コードから選ぶ。保存方式と設定の所有を確定した時点で、本節に具体的な選択理由を追記する。
 
@@ -73,3 +77,11 @@ U05: 入力と事後観測・操作直前の権限照合。U06: 公開会話全�
 - [ ] 静的検査・単体/結合・配布gateを通した
 - [ ] 実接続・実映像の受入と残リスクを確認した
 - [ ] 公開docsと親仕様を実装実績へ更新した
+
+### M2-01 実装・検証
+
+Observationはcaptured_at、FrameSource（世代・連番・元寸法）、png_bytes、出力width/heightを保持し、mime_typeはimage/png固定とした。整数計算で比率を維持して縮小し、PNGを一度符号化する。JSONL payload.imageにmime_type/width/heightを追加し、新形式へ直接変更した。
+
+RED: `uv run pytest tests/integration/test_observation_storage.py -q --tb=short`は9 failed / 36 passed。新しい取得時刻・解像度引数・画像メタデータ未対応を確認。GREEN: 同commandで45 passed、storage/service/capture_serviceで62 passed。既存試験へoriginal・HD・既定FullHD・縦横比・整数丸め・色/全画面保持を統合した。Frame本体不在だけをassertする試験は追加していない。
+
+rootで`uv run pytest tests/unit tests/integration -q`: 415 passed。`uv run ruff format --check .`（168 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv build`、`git diff --check`成功。追加の構造整理は不要と判断。サービスの保存待ちはM2-02で変更するため、現時点の公開docsは同期保存の実装事実を維持する。実MCP/実機は未実施。
