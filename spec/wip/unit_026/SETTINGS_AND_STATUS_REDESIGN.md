@@ -302,3 +302,7 @@ test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始
 ### V3 現在機器の重複表示
 
 実画面で同じ機器の解像度だけを変更しても現在機器名が再表示される冗長な挙動を確認。test_resolution_applicationに追加した解像度/FPSの2件red→2件green。機器識別子が異なる時だけ補助表示し、処理中・失敗・終了未確認は維持する。担当ruff/format/ty成功。refactor-skipped。
+
+### A6 映像情報
+
+test_video_informationは未実装の4件red→4件green。表示メニューから現在の要求値・実到着・API・途中失敗・世代・終了状態の固定snapshotを開く。撮像操作と失敗通知を発生させず、コピー中に更新せず、再表示で更新する。関連65件成功、担当ruff/format/ty・diffcheck成功。offscreen620×440の内容・閉じるボタンを目視確認。refactor-skipped。主画面への寸法・FPS常設は行わない。
