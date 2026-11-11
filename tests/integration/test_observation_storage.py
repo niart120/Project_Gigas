@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -303,6 +304,24 @@ def test_invalid_recorded_observation_is_rejected_without_rewriting(
     with pytest.raises(ProjectError, match="行1"):
         ProjectWriter.open(writer.path)
     assert log.read_bytes() == original
+
+
+@pytest.mark.parametrize("field", ["generation", "sequence"])
+def test_invalid_source_identifiers_cannot_create_unreadable_records(
+    tmp_path: Path, field: str
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        invalid = replace(sample_frame(), **{field: True})
+        with pytest.raises(ProjectError):
+            writer.record(invalid)
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+        assert list((writer.path / "observations").iterdir()) == []
+        writer.record(sample_frame())
+    finally:
+        writer.close()
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
 
 
 @pytest.mark.parametrize("failure", ["encode", "png_sync", "collision"])

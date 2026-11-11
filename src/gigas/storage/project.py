@@ -174,6 +174,11 @@ class ProjectWriter:
                     "analysis": {},
                 },
             }
+            try:
+                _validate_observation(event["payload"])
+            except (ValueError, TypeError) as error:
+                message = f"観測項目が不正です。記録していません: {error}"
+                raise ProjectError(message) from error
             row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
             try:
                 _publish_image(self.path / observation.image_path, observation.png_bytes)

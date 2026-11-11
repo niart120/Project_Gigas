@@ -44,7 +44,7 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 
 | refactor-skipped | R1: 非RFC3339の時刻を拒否する | regression | integration | レビューで基本ISO形式の受理を発見 |
 | refactor-done | R2: 深すぎるJSONの読込失敗でもロックを残さない | regression | integration | レビューでRecursionError経路を発見 |
-| todo | R3: 不正な元Frameの識別値を永続化しない | regression | integration | boolを受理する既存Frameと保存schemaの境界 |
+| refactor-skipped | R3: 不正な元Frameの識別値を永続化しない | regression | integration | boolを受理する既存Frameと保存schemaの境界 |
 
 ## 7. 設計メモ
 
@@ -87,3 +87,5 @@ C1: serviceの3 failed→service/capture 17 passed。同時BUSY、要求取消�
 R1: `pytest ...test_observation_storage.py -k non_rfc3339` 4 failed→4 passed。日時parserの前にRFC3339の秒までの表記を確認し、ISO基本形・週番号形・分まで・小数コンマを拒否。
 
 R2: JSON深さ超過2 failed→storage 39 passed。解析限界をProjectErrorへ変換し、create/openの未成立所有者はExitStackで例外種別に依存せず解放する。例外を保持したまま元ファイルを明示復元後に再open可能。対象ruff/ty成功。
+
+R3: 不正Frame識別値の2 failed→storage 41 passed。保存前にも既存payload検証を使い、boolの世代・連番を原記録へ書かない。拒否後の正常保存・再openを確認し、取得サービス側の状態や世代整合検査を重複追加していない。対象ruff/ty成功。
