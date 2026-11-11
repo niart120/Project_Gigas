@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 
@@ -14,6 +15,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
 from gigas.storage.settings import Settings, load_settings, save_settings
+from gigas.ui.video_panel import VideoView
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
 
@@ -31,6 +33,66 @@ class PreviewClocks:
     def perf_counter(self) -> float:
         """Return the precise elapsed time of the same event."""
         return 1000.0 + self.elapsed
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "left", "top", "right", "bottom"),
+    [(4, 3, 40, 0, 279, 179), (32, 3, 0, 75, 319, 104), (16, 9, 0, 0, 319, 179)],
+    ids=["four-three", "ultrawide", "same-aspect"],
+)
+def test_preview_letterbox_switch_preserves_complete_source(
+    qtbot: QtBot, width: int, height: int, left: int, top: int, right: int, bottom: int
+) -> None:
+    view = VideoView()
+    qtbot.addWidget(view)
+    view.resize(320, 180)
+    view.show()
+    colors = (bytes([0, 0, 255]), bytes([0, 255, 0]), bytes([255, 0, 0]), bytes([255] * 3))
+    pixels = b"".join(
+        colors[2 * (y >= height // 2) + (x >= width // 2)]
+        for y in range(height)
+        for x in range(width)
+    )
+    frame = Frame(pixels, width, height, 1, 1, datetime.now(UTC), 10)
+    view.set_frame(frame)
+
+    def assert_corners(x1: int, y1: int, x2: int, y2: int) -> None:
+        image = view.grab().toImage()
+        assert image.pixelColor(x1, y1) == QColor("red")
+        assert image.pixelColor(x2, y1) == QColor("lime")
+        assert image.pixelColor(x1, y2) == QColor("blue")
+        assert image.pixelColor(x2, y2) == QColor("white")
+
+    original = view.grab().toImage()
+    assert_corners(left, top, right, bottom)
+    if left:
+        assert original.pixelColor(left - 1, 90) == QColor("black")
+        assert original.pixelColor(right + 1, 90) == QColor("black")
+    if top:
+        assert original.pixelColor(160, top - 1) == QColor("black")
+        assert original.pixelColor(160, bottom + 1) == QColor("black")
+
+    view.set_letterbox(False)
+    assert_corners(0, 0, 319, 179)
+    view.set_letterbox(True)
+    assert view.grab().toImage() == original
+    assert frame.bgr == pixels
+    assert (frame.width, frame.height, frame.generation, frame.sequence) == (width, height, 1, 1)
+
+
+def test_preview_letterbox_mode_survives_empty_and_new_frames(qtbot: QtBot) -> None:
+    view = VideoView()
+    qtbot.addWidget(view)
+    view.resize(160, 90)
+    view.show()
+    view.set_letterbox(False)
+    frame = Frame(bytes([0, 0, 255]) * 12, 4, 3, 1, 1, datetime.now(UTC), 10)
+    view.set_frame(frame)
+    assert view.grab().toImage().pixelColor(0, 45) == QColor("red")
+    view.set_frame(None)
+    assert view.grab().toImage().pixelColor(0, 45) == QColor("black")
+    view.set_frame(replace(frame, generation=2))
+    assert view.grab().toImage().pixelColor(0, 45) == QColor("red")
 
 
 @pytest.fixture

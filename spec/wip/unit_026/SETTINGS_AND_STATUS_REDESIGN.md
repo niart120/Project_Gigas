@@ -189,7 +189,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | todo | 保存と取得先要求の分離 | regression / integration | 再読込で接続しない、保存B・実取得Aでも一般の保存でBを消さない、列挙・保存完了で要求を上書きしない |
 | todo | フォーム再分類と設定保持 | regression / integration | 移動したserial・未知項目・既存認証値を保持、初回列挙・未保存選択と機器名識別を維持 |
 | todo | 状態・通知・復旧への到達 | regression / integration | 分割幅追従、短い状態を保持、通知再表示とコピー維持、読込失敗時再読込、取消し可能期間 |
-| todo | プレビューの比率維持と引き延ばし | new / integration | 4:3・超横長・同寸法の表示領域と黒帯、クロップなし、共通Frameの画素不変、取得自動でも切替可能 |
+| green | プレビューの比率維持と引き延ばし | new / integration | 4:3・超横長・同寸法の表示領域と黒帯、クロップなし、共通Frameの画素不変、取得自動でも切替可能 |
 | green | 画像設定の保存と移行 | new / unit | 省略時FullHD/preview_letterbox=true、不正値拒否、未知width/height保持、表示設定と取得設定を独立保存 |
 | todo | 自動と固定解像度の要求 | new / integration | 自動で寸法要求せず実寸法を返す、固定要求と違う実画像を加工せず共有、不正形式・上限超過・途中寸法変更を通知 |
 | todo | 可変寸法の共有と独立読取 | new / integration | 画素と寸法の原子性、容量検証、古い読取保持中も新プレビューが進む、取得時刻を保持 |
@@ -232,3 +232,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### S1 画像設定の保存と移行
 
 `uv run pytest tests/unit/test_settings.py tests/unit/test_video_settings.py --basetemp=tmp/pytest-settings -q`: 新属性未定義・不正値が無視される32件red→68件green。省略値、2設定の独立保存、未知項目保持、失敗時ファイル不変を確認。担当ruff/format/ty成功。refactor-skipped。
+
+### V1 プレビュー方式
+
+`uv run pytest tests/integration/test_video_gui.py -k letterbox -q --basetemp=tmp/pytest-ui`: set_letterbox未実装の4件red→4件green。関連test_video_gui/test_video_previewは15件成功。4:3/横長/同率・空/新世代・共有Frame不変を確認。担当ruff/format/ty成功。refactor-skipped。設定との結合は別項目。
