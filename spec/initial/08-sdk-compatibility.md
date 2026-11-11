@@ -22,7 +22,7 @@ Windows x64/Python 3.13.5の隔離環境で、固定runtimeのinitialize、未�
 |---|---|
 | 同梱実行ファイルの`app-server generate-json-schema --experimental` | `ThreadStartParams.config`、`mcpServerStatus/list`のthreadId/serverName、`mcpServer/tool/call`のthreadId/server/tool/argumentsを確認。後二つは限定接続検証に利用できるが、専用の製品操作経路は作らない |
 | [採用tagの設定schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json#L4208)・[公式MCP設定](https://learn.chatgpt.com/docs/extend/mcp) | URL、http_headers、enabled_tools、required、startup_timeout_sec、tool_timeout_secが公開されている。現製品の外部MCP無効化とthread/start.configへ、アプリ専有サーバを追加する方針 |
-| [MCPのimage content](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) | 同じPNG bytesをbase64のimage contentで返し、観測ID・取得UTC・analysisを短いJSON textで返せる。structuredContentとの二重配送を必須にしない |
+| [MCPのimage content](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) | 同じPNG bytesをbase64のimage contentで返し、観測ID・取得UTCを短いJSON textで返せる。structuredContentとの二重配送を必須にしない |
 | [採用tagのモデル配送と通知](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs#L695) | 通知用には切詰め結果、モデル側には元の結果を渡す。Gigasの保存PNGとMCP応答の同一性を、モデル内部の画像前処理まで拡張しない |
 | [通知結果上限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/pty/src/lib.rs#L25)・[切詰め処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/output-truncation/src/lib.rs#L69) | 結果全体を最大1 MiBのpreviewへ制限する。外側JSONが加わるためGigas現行の受信1 MiBでは不足し得る。M2で2 MiBの有界受信と実通知サイズを確認する |
 | [通知画像省略feature](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/features/src/lib.rs#L1922) | 開発中・既定false。切詰め後のtextに残る画像断片を消す保証もないため、U04の必須設定にしない |

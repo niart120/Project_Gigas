@@ -32,18 +32,20 @@ UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と
 
 [M0の詳細契約](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[03 観測・操作](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[08 公開経路と未確認事項](../../initial/08-sdk-compatibility.md)、[07 検証](../../initial/07-verification.md)。親は工程全体の受入、子は詳細契約・検証結果を所有する。
 
-## 5. M0の決定と要否の見直し
+## 5. M0の決定とM1レビューでの見直し
 
 | 対象 | 決定・理由・影響 |
 |---|---|
 | 観測元 | `observe()`受付時の一度のsnapshotがstreamingでFrameありなら採用する。最新キャッシュでよく、要求前の取得も同じFrameの再観測も許容する。要求後待機・専用期限・年齢監視を追加しない。取得停止時の失効はU03を使う |
 | 加工 | 原寸PNG一回の符号化とidentityだけ。全画面・文字を保ち、同じbytesを保存と応答へ使う。呼出引数や共通画像設定、汎用変換は必要性が確認できず見送り。PNG上限32 MiB、同時1件、占有中はBUSY |
 | 対応関係 | 永続UUID観測ID、画像相対パス、元取得UTC、元Frameの世代・連番・寸法を記録する。原寸PNG・変換なしをschema 1の契約とし、取得サービスUUID・単調時計・hash・重複する出力寸法や変換オブジェクトを必須にしない |
-| 保存 | 最小project.json、events.jsonl、observations。画像公開→一行追記・flush/fsync→成功応答。一つのwriterとOSロック。読込時の全画像検査はしない。画像だけの失敗でwriterを閉じず、JSONL追記結果が不明になった場合だけ再読込まで追記を止める |
+| 保存 | 最小project.json、events.jsonl、observations。画像公開→一行追記・flush/fsync→成功応答。アプリが選択先の原記録writerを一つ所有し、MCPは借用する。OSロックは別writerだけを排他し、原記録の読取やmemory編集を妨げない。読込時の全画像検査はしない。画像だけの失敗でwriterを閉じず、JSONL追記結果が不明になった場合だけ再読込まで追記を止める |
 | 案内・UI | 保存場所は既存developerInstructionsで案内し、guide.mdや空のmemoryはU06へ送る。UIは保存先操作に限定。接続中の保存先差替えや専用再接続を作らない |
-| MCP | 接続ごとのloopbackサーバとBearer値を一つずつ持ち、reader/writerを固定参照する。既存サービス用ループで所有し、切断で受付を閉じる。世代履歴表・権限管理サービスは作らない。公式SDK 2.3.0をM2の固定候補とし、実接続は未実施 |
+| MCP | 接続ごとのloopbackサーバとBearer値を一つずつ持ち、アプリの観測サービスを借用し、接続中はreader/writerの参照を固定する。既存サービス用ループで所有し、切断で受付を閉じる。世代履歴表・権限管理サービスは作らない。公式SDK 2.3.0をM2の固定候補とし、実接続は未実施 |
 | 通知容量 | 採用runtimeのMCP通知結果上限1 MiBに外側JSONが加わるため、現transportの受信1 MiBは不足し得る。M2で受信2 MiBの有界変更と実通知確認を行う。本observeの通常通知には48 MiBへの拡張は不要 |
 | U05への条件 | 旧認証値を新世代へ付け替えず拒否する。新認証値の再公開、旧呼出し収束、操作直前の照合を入力公開前に実接続確認する。操作後Frameの待機はU05で設計し、U04のsnapshotに事後条件を仮定しない |
+
+[M1レビュー](../../complete/unit_033/OBSERVATION_STORAGE_REVIEW.md)では、符号化を観測サービス、符号化済み画像の保存をwriterへ分け、未使用のanalysis予約欄を保存・予定するMCP応答から除いた。旧schema 1行のanalysisは余剰項目として保持する。Codex解釈・対話履歴は受信後に別記録へ残し、原観測を更新しない。その記録APIはU06で具体化する。
 
 画像の同一性はGigasの保存・MCP応答bytesの契約であり、Codex内部の画像前処理まで同じbytesと保証しない。撮像時刻・カード内部遅延はホスト時計だけでは分からない。
 
@@ -92,11 +94,11 @@ M0の文書検査結果は子仕様に記録する。親全体の完了にはM1/
 
 | 事項 | 担当・期限 |
 |---|---|
-| 保存先GUIと接続・アプリ終了の結合 | M2。受付停止→drain→writer/loop終了を既存所有者へ配線し、一括Task取消しで実保存の回収を失わない |
+| 保存先GUIと接続・アプリ終了の結合 | M2。接続切断は受付停止→drain。選択プロジェクトは保持し、保存先切替・アプリ終了で原記録処理の収束後にwriterを閉じる。一括Task取消しで実保存の回収を失わない |
 | SDK/ASGIの依存解決・Windows起動終了、認証、thread設定、画像容量とモデル受信、通知サイズ | M2の実装・限定接続確認。未成立なら結合方針を再検討 |
 | R02/R04 | 接続・会話画面拡張前に独立修正。M2受入まで回帰確認 |
 | 新しい接続権の公開と古い要求の拒否、事後Frame | [U05](../../planned/unit_010/INPUT_AND_STOP.md) M0、入力公開前 |
-| Goal・案内と記憶入口、対話UI | [U06](../../planned/unit_011/GOAL_EXECUTION.md) |
+| Goal・案内と記憶入口、対話UI、公開応答の別記録・memory書込権限 | [U06](../../planned/unit_011/GOAL_EXECUTION.md) |
 | 保存参照からの復帰・整理復元 | [U08](../../planned/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md) |
 
 ## 11. 完了チェックリスト

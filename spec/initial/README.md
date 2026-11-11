@@ -29,7 +29,7 @@
 
 [U02の接続・通常ターン](../complete/unit_007/CODEX_CONNECTION.md)は完了しています。[U03の映像取得](../complete/unit_008/VIDEO_CAPTURE.md)も人間レビューによるUI・読み取り境界の見直しと再検証を完了しました。U03はLive Gamer 4K 2.1で実映像の取得・プレビュー・切断・再接続・表示中のアプリ終了を確認しました。物理抜去と入力から表示までの光学的な遅延は未検証です。調査・実装・実機検証の詳細は各親仕様に記録します。
 
-[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)では表示名選択・4段階表示・読み取り専用境界を確認しました。[U04の記録付き観測](../wip/unit_009/RECORDED_OBSERVATION.md)はM0の調査・設計と[M1の観測・保存API](../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を完了し、親はwipです。MCP・保存先GUI・実機観測はM2で結合します。観測画像の確定・保存・MCP接続を扱い、ゲーム入力と即時停止はU05に分けます。依存の詳細と推奨順は05を正本とします。
+[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)では表示名選択・4段階表示・読み取り専用境界を確認しました。[U04の記録付き観測](../wip/unit_009/RECORDED_OBSERVATION.md)はM0の調査・設計と[M1の観測・保存API](../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を完了し、親はwipです。[M1レビュー](../complete/unit_033/OBSERVATION_STORAGE_REVIEW.md)で符号化と原記録の保存責務を分離し、アプリ所有writerとCodexの解釈・記憶編集の関係を整理しました。MCP・保存先GUI・実機観測はM2で結合します。観測画像の確定・保存・MCP接続を扱い、ゲーム入力と即時停止はU05に分けます。依存の詳細と推奨順は05を正本とします。
 
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 

@@ -2,9 +2,9 @@
 
 ## 1. 目的・起点
 
-状態: wip。2026-11-12の追加レビュー依頼に着手。[U04親](../unit_009/RECORDED_OBSERVATION.md)・[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を対象に、最新画像一枚の保存・返却を基準として責務と不要な仕組みを見直す。ユーザーは、MCPの観測保存と、その後のCodex解釈・対話履歴保存を同じロックで妨げないかを指摘した。
+状態: complete（レビュー・修正・検証完了）。2026-11-12の追加レビュー依頼に着手・完了。[U04親](../../wip/unit_009/RECORDED_OBSERVATION.md)・[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を対象に、最新画像一枚の保存・返却を基準として責務と不要な仕組みを見直す。ユーザーは、MCPの観測保存と、その後のCodex解釈・対話履歴保存を同じロックで妨げないかを指摘した。
 
-開始時は`codex/u04-m0-observation-design`、`23b8fad`。未追跡`debug.log`を保全する。
+開始時は`codex/u04-m0-observation-design`、`23b8fad`。開始時の未追跡`debug.log`は作業中に利用者自身が削除したと回答を受けたため復元しない。
 
 ## 2. 対象範囲
 
@@ -28,7 +28,7 @@ MCP/GUI結合、対話履歴の製品保存API、Codexによるmemory編集の�
 | 排他の対象 | OSロックは協調するアプリ同士の原記録writer専有。画像・ログ読取やCodexのmemory編集を排他しない。原記録の編集・追記はアプリだけが担当する |
 | API責務 | `ObservationService`の一件のワーカーで`Observation.from_frame`→`ProjectWriter.record(observation)`を行う。writerは符号化済み画像を保存する。PNG符号化中にwriterの同期操作ロックを持たない |
 | 空analysis | 観測にもMCP応答にも必要ない予約欄を廃止する。schema 1の読込では旧analysisを余剰項目として許容し、既存行は書き換えない。版1の画像・ID等の意味は変えない |
-| 状態と終了 | 保存中の同期操作mutex、別アプリ排他、取消し後のTask参照は異なる資源を守るので維持する。アプリ所有者は受付終了→drain後に保存先を閉じる。別の状態機械は追加しない |
+| 状態と終了 | 保存中の同期操作mutex、別アプリ排他、取消し後のTask参照は異なる資源を守るので維持する。符号化中のwriter.closeは自動拒否されない。アプリ所有者が受付終了→drain後に保存先を閉じる。別の状態機械は追加しない |
 
 `ProjectWriter`はプロジェクト全体やCodexの会話を管理する型ではなく、アプリの原記録への書込所有者である。名前だけを変える改修は行わない。将来、対話記録を追加する際は同じwriterへ短い永続化処理を直列化する。観測のBUSYを対話履歴の破棄に流用せず、その通知順・保存失敗・終了との結合はU06で確定する。
 
@@ -52,7 +52,26 @@ MCPはツール境界であり、プロジェクトの所有者や画像解釈�
 
 ## 9. 検証
 
-既存試験を先に書き換え、対象pytest、ruff、ty、unit/integration全体、lock/build、文書リンク・参照先・仮テキスト検査を行う。現時点の検証結果は未実行。
+| command / 確認 | result | 対象と限界 |
+|---|---|---|
+| `uv run pytest tests/unit tests/integration -q` | 408 passed、33.54秒 | 既存全体。初回M1の411件から統合・削除し、原記録読取/memory編集と符号化取消しを既存検証へ組込み |
+| `uv run ruff format --check .` | pass（166 files） | 製品・試験等のPythonファイル |
+| `uv run ruff check .` / `uv run ty check --no-progress` | pass | `record(Observation)->None`とserviceの返却・例外の型/説明が一致。型抑制追加なし |
+| `uv lock --check` / `uv build` | pass | 依存・lock変更なし、wheel/sdist生成 |
+| `uv run python -` のwheelプローブ | pass | wheel内のAPIから符号化済み保存・非同期観測・drain・再open。既存依存環境を使用 |
+| 公開docsのPython例 | 2例実行成功 | 同期API、非同期観測からプロジェクト終了・再open。実MCPなし |
+| `git diff --check` / 文書機械検査 | pass | 参照先、unit一意性、仮テキストを確認 |
+| 実MCP/Codex記憶書込/対話履歴保存 | not run | M2/U06の実装・実接続で確認。別Pythonプロセスによる共存試験と区別 |
+
+独立レビュー2担当の指摘（ロック説明の過広さ、符号化責務、空analysis、asyncioだけの試験）は採用。mutex・OSロック・Task参照・明示reloadはそれぞれ現在の保全責務があり維持した。改修後の独立レビューは追加欠陥なし、storage/service 46件を別basetempで確認した。`test-desiderata-review`、`type-boundary-review`、`docstring-style`、`agentic-self-review`で検証価値と契約を確認した。
+
+### 項目別記録
+
+S1: storage既存試験を書換えたredは13 failed（符号化済みObservationを旧Frame APIが再符号化しようとした）。責務分離後、storage/service/captureの56 passed、対象ruffと全体ty成功。旧analysis付き行の原本保持・追記も同じ保存試験で確認。空analysisの不正値だけを検査したパラメーター1件を削除し、符号化失敗の検証はS3のサービス試験へ移す。
+
+S2: 既存のOS排他・プロセス終了の2試験を1試験へ統合。`pytest tests/integration/test_observation_storage.py -k archive_owner` 1 passed（初回greenの現動作確認）。別Pythonが画像/JSONL/管理情報を読みmemoryを作成でき、原記録は不変、別writerだけ拒否。close後と異常プロセス終了後の再取得も確認。対象ruff/ty成功。実Codexの権限・解釈の試験ではない。
+
+S3: 既存service試験へ符号化容量失敗と、符号化中取消し後の回収を統合。符号化中もwriterの再検査が可能で、別writerの専有は拒否される。保存中のclose/reload拒否と取消し後の成功/失敗回収も維持。未実行コルーチン取消しだけの試験を削除。service/capture 17 passed（初回green）、ruff/全体ty成功。製品の符号化責務はS1で移動済み。
 
 ## 10. 後続
 
@@ -63,12 +82,6 @@ U06: 公開応答・依頼等のイベント形式、同じwriterでの直列保
 ## 11. 完了チェックリスト
 
 - [x] 現実装と後続責務を照合した
-- [ ] 必要な修正・既存試験の整理を終えた
-- [ ] 公開API・仕様と検証結果を更新した
-- [ ] 変更をコミットした
-
-S1: storage既存試験を書換えたredは13 failed（符号化済みObservationを旧Frame APIが再符号化しようとした）。責務分離後、storage/service/captureの56 passed、対象ruffと全体ty成功。旧analysis付き行の原本保持・追記も同じ保存試験で確認。空analysisの不正値だけを検査したパラメーター1件を削除し、符号化失敗の検証はS3のサービス試験へ移す。
-
-S2: 既存のOS排他・プロセス終了の2試験を1試験へ統合。`pytest tests/integration/test_observation_storage.py -k archive_owner` 1 passed（初回greenの現動作確認）。別Pythonが画像/JSONL/管理情報を読みmemoryを作成でき、原記録は不変、別writerだけ拒否。close後と異常プロセス終了後の再取得も確認。対象ruff/ty成功。実Codexの権限・解釈の試験ではない。
-
-S3: 既存service試験へ符号化容量失敗と、符号化中取消し後の回収を統合。符号化中もwriterの再検査が可能で、別writerの専有は拒否される。保存中のclose/reload拒否と取消し後の成功/失敗回収も維持。未実行コルーチン取消しだけの試験を削除。service/capture 17 passed（初回green）、ruff/全体ty成功。製品の符号化責務はS1で移動済み。
+- [x] 必要な修正・既存試験の整理を終えた
+- [x] 公開API・仕様と検証結果を更新した
+- [x] 変更をコミットした

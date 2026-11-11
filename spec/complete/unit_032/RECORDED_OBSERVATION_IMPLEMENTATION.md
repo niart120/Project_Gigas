@@ -4,6 +4,8 @@
 
 状態: complete（M1の独立API実装・検証完了）。2026-11-12着手・完了。親は[U04](../../wip/unit_009/RECORDED_OBSERVATION.md)。ユーザーのM1実装・検証依頼を受け、[M0の採用方針](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)を実行可能な観測・保存APIにする。M0は調査作業の完了であり、本書は製品実装と検証の完了を管理する。
 
+本書の検証件数とTDD記録はM1初回受入時点の履歴である。後続の[責務レビュー](../unit_033/OBSERVATION_STORAGE_REVIEW.md)で符号化と保存のAPIを分離し、空analysisと不要な試験を整理した。以下の公開境界は現在の契約へ更新する。
+
 利用者は、作成または開いたプロジェクトへ最新のFrameを記録し、同じPNG bytesと観測IDを受け取る。再読込後も画像を参照でき、破損・部分失敗を成功として扱わない。
 
 ## 2. 対象範囲
@@ -21,9 +23,9 @@ MCP、Codex接続、保存先GUI、R02/R04修正、実機観測、画像加工�
 ## 5. 振る舞いと公開境界
 
 - `ProjectWriter.create(path)` / `open(path)` は同期API。存在しない専用ディレクトリだけに新規作成する。`reload()`は保持中のロックで再検査し、`close()`は書込処理が終わった所有者を解放する。保存中の再検査・終了・二重書込は拒否する。
-- `ProjectWriter.record(frame)` は一件の同期処理として符号化・画像公開・追記を行い、不変の`Observation`（ID、元Frame、PNG bytes）を返す。画像変換はgame_ioの符号化処理、永続化はstorageが担当する。MCP・Qt型を渡さない。
+- `ProjectWriter.record(observation)` は符号化済みObservationを画像公開・追記し、成功時はNoneを返す。観測サービスの一件のワーカーがgame_ioの符号化→storage保存→同じObservation返却を担当する。符号化中にwriterの同期mutexを持たず、MCP・Qt型も渡さない。
 - `ObservationService(reader, writer).observe()` はstreamingかつFrameありのsnapshotを一度採用し、同期処理を既存asyncioループのexecutorへ投入する。要求後の新Frameを待たず、同じFrameでも新IDを作る。
-- ワーカー投入を一件の処理開始点とする。投入前の要求取消しなら保存せず、投入後は全処理を回収する。`drain()`は実処理が終わるまで待つ。要求取消しはワーカーを取り消さず、枠も解放しない。所有者はdrain完了後にwriterを閉じる。段階別の取消し状態を追加しない。
+- ワーカー投入を一件の処理開始点とする。投入前の要求取消しなら保存せず、投入後は全処理を回収する。`drain()`は実処理が終わるまで待つ。要求取消しはワーカーを取り消さず、枠も解放しない。アプリ所有者は保存先を終了するときにdrain完了後にwriterを閉じる。Codex切断だけでは選択先writerを閉じない。段階別の取消し状態を追加しない。
 - WindowsのOSファイルロックを使う。ロックファイルの存在だけで拒否せず、PID表・期限・回復ループを作らない。Windows以外への移植は今回の受入対象外。
 - JSONLは共通形式と既知観測payload、正整数の単調増加を検査する。未知種別・余剰項目・欠番は許容し、過去画像を走査しない。不正行と正常な接頭部の範囲をエラーに示し、原本を修復しない。
 - PNG保存までの失敗は当該観測だけ失敗。JSONLへ触れた後の失敗は再検査まで追記不可。既存画像・公開済み画像・不完全な原記録を保持する。
@@ -73,7 +75,7 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 
 `type-boundary-review` / `docstring-style` / `agentic-self-review`でAPI・例外・取消しの所有と文書を照合した。元Frame→一回の符号化→同bytes保存/返却を維持し、設定・加工・監視・UIを増やしていない。
 
-独立レビューの日時形式、JSON解析失敗時のロック残留、不正Frame値による再読込不能はすべて採用しR1〜R3で修正した。async所有レビューは追加欠陥なし。M2では受付を閉じてdrain完了後にwriter/loopを閉じ、既存の一括Task取消しで保存Taskを失わないことが条件である。
+独立レビューの日時形式、JSON解析失敗時のロック残留、不正Frame値による再読込不能はすべて採用しR1〜R3で修正した。async所有レビューは追加欠陥なし。後続レビューでM2の終了条件を具体化した。切断では受付を閉じてdrainし、writerはプロジェクト終了まで保持する。アプリ終了時は原記録処理の収束後にwriter/loopを閉じ、既存の一括Task取消しで保存Taskを失わない。
 
 ### 項目別記録
 
