@@ -2,7 +2,7 @@
 
 ## 1. 目的・起点
 
-状態: **wip**。2026-11-11のユーザー回答で公開app-server直接接続への変更が承認された。[M0](../../complete/unit_016/CODEX_SDK_SELECTION.md)のSDK不採用判断を引き継ぎ、[U02親](../unit_007/CODEX_CONNECTION.md)の製品接続部を実装する。
+状態: **complete**。2026-11-11のユーザー回答で公開app-server直接接続への変更が承認された。[M0](../../complete/unit_016/CODEX_SDK_SELECTION.md)のSDK不採用判断を引き継ぎ、[U02親](../unit_007/CODEX_CONNECTION.md)の製品接続部を実装する。
 
 利用者はChatGPT認証でモデルとeffortを確認して通常ターンを開始し、質問・承認を保留・回答・中断できる。SDKのprivate APIや二重受信は使わない。
 
@@ -143,7 +143,7 @@ TDD対象pytest、ruff format/check、ty、依存lock、build、既存unit/integ
 
 通常モードの質問は`isBlocking=false`でもcoreが回答をawaitする（[固定実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/session/mod.rs#L3458)）。実際の2秒保留中もターンが終了せず、上記の回答・中断に成功した。
 
-実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateはM2を含むU02最終確認で記録する。継続利用する実接続手順は[docs](../../../docs/codex-verification.md)に置く。
+実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateは[M2](../unit_018/CODEX_GUI.md)を含む[U02最終確認](../unit_007/CODEX_CONNECTION.md)で成功した。全145 tests、ruff/ty/lock、wheel/sdistと新規install後の資材・起動確認を含む。継続利用する実接続手順は[docs](../../../docs/codex-verification.md)に置く。
 
 ## 8. 先送り事項
 
@@ -153,5 +153,5 @@ GUIはM2、APIキー実接続はU06まで。Goal/MCP/旧書込終了はM0と親�
 
 - [x] 明示承認と対象範囲・所有契約を記録した
 - [x] TDD項目をcommitと対応付けて完了した
-- [ ] 製品・依存・型・docstring・配布gateを記録した
+- [x] 製品・依存・型・docstring・配布gateを記録した
 - [x] 実runtime確認と未検証事項を区別しM2へ引き継いだ

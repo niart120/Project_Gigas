@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-後続判断: 2026-11-11にユーザーが直接接続案を承認し、[M1](../../wip/unit_017/CODEX_DIRECT_CONNECTION.md)へ進んだ。以下の「未採用」「判断待ち」は本調査完了時点の記録。
+後続判断: 2026-11-11にユーザーが直接接続案を承認し、[M1](../../complete/unit_017/CODEX_DIRECT_CONNECTION.md)へ進んだ。以下の「未採用」「判断待ち」は本調査完了時点の記録。
 
 状態: **complete（調査・不採用判断完了）**。U02の最初の子仕様。2026-11-11に着手・調査を完了した。製品接続方式の変更判断と実装・実接続受入は親仕様に残す。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | user request | U02を開始して完遂する。ブランチ作成、親のwip移動、採用版・接続方式の子仕様から進める | 2026-11-11の依頼 |
 | roadmap | U01の次にU02 M0を選ぶ | [05](../../initial/05-implementation.md) |
-| parent | 工程の受入条件 | [U02](../../wip/unit_007/CODEX_CONNECTION.md) |
+| parent | 工程の受入条件 | [U02](../../complete/unit_007/CODEX_CONNECTION.md) |
 
 利用場面: 実装担当が、公開配布物・API・Windows環境の根拠から接続方式を選ぶ。質問の回答待ちに受信を止める方式や暗黙の承認を製品へ持ち込まない。
 
@@ -120,7 +120,7 @@ U01の起動・設定・GUIと設定I/Oワーカーは実装済み。認証・�
 
 ## 8. 対象ファイル
 
-本書、[U02親](../../wip/unit_007/CODEX_CONNECTION.md)、初期設計05・08・README、親仕様への参照元。採用判断が成立するまで製品依存は追加しない。
+本書、[U02親](../../complete/unit_007/CODEX_CONNECTION.md)、初期設計05・08・README、親仕様への参照元。採用判断が成立するまで製品依存は追加しない。
 
 ## 9. 検証
 
@@ -147,14 +147,14 @@ from pathlib import Path
 from openai_codex import CodexConfig
 from openai_codex.client import CodexClient
 
-root = Path('tmp/u02-runtime-probe').resolve()
-home = root / 'home'
+root = Path("tmp/u02-runtime-probe").resolve()
+home = root / "home"
 home.mkdir(parents=True, exist_ok=True)
-with CodexClient(CodexConfig(cwd=str(root), env={'CODEX_HOME': str(home)})) as client:
+with CodexClient(CodexConfig(cwd=str(root), env={"CODEX_HOME": str(home)})) as client:
     print(client.initialize().model_dump(exclude_none=True))
-    print('authenticated:', client.account_read().account is not None)
-    print('model_count:', len(client.model_list().data))
-print('CLOSE_RETURNED')
+    print("authenticated:", client.account_read().account is not None)
+    print("model_count:", len(client.model_list().data))
+print("CLOSE_RETURNED")
 ```
 
 reader再現の最小コードも同じ隔離Pythonへ渡す。以下の待機時間は調査の打切り用で、製品の停止期限ではない。
@@ -169,39 +169,43 @@ from openai_codex.client import CodexClient
 from pydantic import BaseModel
 
 entered, release = Event(), Event()
-peer = '''import json, sys
+peer = """import json, sys
 print(json.dumps({"id":"approval-1","method":"item/commandExecution/requestApproval","params":{}}), flush=True)
 print(json.dumps({"method":"probe/afterApproval","params":{}}), flush=True)
 for line in sys.stdin:
     msg = json.loads(line)
     if msg.get("method") == "probe/ping":
         print(json.dumps({"id":msg["id"],"result":{"pong":True}}), flush=True)
-'''
+"""
+
 
 class Pong(BaseModel):
     pong: bool
 
+
 def handler(method, params):
     entered.set()
     if not release.wait(5):
-        raise TimeoutError('probe release timeout')
-    return {'decision': 'decline'}
+        raise TimeoutError("probe release timeout")
+    return {"decision": "decline"}
 
-with CodexClient(CodexConfig(launch_args_override=(sys.executable, '-u', '-c', peer)),
-                 approval_handler=handler) as client:
+
+with CodexClient(
+    CodexConfig(launch_args_override=(sys.executable, "-u", "-c", peer)), approval_handler=handler
+) as client:
     assert entered.wait(3)
     with ThreadPoolExecutor(max_workers=2) as pool:
         notification = pool.submit(client.next_notification)
-        response = pool.submit(client.request, 'probe/ping', None, response_model=Pong)
+        response = pool.submit(client.request, "probe/ping", None, response_model=Pong)
         try:
             assert not release.wait(0.3)
             before = (notification.done(), response.done())
         finally:
             release.set()
         after = (notification.result(timeout=3).method, response.result(timeout=3).pong)
-        print(json.dumps({'while_pending': before, 'after_reply': after}))
+        print(json.dumps({"while_pending": before, "after_reply": after}))
         assert before == (False, False)
-        assert after == ('probe/afterApproval', True)
+        assert after == ("probe/afterApproval", True)
 ```
 
 ## 10. 先送り事項

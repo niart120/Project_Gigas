@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-U02のM2子仕様。公開app-server接続をGUIから明示的に開始し、通常ターン、質問・承認、中断、切断を操作する。状態はwip。接続部の実装とGUI受入を混同しない。
+U02のM2子仕様。公開app-server接続をGUIから明示的に開始し、通常ターン、質問・承認、中断、切断を操作する。状態はcomplete。接続部の実装とGUI受入を混同しない。
 
 起点は[親仕様](../unit_007/CODEX_CONNECTION.md)、[M1](../unit_017/CODEX_DIRECT_CONNECTION.md)、[実行基盤](../../initial/02-runtime.md)、[制御フロー](../../initial/09-control-flows.md)。既存の設定保存・終了契約は[U01](../../complete/unit_004/APPLICATION_SHELL.md)に従う。
 
@@ -104,5 +104,5 @@ Goal・プロジェクト・実機入力は親仕様のU04〜U06へ引き継ぐ�
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを完了した
-- [ ] 型・docstring・既存回帰・配布gateを記録した
-- [ ] 実画面と実runtime受入の結果・未検証範囲を親へ引き継いだ
+- [x] 型・docstring・既存回帰・配布gateを記録した
+- [x] 実画面と実runtime受入の結果・未検証範囲を親へ引き継いだ
