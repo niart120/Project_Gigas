@@ -194,7 +194,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | green | 自動と固定解像度の要求 | new / integration | 自動で寸法要求せず実寸法を返す、固定要求と違う実画像を加工せず共有、不正形式・上限超過・途中寸法変更を通知 |
 | green | 可変寸法の共有と独立読取 | new / integration | 画素と寸法の原子性、容量検証、古い読取保持中も新プレビューが進む、取得時刻を保持 |
 | green | 取得解像度の要求への結合 | new / integration | 保存された5候補を対応する幅・高さの要求へ変換する |
-| todo | 取得設定適用の世代境界 | new / integration | 旧取得の解放を待つ、新設定の最初の画像で完了、失敗後旧画像を現在扱いしない、要求と実到着が違っても同じ要求値は適用済み、レターボックスを含む表示変更は再接続なし |
+| green | 取得設定適用の世代境界 | new / integration | 旧取得の解放を待つ、新設定の最初の画像で完了、失敗後旧画像を現在扱いしない、要求と実到着が違っても同じ要求値は適用済み、レターボックスを含む表示変更は再接続なし |
 | green | OS別の列挙と機器照合 | new / unit | 方式ごとに番号が違う同一機器、同名同型2台、欠落・空・重複ID、利用不可方式、既存Windows設定の保持 |
 | green | 代替取得の停止境界 | new / integration | 旧取得回収前に次を開かない、終了未確認なら停止、停止要求で連鎖取消し、全体期限、中間失敗と最終失敗を区別 |
 | todo | 現在の映像診断への到達 | new / integration | 表示メニューから要求・実寸法/FPS/API/途中失敗/世代/終了状態を確認し、コピー中のsnapshotを更新しない。取得設定・共有画像を変えない |
@@ -290,3 +290,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### C3b 同一機器のAPIフォールバック
 
 test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始期限を越えて初回Frameを公開する問題を独立レビューで発見し、追加1件red→修正green。開始前の最大2候補、同一ID再照合、正常release通知・exit0・host gracefulの全確認、停止・終了による連鎖取消しを検証した。capture関連全106件成功（`uv run pytest`、`--basetemp=tmp/pytest-capture`）。対象ruff/format/ty・diffcheck成功、独立レビュー必須指摘なし。refactor-skipped。Windows以外の実機動作は未検証。
+
+### 取得解像度と表示設定の結合確認
+
+`uv run pytest tests/integration/test_resolution_application.py -q --basetemp=tmp/pytest-root`: 2件成功。既存A1/A2/A3の組み合わせで、自動への変更は旧終了確認と新Frameを待ち、表示変更は要求と違う実到着画像でも再接続しないことを確認。追加の製品修正は不要で、初回から成功した結合確認として記録する。取得適用失敗・旧画像失効はtest_video_applicationの既存回帰と合わせて確認する。
