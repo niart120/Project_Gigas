@@ -183,8 +183,8 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 
 | status | item | type / layer | 検証する振る舞い |
 |---|---|---|---|
-| todo | OK・適用・キャンセルの完了条件 | regression / integration | 保存と最初のフレームまで待つ、失敗時保持、適用後の取消しは巻き戻さない、失敗後再試行や終了取消しで旧OKを復活させない |
-| todo | 処理中の操作境界 | regression / integration | 二重保存防止、切断によるOK予定取消し、設定終了禁止でも既存停止とアプリ終了が可能 |
+| green | OK・適用・キャンセルの完了条件 | regression / integration | 保存と最初のフレームまで待つ、失敗時保持、適用後の取消しは巻き戻さない、失敗後再試行や終了取消しで旧OKを復活させない |
+| green | 処理中の操作境界 | regression / integration | 二重保存防止、切断によるOK予定取消し、設定終了禁止でも既存停止とアプリ終了が可能 |
 | green | 未接続と適用の操作境界 | regression / integration | 未接続は最後の実機を消さない、保存値と同じ機器も開始できる、要求が未接続なら一般の変更で開始しない、同機器再試行、保存待ちの停止、終了未確認、停止後の適用で開始要求を復活させない |
 | green | 保存と取得先要求の分離 | regression / integration | 再読込で接続しない、保存B・実取得Aでも一般の保存でBを消さない、列挙・保存完了で要求を上書きしない |
 | green | フォーム再分類と設定保持 | regression / integration | 移動したserial・未知項目・既存認証値を保持、初回列挙・未保存選択と機器名識別を維持 |
@@ -269,3 +269,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### C3a OS別の列挙と機器照合
 
 新test_capture_platformsはOS固定・方式と番号未分離の11件red/1件pass→12件green。capture回帰92件成功。IndexedDeviceに方式を対応付け、列挙時のIDと接続候補を組にする。利用可能方式、同名別ID、Linux安定パス、Mac uniqueIDを機器非依存試験で確認。担当ruff/format/tyと独立レビュー成功。C2共有競合試験は非Noneの読取40件を必須とするよう補強し20件成功。代替取得への進行はC3b、他OS実機は未検証。
+
+### A3 OK・適用・キャンセル
+
+`uv run pytest tests/integration/test_settings_accept.py -q --basetemp=tmp/pytest-root --tb=short`: OKが閉じない・Cancelが保存確認する3件red/2件pass→5件green。最初のFrame待ち、busy中×/Esc拒否、失敗/明示停止で古いOK失効、無変更OKの無保存終了、適用後Cancelの保持を確認。A2と認証回帰を合わせ11件green、担当ruff/format/ty成功。読込中はCancelで画面を閉じられ、読込自体を中断せず自動列挙意図だけ破棄する。refactor-done（適用完了とdialog破棄を小さい共通処理に分離）。

@@ -63,6 +63,8 @@ class ApplicationShell(QObject):
         self._refresh_on_open = False
         self._refresh_menu_on_open = False
         self._capture_after_save: Settings | None = None
+        self._applying_settings = False
+        self._close_after_apply = False
         self._settings_saved = False
         self._shutdown_failure = ""
         self.service = CodexServiceThread() if service is None else service
@@ -142,6 +144,8 @@ class ApplicationShell(QObject):
             refresh_devices: Discover once after an explicit UI disconnection.
         """
         self._capture_after_save = None
+        self._applying_settings = False
+        self._close_after_apply = False
         self._refresh_on_open = False
         self._refresh_menu_on_open = False
         if self.dialog is not None:
@@ -182,6 +186,7 @@ class ApplicationShell(QObject):
     @Slot()
     def _video_changed(self) -> None:
         self._update_capture_devices()
+        self._finish_settings_apply()
         self._render()
         if self.committed:
             self._finish_shutdown()
@@ -236,9 +241,9 @@ class ApplicationShell(QObject):
             self.dialog.set_values(self.baseline)
             self.dialog.set_capture_target(self._active_capture_device)
             self.dialog.save_button.clicked.connect(self._apply_editor)
-            self.dialog.ok_button.clicked.connect(self._apply_editor)
+            self.dialog.ok_button.clicked.connect(lambda: self.apply_settings(close_after=True))
             self.dialog.changed.connect(self._render)
-            self.dialog.close_requested.connect(lambda: self._close("dialog"))
+            self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
         elif newly_shown:
             self.dialog.set_values(self.baseline)
@@ -269,13 +274,17 @@ class ApplicationShell(QObject):
         self._refresh_on_open = False
         self.refresh_video_devices()
 
-    def apply_settings(self, settings: Settings | None = None) -> bool:
+    def apply_settings(
+        self, settings: Settings | None = None, *, close_after: bool = False
+    ) -> bool:
         """Save changed settings and reconcile the explicitly requested capture target.
 
         Args:
             settings: Menu-selected snapshot, rejected while the editor is dirty.
                 An empty device requests disconnection without forgetting the saved
                 device. None uses the editor's separate target, or the active target.
+            close_after: Close the settings dialog only after saving and any capture
+                transition succeed. Any failure or explicit stop discards this intent.
 
         Returns:
             Whether applying was accepted; capture completion is reported separately.
@@ -284,6 +293,9 @@ class ApplicationShell(QObject):
             return False
         if settings is not None and self.dirty:
             return False
+        self._applying_settings = True
+        self._close_after_apply = close_after
+        self.error = ""
         target = (
             settings
             if settings is not None
@@ -309,8 +321,47 @@ class ApplicationShell(QObject):
             capture_target, self._capture_after_save = self._capture_after_save, None
             if capture_target is not None:
                 self.video.apply_capture(capture_target)
+            self._finish_settings_apply()
             self._render()
         return True
+
+    def _finish_settings_apply(self) -> None:
+        if (
+            not self._applying_settings
+            or self.operation is not None
+            or self._capture_after_save is not None
+            or self.video.applying
+        ):
+            return
+        close = (
+            self._close_after_apply
+            and not self.error
+            and self.video.apply_state != "failed"
+            and not self.video.cleanup_unconfirmed
+        )
+        self._applying_settings = False
+        self._close_after_apply = False
+        if close:
+            self._hide_settings()
+
+    def _hide_settings(self) -> None:
+        self._refresh_on_open = False
+        if self.dialog is not None:
+            self.dialog.set_values(self.baseline)
+            self.dialog.set_capture_target(self._active_capture_device)
+            self.dialog.hide()
+
+    def _cancel_settings(self) -> None:
+        if (
+            self.operation != "save"
+            and self.pending is None
+            and not self.committed
+            and not self.video.applying
+            and not self._applying_settings
+        ):
+            self._close_after_apply = False
+            self._hide_settings()
+            self._render()
 
     @property
     def _active_capture_device(self) -> str:
@@ -410,6 +461,8 @@ class ApplicationShell(QObject):
                 self.window.apply_window_size_preset(self.baseline.window_size_preset)
         else:
             self.error = result.error
+            self._applying_settings = False
+            self._close_after_apply = False
             self.error_operation = "読込失敗" if operation == "load" else "保存失敗"
             explanation = (
                 "設定を読み込めませんでした。設定ファイルと詳細を確認して、再読込してください。"
@@ -438,6 +491,8 @@ class ApplicationShell(QObject):
             and self.pending != "app"
         ):
             self.video.apply_capture(capture_target)
+        self._finish_settings_apply()
+        self._render()
         self._refresh_open_settings()
         self._refresh_open_video_menu()
 
@@ -523,9 +578,12 @@ class ApplicationShell(QObject):
                 and self.pending is None
                 and not self.committed
                 and not self.video.applying
+                and not self._applying_settings
             )
             self.dialog.set_editable(idle and self.ready)
-            self.dialog.set_closing_allowed(idle)
+            self.dialog.set_closing_allowed(
+                idle or (self.operation == "load" and self.pending is None and not self.committed)
+            )
             self.dialog.capture_refresh_button.setEnabled(
                 idle and self.ready and self.video.can_refresh
             )
@@ -555,6 +613,8 @@ class ApplicationShell(QObject):
     def request_close(self) -> None:
         """Interrupt the turn, then finish settings and service shutdown."""
         self._capture_after_save = None
+        self._applying_settings = False
+        self._close_after_apply = False
         self._refresh_on_open = False
         self._refresh_menu_on_open = False
         self.video.cancel_pending()
