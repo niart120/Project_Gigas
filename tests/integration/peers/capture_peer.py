@@ -100,6 +100,9 @@ class PeerBackend:
         elif self.scenario == "hang-enumerate":
             _entered(self.marker, "enumerate")
             time.sleep(3600)
+        if self.marker:
+            with Path(self.marker + ".enumerated").open("a", encoding="utf-8") as stream:
+                stream.write("enumerated\n")
         return (
             IndexedDevice(DeviceInfo("Capture", "path-a"), 4),
             IndexedDevice(DeviceInfo("Capture", "path-b"), 7),

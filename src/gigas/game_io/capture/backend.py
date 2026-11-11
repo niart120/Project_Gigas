@@ -98,6 +98,7 @@ def acquire_frames(
     publish: "Callable[[Frame], None]",
     opened: "Callable[[float | None], None]",
     released: "Callable[[], None] | None" = None,
+    enumerated: "Callable[[tuple[DeviceInfo, ...]], None] | None" = None,
 ) -> None:
     """Resolve a device, acquire validated frames, and always release its handle.
 
@@ -109,12 +110,17 @@ def acquire_frames(
         publish: Receives each valid frame; may skip it if the reader is busy.
         opened: Receives device-reported FPS, or None for an unavailable value.
         released: Optional notification after the native release returned normally.
+        enumerated: Optional notification of selectable identities from the same
+            enumeration used to resolve the device, before selection and opening.
 
     Raises:
         CaptureError: Selection, opening, reading, or the actual frame format fails.
     """
     devices = backend.enumerate()
-    selected = select_device(tuple(device.info for device in devices), options.device_path)
+    identities = tuple(device.info for device in devices if device.info.path)
+    if enumerated is not None:
+        enumerated(identities)
+    selected = select_device(identities, options.device_path)
     index = next(device.index for device in devices if device.info == selected)
     if stopped():
         return

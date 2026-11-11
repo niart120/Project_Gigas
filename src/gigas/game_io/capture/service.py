@@ -55,7 +55,8 @@ class CaptureSnapshot:
     Attributes:
         phase: Current connection or device-list operation.
         devices: Last successfully enumerated selectable identities.
-        devices_revision: Zero before enumeration, incremented after each successful list.
+        devices_revision: Zero before enumeration; increments for successful explicit
+            lists and the enumeration used when connecting.
         frame: Latest valid immutable image, or None during stop and after failure.
         generation: Connection generation local to this service's lifetime.
         error: Displayable failure reason, empty when there is no reported failure.
@@ -316,7 +317,8 @@ class CaptureService(Thread):
                 break
             with self._condition:
                 if message.kind == "devices":
-                    session.listed = True
+                    if session.slot is None:
+                        session.listed = True
                     if not self._cancel:
                         self._state = replace(
                             self._state,

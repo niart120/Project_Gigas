@@ -20,7 +20,7 @@
 | 取得と表示 | アプリの取得寸法は1920×1080に固定し、表示プリセットで取得を再接続・再設定しない。サービスAPIの寸法検査は維持する |
 | 表示の4段階 | NyXのwindow/previewの組を採用。HD=1280×720/768×432、FullHD=1920×1080/1280×720（既定）、WQHD=2560×1440/1600×900、4K=3840×2160/2560×1440。取得画像の比率は維持する |
 | 表示の選択と保存 | NyX同様に表示メニューの排他4項目と設定の選択欄を用意する。メニューの明示選択も非同期設定保存へ渡し、保存成功後に反映する。未保存の設定編集中・保存中はメニュー変更を受け付けず、編集値の上書きを避ける |
-| 小さい画面・DPI | 作業領域を超える場合はウィンドウとプレビューを同じ比率で収める。画面外へ操作部品を押し出す固定寸法は採用しない |
+| 小さい画面・DPI | 作業領域を超える場合はウィンドウとプレビューの希望寸法を同じ比率で縮める。操作部品の領域を確保し、実プレビューは残り領域内へさらに縮小できる。画面外へ操作部品を押し出す固定寸法は採用しない |
 | 診断情報 | 主画面の要求寸法・実寸法・報告/実測FPSと長いDevicePath欄を除く。数値はサービスAPIと検証記録に残し、常設のステータスバー表示も追加しない |
 | フレーム | デバイスを一度だけ開く共有取得を維持し、読み手ごとに画像加工と保持の寿命を分ける。模擬画像・寸法フォールバック・無期限joinは採用しない |
 
@@ -57,7 +57,7 @@ U04はこの共有APIの上に要求後の鮮度条件・停止状態の再確�
 | refactor-skipped | R1 読み取り専用portを分け、遅い読み手が画像を保持しても取得とプレビューが進む | new/regression | integration | reader APIの欠如でred→2件green。実spawnでopen1回・同じ世代の連番進行・保持画素不変・切断時失効を確認。MCP実接続の検証ではない |
 | refactor-done | R2 取得をcaptureパッケージへまとめる | characterization | unit/integration/package | R1のgreen後に移動。公開import・取得/GUI結合を3.12/3.13で各83 passed、配布wheelのspawn/終了も成功 |
 | refactor-skipped | R3 機器を一覧だけから選択し用途別の設定を明示保存する | regression | integration | red: 旧寸法の使用・タブ/候補不足・未検出Path消失5件とpreview専用reader未使用1件。green: 対象27件。選択と旧値保護を小さい関数へ分け、追加構造変更なし |
-| todo | R4 表示プリセットを切り替えても取得と共有画像を変えない | new | unit/integration | 4段階・保存/再読込・画面内配置・接続中反映・表示診断除去 |
+| refactor-skipped | R4 表示プリセットを切り替えても取得と共有画像を変えない | new | unit/integration | red: 保存キー・寸法計算・メニュー未実装。green: 設定/配置56件・I/O9件・GUI回帰79件。保存境界と純粋配置計算へ分離済みで追加整理不要 |
 
 R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。各論理変更を別コミットにする。R1の既存の非占有性については現在の設計で成立するかをまず確認し、人工的なredを作らない。新しいreader APIとR3/R4の振る舞い変更はred→greenを記録する。R2は構造変更として変更前後の同じ契約を検証する。
 
@@ -67,7 +67,7 @@ R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。
 
 ## 7. 検証計画と現在地
 
-NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R3の実装と下記模擬境界の自動試験を完了した。R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R4の実装と下記模擬境界の自動試験を完了した。新UIの最終代表画面・実機結合の再確認は別の受入として行う。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
 
 ### R1: 読み取り専用APIと複数読み手
 
@@ -104,6 +104,23 @@ NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R3
 - 既存GUIの回帰: `uv run --no-sync pytest tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py --basetemp=tmp/pytest-r3-existing-gui -q -o faulthandler_timeout=30`で53件成功。QLineEdit・一覧選択への操作変更後も、保存と再起動・未編集のCRLF/NBSP保持・保存失敗・終了取消し・Codexの寿命を検証した。
 - 型/docstring/docs: `CapturePort.reader()`と`VideoController.reader`で読取境界を明示し、Settingsの公開属性から取得寸法を除いた。型緩和やignoreを追加せず、対応するruff/format・tyを検査した。現在の選択操作と旧寸法の無効化を`docs/settings.md`・`docs/video.md`へ記載した。新画面を読む検証と実機結合はR4後に行う。
 - 独立レビュー: 必須指摘なし。接続中の表示FPS反映はR4で扱うことを再確認した。3タブのQt offscreen画像を読み、表示名・一行入力・下部操作の配置を確認した。描画環境の日本語フォント不足は検証ハーネスだけでMeiryoを登録して補い、製品フォントは変更していない。R4のプリセット追加後に再確認する。
+
+### R4: 4段階の表示と非同期保存
+
+`ui/layout.py`にNyXと同じ4組の希望寸法を持つQt非依存の計算を置いた。作業領域へ合わせてウィンドウとプレビューを同倍率で縮め、Qtの実配置では操作部品の領域を確保した残りへプレビューをさらに縮める。800×800のoffscreen画面でも各プリセットのフレームと接続・送信・設定操作が画面内に収まることを確認した。
+
+設定のcomboと「表示→ウィンドウサイズ」の排他メニューは同じ4キーを使う。メニューも既存の設定ワーカーによる非同期保存を通り、成功時だけサイズを反映する。未保存編集中・保存中・終了中・設定読込失敗時はメニューを無効にする。保存失敗では選択と表示を直前の保存値へ保ち、切断操作を妨げない。接続中の表示FPSも取得設定とは独立して反映し、保存成功・再読込成功のときだけ更新する。
+
+主画面から要求/受信寸法・報告/実測FPSとDevicePath欄を除き、機器表示名・短い状態・接続/切断・必要なエラーだけを残した。取得APIの数値情報は削除していない。
+
+- red: 設定の新キー試験14件と旧設定の既定値試験1件が属性欠如/不正値未拒否で失敗。寸法計算は新module不存在で失敗。`test_window_presets.py -k all_presets --basetemp=tmp/pytest-r4-gui-red`はメニュー未実装で失敗した。
+- 設定・配置green: `test_settings.py`、`test_video_settings.py`、`test_window_layout.py`を`--basetemp=tmp/pytest-r4-settings-regression`で実行し56件成功。4キーの保存・省略時既定値・型と未知キー拒否・ファイル保護・4組の寸法・同率縮小・拡大しない計算を確認した。`test_settings_io.py`の9件も成功。
+- GUI green: `uv run --no-sync pytest tests/integration/test_window_presets.py tests/integration/test_video_gui.py tests/integration/test_video_settings_gui.py tests/integration/test_video_preview.py tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_app_entry.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py --basetemp=tmp/pytest-r4-regression -q -o faulthandler_timeout=15 --tb=short`で79件成功。保存待ち/失敗、編集値の保護、メニューと設定の同期、表示FPSの接続中反映、再読込、画面内の操作配置を検証した。
+- 実spawn結合: 独立readerが保持する旧Frameを残したままGUIで表示サイズを保存・反映し、プレビューreaderの新連番・同世代・1920×1080・保持画素不変・機器open1回を照合した。終了時のreleaseも1回。物理機器や実MCPはこの試験では使っていない。
+- 型/docstring/docs: 希望寸法計算とGUI適用を分け、設定の受理キーと保存成功後の反映を公開文書へ反映した。全体tyと対象ruff/formatを検査した。新規の型ignore/castはない。
+- 独立レビュー反映: 事前の一覧更新なしで保存機器へ直接接続すると、取得は成立しても表示名が空欄になる指摘を採用した。GUI実spawn試験で5秒待っても名前が出ないredと、coreの通知/一覧/開始期限の3件redを確認。接続に使う一度の列挙結果をホストの`devices`と`devices_revision`へ伝え、主画面の表示名と取得中の設定候補を同じ情報から更新した。追加列挙や追加openはしない。列挙専用操作の完了フラグはその操作だけに限定し、取得側の開始期限・停止・解放確認を維持した。
+- 修正後: 取得unit/integration55件と`uv run --no-sync pytest tests/integration/test_window_presets.py --basetemp=tmp/pytest-r4-name-green -q -o faulthandler_timeout=15 --tb=short`の5件が成功。保存Pathの直接接続、表示名、設定候補、同じ列挙1回、一覧通知後のopen固着期限を確認した。再度の独立読取レビューで追加必須指摘なし。
+- 画面確認: 4096×2400と800×800のQt offscreen描画で、設定3タブと主画面4段階を読み、作業領域内の配置と操作の可視性を確認した。最終実機での直接接続・4段階切替・切断/再接続・終了は[実機受入記録](HARDWARE_ACCEPTANCE.md)で別に扱う。
 
 ## 8. 先送り事項
 

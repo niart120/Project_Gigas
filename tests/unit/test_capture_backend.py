@@ -56,10 +56,15 @@ class Backend:
         """Own the test's camera."""
         self.camera = camera
         self.selected: int | None = None
+        self.enumerations = 0
 
     def enumerate(self) -> tuple[IndexedDevice, ...]:
-        """Return the current index and path."""
-        return (IndexedDevice(DeviceInfo("Capture", "path-a"), 9),)
+        """Return a selectable device and an interface with no usable path."""
+        self.enumerations += 1
+        return (
+            IndexedDevice(DeviceInfo("Capture", "path-a"), 9),
+            IndexedDevice(DeviceInfo("Pathless", ""), 12),
+        )
 
     def open(self, index: int) -> Camera:
         """Record the index and return the camera."""
@@ -73,6 +78,7 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     backend = Backend(camera)
     frames: list[Frame] = []
     rates: list[float | None] = []
+    listed: list[tuple[DeviceInfo, ...]] = []
     acquire_frames(
         CaptureOptions("path-a", 16, 16, 60),
         7,
@@ -80,7 +86,10 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
         lambda: bool(frames),
         frames.append,
         rates.append,
+        enumerated=listed.append,
     )
+    assert listed == [(DeviceInfo("Capture", "path-a"),)]
+    assert backend.enumerations == 1
     assert backend.selected == 9
     assert camera.properties == {
         cv2.CAP_PROP_FRAME_WIDTH: 16,

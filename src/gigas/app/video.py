@@ -86,6 +86,7 @@ class VideoController(QObject):
         self._request_error = ""
         self._revision = 0
         self._next_image = 0.0
+        self._preview_fps = 30
         self._last_state: tuple[str, str, str, bool] | None = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -171,8 +172,19 @@ class VideoController(QObject):
             self._disconnecting = False
             self._next_image = 0.0
             self.panel.view.set_frame(None)
-            self.timer.setInterval(min(34, math.ceil(1000 / settings.preview_fps)))
+            self.set_preview_fps(settings.preview_fps)
             self._poll()
+
+    def set_preview_fps(self, fps: int) -> None:
+        """Apply a saved display limit without changing the capture connection.
+
+        Args:
+            fps: Validated settings value from 1 through 60 frames per second.
+        """
+        if fps != self._preview_fps:
+            self._preview_fps = fps
+            self._next_image = 0.0
+            self.timer.setInterval(min(34, math.ceil(1000 / fps)))
 
     def disconnect_capture(self) -> None:
         """Clear displayed pixels before requesting asynchronous cleanup."""
@@ -207,7 +219,7 @@ class VideoController(QObject):
             self.panel.view.set_frame(None)
         elif self.active_settings is not None and (now := time.perf_counter()) >= self._next_image:
             self.panel.view.set_frame(snapshot.frame)
-            self._next_image = now + 1 / self.active_settings.preview_fps
+            self._next_image = now + 1 / self._preview_fps
         state = (snapshot.phase, snapshot.error, snapshot.cleanup, alive)
         if state != self._last_state:
             self._last_state = state

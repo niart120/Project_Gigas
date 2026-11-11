@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from gigas.storage.settings import Settings
+from gigas.ui.layout import WINDOW_SIZE_PRESETS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,6 +78,12 @@ class SettingsDialog(QDialog):
             ("表示FPS", self.preview_fps),
         ):
             self.video_form.addRow(label, field)
+        self.window_size_preset = QComboBox(self)
+        for preset in WINDOW_SIZE_PRESETS:
+            self.window_size_preset.addItem(preset.label, preset.key)
+        self.window_size_preset.setCurrentIndex(self.window_size_preset.findData("full_hd"))
+        self.window_size_preset.currentIndexChanged.connect(self.changed)
+        self.video_form.addRow("ウィンドウサイズ", self.window_size_preset)
         agent_form = self._tab("エージェント")
         self.model = self._text_field()
         self.effort = self._text_field()
@@ -201,6 +208,7 @@ class SettingsDialog(QDialog):
             auth_method=str(self.auth_method.currentData()),
             capture_fps=int(self.capture_fps.currentData()),
             preview_fps=int(self.preview_fps.currentData()),
+            window_size_preset=str(self.window_size_preset.currentData()),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -221,6 +229,9 @@ class SettingsDialog(QDialog):
                 self._set_rate(field, value)
             self._selected_device = values.capture_device
             self._sync_capture_choice()
+            self.window_size_preset.setCurrentIndex(
+                self.window_size_preset.findData(values.window_size_preset)
+            )
 
     def _text_value(self, field: QLineEdit) -> str:
         current = field.text()
@@ -237,5 +248,6 @@ class SettingsDialog(QDialog):
             self.capture_fps,
             self.preview_fps,
             self.capture_refresh_button,
+            self.window_size_preset,
         ):
             field.setEnabled(enabled)

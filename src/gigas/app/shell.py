@@ -1,5 +1,6 @@
 """Coordinate the application views and settings operations."""
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -79,6 +80,7 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
+        self.window.window_size_requested.connect(self.change_window_size)
         self.window.close_requested.connect(self.request_close)
         self.window.cancel_close_requested.connect(self.cancel_close)
         panel = self.window.connection
@@ -160,6 +162,18 @@ class ApplicationShell(QObject):
         if self.ready:
             self._request("save")
 
+    def change_window_size(self, key: str) -> None:
+        """Save a menu selection without overwriting any settings editor changes."""
+        if (
+            self.ready
+            and self.operation is None
+            and self.pending is None
+            and not self.committed
+            and not self.dirty
+            and key != self.baseline.window_size_preset
+        ):
+            self._request("save", settings=replace(self.baseline, window_size_preset=key))
+
     def reload(self) -> None:
         """Reload settings through the worker."""
         if self.operation is not None or self.pending is not None or self.committed:
@@ -169,7 +183,9 @@ class ApplicationShell(QObject):
         else:
             self._request("load")
 
-    def _request(self, operation: str, *, continuing: bool = False) -> None:
+    def _request(
+        self, operation: str, *, continuing: bool = False, settings: Settings | None = None
+    ) -> None:
         if (
             self.operation is not None
             or self.committed
@@ -180,7 +196,9 @@ class ApplicationShell(QObject):
         self.operation = operation
         self.error = ""
         self._render()
-        snapshot = self.dialog.values() if self.dialog is not None else self.baseline
+        snapshot = settings
+        if snapshot is None:
+            snapshot = self.dialog.values() if self.dialog is not None else self.baseline
         self.requested.emit(operation, snapshot)
 
     @Slot(object)
@@ -194,6 +212,9 @@ class ApplicationShell(QObject):
             self.ready = True
             if self.dialog is not None:
                 self.dialog.set_values(result.settings)
+            self.video.set_preview_fps(self.baseline.preview_fps)
+            if self.window.current_window_size_preset != self.baseline.window_size_preset:
+                self.window.apply_window_size_preset(self.baseline.window_size_preset)
         else:
             self.error = result.error
             self.error_operation = "読込失敗" if operation == "load" else "保存失敗"
@@ -241,6 +262,16 @@ class ApplicationShell(QObject):
             "閉じる取消し" if self.pending == "dialog" else "終了取消し"
         )
         self.window.settings_button.setEnabled(not self.committed)
+        self.window.set_window_size_state(
+            self.baseline.window_size_preset,
+            enabled=(
+                self.ready
+                and self.operation is None
+                and self.pending is None
+                and not self.committed
+                and not self.dirty
+            ),
+        )
         self.window.connection.set_available(
             not self.committed and self.pending is None and not self._service_unavailable,
             settings_ready=self.ready,

@@ -16,6 +16,8 @@
 
 `gigas.game_io.capture.CaptureService`はUIに依存しない監視スレッドです。生成後に`start()`を一度呼びます。機器を開くのは`connect(CaptureOptions(...))`を明示的に呼んだときだけです。`refresh_devices()`は別の子プロセスで列挙し、`snapshot().devices`と`devices_revision`を更新します。初期revisionは0、列挙成功ごとに1増えます。空の列挙成功と未列挙を区別できます。
 
+`connect()`も、機器パスを解決するために行う1回の列挙結果で`devices`と`devices_revision`を更新します。事前に`refresh_devices()`を呼ばなくても、接続先の表示名と機器一覧を取得できます。この通知は接続成功を意味せず、最初のフレームまでの期限監視は続きます。表示名取得のための追加列挙や追加の機器openは行いません。
+
 接続・列挙要求は受付時に`True`、別の要求中や終了中、前の取得の`cleanup`が`unconfirmed`なら`False`を返します。受付は接続成功ではありません。`snapshot().phase`が`streaming`となり、`frame`が得られた時点で実画像取得を確認できます。`reported_fps`は機器の報告値、`measured_fps`は連番と単調時計から求めた取得レートです。
 
 `CaptureService.reader()`は読み取り専用の`CaptureReader`を返します。readerの公開操作は`snapshot()`で、状態を含む`CaptureSnapshot`を取得します。開始・切断・終了は所有側の`CaptureService`が操作します。readerの生成・破棄では機器を開閉せず、複数のreaderが同じ取得元の最新画像を参照します。

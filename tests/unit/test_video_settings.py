@@ -91,3 +91,66 @@ def test_fresh_settings_do_not_create_capture_dimensions(tmp_path: Path) -> None
     saved = tomllib.loads(path.read_text(encoding="utf-8"))
     assert "width" not in saved["capture"]
     assert "height" not in saved["capture"]
+
+
+def test_legacy_settings_default_to_full_hd_without_writing(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    original = '# old file\n[gui]\ncustom = "preserve"\n'
+    path.write_text(original, encoding="utf-8")
+
+    assert load_settings(path).window_size_preset == "full_hd"
+    assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("preset", ["hd", "full_hd", "wqhd", "four_k"])
+def test_window_size_preset_round_trip_preserves_unrelated_values(
+    tmp_path: Path, preset: str
+) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(
+        '# keep\n[gui]\nwindow_size_preset = "hd" # choice\ncustom = "untouched"\n',
+        encoding="utf-8",
+    )
+    values = Settings(window_size_preset=preset)
+
+    save_settings(path, values)
+
+    assert load_settings(path) == values
+    contents = path.read_text(encoding="utf-8")
+    document = tomllib.loads(contents)
+    assert document["gui"]["window_size_preset"] == preset
+    assert document["gui"]["custom"] == "untouched"
+    assert "# keep" in contents
+    assert "# choice" in contents
+
+
+@pytest.mark.parametrize("invalid", ['"unknown"', '""', "1", "true", "[]"])
+def test_invalid_window_size_preset_cannot_be_loaded(tmp_path: Path, invalid: str) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(f"[gui]\nwindow_size_preset = {invalid}\n", encoding="utf-8")
+
+    with pytest.raises(SettingsError, match="window_size_preset"):
+        load_settings(path)
+
+
+def test_gui_settings_require_a_table(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('gui = "full_hd"\n', encoding="utf-8")
+
+    with pytest.raises(SettingsError, match="gui"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("invalid", ["unknown", 1, True, None])
+def test_invalid_window_size_preset_cannot_overwrite_existing_file(
+    tmp_path: Path, invalid: object
+) -> None:
+    path = tmp_path / "settings.toml"
+    original = '# keep\n[gui]\nwindow_size_preset = "hd"\ncustom = 3\n'
+    path.write_text(original, encoding="utf-8")
+    values = replace(Settings(), window_size_preset=invalid)
+
+    with pytest.raises(SettingsError, match="window_size_preset"):
+        save_settings(path, values)
+
+    assert path.read_text(encoding="utf-8") == original

@@ -358,9 +358,12 @@ def test_long_device_paths_and_errors_keep_video_controls_within_the_screen(
     shell.baseline = replace(shell.baseline, capture_device=path)
     shell.window.video.connect_button.click()
     error = "<b>not markup</b> " + "diagnostic/" * 300
-    capture.state = replace(capture.state, phase="error", error=error)
+    name = "<b>Camera</b>"
+    capture.state = replace(
+        capture.state, phase="error", error=error, devices=(DeviceInfo(name, path),)
+    )
     qtbot.waitUntil(lambda: shell.window.video.details.toPlainText() == error)
-    assert shell.window.video.source.text() == path
+    assert shell.window.video.source.text() == name
     assert shell.window.screen().availableGeometry().contains(shell.window.frameGeometry())
     panel = shell.window.video
     for button in (panel.connect_button, panel.disconnect_button):

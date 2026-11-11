@@ -215,6 +215,9 @@ def worker_main(
                 slot.publish,
                 lambda fps: send_message(status, WorkerMessage("opened", fps=fps)),
                 lambda: send_message(status, WorkerMessage("released")),
+                enumerated=lambda devices: send_message(
+                    status, WorkerMessage("devices", devices=devices)
+                ),
             )
     except Exception as failure:  # noqa: BLE001 -- sanitize the native driver boundary
         error = str(failure) if isinstance(failure, CaptureError) else "映像取得処理が失敗"

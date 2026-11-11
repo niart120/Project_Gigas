@@ -44,6 +44,33 @@ def test_worker_startup_deadline_invalidates_request_and_reaps_process() -> None
         assert not service.is_alive()
 
 
+def test_device_list_during_capture_does_not_disable_first_frame_deadline(tmp_path: Path) -> None:
+    marker = tmp_path / "release.txt"
+    entered = marker.with_suffix(".txt.entered.open")
+    service = CaptureService(
+        backend_factory=PeerBackend(str(marker), "hang-open"),
+        timeouts=CaptureTimeouts(startup=5, frame=0.2, stop=0.1, terminate=1),
+    )
+    service.start()
+    try:
+        assert service.connect(CaptureOptions("path-b", 16, 16))
+        listed = wait_for(service, lambda state: state.devices_revision == 1 and entered.exists())
+        assert listed.devices
+        assert listed.frame is None
+        failed = wait_for(service, lambda state: state.phase == "error", timeout=7)
+        assert failed.error == "映像取得の開始期限切れ"
+        assert failed.cleanup == "forced"
+        assert failed.frame is None
+        assert not marker.exists()
+    finally:
+        service.shutdown()
+        service.join(3)
+        assert not service.is_alive()
+    assert not any(
+        child.name.startswith("gigas-capture-") for child in multiprocessing.active_children()
+    )
+
+
 @pytest.mark.parametrize("scenario", ["hang-enumerate", "hang-open", "hang-read", "hang-release"])
 def test_blocked_native_boundary_is_forced_closed_after_explicit_stop(
     tmp_path: Path,

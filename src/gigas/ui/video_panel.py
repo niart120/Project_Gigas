@@ -2,12 +2,11 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -43,7 +42,18 @@ class VideoView(QWidget):
         super().__init__(parent)
         self._image = QImage()
         self._key: tuple[int, int] | None = None
+        self._preview_size = QSize(640, 360)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def set_preview_size(self, width: int, height: int) -> None:
+        """Set the display target while allowing the layout to allocate less space."""
+        self._preview_size = QSize(width, height)
+        self.setMaximumSize(self._preview_size)
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
+        """Prefer the selected display target without imposing a minimum size."""
+        return self._preview_size
 
     def set_frame(self, frame: "Frame | None") -> None:
         """Display the latest frame or clear the image when capture stops.
@@ -106,18 +116,12 @@ class VideoPanel(QWidget):
             actions.addWidget(widget)
         actions.addStretch()
         layout.addLayout(actions)
-        self.source = QLineEdit(self)
-        self.source.setReadOnly(True)
+        self.source = QLabel(self)
+        self.source.setTextFormat(Qt.TextFormat.PlainText)
+        self.source.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.source)
-        self.requested_mode = QLabel(self)
-        self.actual_mode = QLabel(self)
-        for label in (self.requested_mode, self.actual_mode):
-            label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setWordWrap(True)
-            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            layout.addWidget(label)
         self.view = VideoView(self)
-        layout.addWidget(self.view, 1)
+        layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
         self.details = QPlainTextEdit(self)
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(70)
@@ -159,22 +163,13 @@ class VideoPanel(QWidget):
         self.disconnect_button.setEnabled(
             available and phase in {"connecting", "streaming", "enumerating"}
         )
-        self.source.setText("" if settings is None else settings.capture_device)
-        self.requested_mode.setText(
-            "" if settings is None else f"要求 1920 x 1080 · {settings.capture_fps} FPS"
-        )
-        frame = snapshot.frame
-        self.actual_mode.setText(
-            ""
-            if frame is None
-            else f"取得 {frame.width} x {frame.height} · "
-            f"報告 {_rate(snapshot.reported_fps)} · 実測 {_rate(snapshot.measured_fps)} FPS"
-        )
+        names = [
+            device.name
+            for device in snapshot.devices
+            if settings is not None and device.path == settings.capture_device
+        ]
+        self.source.setText(names[0] if len(names) == 1 else "")
         detail = error or snapshot.error
         if self.details.toPlainText() != detail:
             self.details.setPlainText(detail)
         self.details.setVisible(bool(detail))
-
-
-def _rate(value: float | None) -> str:
-    return "—" if value is None else f"{value:.2f}"

@@ -8,7 +8,7 @@ import pytest
 
 from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
 from gigas.game_io.capture._process import SharedSlot
-from gigas.game_io.capture.models import CaptureOptions
+from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
 from tests.integration.peers.capture_peer import PeerBackend
 
 if TYPE_CHECKING:
@@ -115,6 +115,28 @@ def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
     assert not service.is_alive()
     assert service.snapshot().phase == "closed"
     assert marker.read_text(encoding="utf-8") == "released\nreleased\n"
+
+
+def test_direct_connection_reports_device_names_without_an_additional_enumeration(
+    capture: tuple[CaptureService, Path],
+) -> None:
+    service, marker = capture
+    assert service.snapshot().devices_revision == 0
+    assert service.connect(CaptureOptions("path-b", 16, 16, 60))
+    initial = wait_for(service, lambda state: state.frame is not None)
+
+    assert initial.devices == (DeviceInfo("Capture", "path-a"), DeviceInfo("Capture", "path-b"))
+    assert initial.devices_revision == 1
+    first = initial.frame
+    assert first is not None
+    progressed = wait_for(
+        service,
+        lambda state: state.frame is not None and state.frame.sequence >= first.sequence + 5,
+    )
+    assert progressed.phase == "streaming"
+    assert progressed.devices_revision == 1
+    assert marker.with_suffix(".txt.enumerated").read_text(encoding="utf-8") == "enumerated\n"
+    assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
 
 
 def test_shutdown_before_start_rejects_new_requests() -> None:
