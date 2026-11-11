@@ -52,10 +52,11 @@ class Frame:
 
 @dataclass(frozen=True, slots=True)
 class DeviceInfo:
-    """A display name and the DirectShow device path used for selection.
+    """A display name and opaque device identity used for selection.
 
-    The path identifies a current Windows device interface, not a permanent
-    physical serial number. Names and enumeration indices are not identifiers.
+    The path is a Windows device interface, Linux stable node alias, or macOS
+    uniqueID, not a universal physical serial number. Names and enumeration indices
+    are not identifiers; identities are not translated between operating systems.
     """
 
     name: str

@@ -195,7 +195,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | green | 可変寸法の共有と独立読取 | new / integration | 画素と寸法の原子性、容量検証、古い読取保持中も新プレビューが進む、取得時刻を保持 |
 | green | 取得解像度の要求への結合 | new / integration | 保存された5候補を対応する幅・高さの要求へ変換する |
 | todo | 取得設定適用の世代境界 | new / integration | 旧取得の解放を待つ、新設定の最初の画像で完了、失敗後旧画像を現在扱いしない、要求と実到着が違っても同じ要求値は適用済み、レターボックスを含む表示変更は再接続なし |
-| todo | OS別の列挙と機器照合 | new / unit | 方式ごとに番号が違う同一機器、同名同型2台、欠落・空・重複ID、利用不可方式、既存Windows設定の保持 |
+| green | OS別の列挙と機器照合 | new / unit | 方式ごとに番号が違う同一機器、同名同型2台、欠落・空・重複ID、利用不可方式、既存Windows設定の保持 |
 | todo | 代替取得の停止境界 | new / integration | 旧取得回収前に次を開かない、終了未確認なら停止、停止要求で連鎖取消し、全体期限、中間失敗と最終失敗を区別 |
 
 通常ラベルが消えたことや説明の文面だけを試験にせず、代表画面・長名・小画面・通知時を目視する。keyboard focus、Tab順、標準ボタンの誤発火も受入で確認する。
@@ -265,3 +265,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### A2 取得先要求と設定保存の分離
 
 `uv run pytest tests/integration/test_settings_apply_contract.py -q --basetemp=tmp/pytest-root --tb=short`: 新Dialog API未結合で4件red→4件green。未接続でも機器を記憶、同じ保存機器へ開始、一般変更で誤接続なし、失敗後の無編集再試行、保存B/実取得Aの保持を確認。要求と実到着の差は再適用の原因にしない。担当ruff/ty成功。refactor-done（fixtureの明示列挙完了をhelper化後同4件成功）。OK/取消しの完了条件はA3。
+
+### C3a OS別の列挙と機器照合
+
+新test_capture_platformsはOS固定・方式と番号未分離の11件red/1件pass→12件green。capture回帰92件成功。IndexedDeviceに方式を対応付け、列挙時のIDと接続候補を組にする。利用可能方式、同名別ID、Linux安定パス、Mac uniqueIDを機器非依存試験で確認。担当ruff/format/tyと独立レビュー成功。C2共有競合試験は非Noneの読取40件を必須とするよう補強し20件成功。代替取得への進行はC3b、他OS実機は未検証。

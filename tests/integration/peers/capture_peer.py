@@ -115,12 +115,12 @@ class PeerBackend:
             IndexedDevice(DeviceInfo("Capture", "path-b"), 7),
         )
 
-    def open(self, index: int) -> PeerCamera:
+    def open(self, device: IndexedDevice) -> PeerCamera:
         """Reject an incorrectly mapped transient index."""
         if self.scenario == "hang-open":
             _entered(self.marker, "open")
             time.sleep(3600)
-        if index != 7:
+        if device.index != 7:
             message = "unexpected selected index"
             raise ValueError(message)
         if self.marker:

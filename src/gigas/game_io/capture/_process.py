@@ -8,7 +8,7 @@ from multiprocessing.shared_memory import SharedMemory
 from struct import Struct
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from gigas.game_io.capture.backend import acquire_frames
+from gigas.game_io.capture.backend import acquire_frames, device_catalog
 from gigas.game_io.capture.models import CaptureError, DeviceInfo, Frame
 
 if TYPE_CHECKING:
@@ -214,7 +214,7 @@ def worker_main(
     try:
         backend = factory()
         if options is None:
-            devices = tuple(device.info for device in backend.enumerate() if device.info.path)
+            devices = device_catalog(backend.enumerate())
             send_message(status, WorkerMessage("devices", devices=devices))
         elif memory_name is not None and lock is not None:
             slot = SharedSlot(SharedMemory(name=memory_name), lock)

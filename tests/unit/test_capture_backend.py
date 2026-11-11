@@ -66,9 +66,9 @@ class Backend:
             IndexedDevice(DeviceInfo("Pathless", ""), 12),
         )
 
-    def open(self, index: int) -> Camera:
+    def open(self, device: IndexedDevice) -> Camera:
         """Record the index and return the camera."""
-        self.selected = index
+        self.selected = device.index
         return self.camera
 
 
@@ -257,7 +257,12 @@ def test_opencv_adapter_uses_directshow_and_excludes_pathless_sources(
     monkeypatch.setattr(capture_backend, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(capture_backend, "enumerate_cameras", enumerate_devices)
     monkeypatch.setattr(capture_backend.cv2, "VideoCapture", open_device)
+    monkeypatch.setattr(
+        capture_backend.cv2.videoio_registry, "getCameraBackends", lambda: (cv2.CAP_DSHOW,)
+    )
+    monkeypatch.setattr(capture_backend.cv2.videoio_registry, "hasBackend", lambda _api: True)
     backend = OpenCVBackend()
-    assert backend.enumerate() == (IndexedDevice(DeviceInfo("A", "path-a"), 3),)
-    assert backend.open(3) is camera
+    device = IndexedDevice(DeviceInfo("A", "path-a"), 3, cv2.CAP_DSHOW)
+    assert backend.enumerate() == (device,)
+    assert backend.open(device) is camera
     assert calls == [(cv2.CAP_DSHOW,), (3, cv2.CAP_DSHOW)]

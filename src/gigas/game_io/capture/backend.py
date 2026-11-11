@@ -1,9 +1,10 @@
-"""DirectShow device access confined to a capture worker process."""
+"""Platform-specific device access confined to a capture worker process."""
 
 import math
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic_ns
 from typing import TYPE_CHECKING, Protocol
 
@@ -16,19 +17,76 @@ from gigas.game_io.capture.models import (
     CaptureOptions,
     DeviceInfo,
     Frame,
-    select_device,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+_LINUX_ID_ROOTS = (Path("/dev/v4l/by-id"), Path("/dev/v4l/by-path"))
+
 
 @dataclass(frozen=True, slots=True)
 class IndexedDevice:
-    """A transient DirectShow index paired with its current device identity."""
+    """A stable selection identity paired with a transient API-specific index.
+
+    Attributes:
+        info: Display name and opaque selection identity.
+        index: Current enumeration index, meaningful only with this backend.
+        backend: Explicit OpenCV API identifier; zero is reserved for test adapters.
+    """
 
     info: DeviceInfo
     index: int
+    backend: int = 0
+
+
+def device_catalog(devices: tuple[IndexedDevice, ...]) -> tuple[DeviceInfo, ...]:
+    """Return one display entry per nonempty identity, preserving API priority."""
+    catalog: dict[str, DeviceInfo] = {}
+    for device in devices:
+        if device.info.path:
+            catalog.setdefault(device.info.path, device.info)
+    return tuple(catalog.values())
+
+
+def select_candidates(
+    devices: tuple[IndexedDevice, ...], device_path: str
+) -> tuple[IndexedDevice, ...]:
+    """Resolve an exact identity to unique candidates in backend priority order.
+
+    Args:
+        devices: Current enumeration with backend-specific indices.
+        device_path: Nonempty opaque identity, never a display name or numeric index.
+
+    Returns:
+        Matching candidates, each belonging to a different backend.
+
+    Raises:
+        CaptureError: The identity is absent or ambiguous within one backend.
+    """
+    matches = tuple(device for device in devices if device_path and device.info.path == device_path)
+    if not matches:
+        message = "映像取得元が見つからない"
+        raise CaptureError(message)
+    if len({device.backend for device in matches}) != len(matches):
+        message = "映像取得元の識別子が同一方式内で重複"
+        raise CaptureError(message)
+    return matches
+
+
+def _linux_identity(path: str) -> str | None:
+    try:
+        node = Path(path).resolve(strict=True)
+        for root in _LINUX_ID_ROOTS:
+            for alias in sorted(root.glob("*")):
+                try:
+                    if alias.resolve(strict=True) == node:
+                        return str(alias)
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return None
 
 
 class Camera(Protocol):
@@ -62,32 +120,60 @@ class CaptureBackend(Protocol):
         """Return current device identities and transient indices."""
         ...
 
-    def open(self, index: int) -> Camera:
-        """Open one index from the current enumeration."""
+    def open(self, device: IndexedDevice) -> Camera:
+        """Open a current candidate using its own API and index together."""
         ...
 
 
 class OpenCVBackend:
-    """Acquire Windows DirectShow video without importing GUI libraries."""
+    """Enumerate usable native APIs without importing GUI libraries or probing indices."""
+
+    @staticmethod
+    def _apis() -> tuple[int, ...]:
+        preferred = {
+            "win32": (cv2.CAP_DSHOW, cv2.CAP_MSMF),
+            "linux": (cv2.CAP_V4L2, cv2.CAP_GSTREAMER),
+            "darwin": (cv2.CAP_AVFOUNDATION,),
+        }.get(sys.platform, ())
+        registered = cv2.videoio_registry.getCameraBackends()
+        available = tuple(
+            api for api in preferred if api in registered and cv2.videoio_registry.hasBackend(api)
+        )
+        if not available:
+            message = "このOSまたはOpenCV構成に対応する映像取得方式がない"
+            raise CaptureError(message)
+        return available
 
     def enumerate(self) -> tuple[IndexedDevice, ...]:
-        """List selectable devices, excluding interfaces without a device path.
+        """List identities with explicit APIs, excluding sources without a safe identity.
+
+        Windows preserves device paths, macOS uses uniqueID, and Linux resolves
+        current nodes through by-id or by-path aliases. Numbers are never saved.
 
         Raises:
-            CaptureError: The platform is not Windows.
+            CaptureError: No supported native camera API is available.
         """
-        if sys.platform != "win32":
-            message = "映像取得はWindows DirectShowのみ対応"
-            raise CaptureError(message)
-        return tuple(
-            IndexedDevice(DeviceInfo(str(device.name), str(device.path)), int(device.index))
-            for device in enumerate_cameras(cv2.CAP_DSHOW)
-            if device.path
-        )
+        devices = []
+        for api in self._apis():
+            for device in enumerate_cameras(api):
+                if not device.path:
+                    continue
+                path = str(device.path)
+                identity = _linux_identity(path) if sys.platform == "linux" else path
+                if identity:
+                    devices.append(
+                        IndexedDevice(
+                            DeviceInfo(str(device.name), identity), int(device.index), api
+                        )
+                    )
+        return tuple(devices)
 
-    def open(self, index: int) -> Camera:
-        """Open the explicit DirectShow backend without choosing another device."""
-        return cv2.VideoCapture(index, cv2.CAP_DSHOW)
+    def open(self, device: IndexedDevice) -> Camera:
+        """Open the candidate's explicit API and index without CAP_ANY substitution."""
+        if device.backend not in self._apis() or device.index < 0:
+            message = "映像取得方式または機器番号が不正"
+            raise CaptureError(message)
+        return cv2.VideoCapture(device.index, device.backend)
 
 
 def acquire_frames(
@@ -119,14 +205,13 @@ def acquire_frames(
             within 16..3840 by 16..2160, or dimensions change after the first frame.
     """
     devices = backend.enumerate()
-    identities = tuple(device.info for device in devices if device.info.path)
+    identities = device_catalog(devices)
     if enumerated is not None:
         enumerated(identities)
-    selected = select_device(identities, options.device_path)
-    index = next(device.index for device in devices if device.info == selected)
+    selected = select_candidates(devices, options.device_path)[0]
     if stopped():
         return
-    camera = backend.open(index)
+    camera = backend.open(selected)
     try:
         if not camera.isOpened():
             message = "映像取得元を開けない"

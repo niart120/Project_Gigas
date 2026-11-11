@@ -1,4 +1,5 @@
 import multiprocessing
+import time
 from datetime import UTC, datetime
 from multiprocessing.shared_memory import SharedMemory
 from threading import Event, Thread
@@ -74,13 +75,16 @@ def test_shared_dimensions_and_pixels_remain_consistent_during_concurrent_copy()
 
     writer = Thread(target=publish, daemon=True)
     writer.start()
+    copied = 0
     try:
         slot.publish(sources[0])
         start.set()
-        for _ in range(40):
+        deadline = time.monotonic() + 3
+        while copied < 40 and time.monotonic() < deadline:
             frame = slot.read(4, 0)
             if frame is not None:
                 assert frame == sources[frame.sequence - 1]
+                copied += 1
     finally:
         stop.set()
         start.set()
@@ -88,6 +92,7 @@ def test_shared_dimensions_and_pixels_remain_consistent_during_concurrent_copy()
         slot.close(owner=True)
     assert not writer.is_alive()
     assert not failures
+    assert copied == 40
 
 
 def test_transport_rejects_undersized_mapping_without_taking_ownership() -> None:
