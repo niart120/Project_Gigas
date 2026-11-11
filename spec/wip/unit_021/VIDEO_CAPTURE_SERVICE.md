@@ -27,7 +27,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | C1 設定値を検査し機器パスで一意に選択する | new | unit | 同名・空ID・不在・重複・無効モード |
-| todo | C2 最新1枚の画像・連番・時計を加工から保護する | new | unit | 受信停止と再接続世代 |
+| refactor-skipped | C2 最新1枚の画像・連番・時計を加工から保護する | new | unit | 受信停止と再接続世代 |
 | todo | C3 DirectShow取得が要求を適用し実フレーム検証と解放を行う | new | unit | 読込失敗・寸法不一致・例外 |
 | todo | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
 | todo | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
@@ -41,6 +41,8 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 ## 7. 検証
 
 C1: `uv run --no-sync pytest tests/unit/test_capture_models.py --basetemp=tmp/pytest-capture -q` は未実装importによるred後、16 passed。担当範囲のruff check/formatとty checkはpass。既存構造を変更する必要はなくrefactor-skipped。依存・配布はC3で検証する。実機での製品経路と画質・表示は後続GUI結合で確認する。
+
+C2: `uv run --no-sync pytest tests/unit/test_capture_frames.py tests/unit/test_capture_models.py --basetemp=tmp/pytest-capture -q` は未実装importによるred後、21 passed。最新1枚・加工分離・時計保持・切断と旧世代の拒否を確認。担当ruff/tyはpass。責務はFrameと共有slotに分離済みのため追加refactorなし。
 
 ## 8. 先送り事項
 
