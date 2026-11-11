@@ -2,7 +2,7 @@
 
 ## 1. 目的・起点
 
-状態: complete（M1の独立API実装・検証完了）。2026-11-12着手・完了。親は[U04](../../wip/unit_009/RECORDED_OBSERVATION.md)。ユーザーのM1実装・検証依頼を受け、[M0の採用方針](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)を実行可能な観測・保存APIにする。M0は調査作業の完了であり、本書は製品実装と検証の完了を管理する。
+状態: complete（M1の独立API実装・検証完了）。2026-11-12着手・完了。親は[U04](../../complete/unit_009/RECORDED_OBSERVATION.md)。ユーザーのM1実装・検証依頼を受け、[M0の採用方針](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)を実行可能な観測・保存APIにする。M0は調査作業の完了であり、本書は製品実装と検証の完了を管理する。
 
 本書の検証件数とTDD記録はM1初回受入時点の履歴である。後続の[責務レビュー](../unit_033/OBSERVATION_STORAGE_REVIEW.md)で符号化と保存のAPIを分離し、空analysisと不要な試験を整理した。以下の公開境界は現在の契約へ更新する。
 

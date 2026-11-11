@@ -2,7 +2,7 @@
 
 ## 1. 目的・起点
 
-状態: complete（レビュー・修正・検証完了）。2026-11-12の追加レビュー依頼に着手・完了。[U04親](../../wip/unit_009/RECORDED_OBSERVATION.md)・[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を対象に、最新画像一枚の保存・返却を基準として責務と不要な仕組みを見直す。ユーザーは、MCPの観測保存と、その後のCodex解釈・対話履歴保存を同じロックで妨げないかを指摘した。
+状態: complete（レビュー・修正・検証完了）。2026-11-12の追加レビュー依頼に着手・完了。[U04親](../../complete/unit_009/RECORDED_OBSERVATION.md)・[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を対象に、最新画像一枚の保存・返却を基準として責務と不要な仕組みを見直す。ユーザーは、MCPの観測保存と、その後のCodex解釈・対話履歴保存を同じロックで妨げないかを指摘した。
 
 開始時は`codex/u04-m0-observation-design`、`23b8fad`。開始時の未追跡`debug.log`は作業中に利用者自身が削除したと回答を受けたため復元しない。
 

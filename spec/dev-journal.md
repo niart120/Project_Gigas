@@ -113,7 +113,7 @@ pauseはGoalを保持し、stopはGoalを破棄する。どちらも推論中断
 
 ### 現状
 
-2026-11-11のR02・R04は[U04 M2子仕様](wip/unit_035/MCP_OBSERVATION_INTEGRATION.md)のM2-03で再現し、既存のTurnStartedと終端状態の扱いを修正した。詳細なred/green・検証結果は子仕様へ集約する。
+2026-11-11のR02・R04は[U04 M2子仕様](complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)のM2-03で再現し、既存のTurnStartedと終端状態の扱いを修正した。詳細なred/green・検証結果は子仕様へ集約する。
 
 ### 観察
 
