@@ -27,6 +27,10 @@ class Settings:
         capture_fps: Requested integer capture rate, from 1 to 120 frames per second.
         preview_fps: GUI update limit, from 1 to 60 frames per second.
         window_size_preset: Display size key: hd, full_hd, wqhd, or four_k.
+        capture_resolution: Capture size request: auto, hd, full_hd, wqhd, or four_k.
+            The auto value leaves the device dimensions unchanged.
+        preview_letterbox: Preserve the preview aspect ratio with black padding when
+            true; stretch to the preview area when false. Capture pixels are unchanged.
     """
 
     capture_device: str = ""
@@ -37,6 +41,8 @@ class Settings:
     capture_fps: int = 60
     preview_fps: int = 30
     window_size_preset: str = "full_hd"
+    capture_resolution: str = "full_hd"
+    preview_letterbox: bool = True
 
 
 class SettingsError(ValueError):
@@ -115,6 +121,8 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         capture_fps=_integer(capture, "fps", path, 60, 1, 120),
         preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
         window_size_preset=_window_size_preset(gui.get("window_size_preset", "full_hd"), path),
+        capture_resolution=_capture_resolution(capture.get("resolution", "full_hd"), path),
+        preview_letterbox=_preview_letterbox(gui.get("preview_letterbox", True), path),
     )
 
 
@@ -137,6 +145,10 @@ def save_settings(path: "Path", settings: Settings) -> None:
     agent = _ensure_table(document, "agent", path)
     gui = _ensure_table(document, "gui", path)
     _set_text(gui, "window_size_preset", _window_size_preset(settings.window_size_preset, path))
+    letterbox = _preview_letterbox(settings.preview_letterbox, path)
+    if gui.get("preview_letterbox") != letterbox:
+        gui["preview_letterbox"] = letterbox
+    _set_text(capture, "resolution", _capture_resolution(settings.capture_resolution, path))
     _set_text(capture, "device", settings.capture_device)
     for key, value in (
         ("fps", settings.capture_fps),
@@ -227,6 +239,20 @@ def _window_size_preset(value: object, path: Path) -> str:
         msg = f"{path}: gui.window_size_preset must be hd, full_hd, wqhd or four_k"
         raise SettingsError(msg)
     return str(value)
+
+
+def _capture_resolution(value: object, path: Path) -> str:
+    if not isinstance(value, str) or value not in ("auto", "hd", "full_hd", "wqhd", "four_k"):
+        msg = f"{path}: capture.resolution must be auto, hd, full_hd, wqhd or four_k"
+        raise SettingsError(msg)
+    return str(value)
+
+
+def _preview_letterbox(value: object, path: Path) -> bool:
+    if not isinstance(value, bool):
+        msg = f"{path}: gui.preview_letterbox must be a boolean"
+        raise SettingsError(msg)
+    return value
 
 
 def _set_text(table: MutableMapping[str, object], key: str, value: str) -> None:
