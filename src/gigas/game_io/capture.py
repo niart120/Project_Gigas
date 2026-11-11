@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from gigas.game_io.backend import CaptureBackend
     from gigas.game_io.models import CaptureOptions, DeviceInfo, Frame
 
-__all__ = ["CaptureService", "CaptureSnapshot", "CaptureTimeouts"]
+__all__ = ["CaptureReader", "CaptureService", "CaptureSnapshot", "CaptureTimeouts"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +77,33 @@ class CaptureSnapshot:
     measured_fps: float | None = None
 
 
+class CaptureReader:
+    """Read shared capture state without owning connection or shutdown commands.
+
+    Obtain a reader from CaptureService.reader. Creating or discarding readers does
+    not open or close the device. Processing a returned image holds no capture lock.
+
+    Args:
+        snapshot: The owning service's host-side snapshot callback.
+    """
+
+    __slots__ = ("_read",)
+
+    def __init__(self, snapshot: "Callable[[], CaptureSnapshot]") -> None:
+        """Bind the shared state source without performing device I/O."""
+        self._read = snapshot
+
+    def snapshot(self) -> CaptureSnapshot:
+        """Return current immutable state and image, releasing locks before return.
+
+        Returns:
+            State with the latest valid frame or None after stop or failure. An older
+            snapshot retained by this reader stays unchanged and does not hold up
+            acquisition or other readers; consumers must recheck state for freshness.
+        """
+        return self._read()
+
+
 @dataclass(slots=True)
 class _Session:
     process: "BaseProcess"
@@ -128,6 +155,15 @@ class CaptureService(Thread):
         """Return current state and the immutable latest image without device I/O."""
         with self._condition:
             return replace(self._state, frame=self._frames.latest())
+
+    def reader(self) -> CaptureReader:
+        """Return a new read-only handle sharing this service's latest state.
+
+        Readers do not start acquisition or consume frames from one another. Keep
+        connection and shutdown ownership with this service; use separate readers
+        for preview and observation processing.
+        """
+        return CaptureReader(self.snapshot)
 
     def refresh_devices(self) -> bool:
         """Start enumeration unless busy, shutting down, or cleanup is unconfirmed."""

@@ -1,13 +1,13 @@
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 import pytest
 
 from gigas.game_io._capture_process import SharedSlot
-from gigas.game_io.capture import CaptureService, CaptureSnapshot
+from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
 from gigas.game_io.models import CaptureOptions
 from tests.integration.peers.capture_peer import PeerBackend
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def wait_for(
-    service: CaptureService,
+    service: CaptureService | CaptureReader,
     predicate: Callable[[CaptureSnapshot], bool],
     timeout: float = 8,
 ) -> CaptureSnapshot:
@@ -126,3 +126,63 @@ def test_shutdown_before_start_rejects_new_requests() -> None:
     service.join(2)
     assert not service.is_alive()
     assert service.snapshot().phase == "closed"
+
+
+def test_reader_has_no_ownership_commands_and_observes_state_without_starting() -> None:
+    service = CaptureService(backend_factory=PeerBackend())
+    reader = service.reader()
+    assert isinstance(reader, CaptureReader)
+    assert reader.snapshot() == CaptureSnapshot()
+    assert not service.is_alive()
+    assert all(not hasattr(reader, name) for name in ("connect", "disconnect", "shutdown", "start"))
+    service.shutdown()
+    assert reader.snapshot().phase == "stopping"
+
+
+def test_slow_reader_holds_image_without_stalling_shared_capture_or_preview(
+    capture: tuple[CaptureService, Path],
+) -> None:
+    service, marker = capture
+    preview = service.reader()
+    observation = service.reader()
+    assert service.connect(CaptureOptions("path-b", 16, 16, 60))
+    wait_for(preview, lambda state: state.frame is not None)
+    holding = Event()
+    resume = Event()
+    observed: list[CaptureSnapshot] = []
+
+    def retain_image() -> None:
+        observed.append(observation.snapshot())
+        holding.set()
+        resume.wait()
+        observed.append(observation.snapshot())
+
+    reader_thread = Thread(target=retain_image, daemon=True)
+    reader_thread.start()
+    try:
+        assert holding.wait(timeout=2)
+        retained = observed[0].frame
+        assert retained is not None
+        pixels = bytes([retained.sequence % 256]) * (16 * 16 * 3)
+        progressed = wait_for(
+            preview,
+            lambda state: state.frame is not None and state.frame.sequence >= retained.sequence + 5,
+        )
+        assert reader_thread.is_alive()
+        assert progressed.frame is not None
+        assert progressed.frame.generation == retained.generation
+        assert progressed.frame.bgr == bytes([progressed.frame.sequence % 256]) * (16 * 16 * 3)
+        assert retained.bgr == pixels
+        assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
+        service.disconnect()
+        assert preview.snapshot().frame is None
+        assert observation.snapshot().frame is None
+        assert wait_for(service, lambda state: state.phase == "idle").cleanup == "graceful"
+        assert marker.read_text(encoding="utf-8") == "released\n"
+        assert retained.bgr == pixels
+    finally:
+        resume.set()
+        reader_thread.join(2)
+        assert not reader_thread.is_alive()
+    assert len(observed) == 2
+    assert observed[1].frame is None

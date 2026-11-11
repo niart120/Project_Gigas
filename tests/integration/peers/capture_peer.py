@@ -113,6 +113,9 @@ class PeerBackend:
         if index != 7:
             message = "unexpected selected index"
             raise ValueError(message)
+        if self.marker:
+            with Path(self.marker + ".opened").open("a", encoding="utf-8") as stream:
+                stream.write("opened\n")
         return PeerCamera(self.marker, self.scenario)
 
 

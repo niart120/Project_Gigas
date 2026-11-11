@@ -42,19 +42,19 @@
 
 取得子→共有領域→監視スレッド→最新1枚のFrameStoreを一つの取得経路とする。サービスの所有・開始停止と読み取りを分け、`CaptureService.reader()`が読み取り専用の`CaptureReader`を返す。各readerは`snapshot()`だけを公開し、connect/disconnect/shutdownの所有操作を持たない。readerの生成・破棄で機器を開閉しない。プレビューと後続観測は別のreaderを持つ。
 
-`snapshot()`は変更不能なFrameの参照を返し、参照を渡した時点でロックを解放する。プレビューのQImage変換、観測側の画像変換・保存・送信は各読み手の責務で、取得ロックやGUIスレッドを占有しない。観測側が古いFrameを保持していても、取得とプレビューは新しい連番へ進む。保持した画像の画素は変わらない。NyXの読み手別portと共有所有者を踏襲し、mutable配列のcopyの代わりにimmutable bytesを安全に共有する。
+`snapshot()`は状態と変更不能なFrameの参照を含む`CaptureSnapshot`を返し、参照を渡した時点でロックを解放する。プレビュー変換は取得ロック外で、観測側の画像変換・保存・送信はGUIスレッド外で行う。観測側が古いFrameを保持していても、取得とプレビューは新しい連番へ進む。保持した画像の画素は変わらない。NyXの読み手別portと共有所有者を踏襲し、mutable配列のcopyの代わりにimmutable bytesを安全に共有する。
 
 U04はこの共有APIの上に要求後の鮮度条件・停止状態の再確認・画像の確定と保存を設計する。MCP要求ごとに別デバイスを開いたり、プレビューから画像を消費したりしない。実MCP・エンコード負荷の確認はU04で実施する。
 
 ### モジュールの配置
 
-`game_io/capture/`へ取得のservice、backend、models、frames、private process transportをまとめる。`game_io/capture/__init__.py`からCaptureService / CaptureSnapshot / CaptureTimeoutsを公開し、アプリ側の入口を保つ。内部モデル参照は新しいパッケージへ統一する。未公開のPR内の整理なので旧平置きへの互換shimは追加しない。将来の入力は隣の機能パッケージで分けるが、空のinputディレクトリは作らない。機器APIとUIを同じパッケージへ混ぜない。
+`game_io/capture/`へ取得のservice、backend、models、frames、private process transportをまとめる。`game_io/capture/__init__.py`からCaptureReader / CaptureService / CaptureSnapshot / CaptureTimeoutsを公開し、アプリ側の入口を保つ。内部モデル参照は新しいパッケージへ統一する。未公開のPR内の整理なので旧平置きへの互換shimは追加しない。将来の入力は隣の機能パッケージで分けるが、空のinputディレクトリは作らない。機器APIとUIを同じパッケージへ混ぜない。
 
 ## 5. TDD Test Listと進行順
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | R1 読み取り専用portを分け、遅い読み手が画像を保持しても取得とプレビューが進む | new/regression | integration | readerの公開APIはred→green。実spawnで1取得元・世代・連番・保持画像不変・切断時失効を検査。MCP代替成功とはしない |
+| refactor-skipped | R1 読み取り専用portを分け、遅い読み手が画像を保持しても取得とプレビューが進む | new/regression | integration | reader APIの欠如でred→2件green。実spawnでopen1回・同じ世代の連番進行・保持画素不変・切断時失効を確認。MCP実接続の検証ではない |
 | todo | R2 取得をcaptureパッケージへまとめる | characterization | unit/integration/package | tidy-firstとして振る舞い変更と分離。greenを確認して移動し、公開import/実spawn/配布を再検証 |
 | todo | R3 機器を一覧だけから選択し用途別の設定を明示保存する | regression | integration | パス手入力不要、未検出・同名・更新・未保存選択・既存値保護、取得寸法固定 |
 | todo | R4 表示プリセットを切り替えても取得と共有画像を変えない | new | unit/integration | 4段階・保存/再読込・画面内配置・接続中反映・表示診断除去 |
@@ -67,7 +67,18 @@ R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。
 
 ## 7. 検証計画と現在地
 
-NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。追加製品実装・自動試験・新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1の実装と下記模擬境界の自動試験を完了した。R2〜R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+
+### R1: 読み取り専用APIと複数読み手
+
+2026-11-11、`CaptureReader`と`CaptureService.reader()`を追加。readerは所有側のsnapshot参照だけを保持し、取得経路やフレームのqueueを増やさない。旧画像を保持する観測スレッドをEventで停止し、その間に別のプレビュー用readerで同じ世代の連番が5以上進むことを実spawnで確認した。子のopen記録は1回で、保持画素は不変、切断後の両readerは画像なし、停止中の読み手を待たずにgraceful解放した。実GUI・MCP・保存負荷はこの試験の対象外。
+
+- red: `uv run --no-sync pytest tests/integration/test_capture_service.py -k reader --basetemp=tmp/pytest-capture-r1-red -q`。未実装のCaptureReaderのimportで失敗した。
+- green: 同じ対象を`--basetemp=tmp/pytest-capture-r1-green`で実行し2 passed。既存の非占有性に人工的なredは作らなかった。
+- 回帰: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/integration/test_capture_service.py tests/integration/test_capture_failures.py --basetemp=tmp/pytest-capture-r1-312 -q -o faulthandler_timeout=30`はPython 3.12.10で53 passed。
+- 型/docstring: `uv run --no-sync ruff check src/gigas/game_io tests/integration/test_capture_service.py tests/integration/peers/capture_peer.py`、同範囲の`ruff format --check`、`uv run --no-sync ty check --no-progress`は成功。戻り値CaptureSnapshot、画像のNone、ロック解放と保持画像の寿命をdocstring・公開API文書で照合した。新しいAny/cast/ignoreはない。
+- tidy判断: R1は公開APIの振る舞い変更、R2の配置整理は別コミットへ分離する。reader追加は小さい委譲のみで重複整理は不要のためrefactor-skipped。GUI側の専用readerへの接続はR3で行う。
+- 独立レビュー: 製品APIに必須指摘なし。試験側Eventの8秒期限が取得待機と停止待機の合計より短いという指摘を採用し、試験の`finally`で必ず解放する待機へ修正した。対象2件を再実行して成功した。
 
 ## 8. 先送り事項
 
