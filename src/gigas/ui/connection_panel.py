@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -25,6 +24,7 @@ from gigas.runtime.codex.models import (
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.notifications import Notice
+from gigas.ui.prompt_edit import PromptEdit
 from gigas.ui.request_card import RequestCard
 from gigas.ui.transcript import Transcript
 
@@ -116,7 +116,7 @@ class ConnectionPanel(QWidget):
         self.requests.setWidget(self._request_content)
         self.requests.hide()
         layout.addWidget(self.requests, 2)
-        self.prompt = QPlainTextEdit(self)
+        self.prompt = PromptEdit(self)
         self.prompt.setMaximumHeight(130)
         layout.addWidget(self.prompt, 1)
         turn_actions = QHBoxLayout()
@@ -131,6 +131,7 @@ class ConnectionPanel(QWidget):
         self.login_action.triggered.connect(self._login)
         self.open_login_button.clicked.connect(self._open_login)
         self.send_button.clicked.connect(self._send)
+        self.prompt.submit_requested.connect(self.send_button.click)
         self.interrupt_button.clicked.connect(self.interrupt)
         self.prompt.textChanged.connect(self._render)
         self._render()

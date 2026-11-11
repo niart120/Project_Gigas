@@ -4,7 +4,7 @@ from html import escape
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -49,6 +49,9 @@ class MainWindow(QMainWindow):
         self.window_size_group.setExclusive(True)
         self.file_menu = self.menuBar().addMenu("ファイル")
         self.settings_action = self.file_menu.addAction("設定…")
+        self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
         self.exit_action = self.file_menu.addAction("終了")
         self.exit_action.triggered.connect(self.close)

@@ -75,9 +75,10 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09。GUI 7 failed→146 passed、core 10 failed→65 passed |
 | refactor-skipped | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03。新規11件、関連117 passed |
 | refactor-skipped | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10。2 failed→29 passed |
-| todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
+| refactor-skipped | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11。4 failed / 9 passed→関連80 passed |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
 | refactor-skipped | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 6 failed / 17 passed→35 passed |
+| todo | T13: 小画面の承認・詳細操作を横スクロールなしで表示 | regression | integration / manual | 最終描画で取消しボタンの15pxはみ出しを再現 |
 
 ## 6. 対象ファイルと責務
 
@@ -122,6 +123,10 @@ T08: メニューと設定の共有QAction、表示時の非同期列挙、保�
 T08の追加redでは、長い同名機器の末尾番号が消える問題、重複IDを含む一覧更新後の旧action残存、設定再読込後に保存値と取得中の値が異なると選択済み項目から適用できない問題を確認・修正。`test_main_menus.py`の11件と関連11ファイル117 passed、対象18 Pythonファイルのruff/format・全体ty・差分検査成功。独立レビューの必須指摘を解消した。表示名の組立は設定とメニューで共用し、追加のgreen後構造整理は不要。
 
 T09: `uv run pytest tests/integration/test_auth_choices.py -q --basetemp=tmp/pytest-t09-red --tb=short`で、新規APIキー選択と既存値の選択可否の2件をredにした。新規候補はChatGPTだけとし、保存済みAPIキー方式は無効な候補として保持する。無関係な編集・保存では保持し、ChatGPTへ変更した後は再選択できない。同ファイルと`test_app_settings.py`、`test_video_settings_gui.py`は29 passed。対象ruff/format・全体ty・差分検査成功。認証機能や設定schemaは変えていない。green後の追加構造整理は不要。
+
+T10: `uv run pytest tests/integration/test_keyboard_workflow.py -q`でショートカット未実装による4 failed / 9 passedを確認。設定の共通QActionへ`Ctrl+,`を登録し、入力欄の`Ctrl+Enter`は送信ボタンのクリックと同じ可否判定を通す。Enter単独は改行、テンキーEnterも対応し、IME変換中・キー自動反復・送信不可・要求回答中は送信しない。最終14件と関連8ファイルは80 passed、対象ruff/format・全体ty・差分検査成功。既存の終了取消し・保存失敗後の無再開も同時に確認した。IMEはQtのpreedit/commit/取消しイベントを模擬した検証で、Windows IME実機確認とは区別する。追加構造整理は不要。
+
+T13の起点: 最終描画で、800×600作業領域の承認欄はviewport258pxに対して294pxを必要とし、横スクロール36px、取消しボタンが右端から15pxはみ出すことを確認した。T10とは別itemとして修正する。
 
 ## 8. 先送り事項
 
