@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
+from gigas.app.video import VideoController
 from gigas.runtime.codex.models import ConnectionOptions
 from gigas.services.codex import CodexServiceThread
 from gigas.storage.settings import Settings
@@ -18,6 +19,8 @@ from gigas.ui.settings_dialog import SettingsDialog
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from gigas.app.video import CapturePort
+
 
 class ApplicationShell(QObject):
     """Own the main window and the application's settings path.
@@ -26,6 +29,7 @@ class ApplicationShell(QObject):
         path: Explicit settings path; tests must supply an isolated location.
         io: Synchronous settings operations isolated in the owned thread.
         service: Optional unstarted Codex service owned until application shutdown.
+        capture_service: Optional unstarted capture service owned until confirmed cleanup.
     """
 
     requested = Signal(str, object)
@@ -37,6 +41,7 @@ class ApplicationShell(QObject):
         io: SettingsIO | None = None,
         *,
         service: CodexServiceThread | None = None,
+        capture_service: "CapturePort | None" = None,
     ) -> None:
         """Construct views without displaying them."""
         super().__init__()
@@ -53,6 +58,10 @@ class ApplicationShell(QObject):
         self._stopped = False
         self._service_unavailable = False
         self.service = CodexServiceThread() if service is None else service
+        self.video = VideoController(self.window.video, capture_service, self)
+        self.video.changed.connect(self._video_changed)
+        self.video.devices_changed.connect(self._update_capture_devices)
+        self.window.video.connect_requested.connect(self.connect_video)
         self.confirmation: QMessageBox | None = None
         self.wait_expired = False
         self.wait_timer = QTimer(self)
@@ -86,7 +95,24 @@ class ApplicationShell(QObject):
         fit_to_screen(self.window)
         self.io_thread.start()
         self.service.start()
+        self.video.start()
         self._request("load")
+
+    def connect_video(self) -> None:
+        """Connect video using the last successful settings snapshot."""
+        if self.ready and not self.committed and self.pending is None:
+            self.video.connect_capture(self.baseline)
+
+    @Slot()
+    def _video_changed(self) -> None:
+        self._render()
+        if self.committed:
+            self._finish_shutdown()
+
+    @Slot()
+    def _update_capture_devices(self) -> None:
+        if self.dialog is not None:
+            self.dialog.set_capture_devices(self.video.devices)
 
     def connect_codex(self) -> None:
         """Connect using the last successfully loaded or saved settings snapshot."""
@@ -117,6 +143,8 @@ class ApplicationShell(QObject):
             self.dialog.changed.connect(self._render)
             self.dialog.close_requested.connect(lambda: self._close("dialog"))
             self.dialog.cancel_close_requested.connect(self.cancel_close)
+            self.dialog.capture_refresh_requested.connect(self.video.refresh_devices)
+            self.dialog.set_capture_devices(self.video.devices)
         self._render()
         self.dialog.show()
         fit_to_screen(self.dialog)
@@ -200,6 +228,8 @@ class ApplicationShell(QObject):
                         targets.append(f"設定終了 · {self.path}")
                     if not self.service.wait(0):
                         targets.append("Codex終了")
+                    if not self.video.shutdown_complete:
+                        targets.append("映像終了")
                 state = " · ".join([state, *targets])
         self.window.status.setText(state)
         self.window.cancel_close_button.setVisible(cancelable)
@@ -211,12 +241,19 @@ class ApplicationShell(QObject):
             not self.committed and self.pending is None and not self._service_unavailable,
             settings_ready=self.ready,
         )
+        self.video.set_available(
+            not self.committed and self.pending is None,
+            settings_ready=self.ready,
+        )
         if self.dialog is not None:
             self.dialog.status.setText(state)
             self.dialog.details.setPlainText(self.error)
             self.dialog.details.setVisible(bool(self.error))
             idle = self.operation is None and self.pending is None and not self.committed
             self.dialog.set_editable(idle and self.ready)
+            self.dialog.capture_refresh_button.setEnabled(
+                idle and self.ready and self.video.can_refresh
+            )
             self.dialog.save_button.setEnabled(idle and self.ready)
             self.dialog.reload_button.setEnabled(idle)
             self.dialog.cancel_close_button.setVisible(cancelable)
@@ -276,6 +313,7 @@ class ApplicationShell(QObject):
             self.committed = True
             self.wait_timer.start()
             self.service.shutdown()
+            self.video.shutdown()
             if self.io_thread.isRunning():
                 self.io_thread.quit()
             else:
@@ -312,6 +350,12 @@ class ApplicationShell(QObject):
             return
         if not self.io_thread.wait(0) or not self.service.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
+            return
+        if not self.video.shutdown_complete:
+            if self.video.shutdown_error:
+                self.window.status.setText(self.video.shutdown_error)
+            else:
+                QTimer.singleShot(10, self._finish_shutdown)
             return
         if self.service.shutdown_error:
             self.window.status.setText(self.service.shutdown_error)
