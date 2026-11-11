@@ -156,3 +156,19 @@ RED/GREEN: storage/service既存試験の改訂は17 failed / 45 passed→62 pas
 並行担当のpytestが既定一時フォルダーを共有して失敗したため、担当ごとのbasetempへ分けて対象試験を再検証した。各担当のruff/tyは成功。全体gateは全担当の編集停止後にrootで実行する。実モデル・終了後公開thread/read・実映像・GUI目視はこの模擬検証では完了とせず、M2-08に残す。
 
 rootの最終gate: `uv run --no-sync pytest tests/unit tests/integration -q --basetemp=tmp/pytest-m2-lifecycle-full` 465 passed（42.59秒）。ruff format（173 files）、ruff check、ty、uv lock --check、uv build、git diff --check成功。uv syncは再試行したが、承認済み権限からのプロセス確認でもPID65012のGigasが継続しており、実行ファイル置換で失敗した。アプリ終了の依頼は保留し、当該gateを成功としない。
+
+M2-05は0cab964、M2-06/07の製品結合はa269a24へコミット済み。変更Markdown12件のローカル参照141件と35unitの一意性を確認した。
+
+### M2-08 固定画像の実モデル受入と承認経路の修正
+
+`uv run --no-sync python -X utf8 tmp/m2-product-model-probe.py --run-model`を承認済み権限で実行。既定の製品factory、既存ChatGPT認証、gpt-6.1-sol/low、固定4K Frameを使用した。初回（tmp/m2-product-model-buz3w2e5/results.json）はthreadの永続化と終了後公開readに成功したが、observeは失敗し、画像記録0件だった。公開readのMCPエラーはuser rejected MCP tool call。利用者の拒否操作ではなく、製品が対応していない承認経路で拒否されたものとして調査した。
+
+モデルを使わない公開mcpServer/tool/callでは製品MCPの画像返却・保存に成功した（tmp/m2-direct-product-mcp-rlstaikh/results.json）。この限定RPCはモデル経由の承認を通らず、以前の限定成功では承認経路を検証できていなかった。[採用tagの判定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)と[MCP ToolAnnotations](https://modelcontextprotocol.io/specification/2025-06-18/schema#toolannotations)を確認。annotations未指定では破壊的変更/開いた外界との相互作用を既定で仮定する。
+
+observeにdestructiveHint:false、openWorldHint:falseを付けた。操作対象はアプリの映像と記録先に限られ、保存は新規画像と追記で既存記録を破壊しない。保存の副作用があるためreadOnlyHint:trueやidempotentHint:trueとはしない。承認UIの追加、既存承認の自動応答、全ツールの許可設定変更は不要だった。既存実HTTP試験へtools/listの公開契約を統合し、RED 1 failed / 3 passed（annotations欠落）→GREEN 4 passed。対象ruff/ty成功。
+
+同じ実モデル受入を再実行した結果（tmp/m2-product-model-f0zxgi8v/results.json）、中央のランダム英数字・四隅色・観測IDが全一致した。observeは一回、保存PNGは3,802,894 bytesで加工結果とhash一致、記録失敗なし、通常終了とwriter再open成功。終了後に新しいapp-serverの公開thread/read(includeTurns:true)で同ID/cwd・ユーザー入力・観測ID付き回答を再読込できた。
+
+実MCP完了通知は切詰め済みtextで、受信JSON一行は1,049,142 bytesだった。旧受信1 MiBを超え、変更した2 MiB内に収まった。公開thread/readのMCP結果も切詰め済みで、通知や履歴のbase64から原PNGを復元する経路ではないことを実測した。モデル内部のリサイズ等までPNG bytes一致と保証するものではない。実Frameは固定値であり、実機確認・保存画像を後のターンから参照する検証・実turn時の秘密値残存・GUI目視は未完了として残す。
+
+修正後の局所回帰: MCP/サービス27 passed、全体ruff format/check・ty・uv build・git diff --check成功。全体465件はa269a24時点の結果であり、この修正では影響する実HTTP/サービスと実モデルを再検証した。

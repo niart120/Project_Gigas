@@ -94,6 +94,13 @@ def test_http_observations_return_same_images_before_saving(
         try:
             async with client_for(server) as client:
                 await initialize(client, server.url)
+                catalog = await client.post(
+                    server.url, json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"}
+                )
+                tool = catalog.json()["result"]["tools"][0]
+                assert tool["name"] == "observe"
+                assert tool["annotations"]["destructiveHint"] is False
+                assert tool["annotations"]["openWorldHint"] is False
                 first = (await observe(client, server.url)).json()["result"]
                 assert await asyncio.to_thread(entered.wait, 3)
                 second = (await observe(client, server.url)).json()["result"]

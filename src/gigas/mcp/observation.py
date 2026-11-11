@@ -12,7 +12,7 @@ from uuid import uuid4
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp_types import CallToolResult, ImageContent, TextContent
+from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
 from gigas.game_io.observation import ObservationError
 
@@ -107,7 +107,11 @@ class ObservationMcpServer:
             host = f"127.0.0.1:{listener.getsockname()[1]}"
             self._url = f"http://{host}/mcp"
             mcp: MCPServer[object] = MCPServer(self._name, log_level="WARNING")
-            mcp.tool(name="observe", structured_output=False)(self._observe)
+            mcp.tool(
+                name="observe",
+                structured_output=False,
+                annotations=ToolAnnotations(destructive_hint=False, open_world_hint=False),
+            )(self._observe)
             app = mcp.streamable_http_app(
                 json_response=True,
                 stateless_http=True,

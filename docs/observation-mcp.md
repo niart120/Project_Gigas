@@ -18,6 +18,8 @@ GUIからの切断・アプリ終了でも同じ回収を行います。次の�
 
 公開するツールは引数なしの`observe`です。最新の有効なFrameから観測サービスが確定した画像を返します。
 
+`tools/list`では`destructiveHint: false`と`openWorldHint: false`を公開します。対象はアプリの映像と記録先に限られ、既存記録を破壊せず追記します。アプリが観測を保存するため、環境を変更しないことや繰返し呼出しで追加効果がないことは宣言しません。この情報は当該observeの性質を示し、他ツールの承認設定は変更しません。
+
 - image content: 完成したPNGをbase64化したもの。MCP公開部で画像加工・再符号化は行いません。
 - text content: JSONの`observation_id`、`captured_at`、`source_frame`、`image`。元Frameの識別情報・寸法と出力画像の形式・寸法を区別します。
 
