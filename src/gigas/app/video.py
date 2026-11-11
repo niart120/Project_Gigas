@@ -85,6 +85,8 @@ class VideoController(QObject):
         self._disconnecting = False
         self._request_error = ""
         self._revision = 0
+        self._enumerating = False
+        self._discovery_error = ""
         self._next_image = 0.0
         self._preview_fps = 30
         self._last_state: tuple[str, str, str, bool] | None = None
@@ -98,6 +100,21 @@ class VideoController(QObject):
     def devices(self) -> "tuple[DeviceInfo, ...]":
         """Return the most recent successful enumeration for an opened dialog."""
         return self._snapshot.devices
+
+    @property
+    def devices_checked(self) -> bool:
+        """Whether any successful enumeration has supplied the current catalog."""
+        return self._snapshot.devices_revision > 0
+
+    @property
+    def discovering(self) -> bool:
+        """Whether an explicit catalog request is still awaiting worker cleanup."""
+        return self._enumerating
+
+    @property
+    def discovery_error(self) -> str:
+        """Return the last catalog failure without discarding earlier identities."""
+        return self._discovery_error
 
     @property
     def can_refresh(self) -> bool:
@@ -147,8 +164,10 @@ class VideoController(QObject):
         self._render()
 
     def refresh_devices(self) -> None:
-        """Request an explicit enumeration without changing pending settings."""
+        """Request enumeration when idle without changing pending settings or video."""
         if self.can_refresh and self.service.refresh_devices():
+            self._enumerating = True
+            self._discovery_error = ""
             self._request_error = ""
             self._poll()
 
@@ -188,6 +207,7 @@ class VideoController(QObject):
 
     def disconnect_capture(self) -> None:
         """Clear displayed pixels before requesting asynchronous cleanup."""
+        self._enumerating = False
         self._disconnecting = True
         self.panel.view.set_frame(None)
         self.service.disconnect()
@@ -211,8 +231,15 @@ class VideoController(QObject):
         if self._started and not alive and not self._closing:
             snapshot = replace(snapshot, phase="error", frame=None, error="映像サービス終了")
         self._snapshot = snapshot
+        enumerating = self._enumerating
+        if self._enumerating:
+            self._discovery_error = snapshot.error
+            if snapshot.phase in {"idle", "error", "closed"} or snapshot.cleanup == "unconfirmed":
+                self._enumerating = False
         if snapshot.devices_revision != self._revision:
             self._revision = snapshot.devices_revision
+            if not enumerating:
+                self._discovery_error = ""
             self.devices_changed.emit()
         self._render()
         if self._closing or snapshot.phase != "streaming" or snapshot.frame is None:

@@ -46,6 +46,8 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 
 通知は必要時の非モーダル表示とステータスバーの入口を使い、詳細はモデルレスの画面で開く。設定・映像・Codex・終了の発生元ごとに保持し、一方の失敗で他方を消さない。古い通知から旧接続世代へ操作を送る再試行callbackは保持せず、現在有効な設定・接続の操作へ戻す。NyXは常設ログとマクロ失敗時のRetryモーダルを持つが、Gigasではこの自動モーダル・再実行を移植しない。
 
+通知は発生元ごとの「最近の失敗」であり、未解決件数や現在の接続状態ではない。後の成功でも履歴は保持し、現在の状態は接続サービスの値で別に表示する。通知を閉じても終了確認や復旧が成立した扱いにしない。詳細の選択・コピー中に別の通知で本文を置き換えず、再選択・再表示時に更新する。同じ失敗のポーリング通知はまとめるが、明示的な再試行が再び失敗した場合は新しい通知として表示する。
+
 長い機器名・モデル名・診断が最小幅を押し広げない。短い状態表示と詳細を分け、800×600の作業領域でも操作部品へ到達できる。ログ保存の新しい仕組みや一般的な通知基盤を過剰に作らない。
 
 ### 4.4 会話と質問・承認
@@ -66,7 +68,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-done | T02: 応答更新で閲覧位置・選択を保持し、末尾追従を区別 | regression | integration | RV06。選択消失・折返し位置ずれでred→21 passed |
 | refactor-skipped | T03: 要求解決と回答送信結果を区別し、tokenごとに状態を反映 | regression | unit / integration | RV07。5 failed / 4 passed→81 passed |
 | refactor-skipped | T04: 小画面の要求を優先表示し、完了内容を折り畳んで下書きを保持 | regression | integration | RV08。初期4件と通知順競合のred→39 passed |
-| todo | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02 |
+| refactor-skipped | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02。5 failed / 1 passed→80 passed |
 | todo | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01 |
 | todo | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09 |
 | todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
@@ -76,7 +78,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 
 ## 6. 対象ファイルと責務
 
-`app/shell.py`は設定保存と接続・終了調整、`app/video.py`は映像の状態遷移、`ui/`はメニュー・表示・通知・編集。`runtime/codex`と`services/codex.py`は必要な回答結果の契約だけ変更する。テストは対応するunit/integrationへ追加する。利用手順は`docs/`、規約はAGENTS.mdと初期仕様へ反映する。
+`app/shell.py`は設定保存と接続・終了調整、`app/video.py`は映像の状態遷移、`ui/`はメニュー・表示・通知・編集。`runtime/codex`と`services/codex.py`は回答結果と失敗通知の対応付けに必要な契約を変更する。同じ失敗を状態イベントと操作結果の両方で通知する場合は共通の識別子で対応付け、同じ文章の別操作を消さない。RPCや再試行機構は変更しない。テストは対応するunit/integrationへ追加する。利用手順は`docs/`、規約はAGENTS.mdと初期仕様へ反映する。
 
 ## 7. 検証計画・実績
 
@@ -97,6 +99,8 @@ T03: 回答直後の誤った送信済み表示・解決通知での上書き・
 T11: T03完了後に選択。`uv run pytest tests/integration/test_transcript_reading.py -q`でASCIIからemojiへの置換4例が選択文字を失うred（4 failed / 9 passed）を確認。置換範囲内の端点をUnicode文字境界へ進める最小修正により、同ファイルと`test_codex_gui.py`は25 passed。対象ruff/format・全体ty成功。変更範囲内の選択は元の文字を保持できないため、端点を収める契約をdocstringへ明記した。追加構造変更は不要。
 
 T04: 要求中の領域不足、完了カードの未折り畳み、長い選択肢による横幅拡張など4件をredで確認。入力欄の同一インスタンスを隠して下書きと選択を保持し、要求の見出しから表示する。独立レビューで、回答送信中にターン完了が先着すると非表示の下書きが送信可能になる競合もredにし、要求中の送信を無効化した。関連GUI試験39 passed、対象ruff/format・全体ty・差分検査成功。追加構造変更は不要。模擬イベントによるoffscreen描画ではHD相当の要求欄153px（修正前68px）、Full HD相当710px。8画面で見出し・判断操作・折り返しを確認した。描画時だけMeiryo UI 9ptを指定しており、実Codex・実機・IME・複数DPIの検証とは区別する。
+
+T05: `uv run --no-sync pytest tests/integration/test_device_discovery_gui.py --basetemp=tmp/pytest-t05-red -q -o faulthandler_timeout=30`で初回・再表示時の自動列挙と状態区別が未実装であるred（5 failed / 1 passed）を確認。表示時の列挙予定を設定読込後まで保持し、表示済みダイアログの再フォーカスや取得中の映像を邪魔しない。候補・未保存値を保持したまま検索中・未確認・未検出・列挙失敗を区別する。一覧と終了未確認が同時に届いた場合にも失敗を消さない回帰を追加した。関連9試験ファイル80 passed、対象ruff/format・全体ty・差分検査成功。画面試験の暗黙の取得サービスだけを無機器の制御用実装へ差し替え、明示的な実サービスと模擬backendによるプロセス試験は維持した。実spawn試験で列挙だけでは映像を開かず、接続後の設定再表示でも連番が進むことを確認した。共用fixtureの移動はred前の試験境界整理であり、green後の追加構造変更は不要。
 
 ## 8. 先送り事項
 

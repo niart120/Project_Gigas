@@ -13,7 +13,8 @@ from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import Frame
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
-from tests.integration.test_video_gui import ControlledCapture, PreviewClocks
+from tests.integration.peers.controlled_capture import ControlledCapture
+from tests.integration.test_video_gui import PreviewClocks
 from tests.integration.test_video_gui import (
     video_shell as video_shell,  # noqa: PLC0414 -- expose the shared pytest fixture
 )

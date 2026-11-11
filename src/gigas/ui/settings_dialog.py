@@ -48,6 +48,8 @@ class SettingsDialog(QDialog):
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
         self._selected_device = ""
         self._devices: tuple[DeviceInfo, ...] = ()
+        self._devices_checked = False
+        self._devices_searching = False
         self.setWindowTitle("設定")
         self.resize(560, 440)
         layout = QVBoxLayout(self)
@@ -71,6 +73,14 @@ class SettingsDialog(QDialog):
         selection.addWidget(self.capture_choices, 1)
         selection.addWidget(self.capture_refresh_button)
         self.video_form.addRow("機器", selection)
+        self.capture_discovery_status = QLabel("未確認", self)
+        self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.video_form.addRow("機器一覧", self.capture_discovery_status)
+        self.capture_discovery_error = QPlainTextEdit(self)
+        self.capture_discovery_error.setReadOnly(True)
+        self.capture_discovery_error.setMaximumHeight(70)
+        self.capture_discovery_error.hide()
+        self.video_form.addRow(self.capture_discovery_error)
         self.capture_fps = self._rate_field(60)
         self.preview_fps = self._rate_field(30)
         for label, field in (
@@ -154,13 +164,37 @@ class SettingsDialog(QDialog):
                 field.addItem(str(rate), rate)
             field.setCurrentIndex(field.findData(value))
 
-    def set_capture_devices(self, devices: "tuple[DeviceInfo, ...]") -> None:
+    def set_capture_devices(
+        self,
+        devices: "tuple[DeviceInfo, ...]",
+        *,
+        checked: bool = True,
+        searching: bool = False,
+        error: str = "",
+    ) -> None:
         """Replace selectable devices without changing any unsaved setting.
 
         Args:
             devices: Enumerated names and nonempty paths. Paths are stored unchanged.
+            checked: Whether any successful enumeration has supplied these identities.
+            searching: Whether a catalog request is still running.
+            error: Latest catalog failure, retaining the prior successful candidates.
         """
         self._devices = tuple(device for device in devices if device.path)
+        self._devices_checked = checked
+        self._devices_searching = searching
+        if error:
+            state = "列挙失敗"
+        elif searching:
+            state = "検索中"
+        elif checked:
+            state = "取得済み" if self._devices else "機器なし"
+        else:
+            state = "未確認"
+        self.capture_discovery_status.setText(state)
+        if self.capture_discovery_error.toPlainText() != error:
+            self.capture_discovery_error.setPlainText(error)
+        self.capture_discovery_error.setVisible(bool(error))
         self._sync_capture_choice()
 
     def _sync_capture_choice(self) -> None:
@@ -179,7 +213,10 @@ class SettingsDialog(QDialog):
                 self.capture_choices.addItem(label, device.path)
             selected = self.capture_choices.findData(self._selected_device)
             if selected < 0:
-                self.capture_choices.addItem("未検出", self._selected_device)
+                missing = "未検出" if self._devices_checked else "未確認"
+                self.capture_choices.addItem(
+                    "検索中" if self._devices_searching else missing, self._selected_device
+                )
                 selected = self.capture_choices.count() - 1
             self.capture_choices.setCurrentIndex(selected)
 

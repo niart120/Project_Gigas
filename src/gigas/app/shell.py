@@ -59,6 +59,7 @@ class ApplicationShell(QObject):
         self._stopped = False
         self._worker_released = False
         self._service_unavailable = False
+        self._refresh_on_open = False
         self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
         self.video.changed.connect(self._video_changed)
@@ -111,6 +112,7 @@ class ApplicationShell(QObject):
 
     @Slot()
     def _video_changed(self) -> None:
+        self._update_capture_devices()
         self._render()
         if self.committed:
             self._finish_shutdown()
@@ -118,7 +120,12 @@ class ApplicationShell(QObject):
     @Slot()
     def _update_capture_devices(self) -> None:
         if self.dialog is not None:
-            self.dialog.set_capture_devices(self.video.devices)
+            self.dialog.set_capture_devices(
+                self.video.devices,
+                checked=self.video.devices_checked,
+                searching=self.video.discovering,
+                error=self.video.discovery_error,
+            )
 
     def connect_codex(self) -> None:
         """Connect using the last successfully loaded or saved settings snapshot."""
@@ -141,6 +148,7 @@ class ApplicationShell(QObject):
 
     def open_settings(self) -> None:
         """Show the single settings editor without discarding its input."""
+        newly_shown = self.dialog is None or not self.dialog.isVisible()
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
             self.dialog.set_values(self.baseline)
@@ -150,12 +158,31 @@ class ApplicationShell(QObject):
             self.dialog.close_requested.connect(lambda: self._close("dialog"))
             self.dialog.cancel_close_requested.connect(self.cancel_close)
             self.dialog.capture_refresh_requested.connect(self.video.refresh_devices)
-            self.dialog.set_capture_devices(self.video.devices)
+        self._update_capture_devices()
         self._render()
         self.dialog.show()
         fit_to_screen(self.dialog)
         self.dialog.raise_()
         self.dialog.activateWindow()
+        if newly_shown:
+            self._refresh_on_open = True
+        self._refresh_open_settings()
+
+    def _refresh_open_settings(self) -> None:
+        if not self._refresh_on_open:
+            return
+        if (
+            self.dialog is None
+            or not self.dialog.isVisible()
+            or self.committed
+            or self.pending is not None
+        ):
+            self._refresh_on_open = False
+            return
+        if self.operation is not None or not self.ready:
+            return
+        self._refresh_on_open = False
+        self.video.refresh_devices()
 
     def save(self) -> None:
         """Save the current settings through the worker."""
@@ -227,6 +254,7 @@ class ApplicationShell(QObject):
         elif self.pending is not None:
             self._resolve_close()
         self._render()
+        self._refresh_open_settings()
 
     @property
     def dirty(self) -> bool:

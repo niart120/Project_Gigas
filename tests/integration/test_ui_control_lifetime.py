@@ -8,7 +8,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.models import SessionStatus
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings, save_settings
-from tests.integration.test_video_gui import ControlledCapture
+from tests.integration.peers.controlled_capture import ControlledCapture
 
 
 def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_path: Path) -> None:
