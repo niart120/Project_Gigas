@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from gigas.runtime.codex.transport import RpcId
+
 type ConnectionPhase = Literal[
     "connecting",
     "login_required",
@@ -85,4 +87,71 @@ class LoginEvent:
     url: str
 
 
-type ConnectionEvent = SessionStatus | TextEvent | LoginEvent
+@dataclass(frozen=True, slots=True)
+class QuestionOption:
+    """One model-provided choice with its description."""
+
+    label: str
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class Question:
+    """One user question retaining its identifier and allowed answer controls.
+
+    Attributes:
+        id: Key used to send the answer to Codex.
+        header: Short model-provided heading.
+        question: Model-provided question text.
+        options: Selectable model-provided choices; empty allows text input.
+        is_other: Whether text outside the supplied options is allowed.
+        is_secret: Whether answer entry should hide the typed text.
+    """
+
+    id: str
+    header: str
+    question: str
+    options: tuple[QuestionOption, ...] = ()
+    is_other: bool = False
+    is_secret: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class HumanRequest:
+    """A live question or approval, identified by a connection-unique local token.
+
+    Attributes:
+        token: Opaque local identity passed to answer; never reuse it after resolution.
+        rpc_id: Original RPC identity, preserving integer versus string.
+        thread_id: Runtime conversation containing the request.
+        turn_id: Runtime turn containing the request, including nonblocking questions.
+        kind: Question, command approval or file-change approval.
+        questions: Structured questions; empty for approvals.
+        details: Runtime-provided command, paths, reason or proposed diff for display.
+        decisions: Supported one-time decision names; no automatic default approval.
+        is_blocking: Whether the runtime is waiting for this request to finish.
+    """
+
+    token: str
+    rpc_id: "RpcId"
+    thread_id: str
+    turn_id: str
+    kind: Literal["question", "command", "file"]
+    questions: tuple[Question, ...] = ()
+    details: str = ""
+    decisions: tuple[str, ...] = ()
+    is_blocking: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class RequestResolved:
+    """A local request token that no longer accepts answers.
+
+    Resolution includes reply submission, runtime dismissal, stop or disconnection;
+    it does not assert approval or successful execution of the requested operation.
+    """
+
+    token: str
+
+
+type ConnectionEvent = SessionStatus | TextEvent | LoginEvent | HumanRequest | RequestResolved

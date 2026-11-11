@@ -7,12 +7,19 @@ from typing import TYPE_CHECKING
 import pytest
 
 from gigas.runtime.codex.connection import CodexConnection, CodexConnectionError
-from gigas.runtime.codex.models import ConnectionOptions, LoginEvent, SessionStatus
+from gigas.runtime.codex.models import (
+    ConnectionOptions,
+    HumanRequest,
+    LoginEvent,
+    RequestResolved,
+    SessionStatus,
+)
 from gigas.runtime.codex.transport import (
     JsonObject,
     JsonValue,
     RpcId,
     RpcNotification,
+    ServerRequest,
     TransportClosed,
     TransportError,
     TransportEvent,
@@ -302,6 +309,201 @@ def test_unconfirmed_policy_does_not_start_a_turn(tmp_path: Path) -> None:
         with pytest.raises(CodexConnectionError):
             await connection.send("開始")
         assert not any(method == "turn/start" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+def _question(request_id: RpcId = "question-1", *, blocking: bool = True) -> ServerRequest:
+    return ServerRequest(
+        request_id,
+        "item/tool/requestUserInput",
+        {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "question-item",
+            "isBlocking": blocking,
+            "questions": [
+                {
+                    "id": "route",
+                    "header": "進路",
+                    "question": "どちらへ進むか",
+                    "isOther": True,
+                    "isSecret": False,
+                    "options": [{"label": "東", "description": "東側の道"}],
+                }
+            ],
+        },
+    )
+
+
+def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question(7))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert request.rpc_id == 7
+        assert request.kind == "question"
+        assert request.questions[0].is_other
+        assert request.questions[0].options[0].label == "東"
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "waiting"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={})
+        await connection.answer(request.token, answers={"route": "西"})
+        assert peer.replies == [(7, {"answers": {"route": {"answers": ["西"]}}})]
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert RequestResolved(request.token) in events
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("kind", ["command", "file"])
+def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/started",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "item-1",
+                        "type": "fileChange",
+                        "changes": [
+                            {"path": "save.md", "diff": "+記録", "kind": {"type": "add"}},
+                        ],
+                    },
+                },
+            )
+        )
+        params: JsonObject = {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 10,
+            "reason": "確認",
+            "command": "Get-Date",
+            "cwd": str(tmp_path),
+        }
+        if kind == "command":
+            params["availableDecisions"] = [
+                "decline",
+                "cancel",
+                {"applyNetworkPolicyAmendment": {}},
+            ]
+        method = (
+            "item/commandExecution/requestApproval"
+            if kind == "command"
+            else "item/fileChange/requestApproval"
+        )
+        peer.events.put_nowait(ServerRequest("approval-1", method, params))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert not peer.replies
+        assert request.kind == kind
+        if kind == "command":
+            assert request.decisions == ("decline", "cancel")
+            assert "Get-Date" in request.details
+            with pytest.raises(CodexConnectionError):
+                await connection.answer(request.token, decision="accept")
+        else:
+            assert "save.md" in request.details
+            assert "+記録" in request.details
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token)
+        await connection.answer(request.token, decision="decline")
+        assert peer.replies == [("approval-1", {"decision": "decline"})]
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("terminal", ["resolved", "completed", "stop"])
+def test_resolved_completed_or_stopped_question_rejects_late_answers(
+    tmp_path: Path, terminal: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question(blocking=False))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        if terminal == "resolved":
+            peer.events.put_nowait(
+                RpcNotification(
+                    "serverRequest/resolved",
+                    {
+                        "threadId": "thread-1",
+                        "requestId": "question-1",
+                    },
+                )
+            )
+        elif terminal == "completed":
+            peer.events.put_nowait(
+                RpcNotification(
+                    "turn/completed",
+                    {
+                        "threadId": "thread-1",
+                        "turn": {"id": "turn-1", "status": "completed"},
+                    },
+                )
+            )
+        else:
+            await connection.stop()
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert not peer.replies
+        assert not peer.rejections
+        assert RequestResolved(request.token) in events
+        if terminal == "stop":
+            assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}) in peer.calls
+            assert isinstance(events[-1], SessionStatus)
+            assert events[-1].phase == "stopping"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_unknown_and_unsupported_mcp_requests_are_explicitly_rejected(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(ServerRequest(1, "future/unknown", {}))
+        peer.events.put_nowait(
+            ServerRequest(
+                2,
+                "mcpServer/elicitation/request",
+                {
+                    "threadId": "thread-1",
+                    "serverName": "external",
+                    "mode": "openai/userVerification",
+                },
+            )
+        )
+        await _events_processed()
+        assert [request_id for request_id, _, _ in peer.rejections] == [1, 2]
+        assert not peer.replies
+        assert not any(isinstance(event, HumanRequest) for event in events)
         await connection.close()
 
     _run(scenario())

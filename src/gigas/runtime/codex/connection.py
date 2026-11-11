@@ -2,12 +2,21 @@
 
 import asyncio
 import json
+import uuid
 from contextlib import suppress
 from importlib import resources
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
-from gigas.runtime.codex.models import LoginEvent, SessionStatus, TextEvent
+from gigas.runtime.codex.models import (
+    HumanRequest,
+    LoginEvent,
+    Question,
+    QuestionOption,
+    RequestResolved,
+    SessionStatus,
+    TextEvent,
+)
 from gigas.runtime.codex.transport import (
     RpcNotification,
     ServerRequest,
@@ -16,7 +25,7 @@ from gigas.runtime.codex.transport import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ConnectionPhase
     from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, TransportEvent
@@ -91,6 +100,43 @@ def _login_url(value: "JsonValue") -> str:
     return url
 
 
+def _questions(value: "JsonValue") -> tuple[Question, ...]:
+    if not isinstance(value, list) or not value:
+        message = "質問の形式が不正"
+        raise CodexConnectionError(message)
+    questions: list[Question] = []
+    for item in value:
+        data = _object(item)
+        choices = data.get("options")
+        options: list[QuestionOption] = []
+        if choices is not None:
+            if not isinstance(choices, list):
+                message = "質問の選択肢が不正"
+                raise CodexConnectionError(message)
+            for option in choices:
+                choice = _object(option)
+                label = _text(choice.get("label"))
+                description = choice.get("description")
+                if not isinstance(description, str):
+                    message = "質問の選択肢が不正"
+                    raise CodexConnectionError(message)
+                options.append(QuestionOption(label, description))
+        questions.append(
+            Question(
+                _text(data.get("id")),
+                _text(data.get("header")),
+                _text(data.get("question")),
+                tuple(options),
+                data.get("isOther") is True,
+                data.get("isSecret") is True,
+            )
+        )
+    if len({question.id for question in questions}) != len(questions):
+        message = "質問IDが重複"
+        raise CodexConnectionError(message)
+    return tuple(questions)
+
+
 class CodexConnection:
     """Own account validation and one conversation over a single RPC peer.
 
@@ -123,6 +169,11 @@ class CodexConnection:
         self._login_id: str | None = None
         self._mcp_config: JsonObject = {}
         self._user_items = 0
+        self._stopping = False
+        self._requests: dict[str, HumanRequest] = {}
+        self._request_tokens: dict[RpcId, str] = {}
+        self._seen_requests: set[RpcId] = set()
+        self._file_details: dict[str, str] = {}
 
     async def open(self) -> None:
         """Initialize, read authentication and validate model settings against the catalog.
@@ -214,6 +265,7 @@ class CodexConnection:
             message = "ターンを開始できない状態"
             raise CodexConnectionError(message)
         self._status("starting")
+        self._stopping = False
         try:
             if self._thread_id is None:
                 await self._start_thread()
@@ -237,11 +289,79 @@ class CodexConnection:
             message = "ターン開始に失敗"
             raise CodexConnectionError(message) from None
 
+    async def answer(
+        self,
+        token: str,
+        *,
+        decision: str | None = None,
+        answers: "Mapping[str, str] | None" = None,
+    ) -> None:
+        """Submit one explicit answer to a still-live request.
+
+        Args:
+            token: Connection-unique HumanRequest token received by the event callback.
+            decision: One advertised one-time approval decision, never inferred.
+            answers: One nonempty answer per question ID for a question request.
+
+        Raises:
+            CodexConnectionError: The request is stale, the answer is invalid or
+                transmission fails. Failed transmissions are not retried.
+        """
+        self._require_open()
+        request = self._requests.get(token)
+        if request is None or self._stopping:
+            message = "この要求は回答を受け付けない"
+            raise CodexConnectionError(message)
+        payload = self._answer_payload(request, decision, answers)
+        self._resolve(token)
+        try:
+            await self._peer.respond(request.rpc_id, payload)
+        except TransportError:
+            self._status("error", "回答の送信結果を確認できない")
+            message = "回答の送信結果を確認できない"
+            raise CodexConnectionError(message) from None
+        if decision == "cancel":
+            self._stopping = True
+            self._expire_requests()
+            self._status("stopping")
+        else:
+            self._update_waiting()
+
+    async def stop(self) -> None:
+        """Disable answers immediately and request interruption of the active turn.
+
+        Returning confirms only the interrupt RPC, not turn completion. Questions
+        receive no synthetic empty answer or JSON-RPC error during stopping.
+
+        Raises:
+            CodexConnectionError: The interrupt request failed.
+        """
+        self._require_open()
+        self._stopping = True
+        self._expire_requests()
+        self._status("stopping")
+        if self._thread_id is not None and self._turn_id is not None:
+            try:
+                await self._peer.request(
+                    "turn/interrupt",
+                    {
+                        "threadId": self._thread_id,
+                        "turnId": self._turn_id,
+                    },
+                )
+            except TransportError:
+                self._status("error", "中断結果を確認できない")
+                message = "中断結果を確認できない"
+                raise CodexConnectionError(message) from None
+        else:
+            self._status("stopped")
+
     async def close(self) -> None:
         """Release the event consumer and wait for the owned peer to close."""
         if self._closed:
             return
         self._closed = True
+        self._expire_requests()
         await self._peer.close()
         if self._pump is not None and self._pump is not asyncio.current_task():
             self._pump.cancel()
@@ -354,7 +474,7 @@ class CodexConnection:
                         self._status("error", "Codexとの接続が終了")
                     return
                 if isinstance(event, ServerRequest):
-                    await self._peer.reject(event.id, -32601, "Unsupported request")
+                    await self._server_request(event)
                 elif isinstance(event, RpcNotification):
                     await self._notification(event)
         except (TransportError, CodexConnectionError):
@@ -368,3 +488,168 @@ class CodexConnection:
                 await self._read_account()
                 await self._read_models()
             self._status("ready" if self._authenticated else "login_required")
+            return
+        if params.get("threadId") != self._thread_id:
+            return
+        if event.method == "serverRequest/resolved":
+            request_id = params.get("requestId")
+            if isinstance(request_id, str | int) and not isinstance(request_id, bool):
+                token = self._request_tokens.get(request_id)
+                if token is not None:
+                    self._resolve(token)
+                    self._update_waiting()
+        elif event.method == "turn/completed":
+            turn = _object(params.get("turn"))
+            if turn.get("id") == self._turn_id:
+                self._expire_requests()
+                self._turn_id = None
+                self._file_details.clear()
+                self._status("stopped" if self._stopping else "ready")
+        elif event.method == "item/started" and params.get("turnId") == self._turn_id:
+            item = _object(params.get("item"))
+            if item.get("type") == "fileChange":
+                changes = item.get("changes")
+                if isinstance(changes, list):
+                    self._file_details[_text(item.get("id"))] = "\n".join(
+                        value
+                        for change in changes
+                        if isinstance(change, dict)
+                        for key in ("path", "diff")
+                        if isinstance(value := change.get(key), str)
+                    )
+
+    async def _server_request(self, event: ServerRequest) -> None:
+        methods = {
+            "item/tool/requestUserInput": "question",
+            "item/commandExecution/requestApproval": "command",
+            "item/fileChange/requestApproval": "file",
+        }
+        if event.method not in methods:
+            await self._peer.reject(event.id, -32601, "Unsupported request")
+            return
+        if event.id in self._seen_requests:
+            return
+        self._seen_requests.add(event.id)
+        params = event.params or {}
+        if (
+            self._stopping
+            or params.get("threadId") != self._thread_id
+            or params.get("turnId") != self._turn_id
+            or self._turn_id is None
+        ):
+            return
+        try:
+            request = self._decode_request(event, params)
+        except CodexConnectionError:
+            await self._peer.reject(event.id, -32602, "Invalid request parameters")
+            return
+        self._requests[request.token] = request
+        self._request_tokens[event.id] = request.token
+        self._emit(request)
+        self._update_waiting()
+
+    def _decode_request(self, event: ServerRequest, params: "JsonObject") -> HumanRequest:
+        token = uuid.uuid4().hex
+        thread_id = _text(params.get("threadId"))
+        turn_id = _text(params.get("turnId"))
+        item_id = _text(params.get("itemId"))
+        if event.method == "item/tool/requestUserInput":
+            blocking = params.get("isBlocking")
+            if not isinstance(blocking, bool):
+                message = "質問の待機形式が不正"
+                raise CodexConnectionError(message)
+            return HumanRequest(
+                token,
+                event.id,
+                thread_id,
+                turn_id,
+                "question",
+                questions=_questions(params.get("questions")),
+                is_blocking=blocking,
+            )
+        started = params.get("startedAtMs")
+        if not isinstance(started, int) or isinstance(started, bool):
+            message = "承認要求の時刻が不正"
+            raise CodexConnectionError(message)
+        kind = "command" if event.method == "item/commandExecution/requestApproval" else "file"
+        offered = params.get("availableDecisions")
+        if kind == "file" or offered is None:
+            decisions = ("accept", "decline", "cancel")
+        elif isinstance(offered, list):
+            decisions = tuple(
+                dict.fromkeys(
+                    item
+                    for item in offered
+                    if isinstance(item, str) and item in {"accept", "decline", "cancel"}
+                )
+            )
+        else:
+            decisions = ()
+        if not decisions:
+            message = "承認要求の判断形式に未対応"
+            raise CodexConnectionError(message)
+        details = "\n".join(
+            f"{label}: {value}"
+            for key, label in (
+                ("command", "コマンド"),
+                ("cwd", "作業フォルダー"),
+                ("reason", "理由"),
+            )
+            if isinstance(value := params.get(key), str) and value
+        )
+        if kind == "file" and item_id in self._file_details:
+            details = "\n".join(part for part in (details, self._file_details[item_id]) if part)
+        return HumanRequest(
+            token,
+            event.id,
+            thread_id,
+            turn_id,
+            kind,
+            details=details,
+            decisions=decisions,
+        )
+
+    @staticmethod
+    def _answer_payload(
+        request: HumanRequest, decision: str | None, answers: "Mapping[str, str] | None"
+    ) -> "JsonObject":
+        if request.kind != "question":
+            if decision not in request.decisions or answers is not None:
+                message = "承認判断を選択する必要がある"
+                raise CodexConnectionError(message)
+            return {"decision": decision}
+        if (
+            decision is not None
+            or answers is None
+            or set(answers) != {q.id for q in request.questions}
+        ):
+            message = "すべての質問に回答する必要がある"
+            raise CodexConnectionError(message)
+        payload: JsonObject = {}
+        for question in request.questions:
+            text = answers[question.id]
+            if not text.strip() or (
+                question.options
+                and not question.is_other
+                and text not in {option.label for option in question.options}
+            ):
+                message = "質問の回答が無効"
+                raise CodexConnectionError(message)
+            payload[question.id] = {"answers": [text]}
+        return {"answers": payload}
+
+    def _resolve(self, token: str) -> None:
+        request = self._requests.pop(token, None)
+        if request is not None:
+            self._request_tokens.pop(request.rpc_id, None)
+            self._emit(RequestResolved(token))
+
+    def _expire_requests(self) -> None:
+        for token in tuple(self._requests):
+            self._resolve(token)
+
+    def _update_waiting(self) -> None:
+        if self._turn_id is not None and not self._stopping:
+            self._status(
+                "waiting" if any(req.is_blocking for req in self._requests.values()) else "running"
+            )
