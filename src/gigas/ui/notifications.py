@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
@@ -70,9 +70,6 @@ class NoticeDialog(QDialog):
         self.details.setReadOnly(True)
         layout.addWidget(self.details, 1)
         actions = QHBoxLayout()
-        self.settings_button = QPushButton("設定…", self)
-        self.settings_button.setAutoDefault(False)
-        actions.addWidget(self.settings_button)
         actions.addStretch()
         close = QPushButton("閉じる", self)
         close.setAutoDefault(False)
@@ -101,7 +98,6 @@ class NotificationCenter(QObject):
     """
 
     published = Signal(object)
-    settings_requested = Signal()
 
     def __init__(self, parent: QWidget) -> None:
         """Prepare hidden presentation widgets without connecting service actions."""
@@ -109,7 +105,6 @@ class NotificationCenter(QObject):
         self._owner = parent
         self._notices: dict[NoticeSource, Notice] = {}
         self._latest: NoticeSource | None = None
-        self._settings_available = True
         self.dialog: NoticeDialog | None = None
         self.banner = QFrame(parent)
         self.banner.setFrameShape(QFrame.Shape.StyledPanel)
@@ -153,33 +148,32 @@ class NotificationCenter(QObject):
             return
         self.show_snapshot(self._notices[selected])
 
-    def show_snapshot(self, notice: Notice) -> None:
+    def show_snapshot(self, notice: Notice, *, parent: QWidget | None = None) -> None:
         """Open a specific failure without publishing or replacing recent history.
 
         Args:
             notice: Immutable failure associated with the explicitly chosen UI action.
                 It need not appear in recent history. Later publications leave this
                 displayed snapshot and any text selection unchanged.
+            parent: Active settings dialog, if opening details from a modal editor.
         """
         if self.dialog is None:
             self.dialog = NoticeDialog(self._owner)
             self.dialog.sources.activated.connect(self._select_source)
-            self.dialog.settings_button.clicked.connect(self.settings_requested)
+        owner = self._owner if parent is None else parent
+        if self.dialog.parentWidget() is not owner:
+            self.dialog.setParent(owner, self.dialog.windowFlags())
+        self.dialog.setWindowModality(
+            Qt.WindowModality.NonModal if parent is None else Qt.WindowModality.WindowModal
+        )
         self._sync_sources()
         if self.dialog.sources.findData(notice.source) < 0:
             self.dialog.sources.addItem(_SOURCES[notice.source], notice.source)
         self.dialog.display(notice)
-        self.dialog.settings_button.setEnabled(self._settings_available)
         self.dialog.show()
         fit_to_screen(self.dialog)
         self.dialog.raise_()
         self.dialog.activateWindow()
-
-    def set_settings_available(self, available: bool) -> None:
-        """Update only the current settings entry, without retaining a retry closure."""
-        self._settings_available = available
-        if self.dialog is not None:
-            self.dialog.settings_button.setEnabled(available)
 
     def close_details(self) -> None:
         """Hide the owned modeless window after application shutdown is confirmed."""

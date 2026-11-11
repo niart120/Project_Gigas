@@ -1,16 +1,18 @@
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import pytest
-from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
+from gigas.app.video import VideoController
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
 from gigas.storage.settings import Settings, load_settings, save_settings
+from gigas.ui.video_panel import VideoPanel
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_app_lifetime import ControlledIO
@@ -28,14 +30,14 @@ def application(
     shell = ApplicationShell(path, SettingsIO(io.load, io.save), capture_service=capture)
     shell.start()
     qtbot.waitUntil(lambda: shell.operation is None)
-    shell.connect_video()
+    shell.apply_settings(shell.baseline)
     capture.state = replace(
         capture.state,
         devices=(DeviceInfo("First", "path-a"), DeviceInfo("Second", "path-b")),
         devices_revision=1,
     )
     capture.stream()
-    qtbot.waitUntil(shell.window.video.disconnect_action.isEnabled)
+    qtbot.waitUntil(lambda: not shell.video.applying)
     shell.open_settings()
     assert shell.dialog is not None
     qtbot.waitUntil(
@@ -76,11 +78,10 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     qtbot.waitUntil(io.entered.is_set)
     assert capture.disconnects == 0
     assert capture.snapshot().phase == "streaming"
-    assert not shell.window.video.connect_action.isEnabled()
-    assert shell.window.video.disconnect_action.isEnabled()
+    assert not dialog.save_button.isEnabled()
     assert not dialog.ok_button.isEnabled()
-    assert not dialog.close_button.isEnabled()
-    shell.connect_video()
+    assert dialog.close_button.isEnabled()
+    shell.apply_settings(shell.baseline)
     assert len(capture.connections) == 1
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -88,7 +89,7 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     assert capture.disconnects == 1
     assert len(capture.connections) == 1
     assert shell.video.applying
-    assert not dialog.save_button.isEnabled()
+    assert dialog.save_button.isEnabled()
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: len(capture.connections) == 2)
     assert capture.connections[-1] == CaptureOptions("path-b", fps=30)
@@ -98,7 +99,6 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     qtbot.waitUntil(lambda: not shell.video.applying)
     assert shell.video.apply_state == "complete"
     assert shell.window.video.status.text() == "取得中"
-    assert dialog.capture_connection_status.isHidden()
 
 
 def test_save_failure_preserves_stream_and_unsaved_values(
@@ -119,9 +119,7 @@ def test_save_failure_preserves_stream_and_unsaved_values(
     assert len(capture.connections) == 1
 
 
-@pytest.mark.parametrize(
-    "failure", ["unconfirmed", "old_error", "unreleased", "rejected", "new_error"]
-)
+@pytest.mark.parametrize("failure", ["unconfirmed", "old_error", "rejected", "new_error"])
 def test_failed_switch_stays_stopped_without_rollback_or_retry(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO],
     qtbot: QtBot,
@@ -133,9 +131,7 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert capture.disconnects == 1
-    if failure == "unreleased":
-        capture.state = replace(capture.state, phase="idle", cleanup="none")
-    elif failure in {"unconfirmed", "old_error"}:
+    if failure in {"unconfirmed", "old_error"}:
         capture.state = replace(
             capture.state,
             phase="error",
@@ -153,8 +149,8 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     qtbot.waitUntil(lambda: shell.video.apply_state == "failed")
     assert shell.video.apply_error
     if failure == "unconfirmed":
-        assert shell.dialog.capture_connection_status.text() == "終了未確認"
-    assert shell.dialog.capture_connection_error.toPlainText()
+        assert shell.window.video.status.text() == "終了未確認"
+    assert shell.window.notifications.notices["video"].details
     assert shell.baseline.capture_device == "path-b"
     assert load_settings(shell.path).capture_device == "path-b"
     assert not shell.dirty
@@ -166,62 +162,51 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     assert capture.refreshes == 0
 
 
-def test_dirty_selection_cannot_connect_saved_device_but_can_refresh(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
+@pytest.mark.parametrize(("initial", "target"), [("enumerate", "path-b"), ("capture", "")])
+def test_latest_target_replaces_unstarted_switch(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, initial: str, target: str
 ) -> None:
-    shell, capture, _io = application
-    capture.finish_disconnect = True
-    shell.disconnect_video()
-    choose_second(shell)
-    dialog = shell.dialog
-    assert dialog is not None
-    assert not shell.window.video.connect_action.isEnabled()
-    assert dialog.capture_refresh_button.isEnabled()
-    shell.connect_video()
-    assert len(capture.connections) == 1
-    assert shell.apply_settings()
-    qtbot.waitUntil(lambda: len(capture.connections) == 2)
-    assert capture.connections[-1].device_path == "path-b"
+    capture = CaptureService(backend_factory=PeerBackend())
+    entered, release = Event(), Event()
+    run_request = capture._run_request
 
+    def wait_before_spawn(options: CaptureOptions | None, generation: int) -> None:
+        entered.set()
+        if not release.wait(5):
+            message = "test did not release capture request"
+            raise TimeoutError(message)
+        run_request(options, generation)
 
-def test_disconnected_save_intent_can_be_cancelled_from_menu(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, io = application
-    capture.finish_disconnect = True
-    shell.disconnect_video()
-    choose_second(shell)
-    io.release.clear()
-    dialog = shell.dialog
-    assert dialog is not None
-    dialog.save_button.click()
-    qtbot.waitUntil(io.entered.is_set)
-    shell.video.timer.timeout.emit()
-    assert shell.window.video.disconnect_action.isEnabled()
-    shell.window.video.disconnect_action.trigger()
-    io.release.set()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    for _ in range(3):
-        shell.video.timer.timeout.emit()
-    assert len(capture.connections) == 1
-    assert shell.baseline.capture_device == "path-b"
-
-
-def test_missing_saved_device_cannot_be_explicitly_connected(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, _io = application
-    capture.finish_disconnect = True
-    shell.disconnect_video()
-    assert shell.dialog is not None
-    save_settings(shell.path, replace(shell.baseline, capture_device=""))
-    shell.window.reload_action.trigger()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert not shell.window.video.connect_action.isEnabled()
-    assert shell.dialog.capture_target == ""
-    assert shell.baseline.capture_device == ""
-    shell.connect_video()
-    assert len(capture.connections) == 1
+    monkeypatch.setattr(capture, "_run_request", wait_before_spawn)
+    panel = VideoPanel()
+    qtbot.addWidget(panel)
+    controller = VideoController(panel, capture)
+    controller.start()
+    try:
+        if initial == "enumerate":
+            controller.refresh_devices()
+        else:
+            controller.apply_capture(Settings(capture_device="path-a"))
+        qtbot.waitUntil(entered.is_set)
+        controller.apply_capture(Settings(capture_device="path-c"))
+        controller.apply_capture(Settings(capture_device=target, capture_resolution="auto"))
+        release.set()
+        qtbot.waitUntil(lambda: not controller.applying)
+        assert controller.apply_state == "complete"
+        if target:
+            assert controller.active_settings is not None
+            assert controller.active_settings.capture_device == target
+            assert capture.snapshot().frame is not None
+        else:
+            assert controller.active_settings is None
+            assert capture.snapshot().phase == "idle"
+            assert capture.snapshot().frame is None
+        assert capture.snapshot().generation == 1
+    finally:
+        release.set()
+        controller.shutdown()
+        capture.join(5)
+        assert controller.shutdown_complete
 
 
 def test_real_spawn_applies_saved_fps_after_release_and_keeps_held_frame(
@@ -235,7 +220,7 @@ def test_real_spawn_applies_saved_fps_after_release_and_keeps_held_frame(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.operation is None)
-        shell.connect_video()
+        shell.apply_settings(shell.baseline)
         qtbot.waitUntil(lambda: service.snapshot().frame is not None)
         first = service.snapshot().frame
         assert first is not None
@@ -277,7 +262,7 @@ def test_empty_selection_clears_saved_device_and_disconnects(
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.baseline.capture_device == ""
     assert load_settings(shell.path).capture_device == ""
-    assert shell.dialog.capture_target == ""
+    assert shell.dialog.capture_choices.currentData() == ""
     assert capture.disconnects == 1
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: shell.video.apply_state == "complete")
@@ -285,89 +270,38 @@ def test_empty_selection_clears_saved_device_and_disconnects(
     assert capture.refreshes == 0
 
 
-@pytest.mark.parametrize("stop", ["disconnect", "exit_cancel"])
-def test_manual_stop_cancels_connection_waiting_for_save(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot, stop: str
-) -> None:
-    shell, capture, io = application
-    choose_second(shell)
-    io.release.clear()
-    assert shell.dialog is not None
-    shell.dialog.save_button.click()
-    qtbot.waitUntil(io.entered.is_set)
-    if stop == "disconnect":
-        shell.window.video.disconnect_action.trigger()
-        capture.complete_disconnect()
-    else:
-        shell.request_close()
-        shell.cancel_close()
-    io.release.set()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    for _ in range(3):
-        shell.video.timer.timeout.emit()
-    assert shell.window.isVisible()
-    assert shell.baseline.capture_device == "path-b"
-    assert len(capture.connections) == 1
-    assert not shell.video.applying
+def test_reapplying_same_capture_conditions_keeps_connection(qtbot: QtBot) -> None:
+    capture = ControlledCapture()
+    panel = VideoPanel()
+    qtbot.addWidget(panel)
+    controller = VideoController(panel, capture)
+    controller.start()
+    settings = Settings(capture_device="path-a")
+    try:
+        controller.apply_capture(settings)
+        controller.apply_capture(settings)
+        capture.stream(actual_size=(32, 24))
+        controller.timer.timeout.emit()
+        controller.apply_capture(replace(settings, preview_fps=15, model="changed"))
+        assert len(capture.connections) == 1
+        assert capture.disconnects == 0
+        assert controller.apply_state == "complete"
+    finally:
+        controller.shutdown()
+        assert controller.shutdown_complete
 
 
-def test_saved_device_connect_and_disconnect_refresh_are_explicit(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, _io = application
-    dialog = shell.dialog
-    assert dialog is not None
-    shell.window.video.disconnect_action.trigger()
-    assert capture.disconnects == 1
-    assert capture.refreshes == 0
-    capture.complete_disconnect()
-    qtbot.waitUntil(lambda: capture.refreshes == 1)
-    capture.complete_enumeration((DeviceInfo("First", "path-a"),))
-    qtbot.waitUntil(shell.window.video.connect_action.isEnabled)
-    shell.window.video.connect_action.trigger()
-    assert len(capture.connections) == 2
-    capture.stream()
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    assert capture.refreshes == 1
-
-
-def test_display_only_apply_and_application_close_save_do_not_start_video(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, capture, _io = application
-    capture.finish_disconnect = True
-    shell.window.video.disconnect_action.trigger()
-    dialog = shell.dialog
-    assert dialog is not None
-    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(15))
-    dialog.model.setText("model-only")
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert len(capture.connections) == 1
-    assert shell.baseline.preview_fps == 15
-    choose_second(shell)
-    shell.window.close()
-    assert shell.confirmation is not None
-    button = shell.confirmation.button(QMessageBox.StandardButton.Save)
-    assert button is not None
-    button.click()
-    qtbot.waitUntil(lambda: not dialog.isVisible())
-    assert shell.baseline.capture_device == "path-b"
-    assert len(capture.connections) == 1
-
-
-def test_common_snapshot_apply_rejects_dirty_editor_then_uses_same_switch(
+def test_modal_edit_blocks_menu_until_cancel_then_switches_device(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, io = application
-    target = replace(shell.baseline, capture_device="path-b")
     assert shell.dialog is not None
     shell.dialog.model.setText("draft")
-    assert not shell.apply_settings(target)
+    shell.window.video_device_actions["path-b"].trigger()
     assert io.saves == 0
     assert shell.dialog.model.text() == "draft"
-    shell.dialog.set_values(shell.baseline)
-    assert shell.apply_settings(target)
+    shell.dialog.close_button.click()
+    shell.window.video_device_actions["path-b"].trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert capture.disconnects == 1
     capture.complete_disconnect()

@@ -61,8 +61,6 @@ class CaptureSnapshot:
         generation: Connection generation local to this service's lifetime.
         error: Displayable failure reason, empty when there is no reported failure.
         cleanup: Whether native release or forced process termination was confirmed.
-        reported_fps: Device-reported nominal rate, independent of measured acquisition.
-        measured_fps: Acquisition rate from frame sequence and monotonic timestamps.
         backend: Explicit OpenCV API identifier chosen by the current or last worker,
             or None before selection. Zero is reserved for injected test adapters.
         diagnostics: Bounded attempt failure reasons in order, retained after a
@@ -79,8 +77,6 @@ class CaptureSnapshot:
     generation: int = 0
     error: str = ""
     cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
-    reported_fps: float | None = None
-    measured_fps: float | None = None
     backend: int | None = None
     diagnostics: tuple[str, ...] = ()
 
@@ -204,8 +200,6 @@ class CaptureService(Thread):
                 generation=generation,
                 error="",
                 cleanup="none",
-                reported_fps=None,
-                measured_fps=None,
                 backend=None,
                 diagnostics=(),
             )
@@ -307,8 +301,6 @@ class CaptureService(Thread):
                         phase="connecting",
                         error="",
                         cleanup="none",
-                        reported_fps=None,
-                        measured_fps=None,
                         diagnostics=diagnostics,
                     )
                 else:
@@ -405,8 +397,6 @@ class CaptureService(Thread):
                             devices=message.devices,
                             devices_revision=self._state.devices_revision + 1,
                         )
-                elif message.kind == "opened":
-                    self._state = replace(self._state, reported_fps=message.fps)
                 elif message.kind == "candidates":
                     session.candidates = message.candidates
                     session.backend = message.backend
@@ -421,7 +411,6 @@ class CaptureService(Thread):
 
     def _monitor(self, session: _Session, generation: int, started: float) -> None:
         sequence = 0
-        first: Frame | None = None
         progress = time.monotonic()
         while session.process.is_alive():
             try:
@@ -432,15 +421,13 @@ class CaptureService(Thread):
                     frame = session.slot.read(generation, sequence)
                     if frame is not None:
                         now = time.monotonic()
-                        if first is None and now - started >= self._timeouts.startup:
+                        if sequence == 0 and now - started >= self._timeouts.startup:
                             session.error = "映像取得の開始期限切れ"
                         else:
                             sequence = frame.sequence
                             session.started = True
                             progress = now
-                            if first is None:
-                                first = frame
-                            self._publish(frame, first)
+                            self._publish(frame)
             except Exception:  # noqa: BLE001 -- monitor failures must still stop/reap the worker
                 session.error = "映像監視処理が失敗"
             self._deadlines(session, started, progress, sequence)
@@ -448,12 +435,10 @@ class CaptureService(Thread):
                 self._condition.wait(timeout=0.01)
         self._finalize(session)
 
-    def _publish(self, frame: "Frame", first: "Frame") -> None:
-        elapsed = (frame.monotonic_ns - first.monotonic_ns) / 1_000_000_000
-        rate = (frame.sequence - first.sequence) / elapsed if elapsed > 0 else None
+    def _publish(self, frame: "Frame") -> None:
         with self._condition:
             if self._frames.publish(frame):
-                self._state = replace(self._state, phase="streaming", measured_fps=rate)
+                self._state = replace(self._state, phase="streaming")
 
     def _deadlines(self, session: _Session, started: float, progress: float, sequence: int) -> None:
         now = time.monotonic()

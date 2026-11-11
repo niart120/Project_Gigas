@@ -83,7 +83,7 @@ GUI側の実測FPSも取得サービスの終端snapshotであり、描画FPSで
 | 終了 | stopping観測からclosed観測まで約0.071秒。20ms間隔の状態観測を含む |
 | 回収 | `held_frame_unchanged=True`、`capture_alive=False`、`cleanup=graceful`、`settings_stopped=True`、`codex_stopped=True`、`children=[]` |
 
-セッション全体は約628.43秒、取得中の観測は約391.66秒だった。FullHDでゲーム画素を表示できたこと、情報画面と取得の独立、表示中に所有するサービスを終了できたことを確認した。長時間連続運転やCodex接続・MCP負荷の確認へは拡張しない。実コピーと本文・選択・スクロールの固定は[映像情報の結合試験](../../../tests/integration/test_video_information.py)でも検証している。
+セッション全体は約628.43秒、取得中の観測は約391.66秒だった。FullHDでゲーム画素を表示できたこと、情報画面と取得の独立、表示中に所有するサービスを終了できたことを確認した。長時間連続運転やCodex接続・MCP負荷の確認へは拡張しない。実コピーと本文・選択・スクロールの固定は当時の映像情報の結合試験（`test_video_information.py`）でも検証した。この試験は後のunit_029で情報画面とともに撤去した。
 
 ## 設定エラーからの復旧
 
@@ -97,7 +97,7 @@ GUI側の実測FPSも取得サービスの終端snapshotであり、描画FPSで
 
 `uv run python -X utf8 tmp/unit026/offscreen_final.py`で現在のウィジェットを合成データとMeiryo UI 9ptで描画した。主画面960×540で分割を左右それぞれに寄せても、短い状態は読み取れ、長い機器・モデル名だけが省略された。状態領域の左端は対応ペインと一致した。設定620×380の3タブはスクロールなしで収まり、620×260のI/Oも縦42pxのスクロールでシリアル欄へ到達し、下部の3ボタンは常に画面内に残った。画像9枚を目視し、`tmp/unit026/offscreen-final/metrics.json`で寸法と到達を補助確認した。これはoffscreenの合成検証であり、実モニターのDPI確認とは分ける。
 
-この受入で、Qtの表示後にOKが既定ボタンとなり、編集欄のEnterや、キャンセル・適用にフォーカスしたEnterまでOKへ流れる不具合を再現した。[キーボード回帰](../../../tests/integration/test_settings_keyboard.py)を追加して修正後、各タブの項目と下部ボタンへのTab移動、入力欄のReturn/Enterによる誤適用なし、ボタンの明示操作とコンボの選択確定を確認した。
+この受入で、Qtの表示後にOKが既定ボタンとなり、編集欄のEnterや、キャンセル・適用にフォーカスしたEnterまでOKへ流れる不具合を再現した。当時のキーボード回帰試験（`test_settings_keyboard.py`、後のunit_030で削除）を追加して修正後、各タブの項目と下部ボタンへのTab移動、入力欄のReturn/Enterによる誤適用なし、ボタンの明示操作とコンボの選択確定を確認した。
 
 Windows 150%でも`native_acceptance.py --keyboard`で再確認した。モデル欄へ検証値を入力してReturnを押した時点では、設定画面を保持しTOMLのモデル値は空のままだった。モデル→エフォート→認証方式→OKへTabで移動し、OKのReturnで初めて検証値が保存され画面が閉じた。`native-keyboard.json`でアプリ終了後の全サービス停止、`graceful`、残存子プロセス0を確認した。カメラ・Codex接続・ネイティブIMEの変換はこの再確認に含めていない。
 

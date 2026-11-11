@@ -1,6 +1,5 @@
 """Platform-specific device access confined to a capture worker process."""
 
-import math
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -100,10 +99,6 @@ class Camera(Protocol):
         """Request a device property without guaranteeing that it will be honored."""
         ...
 
-    def get(self, prop_id: int, /) -> float:
-        """Read a device-reported property, which need not match actual throughput."""
-        ...
-
     def read(self) -> tuple[bool, object]:
         """Return the next image for validation at the external-library boundary."""
         ...
@@ -182,7 +177,6 @@ def acquire_frames(
     backend: CaptureBackend,
     stopped: "Callable[[], bool]",
     publish: "Callable[[Frame], None]",
-    opened: "Callable[[float | None], None]",
     released: "Callable[[], None] | None" = None,
     enumerated: "Callable[[tuple[DeviceInfo, ...]], None] | None" = None,
     candidates: "Callable[[tuple[int, ...], int], None] | None" = None,
@@ -197,7 +191,6 @@ def acquire_frames(
         stopped: Nonblocking cancellation check, including after a blocking read.
         publish: Receives actual pixels and dimensions without resizing; may skip a
             frame if the reader is busy. The first dimensions remain fixed until stop.
-        opened: Receives device-reported FPS, or None for an unavailable value.
         released: Optional notification after the native release returned normally.
         enumerated: Optional notification of selectable identities from the same
             enumeration used to resolve the device, before selection and opening.
@@ -241,8 +234,6 @@ def acquire_frames(
             camera.set(cv2.CAP_PROP_FRAME_WIDTH, options.width)
             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, options.height)
         camera.set(cv2.CAP_PROP_FPS, options.fps)
-        rate = camera.get(cv2.CAP_PROP_FPS)
-        opened(rate if math.isfinite(rate) and rate > 0 else None)
         sequence = 0
         dimensions: tuple[int, int] | None = None
         while not stopped():

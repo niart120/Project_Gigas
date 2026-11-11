@@ -25,9 +25,9 @@ def test_saved_resolution_becomes_a_device_request(
     capture = ControlledCapture()
     controller = VideoController(panel, capture)
     controller.start()
-    controller.set_available(True, settings_ready=True)
+    controller.set_available(True)
     try:
-        controller.connect_capture(
+        controller.apply_capture(
             Settings(capture_device="path-a", capture_resolution=resolution, capture_fps=30)
         )
         assert len(capture.connections) == 1

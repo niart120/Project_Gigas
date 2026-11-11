@@ -158,4 +158,20 @@ class RequestResolved:
     token: str
 
 
-type ConnectionEvent = SessionStatus | TextEvent | LoginEvent | HumanRequest | RequestResolved
+@dataclass(frozen=True, slots=True)
+class TurnStarted:
+    """One ordinary turn whose identity was accepted from the runtime.
+
+    Emitted once, before events for that turn, even when completion precedes the
+    start response. A submitted or canceled start request alone does not emit it.
+
+    Attributes:
+        turn_id: Runtime turn identity within this connection's conversation.
+    """
+
+    turn_id: str
+
+
+type ConnectionEvent = (
+    SessionStatus | TextEvent | LoginEvent | HumanRequest | RequestResolved | TurnStarted
+)

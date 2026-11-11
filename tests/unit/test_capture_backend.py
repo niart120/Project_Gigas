@@ -33,10 +33,6 @@ class Camera:
         self.properties[property_id] = value
         return True
 
-    def get(self, _property_id: int) -> float:
-        """Report a fractional nominal rate."""
-        return 59.94
-
     def read(self) -> tuple[bool, object]:
         """Return or raise the next fixed outcome."""
         value = self.outcomes.pop(0)
@@ -77,7 +73,6 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     camera = Camera([pixels])
     backend = Backend(camera)
     frames: list[Frame] = []
-    rates: list[float | None] = []
     listed: list[tuple[DeviceInfo, ...]] = []
     acquire_frames(
         CaptureOptions("path-a", 16, 16, 60),
@@ -85,7 +80,6 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
         backend,
         lambda: bool(frames),
         frames.append,
-        rates.append,
         enumerated=listed.append,
     )
     assert listed == [(DeviceInfo("Capture", "path-a"),)]
@@ -101,7 +95,6 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     assert any(frames[0].bgr)
     assert (frames[0].generation, frames[0].sequence) == (7, 1)
     assert frames[0].monotonic_ns > 0
-    assert rates == [59.94]
     assert camera.released
 
 
@@ -115,7 +108,11 @@ def test_resolution_request_preserves_actual_dimensions_and_unmodified_pixels(
     frames: list[Frame] = []
     options = CaptureOptions("path-a", None, None, 30) if automatic else CaptureOptions("path-a")
     acquire_frames(
-        options, 9, Backend(camera), lambda: len(frames) == 2, frames.append, lambda _: None
+        options,
+        9,
+        Backend(camera),
+        lambda: len(frames) == 2,
+        frames.append,
     )
 
     assert [(frame.width, frame.height) for frame in frames] == [(32, 24), (32, 24)]
@@ -142,7 +139,6 @@ def test_maximum_actual_resolution_is_accepted_without_requiring_the_requested_s
         Backend(camera),
         lambda: bool(frames),
         frames.append,
-        lambda _: None,
     )
     assert (frames[0].width, frames[0].height) == (3840, 2160)
     assert frames[0].bgr == bytes([2, 4, 8]) * (3840 * 2160)
@@ -160,7 +156,6 @@ def test_resolution_change_after_first_frame_fails_without_publishing_new_dimens
             Backend(camera),
             lambda: False,
             frames.append,
-            lambda _: None,
         )
     assert len(frames) == 1
     assert (frames[0].width, frames[0].height, frames[0].bgr) == (32, 24, original.tobytes())
@@ -192,7 +187,6 @@ def test_bad_frames_fail_without_publishing_and_release_the_camera(outcome: obje
             Backend(camera),
             lambda: False,
             frames.append,
-            lambda _rate: None,
         )
     assert frames == []
     assert camera.released
@@ -208,7 +202,6 @@ def test_open_failure_or_read_exception_still_releases_the_camera(opened: bool) 
             Backend(camera),
             lambda: False,
             lambda _frame: None,
-            lambda _rate: None,
         )
     assert camera.released
 
@@ -231,7 +224,6 @@ def test_stop_during_read_does_not_publish_the_late_result() -> None:
         Backend(camera),
         lambda: stopped,
         frames.append,
-        lambda _rate: None,
     )
     assert frames == []
     assert camera.released

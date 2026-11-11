@@ -20,6 +20,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    TurnStarted,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.elided_label import ElidedLabel
@@ -190,6 +191,13 @@ class ConnectionPanel(QWidget):
                 self._expire_requests()
             if event.phase != "authenticating":
                 self.login_url.clear()
+        elif isinstance(event, TurnStarted):
+            for token, card in tuple(self.cards.items()):
+                if card.request.turn_id != event.turn_id and card.is_settled:
+                    self._request_layout.removeWidget(card)
+                    card.deleteLater()
+                    del self.cards[token]
+            self.requests.setVisible(bool(self.cards))
         elif isinstance(event, LoginEvent):
             url = QUrl(event.url)
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:

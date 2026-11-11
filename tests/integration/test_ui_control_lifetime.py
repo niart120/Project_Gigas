@@ -28,7 +28,7 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.operation is None)
-        shell.connect_video()
+        shell.apply_settings(shell.baseline)
         capture.stream()
         qtbot.waitUntil(lambda: not shell.video.applying)
         panel = shell.window.connection
@@ -45,26 +45,23 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
         shell.dialog.save_button.click()
         qtbot.waitUntil(entered.is_set)
 
-        assert not shell.dialog.close_button.isEnabled()
+        assert shell.dialog.close_button.isEnabled()
         shell.dialog.close_button.click()
         shell.dialog.close()
 
-        assert shell.pending is None
         assert shell.operation == "save"
-        assert shell.dialog.isVisible()
+        assert not shell.dialog.isVisible()
         assert panel.interrupt_button.isEnabled()
         assert panel.disconnect_action.isEnabled()
-        assert shell.window.video.disconnect_action.isEnabled()
         panel.interrupt_button.click()
         panel.disconnect_action.trigger()
-        shell.window.video.disconnect_action.trigger()
         assert interrupted == [True]
         assert disconnected == [True]
-        assert capture.disconnects == 1
+        assert capture.disconnects == 0
         assert not release.is_set()
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)
-        assert shell.dialog.isVisible()
+        assert not shell.dialog.isVisible()
         assert shell.baseline.model == "edited"
     finally:
         release.set()

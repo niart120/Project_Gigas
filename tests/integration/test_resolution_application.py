@@ -1,4 +1,3 @@
-import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -9,7 +8,7 @@ from tests.integration.test_video_application import (
 )
 
 
-def test_auto_resolution_waits_for_old_cleanup_and_first_new_frame(
+def test_auto_resolution_closes_editor_before_cleanup_and_uses_new_frame_dimensions(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
@@ -22,13 +21,13 @@ def test_auto_resolution_waits_for_old_cleanup_and_first_new_frame(
     qtbot.waitUntil(lambda: shell.operation is None)
     assert len(capture.connections) == 1
     assert capture.snapshot().frame is None
-    assert dialog.isVisible()
+    assert not dialog.isVisible()
     assert shell.video.apply_state == "stopping"
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: len(capture.connections) == 2)
     assert capture.connections[-1].width is None
     assert capture.connections[-1].height is None
-    assert dialog.isVisible()
+    assert not dialog.isVisible()
     capture.stream(actual_size=(48, 32))
     qtbot.waitUntil(lambda: not dialog.isVisible())
     frame = capture.snapshot().frame
@@ -54,40 +53,4 @@ def test_display_changes_keep_actual_frame_and_requested_resolution(
     assert capture.disconnects == 0
     assert capture.snapshot().frame is frame
     assert not shell.baseline.preview_letterbox
-    assert not dialog.save_button.isEnabled()
-
-
-@pytest.mark.parametrize("acquisition_field", ["resolution", "fps"])
-def test_current_device_hint_only_compares_device_selection(
-    application: tuple[ApplicationShell, ControlledCapture, ControlledIO],
-    qtbot: QtBot,
-    acquisition_field: str,
-) -> None:
-    shell, capture, _io = application
-    dialog = shell.dialog
-    assert dialog is not None
-    assert dialog.capture_connection_status.isHidden()
-    if acquisition_field == "resolution":
-        dialog.capture_resolution.setCurrentIndex(dialog.capture_resolution.findData("auto"))
-    else:
-        dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
     assert dialog.save_button.isEnabled()
-    assert dialog.capture_connection_status.isHidden()
-    assert len(capture.connections) == 1
-
-    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
-    assert not dialog.capture_connection_status.isHidden()
-    assert dialog.capture_connection_status.text() == "現在: First"
-    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
-    assert dialog.capture_connection_status.isHidden()
-
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.video.apply_state == "stopping"
-    assert not dialog.capture_connection_status.isHidden()
-    assert dialog.capture_connection_status.text() == shell.window.video.status.text()
-    capture.complete_disconnect()
-    qtbot.waitUntil(lambda: len(capture.connections) == 2)
-    capture.stream()
-    qtbot.waitUntil(lambda: shell.video.apply_state == "complete")
-    assert dialog.capture_connection_status.isHidden()

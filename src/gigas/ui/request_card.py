@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSizePolicy,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -151,22 +150,12 @@ class RequestCard(QGroupBox):
         self.editors: dict[str, QuestionInput] = {}
         self.decision_buttons: dict[str, QPushButton] = {}
         layout = QVBoxLayout(self)
-        header = QHBoxLayout()
         self.status = _text_label("回答待ち", self)
-        header.addWidget(self.status, 1)
-        self.expand_button = QToolButton(self)
-        self.expand_button.setText("詳細")
-        self.expand_button.setCheckable(True)
-        self.expand_button.setChecked(True)
-        self.expand_button.setArrowType(Qt.ArrowType.DownArrow)
-        self.expand_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        header.addWidget(self.expand_button)
-        layout.addLayout(header)
+        layout.addWidget(self.status)
         self.body = QWidget(self)
         body_layout = QVBoxLayout(self.body)
         body_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.body)
-        self.expand_button.toggled.connect(self._expand)
         if request.details:
             details = QPlainTextEdit(self.body)
             details.setPlainText(request.details)
@@ -198,6 +187,14 @@ class RequestCard(QGroupBox):
     def is_live(self) -> bool:
         """Whether the card still accepts one explicit submission."""
         return self.state == "waiting"
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether expiry or a delivery result permits removal at the next turn.
+
+        A provisional unknown after interruption still awaits its queued result.
+        """
+        return self.state == "expired" or self._result_received
 
     def invalidate(self) -> None:
         """Expire unanswered requests without changing submitted delivery evidence."""
@@ -232,15 +229,7 @@ class RequestCard(QGroupBox):
         self.submit_button.setEnabled(False)
         for button in self.decision_buttons.values():
             button.setEnabled(False)
-        if state not in {"waiting", "sending"}:
-            self.expand_button.setChecked(False)
-        self.changed.emit()
-
-    def _expand(self, expanded: bool) -> None:
-        self.body.setVisible(expanded)
-        self.expand_button.setArrowType(
-            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
-        )
+        self.body.setVisible(state in {"waiting", "sending"})
         self.changed.emit()
 
     def _validate(self) -> None:

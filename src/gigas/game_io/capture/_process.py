@@ -48,9 +48,8 @@ class Channel(Protocol):
 class WorkerMessage:
     """A small state notification; images never travel through the pipe."""
 
-    kind: Literal["devices", "candidates", "opened", "started", "released", "error"]
+    kind: Literal["devices", "candidates", "started", "released", "error"]
     devices: "tuple[DeviceInfo, ...]" = ()
-    fps: float | None = None
     error: str = ""
     candidates: tuple[int, ...] = ()
     backend: int | None = None
@@ -62,7 +61,6 @@ def send_message(channel: Channel, message: WorkerMessage) -> None:
         {
             "kind": message.kind,
             "devices": [{"name": d.name, "path": d.path} for d in message.devices],
-            "fps": message.fps,
             "error": message.error,
             "candidates": message.candidates,
             "backend": message.backend,
@@ -83,7 +81,7 @@ def receive_message(channel: Channel) -> WorkerMessage:
     if not isinstance(value, dict):
         raise CaptureError(error)
     kind = value.get("kind")
-    if kind not in ("devices", "candidates", "opened", "started", "released", "error"):
+    if kind not in ("devices", "candidates", "started", "released", "error"):
         raise CaptureError(error)
     raw_devices = value.get("devices")
     if not isinstance(raw_devices, list) or len(raw_devices) > 64:
@@ -96,9 +94,6 @@ def receive_message(channel: Channel) -> WorkerMessage:
         if not isinstance(name, str) or not isinstance(path, str) or not path:
             raise CaptureError(error)
         devices.append(DeviceInfo(name, path))
-    fps = value.get("fps")
-    if fps is not None and (type(fps) not in (int, float) or not 0 < fps < float("inf")):
-        raise CaptureError(error)
     message = value.get("error")
     if not isinstance(message, str):
         raise CaptureError(error)
@@ -117,8 +112,6 @@ def receive_message(channel: Channel) -> WorkerMessage:
             ):
                 raise CaptureError(error)
             return WorkerMessage("candidates", candidates=tuple(candidates), backend=backend)
-        case "opened":
-            return WorkerMessage("opened", fps=None if fps is None else float(fps))
         case "started":
             return WorkerMessage("started")
         case "released":
@@ -252,7 +245,6 @@ def worker_main(
                 backend,
                 lambda: _stop_requested(stop),
                 publish,
-                lambda fps: send_message(status, WorkerMessage("opened", fps=fps)),
                 lambda: send_message(status, WorkerMessage("released")),
                 enumerated=lambda devices: send_message(
                     status, WorkerMessage("devices", devices=devices)

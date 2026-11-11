@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QTabWidget,
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 
 
 class SettingsDialog(QDialog):
-    """Edit settings in one modeless window owned by the main window.
+    """Edit one settings snapshot in a modal window owned by the main window.
 
     Args:
         path: Settings location shown as a read-only value.
@@ -47,13 +46,8 @@ class SettingsDialog(QDialog):
         """Create the form and action buttons."""
         super().__init__(parent)
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
-        self._saved_device = ""
-        self._selected_device = ""
-        self._edited_device: str | None = None
-        self._closing_allowed = True
         self._devices: tuple[DeviceInfo, ...] = ()
-        self._devices_checked = False
-        self._devices_searching = False
+        self.setModal(True)
         self.setWindowTitle("設定")
         self.resize(620, 440)
         layout = QVBoxLayout(self)
@@ -62,7 +56,12 @@ class SettingsDialog(QDialog):
         general_form = self._tab("一般")
         self.location = QLineEdit(str(path), self)
         self.location.setReadOnly(True)
-        general_form.addRow("設定ファイル", self.location)
+        location_row = QHBoxLayout()
+        location_row.addWidget(self.location, 1)
+        self.open_folder_button = QPushButton("フォルダを開く", self)
+        self.open_folder_button.setAutoDefault(False)
+        location_row.addWidget(self.open_folder_button)
+        general_form.addRow("設定ファイル", location_row)
         display_form = self._group(general_form, "表示")
         self.window_size_preset = QComboBox(self)
         for preset in WINDOW_SIZE_PRESETS:
@@ -85,8 +84,7 @@ class SettingsDialog(QDialog):
         )
         self.capture_choices.setMinimumContentsLength(12)
         self.capture_choices.addItem("未接続", "")
-        self.capture_choices.currentIndexChanged.connect(self._choose_capture_device)
-        self.capture_choices.activated.connect(self._choose_capture_device)
+        self.capture_choices.currentIndexChanged.connect(self.changed)
         self.capture_refresh_button = QPushButton("一覧更新", self)
         self.capture_refresh_button.clicked.connect(self.capture_refresh_requested)
         selection = QHBoxLayout()
@@ -97,19 +95,6 @@ class SettingsDialog(QDialog):
         self.capture_discovery_status.hide()
         selection.addWidget(self.capture_discovery_status)
         capture_form.addRow("機器", selection)
-        self.capture_discovery_error = QPlainTextEdit(self)
-        self.capture_discovery_error.setReadOnly(True)
-        self.capture_discovery_error.setMaximumHeight(70)
-        self.capture_discovery_error.hide()
-        self.capture_connection_status = QLabel(self)
-        self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
-        self.capture_connection_status.setWordWrap(True)
-        self.capture_connection_status.hide()
-        capture_form.addRow(self.capture_connection_status)
-        self.capture_connection_error = QPlainTextEdit(self)
-        self.capture_connection_error.setReadOnly(True)
-        self.capture_connection_error.setMaximumHeight(70)
-        self.capture_connection_error.hide()
         self.capture_fps = self._rate_field(60)
         capture_form.addRow("取得FPS", self.capture_fps)
         self.capture_resolution = QComboBox(self)
@@ -150,11 +135,6 @@ class SettingsDialog(QDialog):
         self.error_details_button.hide()
         error_row.addWidget(self.error_details_button)
         layout.addLayout(error_row)
-        self.details = QPlainTextEdit(self)
-        self.details.setReadOnly(True)
-        self.details.setMaximumHeight(90)
-        self.details.hide()
-        layout.addWidget(self.details)
         actions = QDialogButtonBox(self)
         self.ok_button = actions.addButton(QDialogButtonBox.StandardButton.Ok)
         self.close_button = actions.addButton(QDialogButtonBox.StandardButton.Cancel)
@@ -232,87 +212,34 @@ class SettingsDialog(QDialog):
         self,
         devices: "tuple[DeviceInfo, ...]",
         *,
-        checked: bool = True,
         searching: bool = False,
         error: str = "",
     ) -> None:
-        """Replace selectable devices without changing any unsaved setting.
-
-        Saved and selected device paths remain selectable when absent from the catalog.
+        """Refresh candidates without changing the edited device or other fields.
 
         Args:
-            devices: Enumerated names and nonempty paths. Paths are stored unchanged.
-            checked: Whether any successful enumeration has supplied these identities.
-            searching: Whether a catalog request is still running.
-            error: Latest catalog failure, retaining the prior successful candidates.
+            devices: Latest successful catalog with stable identifiers.
+            searching: Whether enumeration is in progress.
+            error: Current enumeration failure, available through notification details.
         """
-        self._devices = tuple(device for device in devices if device.path)
-        self._devices_checked = checked
-        self._devices_searching = searching
-        if error:
-            state = "列挙失敗"
-        elif searching:
-            state = "検索中"
-        else:
-            state = ""
+        state = "列挙失敗" if error else "検索中" if searching else ""
         self.capture_discovery_status.setText(state)
         self.capture_discovery_status.setVisible(bool(state))
-        if self.capture_discovery_error.toPlainText() != error:
-            self.capture_discovery_error.setPlainText(error)
-        self._sync_capture_choice()
+        devices = tuple(device for device in devices if device.path)
+        if devices != self._devices:
+            selected = str(self.capture_choices.currentData() or "")
+            self._devices = devices
+            self._sync_capture_choice(selected)
 
-    def _sync_capture_choice(self) -> None:
+    def _sync_capture_choice(self, selected: str) -> None:
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
             self.capture_choices.addItem("未接続", "")
             for label, path in capture_device_choices(self._devices):
                 self.capture_choices.addItem(label, path)
-            missing = "未検出" if self._devices_checked else "未確認"
-            state = "検索中" if self._devices_searching else missing
-            for role, path in (
-                ("保存済み", self._saved_device),
-                ("選択中", self._selected_device),
-            ):
-                if path and self.capture_choices.findData(path) < 0:
-                    self.capture_choices.addItem(f"{role} ({state})", path)
-            self.capture_choices.setCurrentIndex(
-                self.capture_choices.findData(self._selected_device)
-            )
-
-    def _choose_capture_device(self) -> None:
-        path = self.capture_choices.currentData()
-        if isinstance(path, str):
-            previous = self._selected_device, self._edited_device
-            self._selected_device = path
-            self._edited_device = path
-            if previous != (self._selected_device, self._edited_device):
-                self.changed.emit()
-
-    @property
-    def capture_target(self) -> str:
-        """Return the requested live device path; an empty string requests disconnection."""
-        return self._selected_device
-
-    def set_capture_target(self, path: str) -> None:
-        """Synchronize the live target without replacing the saved device.
-
-        Args:
-            path: Current live device path, or an empty string for disconnected state.
-                This clears an explicit unsaved device choice without emitting changed.
-        """
-        self._selected_device = path
-        self._edited_device = None
-        self._sync_capture_choice()
-
-    @property
-    def closing_allowed(self) -> bool:
-        """Return whether Cancel, Escape, and the window close control may request closure."""
-        return self._closing_allowed
-
-    def set_closing_allowed(self, allowed: bool) -> None:
-        """Enable or suppress closure requests without accepting or rejecting the dialog."""
-        self._closing_allowed = allowed
-        self.close_button.setEnabled(allowed)
+            if self.capture_choices.findData(selected) < 0:
+                self.capture_choices.addItem(selected, selected)
+            self.capture_choices.setCurrentIndex(self.capture_choices.findData(selected))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Request closure without discarding edits."""
@@ -321,19 +248,12 @@ class SettingsDialog(QDialog):
 
     def reject(self) -> None:
         """Route Escape through the same closure decision as the close button."""
-        if self._closing_allowed:
-            self.close_requested.emit()
+        self.close_requested.emit()
 
     def values(self) -> Settings:
-        """Return settings, retaining the saved device until an explicit source choice.
-
-        An explicit disconnected choice clears the saved device on Apply. Synchronizing
-        a stopped live target does not clear it. Text whitespace is retained.
-        """
+        """Return the edited snapshot, including the selected device or empty value."""
         return Settings(
-            capture_device=(
-                self._saved_device if self._edited_device is None else self._edited_device
-            ),
+            capture_device=str(self.capture_choices.currentData() or ""),
             serial_port=self._text_value(self.serial_port),
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),
@@ -345,14 +265,8 @@ class SettingsDialog(QDialog):
             preview_letterbox=bool(self.preview_mode.currentData()),
         )
 
-    def set_values(self, values: Settings, *, preserve_target: bool = False) -> None:
-        """Replace settings and saved-device baseline without emitting edit notifications.
-
-        Args:
-            values: Saved settings to display, replacing unsaved field edits.
-            preserve_target: Keep the current live target when true. Otherwise use the
-                saved device as the target. Both paths clear an explicit device edit.
-        """
+    def set_values(self, values: Settings) -> None:
+        """Replace the complete edited snapshot without emitting change notifications."""
         with QSignalBlocker(self):
             for field, value in (
                 (self.serial_port, values.serial_port),
@@ -367,11 +281,7 @@ class SettingsDialog(QDialog):
                 (self.preview_fps, values.preview_fps),
             ):
                 self._set_rate(field, value)
-            self._saved_device = values.capture_device
-            self._edited_device = None
-            if not preserve_target:
-                self._selected_device = values.capture_device
-            self._sync_capture_choice()
+            self._sync_capture_choice(values.capture_device)
             self.window_size_preset.setCurrentIndex(
                 self.window_size_preset.findData(values.window_size_preset)
             )
@@ -386,12 +296,7 @@ class SettingsDialog(QDialog):
         return original if current == displayed else current
 
     def set_editable(self, enabled: bool) -> None:
-        """Control editing and closure while retaining selection and copying of values.
-
-        Call set_closing_allowed separately when read-only fields may still be closed,
-        such as after a settings load failure.
-        """
-        self.set_closing_allowed(enabled)
+        """Control editing during I/O while retaining copying and dialog closure."""
         for field in (self.serial_port, self.model, self.effort):
             field.setReadOnly(not enabled)
         self.auth_method.setEnabled(enabled)

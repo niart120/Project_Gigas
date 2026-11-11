@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
@@ -14,10 +14,24 @@ from gigas.game_io.capture.models import Frame
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
-from tests.integration.test_video_gui import PreviewClocks
 from tests.integration.test_video_gui import (
     video_shell as video_shell,  # noqa: PLC0414 -- expose the shared pytest fixture
 )
+
+
+@dataclass
+class PreviewClocks:
+    """Replay precise timer events beside a coarse Windows elapsed clock."""
+
+    elapsed: float = 0.0
+
+    def monotonic(self) -> float:
+        """Return elapsed time quantized to the Windows 15.625 ms tick."""
+        return 1000.0 + int(self.elapsed * 64) / 64
+
+    def perf_counter(self) -> float:
+        """Return the precise elapsed time of the same event."""
+        return 1000.0 + self.elapsed
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -44,7 +58,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        shell.window.video.connect_action.trigger()
+        shell.apply_settings(shell.baseline)
         capture.stream()
         qtbot.waitUntil(lambda: not shell.video.applying)
         original = capture.snapshot().frame
@@ -57,7 +71,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         assert actions["full_hd"].isChecked()
         assert shell.window.video.view.maximumSize() == original_limit
         assert all(not action.isEnabled() for action in actions.values())
-        assert shell.window.video.disconnect_action.isEnabled()
+        assert capture.snapshot().phase == "streaming"
         capture.stream(2)
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)
@@ -87,17 +101,19 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
     assert dialog is not None
     actions = shell.window.window_size_actions
     assert set(actions) == {"hd", "full_hd", "wqhd", "four_k"}
+    dialog.close_button.click()
     for key, action in actions.items():
         action.trigger()
         qtbot.waitUntil(lambda: shell.operation is None)
         assert shell.baseline.window_size_preset == key
+        shell.open_settings()
         assert dialog.window_size_preset.currentData() == key
+        dialog.close_button.click()
         assert [name for name, candidate in actions.items() if candidate.isChecked()] == [key]
         available = shell.window.screen().availableGeometry()
         assert available.contains(shell.window.frameGeometry())
         assert shell.window.settings_action in shell.window.file_menu.actions()
-        assert shell.window.video.connect_action in shell.window.video_menu.actions()
-        assert shell.window.video.disconnect_action in shell.window.video_menu.actions()
+        assert shell.window.video_device_actions[""].isCheckable()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
         for widget in (
@@ -118,7 +134,7 @@ def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_me
     shell, capture = video_shell
     clock = PreviewClocks()
     monkeypatch.setattr(video, "time", clock)
-    shell.window.video.connect_action.trigger()
+    shell.apply_settings(shell.baseline)
     capture.stream()
     qtbot.waitUntil(lambda: not shell.video.applying)
     shell.video.timer.stop()
@@ -156,10 +172,11 @@ def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_me
     shell.video.timer.timeout.emit()
     assert delivered == [1, 2]
     assert len(capture.connections) == 1
-    save_settings(shell.path, replace(shell.baseline, window_size_preset="wqhd"))
-    shell.reload()
+    dialog.close_button.click()
+    shell.window.window_size_actions["wqhd"].trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.window.window_size_actions["wqhd"].isChecked()
+    shell.open_settings()
     assert dialog.window_size_preset.currentData() == "wqhd"
 
 
@@ -173,7 +190,7 @@ def test_real_capture_readers_continue_through_display_resize(qtbot: QtBot, tmp_
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        shell.window.video.connect_action.trigger()
+        shell.apply_settings(shell.baseline)
         qtbot.waitUntil(lambda: observer.snapshot().frame is not None, timeout=8000)
         held = observer.snapshot().frame
         assert held is not None

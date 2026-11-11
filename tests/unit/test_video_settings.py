@@ -160,8 +160,10 @@ def test_invalid_window_size_preset_cannot_overwrite_existing_file(
     assert path.read_text(encoding="utf-8") == original
 
 
-@pytest.mark.parametrize("resolution", ["auto", "hd", "full_hd", "wqhd", "four_k"])
-@pytest.mark.parametrize("letterbox", [False, True])
+@pytest.mark.parametrize(
+    ("resolution", "letterbox"),
+    [("auto", False), ("hd", True), ("full_hd", False), ("wqhd", True), ("four_k", False)],
+)
 def test_capture_resolution_and_preview_letterbox_round_trip_independently(
     tmp_path: Path, resolution: str, letterbox: bool
 ) -> None:

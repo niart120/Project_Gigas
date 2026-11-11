@@ -1,6 +1,5 @@
 """Immutable capture configuration and device identity."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -100,23 +99,3 @@ class CaptureOptions:
             if type(value) is not int or not low <= value <= high:
                 message = f"{label}: {low}〜{high}の整数が必要"
                 raise CaptureError(message)
-
-
-def select_device(devices: Sequence[DeviceInfo], device_path: str) -> DeviceInfo:
-    """Select exactly one device by its path without interpreting legacy values.
-
-    Args:
-        devices: Current enumeration, including devices with duplicate names.
-        device_path: Exact saved path; names and numeric indices are not accepted.
-
-    Returns:
-        The sole matching device.
-
-    Raises:
-        CaptureError: The path is empty, absent, or appears more than once.
-    """
-    matches = [device for device in devices if device_path and device.path == device_path]
-    if len(matches) != 1:
-        message = "映像取得元が見つからない" if not matches else "映像取得元の識別子が重複"
-        raise CaptureError(message)
-    return matches[0]

@@ -18,6 +18,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    TurnStarted,
 )
 from gigas.runtime.codex.transport import (
     JsonObject,
@@ -174,6 +175,9 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
             True,
         )
         await connection.send("確認だけ")
+        assert [event for event in events if isinstance(event, TurnStarted)] == [
+            TurnStarted("turn-1")
+        ]
         start = next(params for method, params in peer.calls if method == "thread/start")
         assert start is not None
         assert start["developerInstructions"] == resources.files("gigas.prompts").joinpath(
@@ -713,6 +717,7 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
         await send
         if method == "thread/start":
             assert not any(name == "turn/start" for name, _ in peer.calls)
+            assert not any(isinstance(event, TurnStarted) for event in events)
         else:
             await connection.stop()
             assert sum(name == "turn/interrupt" for name, _ in peer.calls) == 1
@@ -725,8 +730,10 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
     _run(scenario())
 
 
+@pytest.mark.parametrize("started_notice", [True, False])
 def test_notifications_before_start_response_preserve_text_requests_and_completion(
     tmp_path: Path,
+    started_notice: bool,
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -736,9 +743,10 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         await connection.open()
         send = asyncio.create_task(connection.send("開始"))
         await _events_processed()
-        peer.events.put_nowait(
-            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
-        )
+        if started_notice:
+            peer.events.put_nowait(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
         peer.events.put_nowait(_question())
         peer.events.put_nowait(
             RpcNotification(
@@ -761,6 +769,10 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         peer.gates["turn/start"].set()
         await send
         request = next(event for event in events if isinstance(event, HumanRequest))
+        assert [event for event in events if isinstance(event, TurnStarted)] == [
+            TurnStarted("turn-1")
+        ]
+        assert events.index(TurnStarted("turn-1")) < events.index(request)
         assert RequestResolved(request.token) in events
         assert TextEvent("a", "応") in events
         assert TextEvent("a", "応答", replace=True) in events
@@ -768,6 +780,23 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         assert events[-1].phase == "ready"
         with pytest.raises(CodexConnectionError):
             await connection.answer(request.token, answers={"route": "東"})
+        peer.gates["turn/start"].clear()
+        peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "completed"}}
+        second = asyncio.create_task(connection.send("次へ"))
+        await _events_processed()
+        peer.events.put_nowait(
+            RpcNotification(
+                "turn/completed",
+                {"threadId": "thread-1", "turn": {"id": "turn-2", "status": "completed"}},
+            )
+        )
+        await _events_processed()
+        peer.gates["turn/start"].set()
+        await second
+        assert [event for event in events if isinstance(event, TurnStarted)] == [
+            TurnStarted("turn-1"),
+            TurnStarted("turn-2"),
+        ]
         await connection.close()
 
     _run(scenario())

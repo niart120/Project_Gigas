@@ -1,22 +1,6 @@
 import pytest
 
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo, select_device
-
-
-def test_selects_exact_path_despite_duplicate_names_and_changed_indices() -> None:
-    devices = (DeviceInfo("Capture", "path-b"), DeviceInfo("Capture", "path-a"))
-    assert select_device(devices, "path-a") is devices[1]
-
-
-@pytest.mark.parametrize("path", ["", "Capture", "0", "missing"])
-def test_missing_or_legacy_selection_never_falls_back(path: str) -> None:
-    with pytest.raises(CaptureError):
-        select_device((DeviceInfo("Capture", "path-a"),), path)
-
-
-def test_ambiguous_path_is_rejected() -> None:
-    with pytest.raises(CaptureError):
-        select_device((DeviceInfo("A", "same"), DeviceInfo("B", "same")), "same")
+from gigas.game_io.capture.models import CaptureError, CaptureOptions
 
 
 def test_default_mode_and_supported_boundaries() -> None:

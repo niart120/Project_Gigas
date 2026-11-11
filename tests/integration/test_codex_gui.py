@@ -2,11 +2,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCore import QPoint, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 
-from gigas.app.settings_worker import OperationResult
 from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.models import (
     ConnectionOptions,
@@ -19,32 +18,11 @@ from gigas.runtime.codex.models import (
     TextEvent,
 )
 from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
-from gigas.storage.settings import Settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
 
 if TYPE_CHECKING:
     from gigas.ui.notifications import Notice
-
-
-def test_settings_load_failure_preserves_session_stop(qtbot: QtBot, tmp_path: Path) -> None:
-    shell = ApplicationShell(tmp_path / "settings.toml")
-    qtbot.addWidget(shell.window)
-    shell._complete(OperationResult(settings=Settings()))
-    panel = shell.window.connection
-    panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", authenticated=True)))
-    shell.operation = "load"
-    shell._complete(OperationResult(error="read failure"))
-    assert panel.interrupt_button.isEnabled()
-    assert panel.disconnect_action.isEnabled()
-    with qtbot.waitSignal(panel.interrupt_requested):
-        panel.interrupt_button.click()
-    with qtbot.waitSignal(panel.disconnect_requested):
-        panel.disconnect_action.trigger()
-    panel.handle_result(ServiceResult(1, "disconnect"))
-    shell._render()
-    assert not panel.connect_action.isEnabled()
 
 
 def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) -> None:
@@ -167,6 +145,7 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     )
     panel.handle_event(ServiceEvent(5, RequestResolved("token")))
     assert not card.is_live
+    assert card.editors["text"].answer.text() == ""
     assert "secret" not in panel.transcript.toPlainText()
     panel.activate(6)
     panel.handle_event(ServiceEvent(5, request))
@@ -259,46 +238,3 @@ def test_connection_failure_persists_until_explicit_disconnect(
     assert not panel.connect_action.isEnabled()
     panel.handle_result(ServiceResult(1, "disconnect"))
     assert panel.connect_action.isEnabled()
-
-
-def test_new_request_scrolls_into_view_after_long_resolved_request(qtbot: QtBot) -> None:
-    panel = ConnectionPanel()
-    qtbot.addWidget(panel)
-    panel.resize(800, 650)
-    panel.show()
-    panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
-    panel.handle_event(
-        ServiceEvent(
-            1,
-            HumanRequest(
-                "old",
-                1,
-                "thread",
-                "turn",
-                "question",
-                questions=(Question("long", "質問", "\n".join(["長い質問"] * 60)),),
-            ),
-        )
-    )
-    qtbot.waitUntil(lambda: panel.requests.verticalScrollBar().maximum() > 0)
-    panel.handle_event(ServiceEvent(1, RequestResolved("old")))
-    panel.handle_event(
-        ServiceEvent(
-            1,
-            HumanRequest(
-                "new",
-                2,
-                "thread",
-                "turn",
-                "command",
-                details="command",
-                decisions=("decline",),
-            ),
-        )
-    )
-    card = panel.cards["new"]
-    viewport = panel.requests.viewport()
-    qtbot.waitUntil(lambda: card.y() > panel.cards["old"].y())
-    qtbot.waitUntil(lambda: card.mapTo(viewport, QPoint()).y() < viewport.height(), timeout=1000)
-    assert card.mapTo(viewport, QPoint()).y() + card.height() > 0

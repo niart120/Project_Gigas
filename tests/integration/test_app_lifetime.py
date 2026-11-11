@@ -82,9 +82,7 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
     assert io.thread != QThread.currentThread()
     assert shell.dialog.model.isReadOnly()
     assert not shell.dialog.save_button.isEnabled()
-    assert not shell.window.reload_action.isEnabled()
-    shell.save()
-    shell.reload()
+    assert not shell.apply_settings()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert (io.loads, io.saves) == (1, 1)
@@ -99,83 +97,84 @@ def test_pending_close_follows_save_result(
 ) -> None:
     shell, io = controlled
     io.fail = fail
-    assert shell.dialog is not None
-    shell.dialog.model.setText("edited")
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.model.setText("edited")
     if target == "dialog":
-        shell.dialog.ok_button.click()
+        dialog.ok_button.click()
     else:
-        shell.save()
+        dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     if target == "app":
-        shell.window.close()
-        shell.window.close()
-    else:
-        shell.dialog.close()
-        shell.dialog.close()
+        shell.request_close()
+        shell.request_close()
     assert shell.window.isVisible()
-    assert shell.dialog.isVisible()
+    assert dialog.isVisible()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     if fail:
-        assert shell.pending is None
         assert shell.window.isVisible()
-        assert shell.dialog.isVisible()
-        assert not shell.dialog.model.isReadOnly()
-        assert shell.dialog.save_button.isEnabled()
-        assert shell.dialog.model.text() == "edited"
+        assert dialog.isVisible()
+        assert dialog.save_button.isEnabled()
+        assert dialog.model.text() == "edited"
     else:
-        dialog = shell.dialog
         qtbot.waitUntil(lambda: not dialog.isVisible())
-        assert shell.window.isVisible() == (target == "dialog")
+        if target == "app":
+            qtbot.waitUntil(lambda: not shell.window.isVisible())
+        else:
+            assert shell.window.isVisible()
     assert io.saves == 1
 
 
-def test_close_during_reload_finishes_after_result(
-    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+@pytest.mark.parametrize("fail", [False, True])
+def test_closing_editor_during_save_keeps_submitted_result(
+    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, fail: bool
 ) -> None:
     shell, io = controlled
-    io.block_load = True
-    shell.reload()
+    dialog = shell.dialog
+    assert dialog is not None
+    io.fail = fail
+    dialog.model.setText("submitted")
+    dialog.ok_button.click()
     qtbot.waitUntil(io.entered.is_set)
-    shell.window.close()
-    assert shell.window.isVisible()
-    io.release.set()
-    qtbot.waitUntil(lambda: not shell.window.isVisible())
-    assert shell.baseline == Settings()
-
-
-@pytest.mark.parametrize("operation", ["save", "load"])
-def test_cancel_close_keeps_late_result_without_exiting(
-    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, operation: str
-) -> None:
-    shell, io = controlled
-    assert shell.dialog is not None
-    if operation == "save":
-        shell.dialog.model.setText("late")
-        shell.save()
-    else:
-        save_settings(shell.path, Settings(model="late"))
-        io.block_load = True
-        shell.reload()
-    qtbot.waitUntil(io.entered.is_set)
-    shell.window.close()
-    assert shell.window.cancel_close_button.isVisible()
-    shell.wait_timer.timeout.emit()
-    assert str(shell.path) in shell.window.status.text()
-    shell.window.cancel_close_button.click()
-    assert not shell.window.cancel_close_button.isVisible()
-    assert shell.operation == operation
-    shell.save()
-    shell.reload()
+    qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible()
+    assert shell.operation == "save"
+    shell.open_settings()
+    assert not dialog.isVisible()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
+    assert not dialog.isVisible()
+    assert io.saves == 1
     assert shell.window.isVisible()
-    assert shell.baseline.model == "late"
-    assert shell.dialog.model.text() == "late"
-    assert (io.saves, io.loads) == ((1, 1) if operation == "save" else (0, 2))
+    shell.open_settings()
+    assert dialog.model.text() == ("" if fail else "submitted")
+    if fail:
+        assert shell.window.notifications.notices["settings"].details
+    else:
+        assert load_settings(shell.path).model == "submitted"
 
 
-def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
+def test_close_during_initial_load_finishes_after_result(qtbot: QtBot, tmp_path: Path) -> None:
+    io = ControlledIO()
+    io.block_load = True
+    shell = ApplicationShell(tmp_path / "settings.toml", SettingsIO(io.load, io.save))
+    shell.start()
+    try:
+        qtbot.waitUntil(io.entered.is_set)
+        shell.request_close()
+        assert shell.window.isVisible()
+        io.release.set()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+        assert io.loads == 1
+    finally:
+        io.release.set()
+        if shell.window.isVisible():
+            shell.request_close()
+            qtbot.waitUntil(lambda: not shell.window.isVisible())
+
+
+def test_shutdown_waits_for_thread_cleanup(
     controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     shell, _io = controlled
@@ -190,64 +189,36 @@ def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
 
     monkeypatch.setattr(shell.io_thread, "wait", delayed_wait)
     try:
-        shell.window.close()
+        shell.request_close()
         qtbot.waitUntil(wait_called.is_set)
-        assert shell.committed
         qtbot.waitUntil(shell.io_thread.isFinished)
         assert shell.window.isVisible()
-        assert not shell.window.cancel_close_button.isVisible()
-        shell.cancel_close()
         assert shell.committed
         assert not shell.window.settings_action.isEnabled()
         pulse = Event()
         QTimer.singleShot(0, pulse.set)
         qtbot.waitUntil(pulse.is_set)
-        assert shell.window.isVisible()
     finally:
         cleanup_allowed.set()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
     assert real_wait(0)
 
 
-def test_save_from_close_confirmation_starts_wait_timer(
+def test_save_from_close_confirmation_finishes_before_shutdown(
     controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
     shell.dialog.model.setText("saved-on-close")
-    shell.window.close()
+    shell.request_close()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Save).click()
     qtbot.waitUntil(io.entered.is_set)
     assert shell.wait_timer.isActive()
-    shell.window.cancel_close_button.click()
-    io.release.set()
-    qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.window.isVisible()
+    io.release.set()
+    qtbot.waitUntil(lambda: not shell.window.isVisible())
     assert load_settings(shell.path).model == "saved-on-close"
-
-
-def test_long_wait_target_keeps_closure_controls_inside_screen(
-    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
-) -> None:
-    shell, io = controlled
-    # No filesystem operation uses this synthetic long path.
-    shell.path = Path("C:/") / ("長い保存先" * 100) / "settings.toml"
-    io.block_load = True
-    shell.reload()
-    qtbot.waitUntil(io.entered.is_set)
-    shell.window.close()
-    shell.wait_timer.timeout.emit()
-    laid_out = Event()
-    QTimer.singleShot(0, laid_out.set)
-    qtbot.waitUntil(laid_out.is_set)
-    assert shell.window.screen().availableGeometry().contains(shell.window.frameGeometry())
-    assert shell.dialog is not None
-    assert shell.dialog.screen().availableGeometry().contains(shell.dialog.frameGeometry())
-    assert shell.window.cancel_close_button.isVisible()
-    assert shell.window.close_progress.isVisible()
-    assert shell.window.close_progress.rect().contains(shell.window.cancel_close_button.geometry())
-    shell.cancel_close()
 
 
 def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
@@ -278,7 +249,7 @@ def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
         shell.open_settings()
         assert shell.dialog is not None
         shell.dialog.model.setText("saved before shutdown")
-        shell.save()
+        shell.apply_settings()
         qtbot.waitUntil(entered.is_set)
         shell.request_close()
         pulse = Event()

@@ -60,7 +60,7 @@ def test_explicit_offline_apply_clears_saved_device_after_same_device_can_start(
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
-    assert dialog.capture_target == ""
+    assert dialog.capture_choices.currentData() == "path-a"
     assert dialog.values().capture_device == "path-a"
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
     assert not shell.dirty
@@ -82,7 +82,7 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
     shell, capture = app
     dialog = open_editor(shell, capture)
     assert not shell.dirty
-    dialog.capture_choices.activated.emit(0)
+    dialog.capture_choices.setCurrentIndex(0)
     assert shell.dirty
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -90,29 +90,7 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
     assert not capture.connections
 
 
-def test_menu_stop_preserves_device_for_restart(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
-) -> None:
-    shell, capture = app
-    shell.connect_video()
-    capture.stream()
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    dialog = open_editor(shell, capture)
-    shell.window.video.disconnect_action.trigger()
-    qtbot.waitUntil(lambda: capture.snapshot().phase == "enumerating")
-    capture.complete_enumeration((DeviceInfo("Camera A", "path-a"),))
-    shell.video.timer.timeout.emit()
-    assert dialog.capture_target == ""
-    assert dialog.values().capture_device == "path-a"
-    assert load_settings(shell.path).capture_device == "path-a"
-    dialog.model.setText("changed")
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert load_settings(shell.path).capture_device == "path-a"
-    assert len(capture.connections) == 1
-
-
-def test_offline_general_apply_does_not_open_remembered_device(
+def test_explicit_general_apply_uses_selected_device(
     app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = app
@@ -121,9 +99,9 @@ def test_offline_general_apply_does_not_open_remembered_device(
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.baseline.preview_letterbox
-    assert dialog.capture_target == ""
-    assert not capture.connections
-    assert not dialog.save_button.isEnabled()
+    assert dialog.capture_choices.currentData() == "path-a"
+    assert len(capture.connections) == 1
+    assert dialog.save_button.isEnabled()
 
 
 def test_failed_target_can_be_retried_without_an_edit(
@@ -137,30 +115,9 @@ def test_failed_target_can_be_retried_without_an_edit(
     capture.state = replace(capture.state, phase="error", cleanup="graceful", error="open failed")
     qtbot.waitUntil(lambda: shell.video.apply_state == "failed")
     assert not shell.dirty
-    assert dialog.capture_target == "path-b"
+    assert dialog.capture_choices.currentData() == "path-b"
     assert dialog.save_button.isEnabled()
     dialog.save_button.click()
     qtbot.waitUntil(lambda: len(capture.connections) == 2)
     capture.stream()
     qtbot.waitUntil(lambda: not shell.video.applying)
-
-
-def test_reload_keeps_active_target_and_general_save_preserves_remembered_device(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
-) -> None:
-    shell, capture = app
-    shell.connect_video()
-    capture.stream(actual_size=(32, 24))
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    save_settings(shell.path, Settings(capture_device="path-b"))
-    shell.reload()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    dialog = open_editor(shell, capture)
-    assert dialog.capture_target == "path-a"
-    assert dialog.values().capture_device == "path-b"
-    dialog.model.setText("model-change")
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert len(capture.connections) == 1
-    assert load_settings(shell.path).capture_device == "path-b"
-    assert dialog.capture_target == "path-a"

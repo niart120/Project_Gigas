@@ -56,10 +56,6 @@ class PeerCamera:
             self.height = int(value)
         return True
 
-    def get(self, _prop_id: int) -> float:
-        """Expose a nominal rate distinguishable from measured throughput."""
-        return 59.94
-
     def read(self) -> tuple[bool, object]:
         """Pace numbered frames so cancellation can race with a pending read."""
         if self.sequence == 3:

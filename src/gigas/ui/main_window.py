@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -98,10 +97,8 @@ class MainWindow(QMainWindow):
 
     settings_requested = Signal()
     close_requested = Signal()
-    cancel_close_requested = Signal()
     window_size_requested = Signal(str)
     video_menu_opened = Signal()
-    video_menu_closed = Signal()
     capture_device_requested = Signal(str)
 
     def __init__(self) -> None:
@@ -120,8 +117,6 @@ class MainWindow(QMainWindow):
         self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
-        self.reload_action = self.file_menu.addAction("設定を再読込")
-        self.settings_location_action = self.file_menu.addAction("設定ファイルの場所を開く")
         self.file_menu.addSeparator()
         self.exit_action = self.file_menu.addAction("終了")
         self.exit_action.triggered.connect(self.close)
@@ -129,7 +124,6 @@ class MainWindow(QMainWindow):
         self.video_menu = self.connection_menu.addMenu("映像")
         self.video_menu.setToolTipsVisible(True)
         self.video_menu.aboutToShow.connect(self.video_menu_opened)
-        self.video_menu.aboutToHide.connect(self.video_menu_closed)
         self.codex_menu = self.connection_menu.addMenu("Codex")
         self.view_menu = self.menuBar().addMenu("表示")
         for preset in WINDOW_SIZE_PRESETS:
@@ -152,16 +146,11 @@ class MainWindow(QMainWindow):
         progress_layout.setContentsMargins(0, 0, 0, 0)
         self.status = ElidedLabel(parent=self.close_progress)
         progress_layout.addWidget(self.status, 1)
-        self.cancel_close_button = QPushButton("終了取消し", self.close_progress)
-        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
-        self.cancel_close_button.hide()
-        progress_layout.addWidget(self.cancel_close_button)
         self.close_progress.hide()
         layout.addWidget(self.close_progress)
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.video = VideoPanel(self.splitter)
-        self.view_menu.insertAction(self.notifications.entry_action, self.video.info_action)
         conversation = QWidget(self.splitter)
         conversation_layout = QVBoxLayout(conversation)
         conversation_layout.addWidget(QLabel("Codex", conversation))
@@ -173,8 +162,6 @@ class MainWindow(QMainWindow):
             self.connection.login_action,
         ):
             self.codex_menu.addAction(action)
-        self.video_menu.addAction(self.video.connect_action)
-        self.video_menu.addAction(self.video.disconnect_action)
         self.video_menu.addSeparator()
         self._catalog_status = self.video_menu.addAction("未確認")
         self._catalog_status.setEnabled(False)
@@ -197,41 +184,31 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self._pane_statuses, 1)
 
     def refresh_close_progress(self) -> None:
-        """Reflect direct status and cancel-button updates without changing shutdown.
-
-        Call after setting ``status`` text and ``cancel_close_button`` visibility.
-        The progress region is hidden only when the text is empty and the button
-        is explicitly hidden, independently of the parent's current visibility.
-        """
-        self.close_progress.setVisible(
-            bool(self.status.text()) or not self.cancel_close_button.isHidden()
-        )
+        """Show pending shutdown status without owning shutdown state."""
+        self.close_progress.setVisible(bool(self.status.text()))
 
     def set_capture_devices(
         self,
         devices: "tuple[DeviceInfo, ...]",
         selected_device: str,
         *,
-        checked: bool,
         searching: bool,
         error: str,
         enabled: bool,
     ) -> None:
-        """Reflect the current acquisition target without selecting a saved device.
+        """Reflect the saved device independently of capture connection state.
 
         Args:
             devices: Latest successful catalog, shared with the settings dialog.
-            selected_device: Current target path, or empty for disconnected. An
-                active identity missing from the catalog remains represented.
-            checked: Whether a catalog has been successfully received.
+            selected_device: Saved device path, or empty for no capture. A saved
+                identity missing from the catalog remains represented.
             searching: Whether discovery and its cleanup are pending.
             error: Current catalog failure, shown as a short state here.
             enabled: Whether selecting a device may save and apply settings.
         """
         choices = (("未接続", ""), *capture_device_choices(devices))
         if selected_device not in {path for _label, path in choices}:
-            missing = "未検出" if checked else "未確認"
-            choices += (("検索中" if searching else missing, selected_device),)
+            choices += ((selected_device, selected_device),)
         if choices != self._video_choices:
             for action in self._video_device_group.actions():
                 self.video_menu.removeAction(action)
@@ -257,18 +234,9 @@ class MainWindow(QMainWindow):
             self._video_choices = choices
         self.video_device_actions[selected_device].setChecked(True)
         self._video_device_group.setEnabled(enabled)
-        state = (
-            "列挙失敗"
-            if error
-            else "検索中"
-            if searching
-            else "取得済み"
-            if devices
-            else "機器なし"
-        )
-        if not checked and not searching and not error:
-            state = "未確認"
+        state = "列挙失敗" if error else "検索中" if searching else ""
         self._catalog_status.setText(state)
+        self._catalog_status.setVisible(bool(state))
 
     def set_window_size_state(self, key: str, *, enabled: bool) -> None:
         """Reflect the saved selection and whether a new save can be requested."""
@@ -300,7 +268,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Route window closure through application lifetime management."""
         if self.allow_close:
-            self.video.close_information()
             self.notifications.close_details()
             event.accept()
         else:

@@ -91,15 +91,13 @@ def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
     assert frame is not None
     assert snapshot.phase == "streaming"
     assert frame.bgr == bytes([frame.sequence % 256]) * (16 * 16 * 3)
-    assert snapshot.reported_fps == 59.94
     # The sequence counts device acquisitions, not samples already read by the host.
-    assert snapshot.measured_fps is None
     resume_reader.set()
-    snapshot = wait_for(service, lambda state: state.measured_fps is not None)
+    snapshot = wait_for(
+        service, lambda state: state.frame is not None and state.frame.sequence > frame.sequence
+    )
     assert snapshot.frame is not None
     assert snapshot.frame.sequence > frame.sequence
-    assert snapshot.measured_fps is not None
-    assert snapshot.measured_fps > 0
     service.disconnect()
     assert service.snapshot().frame is None
     stopped = wait_for(service, lambda state: state.phase == "idle")

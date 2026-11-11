@@ -124,6 +124,4 @@ class ControlledCapture:
             datetime.now(UTC),
             sequence,
         )
-        self.state = replace(
-            self.state, phase="streaming", frame=frame, reported_fps=59.94, measured_fps=59.5
-        )
+        self.state = replace(self.state, phase="streaming", frame=frame)

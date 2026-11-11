@@ -143,6 +143,5 @@ def test_more_than_two_matching_apis_are_rejected_before_open() -> None:
             TooManyCandidates(),
             lambda: False,
             lambda _frame: None,
-            lambda _rate: None,
         )
     assert not opened
