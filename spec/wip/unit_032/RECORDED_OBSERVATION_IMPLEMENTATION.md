@@ -35,7 +35,7 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | P1: 新規専用ディレクトリだけに最小プロジェクトを作り既存物を保持する | new | integration | 部分作成失敗も再初期化しない |
-| todo | P2: 正常な既存記録を読み、不正行の位置を報告して追記を拒否する | edge | integration | 未知種別・欠番・余剰項目、原本保持 |
+| refactor-done | P2: 正常な既存記録を読み、不正行の位置を報告して追記を拒否する | edge | integration | 未知種別・欠番・余剰項目、原本保持 |
 | todo | P3: 別プロセスのwriterを拒否し、終了後に同じプロジェクトを開ける | new | integration | 実Windows OSロック、明示的reload |
 | todo | O1: 元寸法・画素・時刻を持つPNGとIDを保存し再読込後も対応する | new | integration | 最大3840×2160、同Frameに別ID |
 | todo | O2: 最新snapshotの採用条件と取得停止前後の境界を守る | new | integration | 既存の遅いreader試験を実保存へ統合 |
@@ -67,3 +67,5 @@ MCP画像応答と実Codex受信、保存先GUI、接続・終了との配線は
 - [ ] 親のM1状態を更新した（U04全体はwip）
 
 P1: `uv run pytest tests/integration/test_observation_storage.py -q` は未実装importでred、その後2 passed。対象ruff/ty成功。新規作成の所有と既存・部分資材の保全を確認。構造整理は不要。
+
+P2: 同じstorage試験でopen未実装の17 failed→19 passed。JSONL一行の検証とファイル読込を分離して再確認。対象ruff/ty成功。未知イベント・欠番保持と破損行拒否を実ファイルで確認。
