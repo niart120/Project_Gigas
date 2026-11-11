@@ -3,12 +3,15 @@
 import json
 import os
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from threading import Lock
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
+
+from gigas.game_io.observation import Observation
 
 if sys.platform == "win32":
     import msvcrt
@@ -16,6 +19,8 @@ if sys.platform == "win32":
 if TYPE_CHECKING:
     from collections.abc import Generator
     from typing import BinaryIO
+
+    from gigas.game_io.capture.models import Frame
 
 
 class ProjectError(ValueError):
@@ -129,6 +134,62 @@ class ProjectWriter:
                 self._lock_file.close()
                 self._lock_file = None
 
+    def record(self, frame: "Frame") -> Observation:
+        """Encode and persist one frame while retaining exclusive ownership.
+
+        Args:
+            frame: An already selected immutable capture frame.
+
+        Returns:
+            The exact bytes and ID saved as PNG and referenced by a synced JSONL row.
+
+        Raises:
+            ProjectBusyError: A recording or reload is already running.
+            ProjectError: The owner is closed, needs reload, or persistence failed.
+                A JSONL failure disables further append until a successful reload.
+            ObservationError: PNG encoding failed; the writer remains usable.
+        """
+        with self._operation():
+            self._require_open()
+            if self._next_sequence is None:
+                message = "追記結果が未確定です。プロジェクトを明示的に再読込してください"
+                raise ProjectError(message)
+            observation = Observation.from_frame(frame)
+            event = {
+                "schema_version": 1,
+                "event_id": f"evt-{uuid4()}",
+                "sequence": self._next_sequence,
+                "occurred_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "type": "observation.recorded",
+                "project_id": self.project_id,
+                "payload": {
+                    "observation_id": observation.observation_id,
+                    "captured_at": frame.captured_at.isoformat().replace("+00:00", "Z"),
+                    "image_path": observation.image_path,
+                    "source_frame": {
+                        "generation": frame.generation,
+                        "sequence": frame.sequence,
+                        "width": frame.width,
+                        "height": frame.height,
+                    },
+                    "analysis": {},
+                },
+            }
+            row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+            try:
+                _publish_image(self.path / observation.image_path, observation.png_bytes)
+            except OSError as error:
+                message = f"{self.path}: 観測画像の保存失敗: {error}"
+                raise ProjectError(message) from error
+            try:
+                _append_row(self.path / "events.jsonl", row)
+            except OSError as error:
+                self._next_sequence = None
+                message = f"{self.path}: JSONL追記結果が未確定です。原本を保持します: {error}"
+                raise ProjectError(message) from error
+            self._next_sequence += 1
+            return observation
+
     @contextmanager
     def _operation(self) -> "Generator[None]":
         if not self._mutex.acquire(blocking=False):
@@ -161,6 +222,32 @@ def _acquire_lock(path: Path) -> "BinaryIO":
         message = f"{path}: 書込所有権を取得できません: {error}"
         raise ProjectError(message) from error
     return stream
+
+
+def _publish_image(path: Path, data: bytes) -> None:
+    temporary = None
+    try:
+        with NamedTemporaryFile(
+            dir=path.parent, prefix=f".{path.stem}-", suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.rename(path)  # Windows rename refuses an existing destination.
+    finally:
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+
+def _append_row(path: Path, row: bytes) -> None:
+    with path.open("ab", buffering=0) as stream:
+        if stream.write(row) != len(row):
+            message = "JSONLへの書込が途中で終了しました"
+            raise OSError(message)
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def _reject_constant(value: str) -> None:

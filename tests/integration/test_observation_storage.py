@@ -1,12 +1,15 @@
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+import cv2
+import numpy as np
 import pytest
 
+from gigas.game_io.capture.models import Frame
 from gigas.storage.project import ProjectError, ProjectWriter
 
 
@@ -78,6 +81,10 @@ def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) 
         assert opened.project_id == project_id
         opened.reload()
         assert (path / "events.jsonl").read_text(encoding="utf-8") == original
+        opened.record(sample_frame())
+        lines = (path / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        assert json.loads(lines[-1])["sequence"] == 10
+        assert "\n".join(lines[:-1]) + "\n" == original
     finally:
         opened.close()
 
@@ -178,3 +185,80 @@ def test_process_exit_releases_lock_without_deleting_lock_file(tmp_path: Path) -
     assert (writer.path / ".gigas.lock").exists()
     reopened = ProjectWriter.open(writer.path)
     reopened.close()
+
+
+def sample_frame(width: int = 16, height: int = 16) -> Frame:
+    pixels = np.random.default_rng(41).integers(0, 256, (height, width, 3), dtype=np.uint8)
+    return Frame(pixels.tobytes(), width, height, 2, 7, datetime(2000, 1, 1, tzinfo=UTC), 123)
+
+
+@pytest.mark.parametrize(("width", "height"), [(16, 16), (3840, 2160)])
+def test_record_preserves_pixels_bytes_id_and_source_time(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    frame = sample_frame(width, height)
+    try:
+        first = writer.record(frame)
+        second = writer.record(frame)
+        assert first.observation_id != second.observation_id
+        assert first.frame is frame
+        assert (writer.path / first.image_path).read_bytes() == first.png_bytes
+        decoded = cv2.imdecode(np.frombuffer(first.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert decoded is not None
+        assert decoded.shape == (height, width, 3)
+        assert decoded.tobytes() == frame.bgr
+        assert len(first.png_bytes) <= 32 * 1024 * 1024
+        records = [
+            json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
+        ]
+        assert [record["sequence"] for record in records] == [1, 2]
+        assert records[0]["event_id"] != records[1]["event_id"]
+        assert records[0]["payload"] == {
+            "observation_id": first.observation_id,
+            "captured_at": "2000-01-01T00:00:00Z",
+            "image_path": first.image_path,
+            "source_frame": {"generation": 2, "sequence": 7, "width": width, "height": height},
+            "analysis": {},
+        }
+        assert datetime.fromisoformat(records[0]["occurred_at"]) > frame.captured_at
+    finally:
+        writer.close()
+    (writer.path / first.image_path).unlink()
+    reopened = ProjectWriter.open(writer.path)
+    try:
+        reopened.record(frame)
+        records = [
+            json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
+        ]
+        assert records[-1]["sequence"] == 3
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("image_path", "../other.png"),
+        ("observation_id", "obs-invalid"),
+        ("source_frame", {}),
+        ("analysis", []),
+        ("captured_at", "yesterday"),
+    ],
+)
+def test_invalid_recorded_observation_is_rejected_without_rewriting(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "broken")
+    try:
+        writer.record(sample_frame())
+    finally:
+        writer.close()
+    log = writer.path / "events.jsonl"
+    record = json.loads(log.read_bytes())
+    record["payload"][key] = value
+    original = (json.dumps(record) + "\n").encode()
+    log.write_bytes(original)
+    with pytest.raises(ProjectError, match="行1"):
+        ProjectWriter.open(writer.path)
+    assert log.read_bytes() == original
