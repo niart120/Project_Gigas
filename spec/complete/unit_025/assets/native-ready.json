@@ -1,0 +1,147 @@
+{
+  "mode": "ready",
+  "python": "3.12.10",
+  "qt": "6.12.0",
+  "window_width": 1280,
+  "window_height": 720,
+  "device_pixel_ratio": 1.5,
+  "records": [
+    {
+      "phase": "idle",
+      "generation": 0,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 0.09761989999969956
+    },
+    {
+      "phase": "enumerating",
+      "generation": 0,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 30.552858399998513
+    },
+    {
+      "phase": "stopping",
+      "generation": 0,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 30.778308699998888
+    },
+    {
+      "phase": "idle",
+      "generation": 0,
+      "cleanup": "graceful",
+      "error": "",
+      "elapsed": 30.797933199995896
+    },
+    {
+      "phase": "connecting",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 81.33786339999642
+    },
+    {
+      "phase": "streaming",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 85.5607347000041
+    },
+    {
+      "phase": "stopping",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 160.97705349999887
+    },
+    {
+      "phase": "idle",
+      "generation": 1,
+      "cleanup": "graceful",
+      "error": "",
+      "elapsed": 161.05719180000597
+    },
+    {
+      "phase": "enumerating",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 161.0773102999956
+    },
+    {
+      "phase": "stopping",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 161.29748100000143
+    },
+    {
+      "phase": "idle",
+      "generation": 1,
+      "cleanup": "graceful",
+      "error": "",
+      "elapsed": 161.31707950000418
+    },
+    {
+      "phase": "enumerating",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 167.52378339999996
+    },
+    {
+      "phase": "stopping",
+      "generation": 1,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 167.75711750000482
+    },
+    {
+      "phase": "idle",
+      "generation": 1,
+      "cleanup": "graceful",
+      "error": "",
+      "elapsed": 167.77800960000604
+    },
+    {
+      "phase": "connecting",
+      "generation": 2,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 197.6777246999991
+    },
+    {
+      "phase": "streaming",
+      "generation": 2,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 200.8983903000044
+    },
+    {
+      "phase": "stopping",
+      "generation": 2,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 226.01729669999622
+    },
+    {
+      "phase": "closed",
+      "generation": 2,
+      "cleanup": "graceful",
+      "error": "",
+      "elapsed": 226.09790090000024
+    }
+  ],
+  "preview_counts": {
+    "1": 2037,
+    "2": 661
+  },
+  "held_frame_unchanged": true,
+  "capture_alive": false,
+  "cleanup": "graceful",
+  "settings_stopped": true,
+  "codex_stopped": true,
+  "children": [],
+  "elapsed": 226.10893679999572
+}

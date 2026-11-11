@@ -195,7 +195,7 @@ def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
         assert not shell.window.cancel_close_button.isVisible()
         shell.cancel_close()
         assert shell.committed
-        assert not shell.window.settings_button.isEnabled()
+        assert not shell.window.settings_action.isEnabled()
         pulse = Event()
         QTimer.singleShot(0, pulse.set)
         qtbot.waitUntil(pulse.is_set)

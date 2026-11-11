@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QPoint, QUrl
@@ -22,6 +23,9 @@ from gigas.storage.settings import Settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
 
+if TYPE_CHECKING:
+    from gigas.ui.notifications import Notice
+
 
 def test_settings_load_failure_preserves_session_stop(qtbot: QtBot, tmp_path: Path) -> None:
     shell = ApplicationShell(tmp_path / "settings.toml")
@@ -33,14 +37,14 @@ def test_settings_load_failure_preserves_session_stop(qtbot: QtBot, tmp_path: Pa
     shell.operation = "load"
     shell._complete(OperationResult(error="read failure"))
     assert panel.interrupt_button.isEnabled()
-    assert panel.disconnect_button.isEnabled()
+    assert panel.disconnect_action.isEnabled()
     with qtbot.waitSignal(panel.interrupt_requested):
         panel.interrupt_button.click()
     with qtbot.waitSignal(panel.disconnect_requested):
-        panel.disconnect_button.click()
+        panel.disconnect_action.trigger()
     panel.handle_result(ServiceResult(1, "disconnect"))
     shell._render()
-    assert not panel.connect_button.isEnabled()
+    assert not panel.connect_action.isEnabled()
 
 
 def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) -> None:
@@ -55,7 +59,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) ->
     panel.activate(1)
     panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
     panel.handle_result(ServiceResult(1, "connect"))
-    assert panel.login_button.isEnabled()
+    assert panel.login_action.isEnabled()
     assert not panel.send_button.isEnabled()
     panel.handle_event(ServiceEvent(1, SessionStatus("authenticating")))
     panel.handle_event(ServiceEvent(1, LoginEvent("https://example.org/login")))
@@ -84,11 +88,11 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) ->
     assert "AB" not in panel.transcript.toPlainText()
     panel.handle_result(ServiceResult(1, "send"))
     assert panel.prompt.toPlainText() == ""
-    panel.disconnect_button.click()
+    panel.disconnect_action.trigger()
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
-    assert not panel.connect_button.isEnabled()
+    assert not panel.connect_action.isEnabled()
     panel.handle_result(ServiceResult(1, "disconnect"))
-    assert panel.connect_button.isEnabled()
+    assert panel.connect_action.isEnabled()
 
 
 def test_shell_connect_uses_saved_snapshot_without_automatic_start(
@@ -111,7 +115,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         shell.open_settings()
         assert shell.dialog is not None
         shell.dialog.model.setText("unsaved")
-        shell.window.connection.connect_button.click()
+        shell.window.connection.connect_action.trigger()
         assert len(snapshots) == 1
         assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")
     finally:
@@ -195,7 +199,7 @@ def test_approval_is_explicit_and_invalidated_locally(qtbot: QtBot, ending: str)
     elif ending == "stop":
         panel.interrupt()
     elif ending == "disconnect":
-        panel.disconnect_button.click()
+        panel.disconnect_action.trigger()
     else:
         panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
     card.decision_buttons["accept"].click()
@@ -237,6 +241,8 @@ def test_connection_failure_persists_until_explicit_disconnect(
     qtbot: QtBot, connection_created: bool
 ) -> None:
     panel = ConnectionPanel()
+    failures: list[Notice] = []
+    panel.failed.connect(failures.append)
     qtbot.addWidget(panel)
     panel.activate(1)
     if connection_created:
@@ -244,14 +250,15 @@ def test_connection_failure_persists_until_explicit_disconnect(
     panel.handle_result(ServiceResult(1, "connect", "接続失敗"))
     panel.set_available(False)
     panel.set_available(True)
-    assert panel.status.text() == "接続失敗"
-    assert not panel.connect_button.isEnabled()
+    assert panel.status.text() == "エラー"
+    assert failures[-1].details == "接続失敗"
+    assert not panel.connect_action.isEnabled()
     assert not panel.send_button.isEnabled()
-    assert panel.disconnect_button.isEnabled()
-    panel.disconnect_button.click()
-    assert not panel.connect_button.isEnabled()
+    assert panel.disconnect_action.isEnabled()
+    panel.disconnect_action.trigger()
+    assert not panel.connect_action.isEnabled()
     panel.handle_result(ServiceResult(1, "disconnect"))
-    assert panel.connect_button.isEnabled()
+    assert panel.connect_action.isEnabled()
 
 
 def test_new_request_scrolls_into_view_after_long_resolved_request(qtbot: QtBot) -> None:

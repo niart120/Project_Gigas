@@ -74,7 +74,7 @@ def _start(
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)
     panel = shell.window.connection
-    panel.connect_button.click()
+    panel.connect_action.trigger()
     panel.prompt.setPlainText("hello")
     qtbot.waitUntil(panel.send_button.isEnabled)
     panel.send_button.click()
@@ -191,7 +191,7 @@ def test_premature_service_exit_does_not_close_application(qtbot: QtBot, tmp_pat
     qtbot.waitUntil(lambda: shell.ready)
     shell.service.shutdown()
     qtbot.waitUntil(lambda: shell.service.wait(0))
-    qtbot.waitUntil(lambda: not shell.window.connection.connect_button.isEnabled())
+    qtbot.waitUntil(lambda: not shell.window.connection.connect_action.isEnabled())
     assert shell.window.isVisible()
     assert not shell.committed
     shell.request_close()

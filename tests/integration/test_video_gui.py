@@ -1,102 +1,21 @@
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 
 import pytest
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPoint, QTimer
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
 from gigas.app import video
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
-from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
+from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
 from gigas.storage.settings import Settings, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
-
-
-class ControlledCapture:
-    """Expose controllable service outcomes without opening a capture device."""
-
-    def __init__(self) -> None:
-        """Prepare request history and an idle state."""
-        self.state = CaptureSnapshot()
-        self.alive = False
-        self.connections: list[CaptureOptions] = []
-        self.refreshes = 0
-        self.disconnects = 0
-        self.shutdowns = 0
-        self.finish_shutdown = True
-        self.reader_requests = 0
-
-    def start(self) -> None:
-        """Start the simulated service without discovering devices."""
-        self.alive = True
-
-    def refresh_devices(self) -> bool:
-        """Accept only an idle device enumeration request."""
-        if self.state.phase not in {"idle", "error"}:
-            return False
-        self.refreshes += 1
-        self.state = replace(self.state, phase="enumerating")
-        return True
-
-    def connect(self, options: CaptureOptions) -> bool:
-        """Record an immutable connection request."""
-        if self.state.phase not in {"idle", "error"}:
-            return False
-        self.connections.append(options)
-        self.state = replace(self.state, phase="connecting", generation=len(self.connections))
-        return True
-
-    def disconnect(self) -> None:
-        """Complete a requested disconnection immediately."""
-        self.disconnects += 1
-        self.state = replace(self.state, phase="idle", frame=None, cleanup="graceful")
-
-    def shutdown(self) -> None:
-        """Optionally keep shutdown pending for lifetime tests."""
-        self.shutdowns += 1
-        self.state = replace(self.state, phase="stopping", frame=None)
-        if self.finish_shutdown:
-            self.state = replace(self.state, phase="closed", cleanup="graceful")
-            self.alive = False
-
-    def is_alive(self) -> bool:
-        """Return the controlled thread lifetime."""
-        return self.alive
-
-    def join(self, timeout: float | None = None) -> None:
-        """Reject any GUI attempt to wait for a running thread."""
-        assert timeout == 0
-
-    def snapshot(self) -> CaptureSnapshot:
-        """Return the immutable current state."""
-        return self.state
-
-    def reader(self) -> CaptureReader:
-        """Return a separate read-only port for the application preview."""
-        self.reader_requests += 1
-        return CaptureReader(self.snapshot)
-
-    def stream(self, sequence: int = 1, bgr: bytes = bytes([0, 0, 255])) -> None:
-        """Publish one solid image in the latest connection."""
-        options = self.connections[-1]
-        frame = Frame(
-            bgr * (options.width * options.height),
-            options.width,
-            options.height,
-            len(self.connections),
-            sequence,
-            datetime.now(UTC),
-            sequence,
-        )
-        self.state = replace(
-            self.state, phase="streaming", frame=frame, reported_fps=59.94, measured_fps=59.5
-        )
+from tests.integration.peers.controlled_capture import ControlledCapture
 
 
 @dataclass
@@ -137,7 +56,7 @@ def video_shell(
         qtbot.waitUntil(lambda: not shell.window.isVisible())
 
 
-def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
+def test_automatic_discovery_preserves_edits_and_connection_uses_saved_mode(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = video_shell
@@ -150,7 +69,6 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
     assert dialog is not None
     dialog.model.setText("unsaved model")
     dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
-    dialog.capture_refresh_button.click()
     assert capture.refreshes == 1
     assert not dialog.capture_refresh_button.isEnabled()
     capture.state = replace(
@@ -164,9 +82,11 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
     assert dialog.values().capture_fps == 30
     assert dialog.capture_choices.currentData() == "path-b"
 
-    shell.window.video.connect_button.click()
-    assert capture.connections == [CaptureOptions("path-b", 1920, 1080, 60)]
-    assert not shell.window.video.connect_button.isEnabled()
+    assert not shell.window.video.connect_action.isEnabled()
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert capture.connections == [CaptureOptions("path-b", 1920, 1080, 30)]
+    assert not shell.window.video.connect_action.isEnabled()
     assert not dialog.capture_refresh_button.isEnabled()
     capture.stream()
     view = shell.window.video.view
@@ -175,17 +95,15 @@ def test_explicit_discovery_preserves_edits_and_connection_uses_saved_mode(
             view.grab().toImage().pixelColor(view.width() // 2, view.height() // 2) == QColor("red")
         )
     )
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.baseline.capture_fps == 30
     assert shell.video.active_settings is not None
-    assert shell.video.active_settings.capture_fps == 60
+    assert shell.video.active_settings.capture_fps == 30
     assert len(capture.connections) == 1
     save_settings(shell.path, replace(shell.baseline, capture_fps=15))
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.baseline.capture_fps == 15
-    assert shell.video.active_settings.capture_fps == 60
+    assert shell.video.active_settings.capture_fps == 30
     assert len(capture.connections) == 1
 
 
@@ -194,7 +112,7 @@ def test_slow_preview_uses_latest_frame_and_clears_disconnect_without_waiting_fo
 ) -> None:
     shell, capture = video_shell
     shell.baseline = replace(shell.baseline, preview_fps=1)
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
     capture.stream()
     view = shell.window.video.view
 
@@ -207,7 +125,7 @@ def test_slow_preview_uses_latest_frame_and_clears_disconnect_without_waiting_fo
     qtbot.wait(100)
     assert color() == QColor("red")
     qtbot.waitUntil(lambda: color() == QColor("blue"), timeout=2000)
-    shell.window.video.disconnect_button.click()
+    shell.window.video.disconnect_action.trigger()
     assert capture.disconnects == 1
     assert color() == QColor("black")
 
@@ -224,7 +142,7 @@ def test_preview_does_not_skip_due_frames_on_coarse_clock_ticks(
     monkeypatch.setattr(video, "time", clock)
     shell.video.timer.stop()
     shell.baseline = replace(shell.baseline, preview_fps=fps)
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
     delivered: list[int] = []
     view = shell.window.video.view
     set_frame = view.set_frame
@@ -247,16 +165,17 @@ def test_failed_settings_load_does_not_disable_active_capture_disconnect(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = video_shell
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
     capture.stream()
     shell.path.write_text("[broken", encoding="utf-8")
+    qtbot.waitUntil(lambda: not shell.video.applying)
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.ready
-    assert shell.window.video.disconnect_button.isEnabled()
-    shell.window.video.disconnect_button.click()
+    assert shell.window.video.disconnect_action.isEnabled()
+    shell.window.video.disconnect_action.trigger()
     assert capture.disconnects == 1
-    assert not shell.window.video.connect_button.isEnabled()
+    assert not shell.window.video.connect_action.isEnabled()
 
 
 def test_saving_settings_does_not_disable_active_capture_disconnect(
@@ -279,13 +198,14 @@ def test_saving_settings_does_not_disable_active_capture_disconnect(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.operation is None)
-        shell.window.video.connect_button.click()
+        shell.window.video.connect_action.trigger()
         capture.stream()
         shell.open_settings()
+        qtbot.waitUntil(lambda: not shell.video.applying)
         shell.save()
         qtbot.waitUntil(entered.is_set)
-        assert shell.window.video.disconnect_button.isEnabled()
-        shell.window.video.disconnect_button.click()
+        assert shell.window.video.disconnect_action.isEnabled()
+        shell.window.video.disconnect_action.trigger()
         assert capture.disconnects == 1
     finally:
         release.set()
@@ -309,7 +229,8 @@ def test_shutdown_waits_for_capture_cleanup_and_keeps_gui_responsive(
     capture.state = replace(
         capture.state, phase="error", cleanup="unconfirmed", error="child alive"
     )
-    qtbot.waitUntil(lambda: "child alive" in shell.window.status.text())
+    qtbot.waitUntil(lambda: "shutdown" in shell.window.notifications.notices)
+    assert "child alive" in shell.window.notifications.notices["shutdown"].details
     assert shell.window.isVisible()
     assert not shell.window.allow_close
     capture.state = replace(capture.state, phase="closed", cleanup="forced", error="")
@@ -327,7 +248,7 @@ def test_real_spawn_capture_displays_and_releases_through_application(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.operation is None)
-        shell.window.video.connect_button.click()
+        shell.window.video.connect_action.trigger()
         qtbot.waitUntil(lambda: service.snapshot().frame is not None, timeout=8000)
         view = shell.window.video.view
         qtbot.waitUntil(
@@ -336,11 +257,11 @@ def test_real_spawn_capture_displays_and_releases_through_application(
                 != QColor("black")
             )
         )
-        shell.window.video.disconnect_button.click()
+        shell.window.video.disconnect_action.trigger()
         qtbot.waitUntil(lambda: service.snapshot().phase == "idle", timeout=8000)
         assert marker.read_text(encoding="utf-8") == "released\n"
-        qtbot.waitUntil(shell.window.video.connect_button.isEnabled)
-        shell.window.video.connect_button.click()
+        qtbot.waitUntil(shell.window.video.connect_action.isEnabled)
+        shell.window.video.connect_action.trigger()
         qtbot.waitUntil(lambda: service.snapshot().frame is not None, timeout=8000)
     finally:
         shell.window.close()
@@ -356,26 +277,33 @@ def test_long_device_paths_and_errors_keep_video_controls_within_the_screen(
     shell, capture = video_shell
     path = "device-path/" * 200
     shell.baseline = replace(shell.baseline, capture_device=path)
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
     error = "<b>not markup</b> " + "diagnostic/" * 300
     name = "<b>Camera</b>"
-    capture.state = replace(
-        capture.state, phase="error", error=error, devices=(DeviceInfo(name, path),)
-    )
-    qtbot.waitUntil(lambda: shell.window.video.details.toPlainText() == error)
-    assert shell.window.video.source.text() == name
+    capture.state = replace(capture.state, devices=(DeviceInfo(name, path),), devices_revision=1)
+    capture.stream()
+    qtbot.waitUntil(lambda: shell.window.video.source.text() == name)
+    capture.state = replace(capture.state, phase="error", error=error)
+    qtbot.waitUntil(lambda: "video" in shell.window.notifications.notices)
+    assert shell.window.notifications.notices["video"].details == error
+    assert shell.window.video.source.text() == ""
     assert shell.window.screen().availableGeometry().contains(shell.window.frameGeometry())
     panel = shell.window.video
-    for button in (panel.connect_button, panel.disconnect_button):
-        assert button.isVisible()
-        assert panel.rect().contains(button.geometry())
+    menu = shell.window.video_menu
+    menu.popup(shell.window.mapToGlobal(QPoint(20, 40)))
+    qtbot.waitUntil(menu.isVisible)
+    assert shell.window.screen().availableGeometry().contains(menu.frameGeometry())
+    for action in (panel.connect_action, panel.disconnect_action):
+        assert action.isVisible()
+        assert menu.rect().contains(menu.actionGeometry(action))
+    menu.hide()
 
 
 def test_unexpected_capture_thread_exit_clears_image_and_disables_requests(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = video_shell
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
     capture.stream()
     view = shell.window.video.view
     qtbot.waitUntil(
@@ -384,8 +312,8 @@ def test_unexpected_capture_thread_exit_clears_image_and_disables_requests(
         )
     )
     capture.alive = False
-    qtbot.waitUntil(lambda: not shell.window.video.disconnect_button.isEnabled())
-    assert not shell.window.video.connect_button.isEnabled()
+    qtbot.waitUntil(lambda: not shell.window.video.disconnect_action.isEnabled())
+    assert not shell.window.video.connect_action.isEnabled()
     assert view.grab().toImage().pixelColor(view.width() // 2, view.height() // 2) == QColor(
         "black"
     )

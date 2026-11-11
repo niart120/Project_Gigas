@@ -1,10 +1,9 @@
 """Settings editor with labels and values, without instructional prose."""
 
-from collections import Counter
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -16,11 +15,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from gigas.storage.settings import Settings
+from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.layout import WINDOW_SIZE_PRESETS
 
 if TYPE_CHECKING:
@@ -48,6 +49,8 @@ class SettingsDialog(QDialog):
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
         self._selected_device = ""
         self._devices: tuple[DeviceInfo, ...] = ()
+        self._devices_checked = False
+        self._devices_searching = False
         self.setWindowTitle("設定")
         self.resize(560, 440)
         layout = QVBoxLayout(self)
@@ -71,6 +74,32 @@ class SettingsDialog(QDialog):
         selection.addWidget(self.capture_choices, 1)
         selection.addWidget(self.capture_refresh_button)
         self.video_form.addRow("機器", selection)
+        self.capture_discovery_status = QLabel("未確認", self)
+        self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.video_form.addRow("機器一覧", self.capture_discovery_status)
+        self.capture_discovery_error = QPlainTextEdit(self)
+        self.capture_discovery_error.setReadOnly(True)
+        self.capture_discovery_error.setMaximumHeight(70)
+        self.capture_discovery_error.hide()
+        self.video_form.addRow(self.capture_discovery_error)
+        connection = QHBoxLayout()
+        self.capture_connect_button = QToolButton(self)
+        self.capture_disconnect_button = QToolButton(self)
+        self.capture_connection_status = QLabel("未接続", self)
+        self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
+        for widget in (
+            self.capture_connect_button,
+            self.capture_disconnect_button,
+            self.capture_connection_status,
+        ):
+            connection.addWidget(widget)
+        connection.addStretch()
+        self.video_form.addRow("映像", connection)
+        self.capture_connection_error = QPlainTextEdit(self)
+        self.capture_connection_error.setReadOnly(True)
+        self.capture_connection_error.setMaximumHeight(70)
+        self.capture_connection_error.hide()
+        self.video_form.addRow(self.capture_connection_error)
         self.capture_fps = self._rate_field(60)
         self.preview_fps = self._rate_field(30)
         for label, field in (
@@ -88,8 +117,9 @@ class SettingsDialog(QDialog):
         self.model = self._text_field()
         self.effort = self._text_field()
         self.auth_method = QComboBox(self)
-        self.auth_method.addItem("ChatGPT", "chatgpt")
-        self.auth_method.addItem("APIキー", "api_key")
+        self._auth_choices = QStandardItemModel(self.auth_method)
+        self.auth_method.setModel(self._auth_choices)
+        self._set_auth_method("chatgpt")
         self.auth_method.currentIndexChanged.connect(self.changed)
         agent_form.addRow("モデル", self.model)
         agent_form.addRow("エフォート", self.effort)
@@ -109,7 +139,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.details)
         actions = QHBoxLayout()
         actions.addStretch()
-        self.save_button = QPushButton("保存", self)
+        self.save_button = QPushButton("適用", self)
         self.reload_button = QPushButton("再読込", self)
         self.close_button = QPushButton("閉じる", self)
         self.cancel_close_button = QPushButton("閉じる取消し", self)
@@ -146,6 +176,19 @@ class SettingsDialog(QDialog):
         field.currentIndexChanged.connect(self.changed)
         return field
 
+    def _set_auth_method(self, value: str) -> None:
+        with QSignalBlocker(self.auth_method):
+            self._auth_choices.clear()
+            supported = QStandardItem("ChatGPT")
+            supported.setData("chatgpt", Qt.ItemDataRole.UserRole)
+            self._auth_choices.appendRow(supported)
+            if value == "api_key":
+                legacy = QStandardItem("APIキー (未対応)")
+                legacy.setData("api_key", Qt.ItemDataRole.UserRole)
+                legacy.setEnabled(False)
+                self._auth_choices.appendRow(legacy)
+            self.auth_method.setCurrentIndex(self.auth_method.findData(value))
+
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
         with QSignalBlocker(field):
@@ -154,32 +197,51 @@ class SettingsDialog(QDialog):
                 field.addItem(str(rate), rate)
             field.setCurrentIndex(field.findData(value))
 
-    def set_capture_devices(self, devices: "tuple[DeviceInfo, ...]") -> None:
+    def set_capture_devices(
+        self,
+        devices: "tuple[DeviceInfo, ...]",
+        *,
+        checked: bool = True,
+        searching: bool = False,
+        error: str = "",
+    ) -> None:
         """Replace selectable devices without changing any unsaved setting.
 
         Args:
             devices: Enumerated names and nonempty paths. Paths are stored unchanged.
+            checked: Whether any successful enumeration has supplied these identities.
+            searching: Whether a catalog request is still running.
+            error: Latest catalog failure, retaining the prior successful candidates.
         """
         self._devices = tuple(device for device in devices if device.path)
+        self._devices_checked = checked
+        self._devices_searching = searching
+        if error:
+            state = "列挙失敗"
+        elif searching:
+            state = "検索中"
+        elif checked:
+            state = "取得済み" if self._devices else "機器なし"
+        else:
+            state = "未確認"
+        self.capture_discovery_status.setText(state)
+        if self.capture_discovery_error.toPlainText() != error:
+            self.capture_discovery_error.setPlainText(error)
+        self.capture_discovery_error.setVisible(bool(error))
         self._sync_capture_choice()
 
     def _sync_capture_choice(self) -> None:
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
             self.capture_choices.addItem("未選択", "")
-            counts = Counter(device.name for device in self._devices)
-            seen: Counter[str] = Counter()
-            for device in self._devices:
-                seen[device.name] += 1
-                label = (
-                    f"{device.name} ({seen[device.name]})"
-                    if counts[device.name] > 1
-                    else device.name
-                )
-                self.capture_choices.addItem(label, device.path)
+            for label, path in capture_device_choices(self._devices):
+                self.capture_choices.addItem(label, path)
             selected = self.capture_choices.findData(self._selected_device)
             if selected < 0:
-                self.capture_choices.addItem("未検出", self._selected_device)
+                missing = "未検出" if self._devices_checked else "未確認"
+                self.capture_choices.addItem(
+                    "検索中" if self._devices_searching else missing, self._selected_device
+                )
                 selected = self.capture_choices.count() - 1
             self.capture_choices.setCurrentIndex(selected)
 
@@ -221,7 +283,7 @@ class SettingsDialog(QDialog):
             ):
                 field.setText(value)
                 self._loaded_text[field] = (value, field.text())
-            self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
+            self._set_auth_method(values.auth_method)
             for field, value in (
                 (self.capture_fps, values.capture_fps),
                 (self.preview_fps, values.preview_fps),

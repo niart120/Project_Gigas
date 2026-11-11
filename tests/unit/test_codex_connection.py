@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gigas.runtime.codex.connection import CodexConnection, CodexConnectionError
+from gigas.runtime.codex.connection import (
+    AnswerDeliveryError,
+    CodexConnection,
+    CodexConnectionError,
+)
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     HumanRequest,
@@ -268,6 +272,127 @@ def test_initialization_failure_closes_peer_without_leaking_diagnostics(tmp_path
         assert "PRIVATE" not in str(error.value)
         assert "PRIVATE" not in repr(events)
         assert peer.closed
+        status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+        assert status.failure_id is not None
+        assert status.failure_id == error.value.failure_id
+
+    _run(scenario())
+
+
+def test_login_failures_correlate_with_results_and_distinguish_retries(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            initial = events[-1]
+            assert isinstance(initial, SessionStatus)
+            assert initial.phase == "login_required"
+            assert initial.failure_id is None
+            peer.failure = "account/login/start"
+            failures: list[int] = []
+            for _ in range(2):
+                with pytest.raises(CodexConnectionError) as error:
+                    await connection.login()
+                status = events[-1]
+                assert isinstance(status, SessionStatus)
+                assert status.phase == "login_required"
+                assert status.failure_id is not None
+                assert error.value.failure_id == status.failure_id
+                failures.append(status.failure_id)
+            assert failures[1] > failures[0]
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_failed_login_completion_has_a_failure_without_exposing_remote_text(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await connection.login()
+            peer.events.put_nowait(
+                RpcNotification(
+                    "account/login/completed",
+                    {"loginId": "login-1", "success": False, "error": "PRIVATE-LOGIN-ERROR"},
+                )
+            )
+            await _events_processed()
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert status.phase == "login_required"
+            assert status.detail
+            assert status.failure_id is not None
+            assert "PRIVATE-LOGIN-ERROR" not in repr(events)
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["send", "stop"])
+def test_turn_operation_failures_share_status_id_with_exception(
+    tmp_path: Path, operation: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            if operation == "stop":
+                await connection.send("開始")
+            peer.failure = "turn/start" if operation == "send" else "turn/interrupt"
+            call = connection.send("開始") if operation == "send" else connection.stop()
+            with pytest.raises(CodexConnectionError) as error:
+                await call
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert status.phase == "error"
+            assert status.failure_id is not None
+            assert error.value.failure_id == status.failure_id
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_invalid_server_requests_report_distinct_failures_without_changing_phase(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await connection.send("開始")
+            failures: list[int] = []
+            for request_id in ("invalid-1", "invalid-2"):
+                peer.events.put_nowait(
+                    ServerRequest(
+                        request_id,
+                        "item/tool/requestUserInput",
+                        {"threadId": "thread-1", "turnId": "turn-1", "itemId": "item"},
+                    )
+                )
+                await _events_processed()
+                status = events[-1]
+                assert isinstance(status, SessionStatus)
+                assert status.phase == "running"
+                assert status.failure_id is not None
+                failures.append(status.failure_id)
+            assert failures[1] > failures[0]
+            assert len(peer.rejections) == 2
+        finally:
+            await connection.close()
 
     _run(scenario())
 
@@ -347,6 +472,47 @@ def _question(request_id: RpcId = "question-1", *, blocking: bool = True) -> Ser
             ],
         },
     )
+
+
+def test_answer_transport_failure_is_distinct_from_validation_rejection(tmp_path: Path) -> None:
+    class FailedWritePeer(FakePeer):
+        """Fail a response after transport submission begins."""
+
+        async def respond(self, request_id: RpcId, result: JsonValue) -> None:
+            """Leave the delivery outcome deliberately unknown."""
+            self.replies.append((request_id, result))
+            message = "PRIVATE-WRITE-ERROR"
+            raise TransportError(message)
+
+    async def scenario() -> None:
+        peer = FailedWritePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        with pytest.raises(CodexConnectionError) as invalid:
+            await connection.answer(request.token, answers={})
+        assert not isinstance(invalid.value, AnswerDeliveryError)
+        assert invalid.value.failure_id is None
+        assert peer.replies == []
+        with pytest.raises(AnswerDeliveryError) as uncertain:
+            await connection.answer(request.token, answers={"route": "東"})
+        assert "PRIVATE-WRITE-ERROR" not in str(uncertain.value)
+        status = events[-1]
+        assert isinstance(status, SessionStatus)
+        assert status.failure_id is not None
+        assert uncertain.value.failure_id == status.failure_id
+        assert len(peer.replies) == 1
+        assert RequestResolved(request.token) in events
+        assert peer.closed
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert len(peer.replies) == 1
+
+    _run(scenario())
 
 
 def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: Path) -> None:

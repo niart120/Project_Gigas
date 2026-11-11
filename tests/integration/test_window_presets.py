@@ -13,7 +13,8 @@ from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import Frame
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
-from tests.integration.test_video_gui import ControlledCapture, PreviewClocks
+from tests.integration.peers.controlled_capture import ControlledCapture
+from tests.integration.test_video_gui import PreviewClocks
 from tests.integration.test_video_gui import (
     video_shell as video_shell,  # noqa: PLC0414 -- expose the shared pytest fixture
 )
@@ -43,8 +44,9 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        shell.window.video.connect_button.click()
+        shell.window.video.connect_action.trigger()
         capture.stream()
+        qtbot.waitUntil(lambda: not shell.video.applying)
         original = capture.snapshot().frame
         original_limit = shell.window.video.view.maximumSize()
         actions = shell.window.window_size_actions
@@ -55,7 +57,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         assert actions["full_hd"].isChecked()
         assert shell.window.video.view.maximumSize() == original_limit
         assert all(not action.isEnabled() for action in actions.values())
-        assert shell.window.video.disconnect_button.isEnabled()
+        assert shell.window.video.disconnect_action.isEnabled()
         capture.stream(2)
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)
@@ -93,12 +95,14 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert [name for name, candidate in actions.items() if candidate.isChecked()] == [key]
         available = shell.window.screen().availableGeometry()
         assert available.contains(shell.window.frameGeometry())
+        assert shell.window.settings_action in shell.window.file_menu.actions()
+        assert shell.window.video.connect_action in shell.window.video_menu.actions()
+        assert shell.window.video.disconnect_action in shell.window.video_menu.actions()
+        assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
         for widget in (
-            shell.window.video.connect_button,
-            shell.window.video.disconnect_button,
-            shell.window.connection.connect_button,
+            shell.window.menuBar(),
             shell.window.connection.send_button,
-            shell.window.settings_button,
+            shell.window.notifications.entry_button,
         ):
             assert widget.isVisible()
             assert available.contains(QRect(widget.mapToGlobal(QPoint()), widget.size()))
@@ -112,7 +116,9 @@ def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_me
     shell, capture = video_shell
     clock = PreviewClocks()
     monkeypatch.setattr(video, "time", clock)
-    shell.window.video.connect_button.click()
+    shell.window.video.connect_action.trigger()
+    capture.stream()
+    qtbot.waitUntil(lambda: not shell.video.applying)
     shell.video.timer.stop()
     shell.open_settings()
     dialog = shell.dialog
@@ -165,11 +171,11 @@ def test_real_capture_readers_continue_through_display_resize(qtbot: QtBot, tmp_
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        shell.window.video.connect_button.click()
+        shell.window.video.connect_action.trigger()
         qtbot.waitUntil(lambda: observer.snapshot().frame is not None, timeout=8000)
         held = observer.snapshot().frame
         assert held is not None
-        qtbot.waitUntil(lambda: shell.window.video.source.text() == "Capture")
+        qtbot.waitUntil(lambda: shell.window.video.source.text() == "Capture (2)")
         shell.open_settings()
         assert shell.dialog is not None
         assert shell.dialog.capture_choices.currentData() == "path-b"

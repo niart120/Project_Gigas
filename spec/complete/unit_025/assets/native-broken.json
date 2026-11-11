@@ -1,0 +1,32 @@
+{
+  "mode": "broken",
+  "python": "3.12.10",
+  "qt": "6.12.0",
+  "window_width": 960,
+  "window_height": 640,
+  "device_pixel_ratio": 1.5,
+  "records": [
+    {
+      "phase": "idle",
+      "generation": 0,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 0.10523639999155421
+    },
+    {
+      "phase": "closed",
+      "generation": 0,
+      "cleanup": "none",
+      "error": "",
+      "elapsed": 171.6462649999885
+    }
+  ],
+  "preview_counts": {},
+  "held_frame_unchanged": true,
+  "capture_alive": false,
+  "cleanup": "none",
+  "settings_stopped": true,
+  "codex_stopped": true,
+  "children": [],
+  "elapsed": 171.65866309999547
+}
