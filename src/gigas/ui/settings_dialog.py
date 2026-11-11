@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -175,6 +175,20 @@ class SettingsDialog(QDialog):
         scroll.setWidget(page)
         self.tabs.addTab(scroll, title)
         return form
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 -- Qt override
+        """Handle Enter only for a focused button, never for an implicit default.
+
+        Child widgets handle their own keys first, including combo-popup selection.
+        Other keys retain the dialog's standard navigation and Escape behavior.
+        """
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()
+            focused = self.focusWidget()
+            if isinstance(focused, QPushButton) and focused.isEnabled():
+                focused.click()
+            return
+        super().keyPressEvent(event)
 
     def _group(self, parent_form: QFormLayout, title: str) -> QFormLayout:
         group = QGroupBox(title, self)
