@@ -411,6 +411,7 @@ def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str
             "cwd": str(tmp_path),
         }
         if kind == "command":
+            params["environmentId"] = "local"
             params["availableDecisions"] = [
                 "decline",
                 "cancel",
@@ -429,6 +430,7 @@ def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str
         if kind == "command":
             assert request.decisions == ("decline", "cancel")
             assert "Get-Date" in request.details
+            assert "local" in request.details
             with pytest.raises(CodexConnectionError):
                 await connection.answer(request.token, decision="accept")
         else:
@@ -782,6 +784,221 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == ("error" if status == "failed" else "stopped")
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("kind", "extra"),
+    [
+        ("command", {"networkApprovalContext": {"host": "example.org", "protocol": "https"}}),
+        ("command", {"additionalPermissions": {"network": {"enabled": True}}}),
+        ("command", {"kind": "writeStdin"}),
+        ("command", {"kind": "humanCommand"}),
+        ("command", {"environmentId": "remote"}),
+        ("command", {"command": None}),
+        ("command", {"cwd": None}),
+        ("file", {"grantRoot": "C:/private"}),
+        ("file", {}),
+    ],
+)
+def test_unsupported_or_incomplete_approvals_cannot_be_accepted(
+    tmp_path: Path, kind: str, extra: JsonObject
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        params: JsonObject = {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 10,
+            "command": "Get-Date",
+            "cwd": str(tmp_path),
+            "availableDecisions": ["accept", "decline", "cancel"],
+        }
+        params.update(extra)
+        method = (
+            "item/commandExecution/requestApproval"
+            if kind == "command"
+            else "item/fileChange/requestApproval"
+        )
+        if kind == "file" and "grantRoot" in extra:
+            peer.events.put_nowait(
+                RpcNotification(
+                    "item/started",
+                    {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "item": {
+                            "id": "item-1",
+                            "type": "fileChange",
+                            "changes": [
+                                {"path": "save.md", "diff": "+record", "kind": {"type": "add"}}
+                            ],
+                        },
+                    },
+                )
+            )
+        peer.events.put_nowait(ServerRequest("restricted", method, params))
+        await _events_processed()
+        assert not any(isinstance(event, HumanRequest) for event in events)
+        assert not peer.replies
+        assert [request_id for request_id, _, _ in peer.rejections] == ["restricted"]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_file_approval_preserves_change_type_and_move_target(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/started",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "type": "fileChange",
+                        "id": "file-1",
+                        "changes": [
+                            {
+                                "path": "old.txt",
+                                "diff": "-old\n+new",
+                                "kind": {"type": "update", "move_path": "new.txt"},
+                            }
+                        ],
+                    },
+                },
+            )
+        )
+        peer.events.put_nowait(
+            ServerRequest(
+                "file-approval",
+                "item/fileChange/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "startedAtMs": 1,
+                },
+            )
+        )
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert "old.txt" in request.details
+        assert "new.txt" in request.details
+        assert "update" in request.details
+        await connection.answer(request.token, decision="accept")
+        assert peer.replies == [("file-approval", {"decision": "accept"})]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_changed_file_patch_invalidates_previously_presented_approval(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/fileChange/patchUpdated",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "changes": [{"path": "a.txt", "diff": "+first", "kind": {"type": "add"}}],
+                },
+            )
+        )
+        peer.events.put_nowait(
+            ServerRequest(
+                "file-approval",
+                "item/fileChange/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "startedAtMs": 1,
+                },
+            )
+        )
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/fileChange/patchUpdated",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "changes": [{"path": "b.txt", "diff": "+different", "kind": {"type": "add"}}],
+                },
+            )
+        )
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, decision="accept")
+        assert RequestResolved(request.token) in events
+        assert [request_id for request_id, _, _ in peer.rejections] == ["file-approval"]
+        assert not peer.replies
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_cancel_decision_disables_other_answers_before_write_and_terminal(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.respond_gate = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(
+            ServerRequest(
+                "approval",
+                "item/commandExecution/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "command",
+                    "startedAtMs": 1,
+                    "command": "Get-Date",
+                    "cwd": str(tmp_path),
+                    "availableDecisions": ["accept", "cancel"],
+                },
+            )
+        )
+        await _events_processed()
+        question, approval = [event for event in events if isinstance(event, HumanRequest)]
+        answer = asyncio.create_task(connection.answer(approval.token, decision="cancel"))
+        await _events_processed()
+        assert RequestResolved(question.token) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopping"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(question.token, answers={"route": "東"})
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.respond_gate.set()
+        await answer
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        assert peer.replies == [("approval", {"decision": "cancel"})]
         await connection.close()
 
     _run(scenario())

@@ -45,7 +45,8 @@ class SessionStatus:
     """Current application status derived from operations and runtime notifications.
 
     Attributes:
-        phase: Connection or turn phase; stopped requires a terminal turn notification.
+        phase: Connection or turn phase. Stopped means no pending start or active turn;
+            interrupt receipt alone does not establish it.
         model: Validated model name, empty before catalog validation.
         effort: Validated reasoning effort, empty before catalog validation.
         authenticated: Whether account/read confirmed the chosen authentication type.

@@ -41,7 +41,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | refactor-done | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 公開RPC境界のfakeで認証、全cursor、モデル/effort、資材失敗、要求設定照合を確認 |
 | refactor-skipped | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 型付き質問/command/file、明示判断、resolved/完了/停止後の回答拒否を確認 |
 | refactor-done | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | 開始応答前の停止・通知、login競合、EOF、並行closeと取消しを確認 |
-| todo | C04 拡張承認や確認対象欠落を許可へ変換しない | edge | unit | network/追加権限/writeStdin/grantRootとfile詳細欠落を明示拒否 |
+| refactor-skipped | C04 拡張承認や確認対象欠落を許可へ変換しない | edge | unit | 未対応権限とfile対象欠落/変更を拒否、cancel送信前に受付を閉じる |
 
 各itemをred→green→必要なrefactor→検証→commitの順に進め、履歴を本書へ記録する。固定語句の文書検査は製品テストにしない。
 
@@ -105,6 +105,17 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - refactor-done: 開始応答の検証、本文通知、turn終端、login完了、所有operation/cleanupを分離して通知分岐と寿命管理を整理した。
 - 検証: `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-connection` は30 passed。対象ruff format/checkとtyが成功。公開型・Google style docstring・docsを更新。実runtime受入は別に実施し、このfake成功だけでは完了扱いにしない。
 - commit: `fix(codex): 開始停止と通知の競合から接続状態を保護する`。
+
+### C04 実行履歴
+
+- 起点: read-only reviewでnetworkApprovalContext/additionalPermissions/kind=writeStdinとfile grantRootが表示情報から落ちてもaccept可能なことが判明した。対象を表示しない許可を防ぐ回帰itemとして追加した。
+- red: 実schemaに沿うnetworkApprovalContext付きcommandからHumanRequestが出ることを再現し1 failed、30 passed。追加のcancel送信待ち試験も、他の質問が有効のまま残るため1 failed、41 passedだった。
+- green: network/追加権限/writeStdin/humanCommand/別environment/grantRootを明示拒否する。通常commandでも本文・cwd欠落では許可を提示しない。fileはpath/diff/kindを確認し、移動先も保持する。patchUpdatedなどで提示対象が変わったらtokenを失効して要求を拒否し、変更前の内容への回答を送らない。
+- 実wire観測で通常commandにも `environmentId="local"` が付くことを確認し、localは対応値としてdetailsへ保持した。未知environmentの拒否を維持する。
+- cancel判断は送信前に停止意思と全質問の失効を確定し、respond待ち中のterminal先着でもstoppedを保つ。停止時に質問へ空回答やJSON-RPC errorを送らない契約は維持した。
+- 検証: 対象pytestは42 passed、対象ruff format/checkとtyが成功。サーバに提示されなかったdecline等を追加する処理はない。通常承認の実runtime受入はrootの製品経路で別途確認する。
+- refactor-skipped: 変更対象検証と承認形式検証を専用関数へ分離済みで、このcycle後の追加構造変更は不要と判断した。
+- commit: `fix(codex): 未対応の権限と未確認の変更を承認から除外する`。
 
 ## 6. 対象ファイル
 
