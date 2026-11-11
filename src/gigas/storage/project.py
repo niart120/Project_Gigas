@@ -2,14 +2,28 @@
 
 import json
 import os
+import sys
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Self
+from threading import Lock
+from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
+
+if sys.platform == "win32":
+    import msvcrt
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from typing import BinaryIO
 
 
 class ProjectError(ValueError):
     """A project could not be created, read, or written without losing data."""
+
+
+class ProjectBusyError(ProjectError):
+    """A recording operation still owns the project."""
 
 
 class ProjectWriter:
@@ -18,11 +32,12 @@ class ProjectWriter:
     Construct through create() or open(), not by calling the initializer.
     """
 
-    def __init__(self, path: Path, project_id: str) -> None:
+    def __init__(self, path: Path, project_id: str, lock_file: "BinaryIO") -> None:
         """Initialize the owner after its project has been validated."""
         self.path = path
         self.project_id = project_id
-        self._closed = False
+        self._lock_file: BinaryIO | None = lock_file
+        self._mutex = Lock()
         self._next_sequence: int | None = 1
 
     @classmethod
@@ -40,8 +55,10 @@ class ProjectWriter:
         """
         path = path.resolve()
         project_id = f"project-{uuid4()}"
+        lock_file = None
         try:
             path.mkdir()
+            lock_file = _acquire_lock(path)
             (path / "observations").mkdir()
             with (path / "events.jsonl").open("xb"):
                 pass
@@ -54,10 +71,12 @@ class ProjectWriter:
                 stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-        except OSError as error:
+        except (OSError, ProjectError) as error:
+            if lock_file is not None:
+                lock_file.close()
             message = f"{path}: プロジェクト作成失敗。作成途中の資材は保持します: {error}"
             raise ProjectError(message) from error
-        return cls(path, project_id)
+        return cls(path, project_id, lock_file)
 
     @classmethod
     def open(cls, path: Path) -> Self:
@@ -73,8 +92,13 @@ class ProjectWriter:
             ProjectError: Metadata or a record is unreadable or invalid.
         """
         path = path.resolve()
-        project_id, next_sequence = _read_project(path)
-        owner = cls(path, project_id)
+        lock_file = _acquire_lock(path)
+        try:
+            project_id, next_sequence = _read_project(path)
+        except ProjectError:
+            lock_file.close()
+            raise
+        owner = cls(path, project_id, lock_file)
         owner._next_sequence = next_sequence
         return owner
 
@@ -85,19 +109,58 @@ class ProjectWriter:
             ProjectError: This owner is closed, identity changed, or data is invalid.
                 Append remains disabled after a failed revalidation.
         """
-        if self._closed:
-            message = "プロジェクトは終了済みです"
-            raise ProjectError(message)
-        self._next_sequence = None
-        project_id, next_sequence = _read_project(self.path)
-        if project_id != self.project_id:
-            message = f"{self.path}: プロジェクトIDが変更されています"
-            raise ProjectError(message)
-        self._next_sequence = next_sequence
+        with self._operation():
+            self._require_open()
+            self._next_sequence = None
+            project_id, next_sequence = _read_project(self.path)
+            if project_id != self.project_id:
+                message = f"{self.path}: プロジェクトIDが変更されています"
+                raise ProjectError(message)
+            self._next_sequence = next_sequence
 
     def close(self) -> None:
-        """Release this owner after its recording operation has finished."""
-        self._closed = True
+        """Release ownership; repeated close is harmless.
+
+        Raises:
+            ProjectBusyError: A synchronous recording or reload is still running.
+        """
+        with self._operation():
+            if self._lock_file is not None:
+                self._lock_file.close()
+                self._lock_file = None
+
+    @contextmanager
+    def _operation(self) -> "Generator[None]":
+        if not self._mutex.acquire(blocking=False):
+            message = "プロジェクトの書込処理中です"
+            raise ProjectBusyError(message)
+        try:
+            yield
+        finally:
+            self._mutex.release()
+
+    def _require_open(self) -> None:
+        if self._lock_file is None:
+            message = "プロジェクトは終了済みです"
+            raise ProjectError(message)
+
+
+def _acquire_lock(path: Path) -> "BinaryIO":
+    if sys.platform != "win32":
+        message = "プロジェクト書込はWindowsだけに対応しています"
+        raise ProjectError(message)
+    try:
+        stream = (path / ".gigas.lock").open("a+b")
+        try:
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            stream.close()
+            raise
+    except OSError as error:
+        message = f"{path}: 書込所有権を取得できません: {error}"
+        raise ProjectError(message) from error
+    return stream
 
 
 def _reject_constant(value: str) -> None:

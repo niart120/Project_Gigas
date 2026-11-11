@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -133,3 +135,46 @@ def test_unknown_or_invalid_project_is_not_initialized(tmp_path: Path, metadata:
     with pytest.raises(ProjectError):
         ProjectWriter.open(path)
     assert (path / "project.json").read_text(encoding="utf-8") == metadata
+
+
+LOCK_PROBE = """
+import sys
+from pathlib import Path
+from gigas.storage.project import ProjectError, ProjectWriter
+try:
+    writer = ProjectWriter.open(Path(sys.argv[1]))
+except ProjectError:
+    sys.exit(2)
+writer.close()
+"""
+
+
+def test_writer_ownership_is_exclusive_across_processes(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "locked")
+    try:
+        with pytest.raises(ProjectError):
+            ProjectWriter.open(writer.path)
+        writer.reload()
+        result = subprocess.run(  # noqa: S603 - fixed local Python probe
+            [sys.executable, "-c", LOCK_PROBE, str(writer.path)], timeout=10, check=False
+        )
+        assert result.returncode == 2
+    finally:
+        writer.close()
+    result = subprocess.run(  # noqa: S603 - fixed local Python probe
+        [sys.executable, "-c", LOCK_PROBE, str(writer.path)], timeout=10, check=False
+    )
+    assert result.returncode == 0
+
+
+def test_process_exit_releases_lock_without_deleting_lock_file(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "locked")
+    writer.close()
+    code = "import os\n" + LOCK_PROBE.replace("writer.close()", "os._exit(0)")
+    result = subprocess.run(  # noqa: S603 - fixed local Python probe
+        [sys.executable, "-c", code, str(writer.path)], timeout=10, check=False
+    )
+    assert result.returncode == 0
+    assert (writer.path / ".gigas.lock").exists()
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
