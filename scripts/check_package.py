@@ -77,6 +77,36 @@ assert closed, f"{entry}: no main window completed the Qt close cycle"
 print(f"{entry}: main window opened and closed")
 """
 
+CAPTURE_PROBE = """
+import multiprocessing
+import sys
+import time
+
+from gigas.game_io.capture import CaptureService
+from gigas.game_io.models import CaptureOptions
+
+if __name__ == "__main__":
+    service = CaptureService()
+    service.start()
+    try:
+        # Resolve an impossible DirectShow path; never open a physical device.
+        assert service.connect(CaptureOptions("gigas:package-probe-missing-device"))
+        deadline = time.monotonic() + 20
+        while service.snapshot().phase not in ("error", "closed"):
+            assert time.monotonic() < deadline, service.snapshot()
+            time.sleep(0.02)
+        state = service.snapshot()
+        assert state.phase == "error", state
+        assert state.error == "映像取得元が見つからない", state
+    finally:
+        service.shutdown()
+        service.join(6)
+    assert not service.is_alive(), service.snapshot()
+    assert not multiprocessing.active_children()
+    assert not any(name.startswith("PySide6") for name in sys.modules)
+    print("Installed capture worker spawned, rejected missing device, and exited")
+"""
+
 
 def check_resources(sdist: Path, wheel: Path) -> str:
     """Check both archives and return the expected installed text digest."""
@@ -122,6 +152,7 @@ def main() -> None:
         run(["uv", "pip", "install", "--python", python, "--link-mode", "copy", str(wheel)], work)
         run([python, "-I", "-c", RESOURCE_PROBE, str(venv), digest], work)
         print(f"Resource verified in {sdist.name} and {wheel.name}", flush=True)  # noqa: T201 -- CLI
+        run([python, "-I", "-c", CAPTURE_PROBE], work, timeout=30)
         for entry in ("module", "script"):
             run(
                 [python, "-I", "-c", APP_PROBE, entry, str(work / f"settings-{entry}")],
