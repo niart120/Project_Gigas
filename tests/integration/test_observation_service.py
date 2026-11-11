@@ -2,24 +2,37 @@ import asyncio
 import json
 from pathlib import Path
 from threading import Event
+from typing import TYPE_CHECKING
 
 import pytest
 
+from gigas.game_io import observation as observation_module
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
-from gigas.game_io.observation import ObservationError
+from gigas.game_io.observation import Observation, ObservationError
 from gigas.services.observation import ObservationService
 from gigas.storage import project
 from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
 from tests.integration.test_observation_storage import sample_frame
 
+if TYPE_CHECKING:
+    from gigas.game_io.capture.models import Frame
 
-def test_observe_uses_cached_frame_and_retains_its_time(tmp_path: Path) -> None:
+
+def test_observe_uses_cached_frame_and_retains_its_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     frame = sample_frame()
     reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame))
     writer = ProjectWriter.create(tmp_path / "game")
 
     async def scenario() -> None:
         service = ObservationService(reader, writer)
+        with monkeypatch.context() as patch:
+            patch.setattr(observation_module, "MAX_PNG_BYTES", 1)
+            with pytest.raises(ObservationError) as failed:
+                await service.observe()
+            assert failed.value.code == "OBSERVATION_ENCODING_ERROR"
+        assert (writer.path / "events.jsonl").read_bytes() == b""
         first = await asyncio.wait_for(service.observe(), timeout=3)
         second = await asyncio.wait_for(service.observe(), timeout=3)
         assert first.frame is second.frame is frame
@@ -32,14 +45,17 @@ def test_observe_uses_cached_frame_and_retains_its_time(tmp_path: Path) -> None:
         writer.close()
 
 
-@pytest.mark.parametrize("save_fails", [False, True])
+@pytest.mark.parametrize(
+    ("boundary", "save_fails"), [("encode", False), ("publish", False), ("publish", True)]
+)
 def test_cancellation_retains_worker_slot_and_project_until_drain(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, save_fails: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, *, save_fails: bool
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     snapshot = CaptureSnapshot(phase="streaming", frame=sample_frame())
     entered, release = Event(), Event()
     publish = project._publish_image
+    encode = Observation.from_frame
 
     def delayed_publish(path: Path, data: bytes) -> None:
         entered.set()
@@ -48,7 +64,17 @@ def test_cancellation_retains_worker_slot_and_project_until_drain(
             raise OSError(message)
         publish(path, data)
 
-    monkeypatch.setattr(project, "_publish_image", delayed_publish)
+    def delayed_encode(_cls: type[Observation], frame: "Frame") -> Observation:
+        entered.set()
+        if not release.wait(timeout=10):
+            message = "encoding release deadline"
+            raise TimeoutError(message)
+        return encode(frame)
+
+    if boundary == "encode":
+        monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
+    else:
+        monkeypatch.setattr(project, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
         service = ObservationService(CaptureReader(lambda: snapshot), writer)
@@ -64,10 +90,13 @@ def test_cancellation_retains_worker_slot_and_project_until_drain(
             with pytest.raises(ObservationError) as busy:
                 await service.observe()
             assert busy.value.code == "BUSY"
-            with pytest.raises(ProjectBusyError):
-                writer.close()
-            with pytest.raises(ProjectBusyError):
-                writer.reload()
+            if boundary == "publish":
+                with pytest.raises(ProjectBusyError):
+                    writer.close()
+                with pytest.raises(ProjectBusyError):
+                    writer.reload()
+            else:
+                writer.reload()  # Encoding holds the observation slot, not the storage mutex.
             with pytest.raises(ProjectError):
                 ProjectWriter.open(writer.path)
             waiting = asyncio.create_task(service.drain())
@@ -94,25 +123,6 @@ def test_cancellation_retains_worker_slot_and_project_until_drain(
         asyncio.run(scenario())
     finally:
         release.set()
-        writer.close()
-
-
-def test_cancelled_before_dispatch_does_not_start_recording(tmp_path: Path) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
-
-    async def scenario() -> None:
-        reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=sample_frame()))
-        service = ObservationService(reader, writer)
-        request = asyncio.create_task(service.observe())
-        request.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await request
-        await service.drain()
-
-    try:
-        asyncio.run(scenario())
-        assert (writer.path / "events.jsonl").read_bytes() == b""
-    finally:
         writer.close()
 
 

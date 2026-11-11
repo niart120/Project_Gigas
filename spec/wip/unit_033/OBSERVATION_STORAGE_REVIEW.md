@@ -38,7 +38,7 @@ MCP/GUI結合、対話履歴の製品保存API、Codexによるmemory編集の�
 |---|---|---|---|---|
 | refactor-done | S1: 符号化済み観測をそのbytesとIDのまま保存し、旧analysis付き行も原本保持して再読込する | regression | integration | 既存保存試験を書換え。analysis欠落だけをassertする試験は作らない |
 | refactor-done | S2: writer保有中も別プロセスから原記録を読んでmemoryを編集でき、別writerだけ拒否される | characterization | integration | 既存のプロセス間排他と終了試験へ統合 |
-| todo | S3: 符号化中も取消し後の一件を回収し、完了した同じ観測を保存する | regression | integration | 既存の成功・失敗・取消し試験を保存前の符号化境界へ展開 |
+| refactor-done | S3: 符号化中も取消し後の一件を回収し、完了した同じ観測を保存する | regression | integration | 既存の成功・失敗・取消し試験を保存前の符号化境界へ展開 |
 
 実行前cancelの専用試験はobserve本体が一度も動かずasyncioの性質だけを検査するため削除する。未知schema・破損・上書き拒否・部分追記の試験は原本保護の観測可能な契約なので維持する。最大画像の保存・復号も、実寸法と容量の受入として残す。
 
@@ -70,3 +70,5 @@ U06: 公開応答・依頼等のイベント形式、同じwriterでの直列保
 S1: storage既存試験を書換えたredは13 failed（符号化済みObservationを旧Frame APIが再符号化しようとした）。責務分離後、storage/service/captureの56 passed、対象ruffと全体ty成功。旧analysis付き行の原本保持・追記も同じ保存試験で確認。空analysisの不正値だけを検査したパラメーター1件を削除し、符号化失敗の検証はS3のサービス試験へ移す。
 
 S2: 既存のOS排他・プロセス終了の2試験を1試験へ統合。`pytest tests/integration/test_observation_storage.py -k archive_owner` 1 passed（初回greenの現動作確認）。別Pythonが画像/JSONL/管理情報を読みmemoryを作成でき、原記録は不変、別writerだけ拒否。close後と異常プロセス終了後の再取得も確認。対象ruff/ty成功。実Codexの権限・解釈の試験ではない。
+
+S3: 既存service試験へ符号化容量失敗と、符号化中取消し後の回収を統合。符号化中もwriterの再検査が可能で、別writerの専有は拒否される。保存中のclose/reload拒否と取消し後の成功/失敗回収も維持。未実行コルーチン取消しだけの試験を削除。service/capture 17 passed（初回green）、ruff/全体ty成功。製品の符号化責務はS1で移動済み。
