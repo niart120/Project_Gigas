@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +24,8 @@ from gigas.storage.settings import Settings
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from gigas.game_io.models import DeviceInfo
 
 
 class SettingsDialog(QDialog):
@@ -34,6 +37,7 @@ class SettingsDialog(QDialog):
     """
 
     changed = Signal()
+    capture_refresh_requested = Signal()
     close_requested = Signal()
     cancel_close_requested = Signal()
 
@@ -56,7 +60,32 @@ class SettingsDialog(QDialog):
         device_form = QFormLayout(devices)
         self.capture_device = self._text_field()
         self.serial_port = self._text_field()
+        self.capture_choices = QComboBox(devices)
+        self.capture_choices.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.capture_choices.setMinimumContentsLength(12)
+        self.capture_choices.addItem("未選択", "")
+        self.capture_choices.currentIndexChanged.connect(self._choose_capture_device)
+        self.capture_device.textChanged.connect(self._sync_capture_choice)
+        self.capture_refresh_button = QPushButton("一覧更新", devices)
+        self.capture_refresh_button.clicked.connect(self.capture_refresh_requested)
+        selection = QHBoxLayout()
+        selection.addWidget(self.capture_choices, 1)
+        selection.addWidget(self.capture_refresh_button)
+        device_form.addRow("映像機器", selection)
         device_form.addRow("映像取得元", self.capture_device)
+        self.capture_width = self._number_field(16, 3840, 1920)
+        self.capture_height = self._number_field(16, 2160, 1080)
+        self.capture_fps = self._number_field(1, 120, 60)
+        self.preview_fps = self._number_field(1, 60, 30)
+        for label, field in (
+            ("幅", self.capture_width),
+            ("高さ", self.capture_height),
+            ("取得FPS", self.capture_fps),
+            ("表示FPS", self.preview_fps),
+        ):
+            device_form.addRow(label, field)
         device_form.addRow("シリアルポート", self.serial_port)
         body.addWidget(devices)
         agent = QGroupBox("エージェント", self.form)
@@ -109,6 +138,38 @@ class SettingsDialog(QDialog):
         field.textChanged.connect(self.changed)
         return field
 
+    def _number_field(self, minimum: int, maximum: int, default: int) -> QSpinBox:
+        field = QSpinBox(self.form)
+        field.setRange(minimum, maximum)
+        field.setValue(default)
+        field.valueChanged.connect(self.changed)
+        return field
+
+    def set_capture_devices(self, devices: "tuple[DeviceInfo, ...]") -> None:
+        """Replace selectable devices without changing any unsaved setting.
+
+        Args:
+            devices: Enumerated names and nonempty paths. Paths are stored unchanged.
+        """
+        with QSignalBlocker(self.capture_choices):
+            self.capture_choices.clear()
+            self.capture_choices.addItem("未選択", "")
+            for index, device in enumerate(devices, 1):
+                if device.path:
+                    self.capture_choices.addItem(f"{index}: {device.name}", device.path)
+            self._sync_capture_choice()
+
+    def _sync_capture_choice(self) -> None:
+        path = self._text_value(self.capture_device)
+        with QSignalBlocker(self.capture_choices):
+            self.capture_choices.setItemText(0, "一覧外" if path else "未選択")
+            self.capture_choices.setCurrentIndex(max(0, self.capture_choices.findData(path)))
+
+    def _choose_capture_device(self) -> None:
+        path = self.capture_choices.currentData()
+        if isinstance(path, str) and path:
+            self.capture_device.setPlainText(path)
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Request closure without discarding edits."""
         event.ignore()
@@ -126,6 +187,10 @@ class SettingsDialog(QDialog):
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),
             auth_method=str(self.auth_method.currentData()),
+            capture_width=self.capture_width.value(),
+            capture_height=self.capture_height.value(),
+            capture_fps=self.capture_fps.value(),
+            preview_fps=self.preview_fps.value(),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -140,6 +205,16 @@ class SettingsDialog(QDialog):
                 field.setPlainText(value)
                 self._loaded_text[field] = (value, field.toPlainText())
             self.auth_method.setCurrentIndex(self.auth_method.findData(values.auth_method))
+            for field, value in (
+                (self.capture_width, values.capture_width),
+                (self.capture_height, values.capture_height),
+                (self.capture_fps, values.capture_fps),
+                (self.preview_fps, values.preview_fps),
+            ):
+                field.setValue(value)
+            with QSignalBlocker(self.capture_choices):
+                selected = self.capture_choices.findData(values.capture_device)
+                self.capture_choices.setCurrentIndex(max(0, selected))
 
     def _text_value(self, field: QPlainTextEdit) -> str:
         current = field.toPlainText()
@@ -151,3 +226,12 @@ class SettingsDialog(QDialog):
         for field in (self.capture_device, self.serial_port, self.model, self.effort):
             field.setReadOnly(not enabled)
         self.auth_method.setEnabled(enabled)
+        for field in (
+            self.capture_choices,
+            self.capture_width,
+            self.capture_height,
+            self.capture_fps,
+            self.preview_fps,
+            self.capture_refresh_button,
+        ):
+            field.setEnabled(enabled)

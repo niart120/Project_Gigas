@@ -28,7 +28,7 @@ TOML設定の追加、機器一覧からの選択、縦横比を維持する表�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | P1 映像モードを検査し既定値・コメント付きTOMLへ保存する | new | unit/integration | red: 属性不存在・不正型を拒否しない14失敗。green: 下記検証。独立した4数値の変換のみで構造変更不要 |
-| todo | P2 機器を選んでモードとともに明示保存する | new | integration | 未保存変更・同名候補・選択維持 |
+| refactor-skipped | P2 機器を選んでモードとともに明示保存する | new | integration | red: モード消失・選択部品未実装。green: 25件。設定選択の同期を局所化し、大きい構造変更なし |
 | todo | P3 最新画像をコピーし実画像の比率で描画する | new | integration | 上書き・同じ連番・消去・画素と余白 |
 | todo | P4 設定snapshotで接続し遅い表示・切断・終了を結合する | new | integration | 実サービス模擬子、設定失敗中切断、GUI応答 |
 
@@ -43,6 +43,8 @@ TOML設定の追加、機器一覧からの選択、縦横比を維持する表�
 製品試験・型・lint・buildはnot run。代表画面は実装後に確認する。実機取得はユーザーの準備完了連絡までnot run。実機の文字判読・比率・切断・終了は未完の受入条件として残す。
 
 P1: `uv run --no-sync pytest tests/unit/test_video_settings.py tests/unit/test_settings.py tests/integration/test_settings_io.py --basetemp=tmp/pytest-video-settings -q`で設定の旧値・既定値・型/範囲・コメント・既存ファイル保護を検査。初回green34件、その後保存値が既存の整数と等しくなるbool/floatの拒否を追加した。対象ruff・tyも成功。各APIの属性説明と`docs/settings.md`へ範囲を記載した。
+
+P1の最終結果は36件成功。P2: `uv run --no-sync pytest tests/integration/test_video_settings_gui.py tests/integration/test_app_settings.py --basetemp=tmp/pytest-video-gui -q --tb=short`で25件成功。機器一覧からのパス選択・同名の区別・未保存入力維持・手動編集との同期・入力制限と既存設定画面の回帰を確認。実機列挙ボタンの接続はP4で行う。対象ruff・ty成功。
 
 ## 8. 先送り事項
 
