@@ -2,9 +2,9 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（設計・レビュー反映）**。2026-11-11の人間レビューで、FPS・寸法の常時表示、取得パスを手入力する設定、取得サイズと表示サイズの混同、複数読み手の検証不足、game_ioの平置きを指摘された。[U03親仕様](../unit_008/VIDEO_CAPTURE.md)を再開し、NyXの操作設計を参照して改善する。
+状態: **complete**。2026-11-11の人間レビューで、FPS・寸法の常時表示、取得パスを手入力する設定、取得サイズと表示サイズの混同、複数読み手の検証不足、game_ioの平置きを指摘された。[U03親仕様](../unit_008/VIDEO_CAPTURE.md)を再開し、NyXの操作設計を参照して改善した。R1〜R4、最終実機・描画確認と全体品質gateを完了した。
 
-[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)の機器識別・子プロセス・Frame不変性、[M1](../../complete/unit_021/VIDEO_CAPTURE_SERVICE.md)の取得基盤、[M2](../../complete/unit_022/VIDEO_PREVIEW.md)のGUI・実機受入を引き継ぐ。M2受入は当時の画面とコードの結果であり、この子の追加要件を検証済みとは扱わない。
+[M0](../unit_020/VIDEO_CAPTURE_DESIGN.md)の機器識別・子プロセス・Frame不変性、[M1](../unit_021/VIDEO_CAPTURE_SERVICE.md)の取得基盤、[M2](../unit_022/VIDEO_PREVIEW.md)のGUI・実機受入を引き継ぐ。M2受入は当時の画面とコードの結果であり、この子の追加要件を検証済みとは扱わない。
 
 ## 2. 対象範囲・対象外
 
@@ -67,7 +67,7 @@ R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。
 
 ## 7. 検証計画と現在地
 
-NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R4の実装と下記模擬境界の自動試験を完了した。新UIの最終代表画面・実機結合の再確認は別の受入として行う。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+NyXとの仕様照合、R1〜R4の実装・模擬境界試験、最終の実機と代表画面を確認した。全体gate・配布・公開説明の確認結果は本節末尾、実機と描画の条件・限界は[受入記録](HARDWARE_ACCEPTANCE.md)に記す。Python 3.12/3.13のCIをPRの最新HEADで通してからマージする。
 
 ### R1: 読み取り専用APIと複数読み手
 
@@ -122,6 +122,12 @@ NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R4
 - 修正後: 取得unit/integration55件と`uv run --no-sync pytest tests/integration/test_window_presets.py --basetemp=tmp/pytest-r4-name-green -q -o faulthandler_timeout=15 --tb=short`の5件が成功。保存Pathの直接接続、表示名、設定候補、同じ列挙1回、一覧通知後のopen固着期限を確認した。再度の独立読取レビューで追加必須指摘なし。
 - 画面確認: 4096×2400と800×800のQt offscreen描画で、設定3タブと主画面4段階を読み、作業領域内の配置と操作の可視性を確認した。最終実機での直接接続・4段階切替・切断/再接続・終了は[実機受入記録](HARDWARE_ACCEPTANCE.md)で別に扱う。
 
+### 最終統合確認
+
+製品コード`2ffb799`で、`uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`（129ファイル）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功した。全体の`uv run pytest tests/unit tests/integration -q -o faulthandler_timeout=30`はPython 3.12.10で268 passed / 22.13秒、別環境のPython 3.13.5でも268 passed / 28.69秒。後者は`UV_PROJECT_ENVIRONMENT=tmp/u03/ci-python313`と`uv run --python 3.13 --no-sync pytest`を使った。
+
+配布検証はrepo外の新規環境へwheelを入れ、資材同梱、実spawn・不在機器の拒否・回収、module/console起動のGUI開閉を確認した。[実機受入](HARDWARE_ACCEPTANCE.md)は保存済み機器への直接接続、4段階切替、表示名選択・保存、切断・再接続・表示中の終了を確認している。R1〜R4と起動/終了修正の独立レビュー指摘は対応済み。文書と実測JSON、機能範囲、公開型・docstringを読み合わせ、設定の空文字の説明も対象項目に限定した。skill本体は変更していないためvalidatorはnot applicable。PRの最新HEADに対するWindows CI結果はPRで確認する。
+
 ## 8. 先送り事項
 
 観測確定・保存・MCPはU04、入力の機器一覧と接続・即時停止はU05、モデル候補と接続中の実行設定変更はU06。機器内部/光学遅延・物理抜去・長時間連続運転は元の実機記録と同じく未検証として区別する。
@@ -129,6 +135,6 @@ NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1〜R4
 ## 9. 完了チェックリスト
 
 - [x] 人間レビューとNyXの採否を設計へ反映した
-- [ ] R1〜R4の検証と論理コミットを完了した
-- [ ] 実画面を読み、必要な実機再確認と未検証事項を記録した
-- [ ] 品質gate・配布・docs・親仕様の受入を再確認した
+- [x] R1〜R4の検証と論理コミットを完了した
+- [x] 実画面を読み、必要な実機再確認と未検証事項を記録した
+- [x] 品質gate・配布・docs・親仕様の受入を再確認した

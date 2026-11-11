@@ -4,7 +4,7 @@
 
 一つの映像取得元から実フレームを継続取得し、GUIで最新の映像を表示できる状態を作る。取得方式の選定・設計をこの工程の冒頭に置く。
 
-状態: **wip（M0〜M2の受入後、人間レビューを反映中）**。[M0調査・設計](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)で方式・採用版・識別・共有・終了の契約を決め、[M1継続取得](../../complete/unit_021/VIDEO_CAPTURE_SERVICE.md)と[M2プレビュー](../../complete/unit_022/VIDEO_PREVIEW.md)をTDDで実装した。Live Gamer 4K 2.1系の実映像で列挙・接続・表示・切断・再接続・表示中の終了を確認した。その後の人間レビューにより[M3 UI・共有境界の見直し](../unit_023/VIDEO_REVIEW_REFINEMENT.md)へ着手した。M2の結果は[M2実機記録](../../complete/unit_022/HARDWARE_ACCEPTANCE.md)に保持し、新要件の受入とは分ける。
+状態: **complete**。[M0調査・設計](../unit_020/VIDEO_CAPTURE_DESIGN.md)で方式・採用版・識別・共有・終了の契約を決め、[M1継続取得](../unit_021/VIDEO_CAPTURE_SERVICE.md)と[M2プレビュー](../unit_022/VIDEO_PREVIEW.md)をTDDで実装した。Live Gamer 4K 2.1系の実映像で列挙・接続・表示・切断・再接続・表示中の終了を確認した。その後の人間レビューにより[M3 UI・共有境界の見直し](../unit_023/VIDEO_REVIEW_REFINEMENT.md)を実装し、最終実機・画面と品質gateを再確認した。M2の結果は[M2実機記録](../unit_022/HARDWARE_ACCEPTANCE.md)に保持し、新要件の受入は[M3実機・画面記録](../unit_023/HARDWARE_ACCEPTANCE.md)に分けた。
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
@@ -15,7 +15,7 @@
 
 ## 2. 前提と着手条件
 
-[U01](../../complete/unit_001/APP_STARTUP.md)のGUIと設定保存が前提。[U02](../../complete/unit_007/CODEX_CONNECTION.md)の完成は不要。U01のcapture.deviceは選択文字列の保存であり、機器識別方式・取得API・FPS・待機期限の確定、機器接続、映像ワーカーは含まない。
+[U01](../unit_001/APP_STARTUP.md)のGUIと設定保存が前提。[U02](../unit_007/CODEX_CONNECTION.md)の完成は不要。U01のcapture.deviceは選択文字列の保存であり、機器識別方式・取得API・FPS・待機期限の確定、機器接続、映像ワーカーは含まない。
 
 親仕様は工程の受入条件を所有する。着手時に本ディレクトリを`spec/wip`へ移し、最初の子仕様を具体化する。子の番号を先行予約せず、作業仕様を複製しない。必要な公開経路・機器条件が成立しなければ、その条件へ依存する実装は進めず設計判断を更新する。
 
@@ -46,7 +46,7 @@
 |---|---|---|
 | M0 取得方式と設定 | U01の設定・GUI境界と03を照合 | 採用版、取得方式、識別、フレームと終了の契約を決める |
 | M1 継続取得と共有 | M0の方式が成立 | 一つの取得元でフレーム・時刻・連番を供給し、切断と解放を確認する |
-| [M2 プレビュー結合](../../complete/unit_022/VIDEO_PREVIEW.md) | 設定保存・編集はM0から並行可能、取得サービスとの結合はM1 | GUI表示、表示滞留、切断表示、起動・終了と代表画面を実機で確認する |
+| [M2 プレビュー結合](../unit_022/VIDEO_PREVIEW.md) | 設定保存・編集はM0から並行可能、取得サービスとの結合はM1 | GUI表示、表示滞留、切断表示、起動・終了と代表画面を実機で確認する |
 | [M3 人間レビュー反映](../unit_023/VIDEO_REVIEW_REFINEMENT.md) | M1・M2とNyXのUI/共有境界を照合 | 専用reader、取得パッケージ整理、機器一覧中心の設定、4段階表示と新UIの受入 |
 
 これは分割方針であり、子仕様・API・全テストの先行作成ではない。調査で変更理由が生じたら本書と影響する初期設計を更新する。
@@ -75,19 +75,21 @@
 | 確認 | 現在の結果 | 実施時の扱い |
 |---|---|---|
 | 方式調査・設計判断 | pass | M0に採用版・NyXとの差分・3機器のプローブ結果・未確認事項を記録した |
-| 製品の単体・結合試験 | pass | `uv run pytest tests/unit tests/integration`で227件成功。最新画像・世代・時刻・不変性、実spawnと異常系、設定・GUIと既存機能の回帰を検査 |
-| 映像機器・プレビューGUI | pass（記録条件内） | Live Gamer 4K 2.1系、1920×1080、要求60 FPSで実映像の文字・比率、切断・再接続・終了を確認。停止時の取得実測59.81 / 59.08 FPS、終了後の残存子なし |
+| 製品の単体・結合試験 | pass | `uv run pytest tests/unit tests/integration`でPython 3.12/3.13とも268件成功。最新画像・世代・時刻・不変性、実spawnと異常系、設定・GUIと既存機能の回帰を検査 |
+| 映像機器・プレビューGUI | pass（記録条件内） | Live Gamer 4K 2.1系、1920×1080、要求60 FPSで実映像の文字・比率、切断・再接続・終了を確認。M3最終確認の停止時の取得実測59.21 / 59.61 FPS、終了後の残存子なし |
 | 物理抜去・機器内部遅延 | not run | ケーブル抜去と光学計測は実施していない。故障注入はM1、ホスト内の取得完了→表示受渡しの計測と限界はM2へ記録 |
 | Codex・MCP・入力機器との接続 | not applicable | 本工程は映像取得と表示まで。記録付き観測・Codexへの画像配送はU04、物理入力はU05で確認する |
 | 依存・公開API・配布 | pass | sync / lock / ruff / ty / build成功。隔離wheel環境で資材同梱、取得子のspawn・不在path拒否・終了、module / console entryのGUI開閉を確認 |
 
 親仕様の文書検査は工程計画の整合確認であり、上記の製品検証を実行済みにしない。工程完了には本書の必要な実接続・実機確認の根拠が必要で、模擬試験の成功だけで置き換えない。
 
-最終統合gateはWindows / Python 3.12.10で実行した。`uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`（122ファイル）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv run pytest tests/unit tests/integration`（単体101・結合126）、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功した。配布検証はrepo外の一時venvと`python -I`を使い、編集可能インストールへの依存を除いた。Python 3.13はPRのWindows CIでも確認する。
+M2時点の統合gateはWindows / Python 3.12.10で実行した。`uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`（122ファイル）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv run pytest tests/unit tests/integration`（単体101・結合126）、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功した。配布検証はrepo外の一時venvと`python -I`を使い、編集可能インストールへの依存を除いた。当時の結果はM2に保持し、追加レビュー後の最終結果は以下に記す。
 
 独立レビューでは機器選択解除時の保存値、粗い時計による表示省略、列挙結果後の終了期限、終了未確認時の要求拒否、例外時の資源所有を指摘・修正し、対象試験へ反映した。最終製品コード`f612734`に必須の未解決指摘なし。公開docsの終了判定は監視スレッドとcleanupの両方を確認する説明へ修正した。設計・利用手順・U04/U05境界を読んで照合し、Markdown参照先とunit番号の一意性も検査した。skill本体は変更しておらずskill validatorはnot applicable。
 
 PRの最初のCI実行では、3.13の故障注入試験で読込到達と解放到達を同じファイルに書く試験側の競合が発生した。C5aで先行readの後に解放を要求して再現し、操作別の到達マーカーへ修正した。3.12の旧実行はTest段階で長時間継続したため、CIの試験コマンドに`-vv -o faulthandler_timeout=30`を加え、試験名と停止時スタックを出す。ジョブには10分の上限を設定した。YAMLの構文を検査済みで、試験の成功条件は変更していない。CIの最終結果はPRで確認する。
+
+M3では、表示名だけの機器一覧、設定3タブ、取得1920×1080固定と4段階の独立表示、専用CaptureReader、captureパッケージへの配置を実装した。最終製品コード`2ffb799`でsync/lock/ruff（format 129ファイル）/ty/build/隔離wheel検証が成功し、全体unit/integrationはPython 3.12.10と3.13.5で各268件成功した。直接接続時の表示名、表示切替中の同一取得世代、画像保持中の他reader進行、切断・再接続・表示中の終了を実機で確認した。起動・終了競合と直接接続時の名前欠落を含む独立レビュー指摘を修正済み。詳細なTDD・gate・未検証条件はM3が所有する。PRの最新HEADに対するCIを確認してマージする。
 
 ## 10. 未決事項・後続への引継ぎ
 
@@ -101,6 +103,6 @@ PRの最初のCI実行では、3.13の故障注入試験で読込到達と解放
 ## 11. 完了チェックリスト
 
 - [x] 調査結果と設計判断を記録し、未成立の前提を解消した
-- [ ] 対象の子仕様を完了し、本工程全体の受入条件を確認した
+- [x] 対象の子仕様を完了し、本工程全体の受入条件を確認した
 - [x] 実装済み・接続検証済み・未検証の範囲を分け、必要な実行結果を記録した
-- [ ] 恒常設計・利用手順・後続への引継ぎを更新して完了移動できる状態にした
+- [x] 恒常設計・利用手順・後続への引継ぎを更新して完了移動できる状態にした

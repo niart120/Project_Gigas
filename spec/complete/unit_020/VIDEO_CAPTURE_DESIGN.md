@@ -2,9 +2,9 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（調査・設計完了）**。U03の最初の子仕様として、取得API・採用版・機器識別・解像度とFPS・フレーム共有・切断と終了の契約を決定した。M0完了時点では製品実装と実ゲームのプレビューは未検証であり、本書だけの完了をU03全体の完了とは扱わない。後続の実装・実機受入結果は[U03親仕様](../../wip/unit_008/VIDEO_CAPTURE.md)へ集約した。
+状態: **complete（調査・設計完了）**。U03の最初の子仕様として、取得API・採用版・機器識別・解像度とFPS・フレーム共有・切断と終了の契約を決定した。M0完了時点では製品実装と実ゲームのプレビューは未検証であり、本書だけの完了をU03全体の完了とは扱わない。後続の実装・実機受入結果は[U03親仕様](../unit_008/VIDEO_CAPTURE.md)へ集約した。
 
-起点は2026-11-11のユーザー依頼と[U03親仕様](../../wip/unit_008/VIDEO_CAPTURE.md)。NyXの[映像I/O](https://github.com/niart120/Project_NyX/tree/master/src/nyxpy/framework/core/io)を参照し、そのまま採用できる構造と変更する振る舞いを分ける。
+起点は2026-11-11のユーザー依頼と[U03親仕様](../unit_008/VIDEO_CAPTURE.md)。NyXの[映像I/O](https://github.com/niart120/Project_NyX/tree/master/src/nyxpy/framework/core/io)を参照し、そのまま採用できる構造と変更する振る舞いを分ける。
 
 利用場面は、利用者が一つのキャプチャーデバイスを選び、実映像を確認し、明示的に切断またはアプリを終了すること。
 
@@ -14,7 +14,7 @@ API・依存の一次資料、現環境の機器一覧、取得方式の成立�
 
 ## 3. 関連文書・前提
 
-[実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[工程](../../initial/05-implementation.md)、[検証](../../initial/07-verification.md)、[U01](../../complete/unit_001/APP_STARTUP.md)を参照する。設定とGUIは実装済み。U01の取得機器の選択文字列には、識別・接続の保証がない。
+[実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[工程](../../initial/05-implementation.md)、[検証](../../initial/07-verification.md)、[U01](../unit_001/APP_STARTUP.md)を参照する。設定とGUIは実装済み。U01の取得機器の選択文字列には、識別・接続の保証がない。
 
 ## 4. 調査結果と採用判断
 
