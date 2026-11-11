@@ -4,6 +4,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, QWidget
 
+from gigas.ui.connection_panel import ConnectionPanel
+
 
 class MainWindow(QMainWindow):
     """Present the settings action and application status."""
@@ -26,7 +28,8 @@ class MainWindow(QMainWindow):
         self.settings_button.clicked.connect(self.settings_requested)
         actions.addWidget(self.settings_button)
         layout.addLayout(actions)
-        layout.addStretch()
+        self.connection = ConnectionPanel(central)
+        layout.addWidget(self.connection, 1)
         self.setCentralWidget(central)
         self.status = QLabel("変更なし", self)
         self.statusBar().addWidget(self.status, 1)
