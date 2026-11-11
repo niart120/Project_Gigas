@@ -1,12 +1,18 @@
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from threading import Event
+from typing import TYPE_CHECKING
 
 import pytest
 
+from gigas.game_io._capture_process import SharedSlot
 from gigas.game_io.capture import CaptureService, CaptureSnapshot
 from gigas.game_io.models import CaptureOptions
 from tests.integration.peers.capture_peer import PeerBackend
+
+if TYPE_CHECKING:
+    from gigas.game_io.models import Frame
 
 
 def wait_for(
@@ -35,6 +41,28 @@ def capture(tmp_path: Path) -> Iterator[tuple[CaptureService, Path]]:
     assert service.snapshot().cleanup != "unconfirmed"
 
 
+@pytest.fixture
+def initially_skipped_frames(
+    capture: tuple[CaptureService, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[CaptureService, Path, Event]]:
+    service, marker = capture
+    resume_reader = Event()
+    read = SharedSlot.read
+
+    def delayed_read(slot: SharedSlot, generation: int, after_sequence: int) -> "Frame | None":
+        if after_sequence and not resume_reader.wait(timeout=5):
+            return None
+        frame = read(slot, generation, after_sequence)
+        return frame if frame is not None and frame.sequence >= 3 else None
+
+    monkeypatch.setattr(SharedSlot, "read", delayed_read)
+    try:
+        yield service, marker, resume_reader
+    finally:
+        resume_reader.set()
+
+
 def test_spawn_enumeration_returns_identities_without_starting_video(
     capture: tuple[CaptureService, Path],
 ) -> None:
@@ -49,9 +77,9 @@ def test_spawn_enumeration_returns_identities_without_starting_video(
 
 
 def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
-    capture: tuple[CaptureService, Path],
+    initially_skipped_frames: tuple[CaptureService, Path, Event],
 ) -> None:
-    service, marker = capture
+    service, marker, resume_reader = initially_skipped_frames
     options = CaptureOptions("path-b", 16, 16, 60)
     assert service.connect(options)
     assert not service.connect(options)
@@ -64,6 +92,12 @@ def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
     assert snapshot.phase == "streaming"
     assert frame.bgr == bytes([frame.sequence % 256]) * (16 * 16 * 3)
     assert snapshot.reported_fps == 59.94
+    # The sequence counts device acquisitions, not samples already read by the host.
+    assert snapshot.measured_fps is None
+    resume_reader.set()
+    snapshot = wait_for(service, lambda state: state.measured_fps is not None)
+    assert snapshot.frame is not None
+    assert snapshot.frame.sequence > frame.sequence
     assert snapshot.measured_fps is not None
     assert snapshot.measured_fps > 0
     service.disconnect()

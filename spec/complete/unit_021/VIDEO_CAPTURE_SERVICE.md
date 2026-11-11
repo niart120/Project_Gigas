@@ -30,6 +30,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 | refactor-skipped | C2 最新1枚の画像・連番・時計を加工から保護する | new | unit | 受信停止と再接続世代 |
 | refactor-skipped | C3 DirectShow取得が要求を適用し実フレーム検証と解放を行う | new | unit | 読込失敗・寸法不一致・例外 |
 | refactor-skipped | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
+| refactor-skipped | C4a 取得連番と親側のFPS計測成立を分けて待つ | regression | integration | 初回受理が3枚目以降でも、次の取得時刻までFPS未確定 |
 | refactor-skipped | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
 | refactor-skipped | C5a 故障注入の到達通知で別の操作を誤認しない | regression | integration | read到達後のrelease待機、通知の上書き競合を除去 |
 
@@ -62,6 +63,12 @@ C5a: [PR #5のPython 3.13 CI](https://github.com/niart120/Project_Gigas/actions/
 到達通知を操作ごとのファイル（`.entered.read`・`.entered.release`等）へ分離し、対象操作のファイル作成を待つよう修正した。共通ファイルの存在を別操作の到達と取り違えることと、内容の上書き中に空文字列を読む競合を除いた。同じ再現コマンドは1 passed、対象2ファイルのruff check/format・ty checkもpass。独立レビューで、先行readを踏む条件、対象operationだけの待機、既存のforce・期限・画像失効・未完release・残存子のassertが維持されていることを確認した。追加の構造変更は不要で、製品コード・依存・実機条件は変更していない。
 
 C5a後の全体再検査は別原因を調査中。独立basetempを指定した実行は226 passedと`test_tmp_path_stays_in_workspace`の固定パス期待による1 failedだった。標準basetempでのPython 3.12全体再実行は219/227付近で停止しており、固有試験の成功を全体gate成功として扱わない。Python 3.13を含む全体gateとremote CIの最終結果は親仕様へ追記する。
+
+C4a: [次のCIのPython 3.12ジョブ](https://github.com/niart120/Project_Gigas/actions/runs/42955496607/job/130309489139)は1 failed・226 passedで、取得連番が3以上なら`measured_fps`も確定済みとする試験が失敗した。取得連番は子で成功した取得回数であり、最新1枚を読む親が過去の全フレームを受理したことは意味しない。製品は親が最初に受理した画像と、後で受理した画像の連番差・単調時計差から実測FPSを求めるため、初回の`measured_fps=None`は正しい。
+
+`initially_skipped_frames` fixtureで監視が初めて受理する画像を3枚目以降にし、次の読取をEventで保留した。`uv run --no-sync pytest tests/integration/test_capture_service.py::test_spawn_capture_exposes_latest_image_and_reconnects_after_release --basetemp=tmp/pytest-capture-fps -q`で同じ`None is not None`のredを確認した（1 failed）。初回の未確定を確認してから読取を再開し、実測FPSと新しい連番を待つ試験へ変更して同コマンドは1 passed。機器報告FPS・画像内容・切断・再接続・旧画像の不変性を確認するassertは維持した。fixture終了時はEventを必ず解除し、失敗時の資源回収を妨げない。
+
+C4aの担当検証は`tests/unit/test_capture_models.py`・`test_capture_frames.py`・`test_capture_backend.py`と`tests/integration/test_capture_failures.py`・`test_capture_service.py`。Python 3.12.10は`--basetemp=tmp/pytest-capture-fps312`で51 passed、Python 3.13.5は専用環境`tmp/u03/ci-python313`と`--basetemp=tmp/pytest-capture-fps313`で51 passed。対象ファイルのruff check/format・ty checkもpass。製品コード・依存・実機条件は変更していない。C5a時に停止した全体試験のプロセスは診断証拠取得後に終了し、全体gateはGUIの終了競合の修正後に親工程で再実行する。
 
 ## 8. 先送り事項
 
