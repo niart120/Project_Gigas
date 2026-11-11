@@ -30,6 +30,8 @@ def test_omitted_and_unknown_fields_use_defaults(tmp_path: Path) -> None:
         ("[controller]\nserial = []\n", "serial"),
         ("[agent]\nmodel = 10\n", "model"),
         ('[agent]\nauth_method = "invalid"\n', "auth_method"),
+        ('project = "folder"\n', "project"),
+        ("[project]\nlast_path = 42\n", "last_path"),
     ],
 )
 def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: str) -> None:

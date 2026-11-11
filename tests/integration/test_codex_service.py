@@ -1,18 +1,32 @@
 import asyncio
-from collections.abc import Callable, Mapping
+import base64
+import json
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 from PySide6.QtCore import QThread, QTimer
 from pytestqt.qtbot import QtBot
 
-from gigas.runtime.codex.connection import AnswerDeliveryError, CodexConnectionError
+from gigas.game_io.capture import CaptureReader, CaptureSnapshot
+from gigas.mcp.observation import ObservationMcpServer
+from gigas.runtime.codex.connection import (
+    AnswerDeliveryError,
+    CodexConnection,
+    CodexConnectionError,
+)
 from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, SessionStatus
 from gigas.services.codex import AnswerResult, CodexServiceThread
+from gigas.storage import project
+from gigas.storage.project import ProjectWriter
+from tests.integration.test_observation_storage import sample_frame
+from tests.unit.test_codex_connection import FakePeer
 
 if TYPE_CHECKING:
+    from gigas.runtime.codex.models import ThreadConfiguration
     from gigas.services.codex import ServiceEvent, ServiceResult, _Command
 
 
@@ -72,6 +86,243 @@ class WaitingAnswerConnection(ControlledConnection):
         await asyncio.Event().wait()
 
 
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("close_failure", [False, True])
+def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: bool,
+    close_failure: bool,
+) -> None:
+    peers: list[FakePeer] = []
+    results: list[ServiceResult] = []
+    projects = []
+    entered, release = Event(), Event()
+    http_closed = Event()
+    publish = project._publish_image
+    close = ObservationMcpServer.close
+
+    async def fail_after_http_close(server: ObservationMcpServer) -> None:
+        await close(server)
+        http_closed.set()
+        message = "HTTP shutdown failed after closing its listener"
+        raise RuntimeError(message)
+
+    def hold_image(path: Path, data: bytes) -> None:
+        entered.set()
+        if not release.wait(15):
+            raise TimeoutError
+        publish(path, data)
+
+    def factory(
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
+    ) -> CodexConnection:
+        peer = FakePeer()
+        peers.append(peer)
+        return CodexConnection(
+            peer, options, emit, prepare_thread=prepare, on_thread_started=started
+        )
+
+    frame = sample_frame(2048, 1536)
+    service = CodexServiceThread(
+        tmp_path, CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), factory
+    )
+    service.completed.connect(results.append)
+    service.project_completed.connect(projects.append)
+    service.start()
+    try:
+        if selected:
+            service.create_project(tmp_path / "selected")
+            qtbot.waitUntil(lambda: bool(projects))
+            assert not projects[-1].error
+            # Failed switching preserves the current archive and its OS ownership.
+            service.open_project(tmp_path / "missing")
+            qtbot.waitUntil(lambda: len(projects) == 2)
+            assert projects[-1].error
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        assert not (tmp_path / "chats").exists()
+        service.send("observe")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert not results[-1].error
+        thread = next(params for method, params in peers[0].calls if method == "thread/start")
+        assert thread is not None
+        archive = Path(str(thread["cwd"]))
+        assert archive.parent == (tmp_path if selected else tmp_path / "chats")
+        if selected:
+            assert archive.name == "selected"
+        rows = [json.loads(line) for line in (archive / "events.jsonl").read_text().splitlines()]
+        assert rows[0]["type"] == "thread.started"
+        assert rows[0]["payload"]["thread_id"] == "thread-1"
+        config = thread["config"]
+        assert isinstance(config, dict)
+        url = next(value for key, value in config.items() if key.endswith(".url"))
+        headers = next(value for key, value in config.items() if key.endswith(".http_headers"))
+        assert isinstance(url, str)
+        assert isinstance(headers, dict)
+        service.set_observation_resolution("hd")
+        # A later loop command completes only after the setting command was handled.
+        service.interrupt()
+        qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+        monkeypatch.setattr(project, "_publish_image", hold_image)
+        with httpx.Client(
+            headers={
+                **{key: str(value) for key, value in headers.items()},
+                "Accept": "application/json, text/event-stream",
+            },
+            trust_env=False,
+            timeout=5,
+        ) as client:
+            response = client.post(
+                url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "observe", "arguments": {}},
+                },
+            )
+        result = response.json()["result"]
+        assert not result["isError"]
+        metadata = json.loads(result["content"][1]["text"])
+        assert metadata["image"] == {"mime_type": "image/png", "width": 960, "height": 720}
+        qtbot.waitUntil(entered.is_set)
+        if close_failure:
+            monkeypatch.setattr(ObservationMcpServer, "close", fail_after_http_close)
+        service.shutdown()
+        pulse = Event()
+        QTimer.singleShot(0, pulse.set)
+        qtbot.waitUntil(pulse.is_set)
+        if close_failure:
+            qtbot.waitUntil(http_closed.is_set)
+        assert not service.wait(0)
+        release.set()
+        qtbot.waitUntil(lambda: service.wait(0))
+        rows = [json.loads(line) for line in (archive / "events.jsonl").read_text().splitlines()]
+        assert rows[-1]["payload"]["thread_id"] == "thread-1"
+        assert rows[-1]["payload"]["observation_id"] == metadata["observation_id"]
+        image = archive / rows[-1]["payload"]["image_path"]
+        assert image.read_bytes() == base64.b64decode(result["content"][0]["data"])
+        ProjectWriter.open(archive).close()
+        assert bool(service.shutdown_error) == close_failure
+    finally:
+        release.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+
+
+def test_runtime_failure_revokes_old_mcp_endpoint(qtbot: QtBot, tmp_path: Path) -> None:
+    peer = FakePeer()
+    peer.failure = "turn/start"
+    results: list[ServiceResult] = []
+
+    def factory(
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
+    ) -> CodexConnection:
+        return CodexConnection(
+            peer, options, emit, prepare_thread=prepare, on_thread_started=started
+        )
+
+    frame = sample_frame(64, 48)
+    service = CodexServiceThread(
+        tmp_path, CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), factory
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("observe")
+        qtbot.waitUntil(
+            lambda: any(result.operation == "send" and result.error for result in results)
+        )
+        assert peer.closed
+        thread = next(params for method, params in peer.calls if method == "thread/start")
+        assert thread is not None
+        config = thread["config"]
+        assert isinstance(config, dict)
+        url = next(value for key, value in config.items() if key.endswith(".url"))
+        headers = next(value for key, value in config.items() if key.endswith(".http_headers"))
+        assert isinstance(url, str)
+        assert isinstance(headers, dict)
+        with httpx.Client(trust_env=False, timeout=1) as client:
+            try:
+                response = client.post(
+                    url,
+                    headers={
+                        **{key: str(value) for key, value in headers.items()},
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "observe", "arguments": {}},
+                    },
+                )
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError):
+                response = None
+        assert response is None or response.status_code in {401, 503}
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+
+
+def test_disconnect_during_archive_creation_recovers_writer_without_starting_turn(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered, release = Event(), Event()
+    peers: list[FakePeer] = []
+    results: list[ServiceResult] = []
+    create = ProjectWriter.create
+
+    def delayed_create(_cls: type[ProjectWriter], path: Path) -> ProjectWriter:
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError
+        return create(path)
+
+    def factory(
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
+    ) -> CodexConnection:
+        peer = FakePeer()
+        peers.append(peer)
+        return CodexConnection(
+            peer, options, emit, prepare_thread=prepare, on_thread_started=started
+        )
+
+    monkeypatch.setattr(ProjectWriter, "create", classmethod(delayed_create))
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("observe")
+        qtbot.waitUntil(entered.is_set)
+        service.disconnect_runtime()
+        release.set()
+        qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        assert not any(method == "turn/start" for method, _ in peers[0].calls)
+        archives = list((tmp_path / "chats").iterdir())
+        assert len(archives) == 1
+        ProjectWriter.open(archives[0]).close()
+    finally:
+        release.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+
+
 @pytest.mark.parametrize("delivery", [False, True])
 def test_failure_id_is_shared_by_worker_status_and_operation_result(
     qtbot: QtBot, tmp_path: Path, delivery: bool
@@ -95,7 +346,11 @@ def test_failure_id_is_shared_by_worker_status_and_operation_result(
 
     events: list[ServiceEvent] = []
     results: list[ServiceResult] = []
-    service = CodexServiceThread(lambda _options, emit: FailedAnswerConnection(emit))
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda _options, emit, *_callbacks: FailedAnswerConnection(emit),
+    )
     service.received.connect(events.append)
     service.completed.connect(results.append)
     service.start()
@@ -136,13 +391,13 @@ def test_shutdown_stop_failure_preserves_correlation_and_still_closes(
     results: list[ServiceResult] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
     ) -> FailedStopConnection:
         connection = FailedStopConnection(emit)
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.received.connect(events.append)
     service.completed.connect(results.append)
     service.start()
@@ -166,8 +421,8 @@ def test_shutdown_stop_failure_preserves_correlation_and_still_closes(
         assert status.failure_id == stopped[0].failure_id
 
 
-def test_answer_without_connection_reports_not_sent(qtbot: QtBot) -> None:
-    service = CodexServiceThread()
+def test_answer_without_connection_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
@@ -183,8 +438,8 @@ def test_answer_without_connection_reports_not_sent(qtbot: QtBot) -> None:
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_answer_discarded_before_start_reports_not_sent(qtbot: QtBot) -> None:
-    service = CodexServiceThread()
+def test_answer_discarded_before_start_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.answer("queued", decision="accept")
@@ -201,13 +456,13 @@ def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> 
     results: list[ServiceResult] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
     ) -> WaitingAnswerConnection:
         connection = WaitingAnswerConnection(emit)
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -223,7 +478,7 @@ def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> 
     assert answers[0].answer == AnswerResult("pending", "unknown")
 
 
-def test_answer_cancelled_before_execution_reports_not_sent(qtbot: QtBot) -> None:
+def test_answer_cancelled_before_execution_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
     class CancelBeforeRunService(CodexServiceThread):
         """Inject cancellation after task creation but before its first execution."""
 
@@ -232,7 +487,7 @@ def test_answer_cancelled_before_execution_reports_not_sent(qtbot: QtBot) -> Non
             for task in self._tasks:
                 task.cancel()
 
-    service = CancelBeforeRunService()
+    service = CancelBeforeRunService(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
@@ -273,7 +528,11 @@ def test_answer_completion_preserves_delivery_evidence(
                 raise OSError(message)
 
     results: list[ServiceResult] = []
-    service = CodexServiceThread(lambda _options, emit: AnswerConnection(emit))
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda _options, emit, *_callbacks: AnswerConnection(emit),
+    )
     service.completed.connect(results.append)
     service.start()
     try:
@@ -301,7 +560,11 @@ def test_answer_completion_preserves_delivery_evidence(
 
 def test_answer_for_inactive_generation_is_not_success(qtbot: QtBot, tmp_path: Path) -> None:
     results: list[ServiceResult] = []
-    service = CodexServiceThread(lambda _options, emit: ControlledConnection(emit))
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda _options, emit, *_callbacks: ControlledConnection(emit),
+    )
     service.completed.connect(results.append)
     service.start()
     try:
@@ -321,8 +584,8 @@ def test_answer_for_inactive_generation_is_not_success(qtbot: QtBot, tmp_path: P
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_answer_after_service_shutdown_is_reported_not_sent(qtbot: QtBot) -> None:
-    service = CodexServiceThread()
+def test_answer_after_service_shutdown_is_reported_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
@@ -341,14 +604,14 @@ def test_worker_owns_connection_and_interrupts_while_send_waits(
     results: list[ServiceResult] = []
 
     def factory(
-        options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+        options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
     ) -> ControlledConnection:
         assert options.cwd.is_dir()
         connection = ControlledConnection(emit)
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.received.connect(events.append)
     service.completed.connect(results.append)
     service.start()
@@ -383,13 +646,13 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
     called = Event()
 
     def failed_factory(
-        _options: ConnectionOptions, _emit: Callable[[ConnectionEvent], None]
+        _options: ConnectionOptions, _emit: Callable[[ConnectionEvent], None], *_callbacks: object
     ) -> ControlledConnection:
         called.set()
         message = "private credential"
         raise OSError(message)
 
-    service = CodexServiceThread(failed_factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.connect_runtime(ConnectionOptions(tmp_path))
@@ -398,7 +661,7 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
     qtbot.waitUntil(lambda: service.wait(0))
     assert not called.is_set()
 
-    service = CodexServiceThread(failed_factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -423,13 +686,13 @@ def test_shutdown_still_closes_when_stop_fails(qtbot: QtBot, tmp_path: Path) -> 
     connections: list[FailingStop] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
     ) -> FailingStop:
         connection = FailingStop(emit)
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(factory)
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.start()
     service.connect_runtime(ConnectionOptions(tmp_path))
     qtbot.waitUntil(lambda: bool(connections) and connections[0].opened.is_set())

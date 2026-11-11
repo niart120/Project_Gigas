@@ -1,5 +1,6 @@
 """Settings editor with labels and values, without instructional prose."""
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -45,6 +46,7 @@ class SettingsDialog(QDialog):
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
         super().__init__(parent)
+        self._snapshot = Settings()
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
         self._devices: tuple[DeviceInfo, ...] = ()
         self.setModal(True)
@@ -258,7 +260,8 @@ class SettingsDialog(QDialog):
 
     def values(self) -> Settings:
         """Return the edited snapshot, including the selected device or empty value."""
-        return Settings(
+        return replace(
+            self._snapshot,
             capture_device=str(self.capture_choices.currentData() or ""),
             serial_port=self._text_value(self.serial_port),
             model=self._text_value(self.model),
@@ -274,6 +277,7 @@ class SettingsDialog(QDialog):
 
     def set_values(self, values: Settings) -> None:
         """Replace the complete edited snapshot without emitting change notifications."""
+        self._snapshot = values
         with QSignalBlocker(self):
             for field, value in (
                 (self.serial_port, values.serial_port),

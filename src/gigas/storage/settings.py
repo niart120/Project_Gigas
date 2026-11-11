@@ -35,6 +35,7 @@ class Settings:
             Independent of capture resolution and preview display.
         preview_letterbox: Preserve the preview aspect ratio with black padding when
             true; stretch to the preview area when false. Capture pixels are unchanged.
+        last_project_path: Last successfully selected project directory, or empty.
     """
 
     capture_device: str = ""
@@ -48,6 +49,7 @@ class Settings:
     capture_resolution: str = "full_hd"
     preview_letterbox: bool = True
     observation_resolution: "ObservationResolution" = "full_hd"
+    last_project_path: str = ""
 
 
 class SettingsError(ValueError):
@@ -110,6 +112,7 @@ def _read_document(path: "Path") -> "TOMLDocument":
 def _settings_from_document(document: MutableMapping[str, object], path: "Path") -> Settings:
     capture = _table(document, "capture", path)
     observation = _table(document, "observation", path)
+    project = _table(document, "project", path)
     serial = _table(_table(document, "controller", path), "serial", path)
     agent = _table(document, "agent", path)
     gui = _table(document, "gui", path)
@@ -132,6 +135,7 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         observation_resolution=_observation_resolution(
             observation.get("resolution", "full_hd"), path
         ),
+        last_project_path=_text(project, "last_path", path),
     )
 
 
@@ -150,6 +154,7 @@ def save_settings(path: "Path", settings: Settings) -> None:
 
     capture = _ensure_table(document, "capture", path)
     observation = _ensure_table(document, "observation", path)
+    project = _ensure_table(document, "project", path)
     controller = _ensure_table(document, "controller", path)
     serial = _ensure_table(controller, "serial", path)
     agent = _ensure_table(document, "agent", path)
@@ -162,6 +167,7 @@ def save_settings(path: "Path", settings: Settings) -> None:
     _set_text(
         observation, "resolution", _observation_resolution(settings.observation_resolution, path)
     )
+    _set_text(project, "last_path", settings.last_project_path)
     _set_text(capture, "device", settings.capture_device)
     for key, value in (
         ("fps", settings.capture_fps),

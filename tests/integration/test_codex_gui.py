@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
+from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     HumanRequest,
@@ -84,7 +85,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
 def test_shell_connect_uses_saved_snapshot_without_automatic_start(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    service = CodexServiceThread()
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     shell = ApplicationShell(tmp_path / "settings.toml", service=service)
     snapshots: list[ConnectionOptions] = []
 

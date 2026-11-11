@@ -85,10 +85,10 @@ M1/M2: 必要になった`game_io`の観測処理、`storage`、`mcp`、既存`s
 | 確認 | 現在の結果 |
 |---|---|
 | M0調査・設計 | 完了。現コード・現存試験、同梱0.167.0のschema生成、採用tag・MCP一次資料の読取、文書整合レビュー |
-| 製品の単体・結合試験 | M1でunit/integration全体411 passed。実ファイル・Windowsプロセス間ロックと模擬取得/故障を確認。M2はnot run |
-| MCP・Codex画像受信・実映像 | not run。M2で固定画像と実U03映像を分けて確認 |
+| 製品の単体・結合試験 | M1でunit/integration全体411 passed。実ファイル・Windowsプロセス間ロックと模擬取得/故障を確認。M2は全体465 passed。保存独立、実HTTP、模擬runtime/Qt、終了回収を検証 |
+| MCP・Codex画像受信・実映像 | MCPの実HTTPと採用runtimeへの限定tool/callを確認。実モデル受信・実映像・GUI目視は未完了 |
 | 入力機器との接続 | not applicable。U05が担当 |
-| 依存・配布 | M1の依存同期・lock/check・build成功。依存と指示資材は未変更。M2のMCP依存導入・配布検証はnot run |
+| 依存・配布 | M1の依存同期・lock/check・build成功。M2はMCP/HTTP依存を導入し、lock/check・build成功。起動中Gigasによる実行ファイル保持でuv syncの最終成功は未確認 |
 
 M0の文書検査結果は子仕様に記録する。親全体の完了にはM1/M2の製品・実接続・実機受入が必要である。
 

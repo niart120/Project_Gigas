@@ -4,6 +4,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -286,8 +287,9 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
             else Observation.from_frame(frame, resolution=resolution)
         )
         second = Observation.from_frame(frame)
-        writer.record(first)
-        writer.record(second)
+        writer.record_thread("thread-1")
+        writer.record(first, thread_id="thread-1")
+        writer.record(second, thread_id="thread-1")
         assert first.observation_id != second.observation_id
         assert first.captured_at == frame.captured_at
         assert (first.source_frame.generation, first.source_frame.sequence) == (2, 7)
@@ -318,9 +320,12 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
-        assert [record["sequence"] for record in records] == [1, 2]
+        assert [record["sequence"] for record in records] == [1, 2, 3]
+        assert records[0]["type"] == "thread.started"
+        assert records[0]["payload"] == {"runtime": "codex", "thread_id": "thread-1"}
         assert records[0]["event_id"] != records[1]["event_id"]
-        assert records[0]["payload"] == {
+        assert records[1]["payload"] == {
+            "thread_id": "thread-1",
             "observation_id": first.observation_id,
             "captured_at": "2000-01-01T00:00:00Z",
             "image_path": first.image_path,
@@ -336,12 +341,14 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
     reopened = ProjectWriter.open(writer.path)
     try:
         assert log.read_bytes() == original
-        reopened.record(Observation.from_frame(frame))
+        reopened.record_thread("thread-2")
+        reopened.record(Observation.from_frame(frame), thread_id="thread-2")
         assert log.read_bytes().startswith(original)
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
-        assert records[-1]["sequence"] == 3
+        assert records[-1]["sequence"] == 5
+        assert records[-1]["payload"]["thread_id"] == "thread-2"
     finally:
         reopened.close()
 
@@ -353,6 +360,9 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
         ("observation_id", "obs-invalid"),
         ("source_frame", {}),
         ("captured_at", "yesterday"),
+        ("thread_id", ""),
+        ("thread_id", " "),
+        ("thread_id", 42),
         ("image", {"mime_type": "image/jpeg", "width": 16, "height": 16}),
         ("image", {"mime_type": "image/png", "width": 0, "height": 16}),
         ("image", {"mime_type": "image/png", "width": 32, "height": 16}),
@@ -426,8 +436,9 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
 
 
 @pytest.mark.parametrize("failure", ["partial", "sync"])
+@pytest.mark.parametrize("kind", ["observation", "thread"])
 def test_uncertain_log_preserves_data_and_requires_explicit_reload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, kind: str
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
@@ -455,16 +466,25 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
                     fsync(descriptor)
 
                 patch.setattr(project.os, "fsync", broken_log_sync)
+            append = (
+                partial(writer.record, Observation.from_frame(sample_frame()))
+                if kind == "observation"
+                else partial(writer.record_thread, "thread-1")
+            )
             with pytest.raises(ProjectError, match="未確定"):
-                writer.record(Observation.from_frame(sample_frame()))
+                append()
         after = log.read_bytes()
         assert after.startswith(before)
         assert len(after) > len(before)
-        assert len(list((writer.path / "observations").glob("*.png"))) == 2
+        assert len(list((writer.path / "observations").glob("*.png"))) == (
+            2 if kind == "observation" else 1
+        )
         with pytest.raises(ProjectError, match="再読込"):
             writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == after
-        assert len(list((writer.path / "observations").glob("*.png"))) == 2
+        assert len(list((writer.path / "observations").glob("*.png"))) == (
+            2 if kind == "observation" else 1
+        )
         if failure == "partial":
             with pytest.raises(ProjectError, match="行2"):
                 writer.reload()
@@ -475,3 +495,25 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
             assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 3
     finally:
         writer.close()
+
+
+@pytest.mark.parametrize("invalid", ["", "  ", "\n"])
+def test_thread_record_rejects_empty_id_before_appending(tmp_path: Path, invalid: str) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        with pytest.raises(ProjectError):
+            writer.record_thread(invalid)
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+        writer.record_thread("opaque-runtime-id")
+    finally:
+        writer.close()
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
+    log = writer.path / "events.jsonl"
+    record = json.loads(log.read_bytes())
+    record["payload"]["thread_id"] = invalid
+    malformed = (json.dumps(record) + "\n").encode()
+    log.write_bytes(malformed)
+    with pytest.raises(ProjectError, match="行1"):
+        ProjectWriter.open(writer.path).close()
+    assert log.read_bytes() == malformed

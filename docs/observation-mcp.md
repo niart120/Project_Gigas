@@ -1,6 +1,6 @@
 # 観測MCP API
 
-`gigas.mcp.observation.ObservationMcpServer`は、[観測サービス](recorded-observation.md)の画像をStreamable HTTPで公開するPython APIです。現在のGUI・Codex接続からの自動起動には未接続です。
+`gigas.mcp.observation.ObservationMcpServer`は、[観測サービス](recorded-observation.md)の画像をStreamable HTTPで公開するPython APIです。アプリは初回チャット送信の準備時に起動し、Codexの`thread/start`へ接続専用の設定として渡します。[会話と保存先の扱い](codex-gui.md)はCodexサービスが所有します。
 
 ## 所有と利用順
 
@@ -11,6 +11,8 @@
 `await server.close()`は新しい要求の受付を閉じ、HTTPとMCP SDKの終了を待ちます。終了待ちを取り消してもサーバTaskは所有され、再度`close()`で終了を確認できます。同じインスタンスは再起動せず、新しい接続では新規インスタンスを作ります。起動失敗も例外として返し、アプリのプロセス全体を終了させません。
 
 HTTPの終了後、アプリ所有者が`await observations.drain()`で進行中の画像生成・保存を回収してからwriterとイベントループを閉じます。サーバはwriterを所有せず、取得サービスの停止も行いません。保存に失敗していても回収は完了し得るため、終了確認と保存成功を分けて扱います。
+
+GUIからの切断・アプリ終了でも同じ回収を行います。次の接続では新しいサーバ名・ポート・Bearerを使うため、以前のURLと認証情報は引き継ぎません。設定値はapp-serverの接続にだけ渡し、グローバル設定ファイル・会話本文・原記録へ保存しません。
 
 ## ツールと応答
 

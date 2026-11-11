@@ -143,66 +143,102 @@ class ProjectWriter:
                 self._lock_file.close()
                 self._lock_file = None
 
-    def record(self, observation: "Observation") -> None:
+    def record_thread(self, thread_id: str) -> None:
+        """Record a real Codex thread before its first turn is submitted.
+
+        Args:
+            thread_id: Opaque runtime ID, not empty or whitespace-only.
+
+        Raises:
+            ProjectBusyError: Another synchronous operation owns the writer.
+            ProjectError: The ID is invalid, the writer is unavailable, or appending
+                fails. Uncertain appends require an explicit successful reload.
+        """
+        with self._operation():
+            sequence = self._require_writable()
+            try:
+                _thread_id(thread_id)
+            except (ValueError, TypeError) as error:
+                message = f"会話IDが不正です。記録していません: {error}"
+                raise ProjectError(message) from error
+            self._append_event(
+                "thread.started", {"runtime": "codex", "thread_id": thread_id}, sequence
+            )
+
+    def record(self, observation: "Observation", *, thread_id: str | None = None) -> None:
         """Persist the final observation image and its corresponding metadata.
 
         Args:
             observation: Immutable PNG and source metadata from Observation.from_frame.
                 The bytes are saved unchanged; this method does not encode an image.
+            thread_id: Real runtime conversation associated with this observation.
+                None means a standalone observation without a chat context.
 
         Raises:
             ProjectBusyError: A recording or reload is already running.
-            ProjectError: The owner is closed, needs reload, or persistence failed.
-                A JSONL failure disables further append until a successful reload.
+            ProjectError: The owner is closed, needs reload, metadata is invalid,
+                or persistence failed. A JSONL failure disables further append
+                until a successful reload.
         """
         with self._operation():
-            self._require_open()
-            if self._next_sequence is None:
-                message = "追記結果が未確定です。プロジェクトを明示的に再読込してください"
-                raise ProjectError(message)
+            sequence = self._require_writable()
             frame = observation.source_frame
-            event = {
-                "schema_version": 1,
-                "event_id": f"evt-{uuid4()}",
-                "sequence": self._next_sequence,
-                "occurred_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "type": "observation.recorded",
-                "project_id": self.project_id,
-                "payload": {
-                    "observation_id": observation.observation_id,
-                    "captured_at": observation.captured_at.isoformat().replace("+00:00", "Z"),
-                    "image_path": observation.image_path,
-                    "image": {
-                        "mime_type": observation.mime_type,
-                        "width": observation.width,
-                        "height": observation.height,
-                    },
-                    "source_frame": {
-                        "generation": frame.generation,
-                        "sequence": frame.sequence,
-                        "width": frame.width,
-                        "height": frame.height,
-                    },
+            payload: dict[str, object] = {
+                "observation_id": observation.observation_id,
+                "captured_at": observation.captured_at.isoformat().replace("+00:00", "Z"),
+                "image_path": observation.image_path,
+                "image": {
+                    "mime_type": observation.mime_type,
+                    "width": observation.width,
+                    "height": observation.height,
+                },
+                "source_frame": {
+                    "generation": frame.generation,
+                    "sequence": frame.sequence,
+                    "width": frame.width,
+                    "height": frame.height,
                 },
             }
+            if thread_id is not None:
+                payload["thread_id"] = thread_id
             try:
-                _validate_observation(event["payload"])
+                _validate_observation(payload)
             except (ValueError, TypeError) as error:
                 message = f"観測項目が不正です。記録していません: {error}"
                 raise ProjectError(message) from error
-            row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
             try:
                 _publish_image(self.path / observation.image_path, observation.png_bytes)
             except OSError as error:
                 message = f"{self.path}: 観測画像の保存失敗: {error}"
                 raise ProjectError(message) from error
-            try:
-                _append_row(self.path / "events.jsonl", row)
-            except OSError as error:
-                self._next_sequence = None
-                message = f"{self.path}: JSONL追記結果が未確定です。原本を保持します: {error}"
-                raise ProjectError(message) from error
-            self._next_sequence += 1
+            self._append_event("observation.recorded", payload, sequence)
+
+    def _require_writable(self) -> int:
+        self._require_open()
+        if self._next_sequence is None:
+            message = "追記結果が未確定です。プロジェクトを明示的に再読込してください"
+            raise ProjectError(message)
+        return self._next_sequence
+
+    def _append_event(self, kind: str, payload: dict[str, object], sequence: int) -> None:
+        # Caller owns _operation and has validated this record before any writes.
+        event = {
+            "schema_version": 1,
+            "event_id": f"evt-{uuid4()}",
+            "sequence": sequence,
+            "occurred_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "type": kind,
+            "project_id": self.project_id,
+            "payload": payload,
+        }
+        row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        try:
+            _append_row(self.path / "events.jsonl", row)
+        except OSError as error:
+            self._next_sequence = None
+            message = f"{self.path}: JSONL追記結果が未確定です。原本を保持します: {error}"
+            raise ProjectError(message) from error
+        self._next_sequence = sequence + 1
 
     @contextmanager
     def _operation(self) -> "Generator[None]":
@@ -370,11 +406,19 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         raise ValueError(message)
     if kind == "observation.recorded":
         _validate_observation(record["payload"])
+    elif kind == "thread.started":
+        payload = _object(record["payload"])
+        _thread_id(payload.get("thread_id"))
+        if payload.get("runtime") != "codex":
+            message = "会話記録のruntimeが不正です"
+            raise ValueError(message)
     return sequence
 
 
 def _validate_observation(value: object) -> None:
     payload = _object(value)
+    if "thread_id" in payload:
+        _thread_id(payload["thread_id"])
     observation_id = _identifier(payload.get("observation_id"), "obs-")
     _timestamp(payload.get("captured_at"))
     if payload.get("image_path") != f"observations/{observation_id}.png":
@@ -392,4 +436,10 @@ def _validate_observation(value: object) -> None:
     image_height = _positive(image.get("height"))
     if image.get("mime_type") != "image/png" or image_width > width or image_height > height:
         message = "観測出力画像の形式または寸法が不正です"
+        raise ValueError(message)
+
+
+def _thread_id(value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        message = "空でないthread_idが必要です"
         raise ValueError(message)

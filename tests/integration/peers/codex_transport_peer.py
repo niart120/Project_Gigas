@@ -47,7 +47,7 @@ def invalid(mode: str) -> None:
         "bool-id": '{"id":true,"method":"TOP_SECRET","params":{}}\n',
         "missing-result": json.dumps({"id": request["id"], "secret": "TOP_SECRET"}) + "\n",
         "both": json.dumps({"id": request["id"], "result": None, "error": {}}) + "\n",
-        "long": json.dumps({"secret": "TOP_SECRET" * 110000}) + "\n",
+        "long": json.dumps({"id": request["id"], "result": "TOP_SECRET" * 240000}) + "\n",
         "partial": '{"method":"TOP_SECRET"}',
         "non-finite": '{"method":"TOP_SECRET","params":{"value":NaN}}\n',
     }
@@ -82,6 +82,20 @@ def rpc_error() -> None:
     request = json.loads(sys.stdin.readline())
     send({"id": request["id"], "result": "still-connected"})
     sys.stdin.read()
+
+
+def sized_frames() -> None:
+    """Report input byte counts or return an exactly sized ASCII response."""
+    for line in sys.stdin:
+        request = json.loads(line)
+        if request["method"] == "probe/length":
+            send({"id": request["id"], "result": len(line.encode("utf-8"))})
+        else:
+            frame = {"id": request["id"], "result": ""}
+            overhead = len(json.dumps(frame)) + 1
+            frame["result"] = "x" * (request["params"]["size"] - overhead)
+            sys.stdout.buffer.write((json.dumps(frame) + "\n").encode("utf-8"))
+            sys.stdout.buffer.flush()
 
 
 def lifetime() -> None:
@@ -137,6 +151,8 @@ if __name__ == "__main__":
         late_response()
     elif mode == "rpc-error":
         rpc_error()
+    elif mode == "sized":
+        sized_frames()
     elif mode == "lifetime":
         lifetime()
     elif mode == "inherited-pipe":

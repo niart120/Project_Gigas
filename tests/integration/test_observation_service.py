@@ -87,10 +87,12 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
             CaptureReader(lambda: snapshot),
             writer,
             on_save_error=lambda observation, error: failures.append((observation, error)),
+            thread_id="thread-1",
         )
         request = asyncio.create_task(service.observe())
         try:
             assert await asyncio.to_thread(entered.wait, 3)
+            service.thread_id = "thread-2"
             if boundary == "encode":
                 request.cancel()
                 with pytest.raises(asyncio.CancelledError):
@@ -138,6 +140,9 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
                 for line in (writer.path / "events.jsonl").read_bytes().splitlines()
             ]
             assert len(records) == (1 if boundary == "encode" else 2)
+            assert [record["payload"]["thread_id"] for record in records] == (
+                ["thread-1"] if boundary == "encode" else ["thread-1", "thread-2"]
+            )
             assert [record["sequence"] for record in records] == list(range(1, len(records) + 1))
             assert all(
                 (writer.path / record["payload"]["image_path"]).is_file() for record in records

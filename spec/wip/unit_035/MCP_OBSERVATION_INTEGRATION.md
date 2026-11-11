@@ -38,9 +38,9 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | refactor-done | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
 | refactor-skipped | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
 | refactor-skipped | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
-| green | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 設定部分検証済み。観測サービスへの配線はM2-06で確認 |
+| refactor-skipped | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | M2-06/07でサービスループへ配線し、次の実HTTP観測への反映も確認 |
 | refactor-skipped | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
-| todo | M2-06/07 保存先操作・復元・未選択チャット・永続thread対応が接続と終了に結合する | new | GUI/integration/runtime | 同じ接続寿命を二度改修しないよう一項目へ統合。公開read・秘密値の検証証拠は模擬結合と分ける |
+| green | M2-06/07 保存先操作・復元・未選択チャット・永続thread対応が接続と終了に結合する | new | GUI/integration/runtime | 製品結合と模擬検証済み。公開read・秘密値の実検証はM2-08と合わせて残す |
 | todo | M2-08 実Codexが固定画像と実映像を受信し、保存と同一、停止・終了が進む | new | runtime/hardware | 模擬試験では完了にしない |
 
 ## 7. 設計メモ
@@ -140,3 +140,19 @@ RED: 新しい実HTTP試験はgigas.mcp未実装により収集失敗。GREEN: `
 `uv run --no-sync pytest tests/unit tests/integration -q --basetemp=tmp/pytest-mcp-full`: 434 passed。ruff format（172 files）/ruff check/ty、uv lock --check、uv build、git diff --check成功。rootで公開API、所有、認証、応答の型とdocsを照合し、追加の構造整理なし。
 
 依存の宣言・lockはuv addで更新したが、起動中のgigas.exe（PID65012）が実行ファイルを保持しているため同期は承認済み権限でも失敗した。アプリを停止せず、必要依存だけuv pip installで反映し、試験は--no-syncで実行した。`uv sync --dev`の最終成功は未確認として残す。Codexへの製品配線・実モデル・GUI・実機は後続の受入に残る。
+
+### M2-06/07 保存先・永続thread・終了の結合
+
+CodexServiceThreadが既存ループ上でwriter・ObservationService・MCPを所有する。接続/ログインはruntime用cwdで行い、初回sendのprepare_threadで明示選択先またはchats/<UUID>を用意する。thread/startはephemeral:falseで実保存先をcwdとし、on_thread_startedが実IDのthread.started行を保存した後にturn/startへ進む。writerへ現在threadや索引は持たせず、観測開始時に実thread IDを固定して保存引数へ渡す。対応記録失敗は原稿・認証を保ち、実IDと保存先を通知へ残す。
+
+「プロジェクト」メニューの新規作成/開く、TOMLのproject.last_path（Settings.last_project_path）の復元を既存設定I/Oへ統合した。既存データを上書きせず、失敗時は選択済みwriterを保持。未選択チャットの記録先は切断後も削除しない。設定編集は保存済みsnapshotから更新し、UIにない前回パスを消さない。記録失敗をCodex失敗で上書きしないため、既存通知の発生元に「記録」を追加した。主画面の説明文や専用保存画面は追加していない。
+
+受付終了と保存回収は既存サービスの終了へ統合。同期I/O待機の取消しでもwriter取得・追記を回収する短いhelperを使う。保存先操作/準備/終了のロックは同じwriterの所有保護だけに使い、observeは取得しない。明示選択の有無はboolだけとし、writer.pathを重複保持しない。保存方式は既存同期writerを標準async Lockで順序付ける選択を維持した。
+
+RED/GREEN: storage/service既存試験の改訂は17 failed / 45 passed→62 passed。runtime既存試験の改訂は7 failed / 50 passed→57 passed、受信2 MiBの境界追加は1 failed / 8 passed→runtime/transport合計79 passed。送信上限は1 MiBのまま。GUI/settingsは新項目未対応4 failedと旧service構成による4ケースの失敗を確認後、関連86 passed。fixture自体の誤用による失敗はREDの根拠から除いた。サービス結合は新構成未実装3 failed→全service 20 passed。観測設定の次HTTP呼出しへの反映、選択/未選択の記録先、実ID関連、保存中終了の応答性を確認した。
+
+独立レビューで二件を採用した。runtime自発終了後も旧MCP要求がHTTP200で成功することを実socketで再現し、既存closedイベントを終了処理へ接続した。MCPclose失敗時のdrain未到達は、実HTTP終了後の例外と保存停止を組み合わせて再現した。回帰試験3 failed / 2 passed→全service 23 passed。共有の終了Taskで同時closeと通知からの再入をまとめ、HTTP終了失敗を報告しながらfinallyで保存とwriterを回収する。監視・自動復旧・保存上限は追加していない。再レビューで追加指摘なし。
+
+並行担当のpytestが既定一時フォルダーを共有して失敗したため、担当ごとのbasetempへ分けて対象試験を再検証した。各担当のruff/tyは成功。全体gateは全担当の編集停止後にrootで実行する。実モデル・終了後公開thread/read・実映像・GUI目視はこの模擬検証では完了とせず、M2-08に残す。
+
+rootの最終gate: `uv run --no-sync pytest tests/unit tests/integration -q --basetemp=tmp/pytest-m2-lifecycle-full` 465 passed（42.59秒）。ruff format（173 files）、ruff check、ty、uv lock --check、uv build、git diff --check成功。uv syncは再試行したが、承認済み権限からのプロセス確認でもPID65012のGigasが継続しており、実行ファイル置換で失敗した。アプリ終了の依頼は保留し、当該gateを成功としない。
