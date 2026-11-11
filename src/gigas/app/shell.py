@@ -617,15 +617,16 @@ class ApplicationShell(QObject):
                 and (self.dirty or self._editor_capture_differs or not self.path.exists())
             )
             self.dialog.ok_button.setEnabled(idle and self.ready)
+            device_differs = self.dialog.capture_target != self._active_capture_device
             capture_state = (
                 "接続失敗"
                 if self.video.apply_state == "failed" and not self.video.cleanup_unconfirmed
                 else self.window.video.status.text()
                 if self.video.applying or self.video.cleanup_unconfirmed
                 else f"現在: {self.window.video.source.text()}"
-                if self._editor_capture_differs and self._active_capture_device
+                if device_differs and self._active_capture_device
                 else "未接続"
-                if self._editor_capture_differs
+                if device_differs
                 else ""
             )
             self.dialog.capture_connection_status.setText(capture_state)

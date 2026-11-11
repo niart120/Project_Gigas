@@ -298,3 +298,7 @@ test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始
 ### A4a 現在エラーと通知履歴の分離
 
 独立レビューで、設定保存/読込の失敗後にフォルダーを開く操作も失敗すると、設定の詳細入口から別の失敗が開く不具合を再現。`uv run pytest tests/integration/test_settings_recovery.py -k 'form_details or direct_snapshot' -q --basetemp=tmp/pytest-ui`: 3件red→3件green。現在エラーの不変Noticeを直接表示し、最新履歴へ再publishしない。関連42件成功、担当ruff/format/ty・diffcheck成功、独立レビュー必須指摘なし。refactor-done（既存詳細表示とsnapshot表示の共通化）。
+
+### V3 現在機器の重複表示
+
+実画面で同じ機器の解像度だけを変更しても現在機器名が再表示される冗長な挙動を確認。test_resolution_applicationに追加した解像度/FPSの2件red→2件green。機器識別子が異なる時だけ補助表示し、処理中・失敗・終了未確認は維持する。担当ruff/format/ty成功。refactor-skipped。
