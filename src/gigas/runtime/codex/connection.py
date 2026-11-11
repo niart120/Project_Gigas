@@ -706,7 +706,7 @@ class CodexConnection:
         self._turn_id = None
         self._file_details.clear()
         if turn.get("status") == "failed":
-            self._failure("error", "ターンが失敗")
+            self._failure("stopped" if self._stopping else "ready", "ターンが失敗")
         elif self._stopping or turn.get("status") == "interrupted":
             self._status("stopped")
         else:

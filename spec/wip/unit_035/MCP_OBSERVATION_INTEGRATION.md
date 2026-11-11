@@ -36,8 +36,8 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
-| green | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
-| todo | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
+| refactor-skipped | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
+| green | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | todo | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 既存settings試験へ統合 |
 | todo | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
 | todo | M2-06 保存先の新規作成・読込・復元・未選択チャットが接続と終了に結合する | new | GUI/integration | 既存settings/終了所有へ統合 |
@@ -101,3 +101,13 @@ root: `uv run pytest tests/unit tests/integration -q` 416 passed。全体ruff fo
 `uv run --with mcp==2.3.0 --with httpx==0.28.1 --link-mode copy python -X utf8 tmp/m2-mcp-runtime-probe.py`で実socketとSDK2.3.0、採用app-server0.167.0を使用した。thread/start.configでURL/Bearer/observeのみの公開、mcpServerStatus/listで認証・ツール認識、mcpServer/tool/callで固定PNG一致、Bearer欠落/誤値401、server/lifespan終了を確認。終了後接続は1秒ConnectTimeout。証拠はignored tmp/m2-mcp-runtime-f4m_uvsg/results.json。認証・turn/start・モデル呼出しは0回であり、モデル画像受信ではない。
 
 liveのthread/read(includeTurns:true)は-32601、falseは成功。その後の終了・再起動ではtrueで空threadを読めた。先行試行tmp/m2-mcp-runtime-ydxcz76dではreadなしのEOF直後にrolloutがなく再読込失敗。空threadの保存タイミングは安定保証としない。有効MCP設定のfake bearer単純文字列走査は隔離HOMEで0件だが、実turn/他の保存表現まで非保存を証明しない。通常ターン終端後の会話永続化・秘密値・画像受信はM2-07/08の受入へ残す。
+
+M2-02は3b15b6eへコミット済み。独立レビューで修正必須なし。追加の構造整理は行っていない。
+
+### M2-03 R02/R04修正
+
+R02は原稿消去を空エラーのServiceResultから既存TurnStartedへ移した。送信後に編集した原稿を一致条件で保護する。R04はfailed終端でfailure_idと理由を残してready（停止要求中はstopped）へ戻し、次の明示送信を許可する。通信失敗のclose/errorは変更せず、自動再送や新しい状態を追加しない。
+
+RED: 既存GUI送信試験と既存terminal試験の選択実行で2 failed / 1 passed（原稿消失、error状態からの復帰不能）。GREEN: 接続・GUI対象59 passed、停止有無を既存terminal試験へ加えて61 passed。全体`uv run pytest tests/unit tests/integration -q`は418 passed。独立レビューの提案で受理通知前に原稿を編集する場合も既存GUI試験へ統合し、最終の接続・GUI対象は62 passed。最終追加はテストだけで、全体試験の再実行は省略。実Codex接続の回帰確認はM2-08で実施する。
+
+レビュー採否: M2-01の不要なJSONL再書込削除とM2-03の編集原稿保持ケースを採用した。M2-02は所有・取消し・drainを確認し追加修正なし。通常の非同期保存に必要なTask集合と標準Lockだけを持ち、監視・保存見送り・上限を追加していない。

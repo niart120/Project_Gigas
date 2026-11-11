@@ -16,6 +16,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    TurnStarted,
 )
 from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
@@ -25,7 +26,10 @@ if TYPE_CHECKING:
     from gigas.ui.notifications import Notice
 
 
-def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) -> None:
+@pytest.mark.parametrize("edited_draft", [False, True])
+def test_panel_login_text_send_failure_interrupt_and_disconnect(
+    qtbot: QtBot, *, edited_draft: bool
+) -> None:
     opened: list[QUrl] = []
     panel = ConnectionPanel(open_url=lambda url: bool(opened.append(url)))
     qtbot.addWidget(panel)
@@ -65,7 +69,11 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) ->
     assert "final" in panel.transcript.toPlainText()
     assert "AB" not in panel.transcript.toPlainText()
     panel.handle_result(ServiceResult(1, "send"))
-    assert panel.prompt.toPlainText() == ""
+    assert panel.prompt.toPlainText() == "hello"  # A stopped pre-acceptance send also returns.
+    if edited_draft:
+        panel.prompt.setPlainText("次の原稿")
+    panel.handle_event(ServiceEvent(1, TurnStarted("accepted-turn")))
+    assert panel.prompt.toPlainText() == ("次の原稿" if edited_draft else "")
     panel.disconnect_action.trigger()
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     assert not panel.connect_action.isEnabled()

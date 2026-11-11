@@ -959,8 +959,9 @@ def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Pa
 
 
 @pytest.mark.parametrize("status", ["failed", "interrupted"])
+@pytest.mark.parametrize("stopping", [False, True])
 def test_terminal_status_and_late_text_do_not_masquerade_as_success(
-    tmp_path: Path, status: str
+    tmp_path: Path, status: str, *, stopping: bool
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -968,6 +969,8 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
+        if stopping:
+            await connection.stop()
         peer.events.put_nowait(_terminal(status))
         peer.events.put_nowait(
             RpcNotification(
@@ -978,7 +981,18 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         await _events_processed()
         assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
         assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == ("error" if status == "failed" else "stopped")
+        assert events[-1].phase == ("stopped" if stopping or status == "interrupted" else "ready")
+        if status == "failed":
+            assert events[-1].failure_id is not None
+            assert events[-1].detail == "ターンが失敗"
+        assert not peer.closed
+        assert len([call for call in peer.calls if call[0] == "turn/start"]) == 1
+        peer.responses["turn/start"] = {
+            "turn": {"id": "turn-2", "status": "inProgress", "items": []}
+        }
+        await connection.send("次の明示送信")
+        assert len([call for call in peer.calls if call[0] == "turn/start"]) == 2
+        assert TurnStarted("turn-2") in events
         await connection.close()
 
     _run(scenario())
