@@ -1,6 +1,7 @@
 import tomllib
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -17,6 +18,7 @@ def test_legacy_settings_gain_video_defaults_without_changing_device(tmp_path: P
     assert values.capture_device == "old name"
     assert (values.capture_fps, values.preview_fps) == (60, 30)
     assert values.capture_resolution == "full_hd"
+    assert values.observation_resolution == "full_hd"
     assert values.preview_letterbox is True
     assert path.read_text(encoding="utf-8") == original
 
@@ -161,11 +163,20 @@ def test_invalid_window_size_preset_cannot_overwrite_existing_file(
 
 
 @pytest.mark.parametrize(
-    ("resolution", "letterbox"),
-    [("auto", False), ("hd", True), ("full_hd", False), ("wqhd", True), ("four_k", False)],
+    ("resolution", "letterbox", "observation"),
+    [
+        ("auto", False, "original"),
+        ("hd", True, "hd"),
+        ("full_hd", False, "full_hd"),
+        ("wqhd", True, "hd"),
+        ("four_k", False, "full_hd"),
+    ],
 )
 def test_capture_resolution_and_preview_letterbox_round_trip_independently(
-    tmp_path: Path, resolution: str, letterbox: bool
+    tmp_path: Path,
+    resolution: str,
+    letterbox: bool,
+    observation: Literal["original", "full_hd", "hd"],
 ) -> None:
     path = tmp_path / "settings.toml"
     path.write_text(
@@ -175,6 +186,7 @@ def test_capture_resolution_and_preview_letterbox_round_trip_independently(
     )
     values = Settings(
         capture_resolution=resolution,
+        observation_resolution=observation,
         preview_letterbox=letterbox,
         window_size_preset="wqhd",
         capture_fps=60,
@@ -187,6 +199,7 @@ def test_capture_resolution_and_preview_letterbox_round_trip_independently(
     contents = path.read_text(encoding="utf-8")
     document = tomllib.loads(contents)
     assert document["capture"]["resolution"] == resolution
+    assert document["observation"]["resolution"] == observation
     assert document["gui"]["preview_letterbox"] is letterbox
     assert document["capture"]["custom"] == 7
     assert document["gui"]["custom"] == "untouched"
@@ -198,6 +211,10 @@ def test_capture_resolution_and_preview_letterbox_round_trip_independently(
 @pytest.mark.parametrize(
     ("table", "key", "invalid"),
     [
+        ("observation", "resolution", '"unknown"'),
+        ("observation", "resolution", '""'),
+        ("observation", "resolution", "1"),
+        ("observation", "resolution", "true"),
         ("capture", "resolution", '"unknown"'),
         ("capture", "resolution", '""'),
         ("capture", "resolution", '"FULL_HD"'),
@@ -227,6 +244,9 @@ def test_invalid_image_settings_cannot_be_loaded(
 @pytest.mark.parametrize(
     ("field", "invalid"),
     [
+        ("observation_resolution", "unknown"),
+        ("observation_resolution", 1),
+        ("observation_resolution", True),
         ("capture_resolution", "unknown"),
         ("capture_resolution", 1),
         ("capture_resolution", True),
@@ -245,7 +265,9 @@ def test_invalid_image_settings_cannot_overwrite_existing_file(
     path.write_text(original, encoding="utf-8")
     values = replace(Settings(), **{field: invalid})
 
-    with pytest.raises(SettingsError, match=field.removeprefix("capture_")):
+    with pytest.raises(
+        SettingsError, match=field.removeprefix("capture_").removeprefix("observation_")
+    ):
         save_settings(path, values)
 
     assert path.read_text(encoding="utf-8") == original

@@ -90,17 +90,42 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
     assert not capture.connections
 
 
-def test_explicit_general_apply_uses_selected_device(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+@pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize("observation_only", [False, True])
+def test_apply_capture_effect_depends_on_changed_settings(
+    app: tuple[ApplicationShell, ControlledCapture],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    running: bool,
+    observation_only: bool,
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
-    dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+    codex_connects: list[object] = []
+    monkeypatch.setattr(shell.service, "connect_runtime", codex_connects.append)
+    if running:
+        dialog.save_button.click()
+        qtbot.waitUntil(lambda: len(capture.connections) == 1)
+        capture.stream()
+        qtbot.waitUntil(lambda: not shell.video.applying)
+    frame = capture.snapshot().frame
+    if observation_only:
+        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
+    else:
+        dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert not shell.baseline.preview_letterbox
+    if observation_only:
+        assert shell.baseline.observation_resolution == "hd"
+        assert load_settings(shell.path).observation_resolution == "hd"
+        assert capture.snapshot().frame is frame
+    else:
+        assert not shell.baseline.preview_letterbox
     assert dialog.capture_choices.currentData() == "path-a"
-    assert len(capture.connections) == 1
+    assert len(capture.connections) == int(running or not observation_only)
+    assert capture.disconnects == 0
+    assert codex_connects == []
     assert dialog.save_button.isEnabled()
 
 

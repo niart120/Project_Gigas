@@ -37,8 +37,8 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 |---|---|---|---|---|
 | refactor-done | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
 | refactor-skipped | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
-| green | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
-| todo | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 既存settings試験へ統合 |
+| refactor-skipped | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
+| green | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 設定部分検証済み。観測サービスへの配線はM2-06で確認 |
 | todo | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
 | todo | M2-06 保存先の新規作成・読込・復元・未選択チャットが接続と終了に結合する | new | GUI/integration | 既存settings/終了所有へ統合 |
 | todo | M2-07 永続threadと観測記録が対応し、終了後の公開readと画像参照が成立する | new | integration/runtime | 秘密値の残存も隔離確認 |
@@ -111,3 +111,19 @@ R02は原稿消去を空エラーのServiceResultから既存TurnStartedへ移�
 RED: 既存GUI送信試験と既存terminal試験の選択実行で2 failed / 1 passed（原稿消失、error状態からの復帰不能）。GREEN: 接続・GUI対象59 passed、停止有無を既存terminal試験へ加えて61 passed。全体`uv run pytest tests/unit tests/integration -q`は418 passed。独立レビューの提案で受理通知前に原稿を編集する場合も既存GUI試験へ統合し、最終の接続・GUI対象は62 passed。最終追加はテストだけで、全体試験の再実行は省略。実Codex接続の回帰確認はM2-08で実施する。
 
 レビュー採否: M2-01の不要なJSONL再書込削除とM2-03の編集原稿保持ケースを採用した。M2-02は所有・取消し・drainを確認し追加修正なし。通常の非同期保存に必要なTask集合と標準Lockだけを持ち、監視・保存見送り・上限を追加していない。
+
+M2-03は30df8e6へコミット済み。追加の構造整理なし。
+
+### 実接続・機器の事前確認
+
+2026-11-12、現create_connectionを既定認証HOMEでopen/closeし、ready・authenticated=true・catalog既定gpt-6.1-sol/lowを確認した。sandbox内では接続失敗となり、同じ非推論確認を承認済みの権限で再実行して成功。新規ログイン・モデル呼出しは行っていない。公式App Server資料も再読したが、採用版の成立根拠はローカル実行結果を優先する。
+
+現在の実機一覧はElite Go GC313Pro、USB Video Device、GV-USB2, Analog Capture。保存済み機器はこの一覧に一致しない。機器は開かず、実映像受入の選択を利用者へ問い合わせた。実装・模擬検証はこの回答と独立して進める。
+
+### M2-04 設定部分の実装・検証
+
+Settings.observation_resolutionとTOML observation.resolutionを追加し、既存I/O→映像入力の3択へ配線。保存・適用・取消し・保存失敗は既存経路を使う。観測解像度だけが変更された場合だけcapture反映を外し、一般設定のみ・無変更適用の従来動作は維持する。設定UIや値のための状態管理サービスは追加していない。
+
+RED: video_settings/settings_apply_contract/settings_acceptの既存試験改訂で16 failed / 57 passed。GREEN同対象73 passed、関連settings/GUI8ファイル116 passed。root全体`uv run pytest tests/unit tests/integration -q`: 430 passed。全体ruff format（168files）/ruff check/ty、uv build、git diff --check成功。設定コードとGUIの実ラベルを読んで確認した。実画面の目視は最終結合時に行う。
+
+現アプリにObservationServiceの所有がまだないため、未使用hookは作らず、適用値はbaselineへ保持する。サービスループへの反映と次観測に効くことはM2-06の結合条件に残し、設定部分のgreenを全結合完了とは扱わない。

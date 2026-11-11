@@ -109,6 +109,12 @@ class SettingsDialog(QDialog):
         self.capture_resolution.setCurrentIndex(self.capture_resolution.findData("full_hd"))
         self.capture_resolution.currentIndexChanged.connect(self.changed)
         capture_form.addRow("取得解像度", self.capture_resolution)
+        self.observation_resolution = QComboBox(self)
+        for label, key in (("オリジナル", "original"), ("FullHD", "full_hd"), ("HD", "hd")):
+            self.observation_resolution.addItem(label, key)
+        self.observation_resolution.setCurrentIndex(self.observation_resolution.findData("full_hd"))
+        self.observation_resolution.currentIndexChanged.connect(self.changed)
+        capture_form.addRow("観測解像度", self.observation_resolution)
         controller_form = self._group(io_form, "コントローラー")
         self.serial_port = self._text_field()
         controller_form.addRow("シリアルポート", self.serial_port)
@@ -263,6 +269,7 @@ class SettingsDialog(QDialog):
             window_size_preset=str(self.window_size_preset.currentData()),
             capture_resolution=str(self.capture_resolution.currentData()),
             preview_letterbox=bool(self.preview_mode.currentData()),
+            observation_resolution=self.observation_resolution.currentData(),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -289,6 +296,9 @@ class SettingsDialog(QDialog):
                 self.capture_resolution.findData(values.capture_resolution)
             )
             self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
+            self.observation_resolution.setCurrentIndex(
+                self.observation_resolution.findData(values.observation_resolution)
+            )
 
     def _text_value(self, field: QLineEdit) -> str:
         current = field.text()
@@ -307,6 +317,7 @@ class SettingsDialog(QDialog):
             self.capture_refresh_button,
             self.window_size_preset,
             self.capture_resolution,
+            self.observation_resolution,
             self.preview_mode,
         ):
             field.setEnabled(enabled)

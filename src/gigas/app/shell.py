@@ -281,7 +281,12 @@ class ApplicationShell(QObject):
                 else self.baseline
             )
         )
-        request = _SettingsRequest(target, capture=True, close_dialog=close_after)
+        observation_only = (
+            target != self.baseline
+            and replace(target, observation_resolution=self.baseline.observation_resolution)
+            == self.baseline
+        )
+        request = _SettingsRequest(target, capture=not observation_only, close_dialog=close_after)
         self._settings_error_notice = None
         if target != self.baseline or not self.path.exists():
             self._request(request)
