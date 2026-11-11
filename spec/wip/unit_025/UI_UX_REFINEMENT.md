@@ -63,7 +63,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | status | item | type | layer | 対応 |
 |---|---|---|---|---|
 | refactor-skipped | T01: 設定画面の終了待ちでも中断・切断が可能 | regression | integration | RV04。中断無効でred→19 passed |
-| todo | T02: 応答更新で閲覧位置・選択を保持し、末尾追従を区別 | regression | integration | RV06 |
+| refactor-done | T02: 応答更新で閲覧位置・選択を保持し、末尾追従を区別 | regression | integration | RV06。選択消失・折返し位置ずれでred→21 passed |
 | todo | T03: 要求解決と回答送信結果を区別し、tokenごとに状態を反映 | regression | unit / integration | RV07 |
 | todo | T04: 小画面の要求を優先表示し、完了内容を折り畳んで下書きを保持 | regression | integration | RV08 |
 | todo | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02 |
@@ -84,6 +84,8 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 T01: `uv run pytest tests/integration/test_ui_control_lifetime.py -q`で中断ボタン無効の期待したredを確認。設定画面終了待ちとアプリ終了を分け、設定画面終了待ちでは既存の中断・切断を維持した。新規接続は引き続き設定状態で制限する。`uv run pytest tests/integration/test_ui_control_lifetime.py tests/integration/test_app_lifetime.py tests/integration/test_codex_shutdown.py -q`は19 passed。対象ruff check成功、format適用後に対象1 passed。構造変更は不要と判断。
 
 現時点: 製品修正を進行中。画面・実機確認、全体品質gate、PRは未完了。
+
+T02: `uv run pytest tests/integration/test_transcript_reading.py -q --basetemp=tmp/pytest-review-t02`で選択消失・方向リセットの6 failed / 2 passedを確認し、変更範囲の編集で8 passed。折返し段落の前置追加で閲覧位置が588pxずれる回帰を追加してred、可視文字の折返し行を保持して9 passed。green後に`Transcript`へ責務を分離し、`uv run pytest tests/integration/test_transcript_reading.py tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-review-t02`で21 passed。対象ruff・format、全体ty、差分検査成功。QtのUTF-16位置とPython文字位置の違いをemojiで検証し、型ignore/castは追加していない。
 
 ## 8. 先送り事項
 

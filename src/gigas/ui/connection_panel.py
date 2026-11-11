@@ -24,6 +24,7 @@ from gigas.runtime.codex.models import (
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.request_card import RequestCard
+from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,8 +100,7 @@ class ConnectionPanel(QWidget):
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
         layout.addLayout(login)
-        self.transcript = QPlainTextEdit(self)
-        self.transcript.setReadOnly(True)
+        self.transcript = Transcript(self)
         layout.addWidget(self.transcript, 3)
         self.requests = QScrollArea(self)
         self.requests.setWidgetResizable(True)
@@ -190,14 +190,12 @@ class ConnectionPanel(QWidget):
                 event.role,
                 event.text if event.replace else previous + event.text,
             )
-            self.transcript.setPlainText(
+            self.transcript.set_text(
                 "\n\n".join(
                     f"{'Codex' if role == 'assistant' else 'あなた'}\n{text}"
                     for role, text in self._texts.values()
                 )
             )
-            scrollbar = self.transcript.verticalScrollBar()
-            scrollbar.setValue(scrollbar.maximum())
         elif isinstance(event, HumanRequest):
             if (
                 event.token not in self.cards
