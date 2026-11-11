@@ -2,7 +2,7 @@
 
 ## 1. 概要・起点
 
-状態: wip。2026-11-11のユーザー指示により、[レビュー](../../complete/unit_027/M1_M2_REVIEW.md)のR1〜R3とテスト見直し8件へ対応する。追加回答で、前回CSVの価値「中」107件は、検証が減ることを承知で一律削除する方針が確定した。
+状態: complete。2026-11-11のユーザー指示により、[レビュー](../../complete/unit_027/M1_M2_REVIEW.md)のR1〜R3とテスト見直し8件へ対応した。追加回答で、前回CSVの価値「中」107件は、検証が減ることを承知で一律削除する方針が確定した。
 
 ## 2. 対象範囲
 
@@ -33,7 +33,7 @@
 | refactor-skipped | R1: 未生成取消から最新機器／未接続へ進める | regression | integration | 既存のlatest target試験を実サービス境界へ書換え、unreleasedの誤期待を削除。2件red→関連45件green |
 | refactor-done | R2: 初回画像で候補のキー選択を戻さない | regression | integration | 残す機器発見GUI試験でred→5件green。通知経路整理後28件green |
 | refactor-skipped | R3: 失敗時の案内先と現UIを一致させる | review | docs/UI | 通知詳細と設定の再選択・適用へ案内。固定文言テストは作らない |
-| todo | テスト整理: 中107件と見直し8件を整理 | refactor | tests | 107件の削除をnodeidで照合。低の重複、製品外の確認も整理 |
+| refactor-done | テスト整理: 中107件と見直し8件を整理 | refactor | tests | 107件の削除をnodeidで照合。低の重複、製品外の確認も削除。362件green |
 
 ## 7. 設計判断
 
@@ -55,6 +55,57 @@ R2: `test_streaming_settings_use_cached_devices_without_interrupting_preview`を
 
 R3: 通常の映像失敗と保存後の適用失敗を「詳細を確認し、設定で機器を選び直して適用」へ修正。サービス終了・解放未確認の専用案内は維持。`uv run pytest tests/integration/test_settings_accept.py tests/integration/test_settings_recovery.py -q --tb=short`は9件成功（0.50秒）。文言そのものを固定するassertは追加していない。
 
+### テスト削除と見直しの実績
+
+前回CSVの「中」107件を全削除した。元CSVは9eb7b6d時点の記録として保存し、評価を変更して削除対象から外す処理は行っていない。
+
+| 元ファイル | 削除した「中」の件数 |
+|---|---:|
+| integration/test_app_import.py | 1 |
+| integration/test_auth_choices.py | 2 |
+| integration/test_keyboard_workflow.py | 14 |
+| integration/test_main_menus.py | 11 |
+| integration/test_notifications.py | 11 |
+| integration/test_request_layout.py | 9 |
+| integration/test_settings_keyboard.py | 9 |
+| integration/test_transcript_reading.py | 19 |
+| integration/test_video_gui.py | 11 |
+| integration/test_video_preview.py | 1 |
+| integration/test_video_settings_gui.py | 7 |
+| unit/test_package.py | 1 |
+| unit/test_window_layout.py | 11 |
+
+このほか、低評価の未接続選択1件、製品外のtmpパス確認1件、R1の誤ったunreleased期待1件を削除。合計110件減で、472→362ケース、282→207関数、43→31ファイルとなった。関数の一括結合やループへの置換による件数圧縮はしていない。残る実spawn試験と他ファイルが利用するfixtureは保持し、PreviewClocksは唯一の利用元であるwindow_presetsへ移した。
+
+| 前回の見直し8件 | 今回の対応 |
+|---|---|
+| failed_switchのunreleasedケース | 誤った契約を削除。既存latest_targetを実サービスでの未生成取消に書換え |
+| device_selection_and_rates | 「中」のため削除。今回のR2は元から「高」の機器発見GUI試験の初回フレーム境界で確認 |
+| unselecting_camera | 低評価の重複として削除 |
+| tmp_path_stays_in_workspace | 製品外の試験として削除。既存のpytestのbasetemp設定は維持 |
+| settings_fields_are_grouped | 「中」のため試験全体を削除 |
+| file_and_codex_menus | 「中」のため試験全体を削除 |
+| preview_preserves_pixels_aspect | 「中」のため削除。今回の一律削除指示に従い、境界画素等のassertを他試験へ移植しない |
+| auto_resolution_waits_for_old_cleanup_and_first_new_frame | 初回画像より先に閉じることが分かる名前へ変更。内容は維持 |
+
+失われる専用検証には、キーによる誤送信防止、選択・閲覧位置、表示の細かい寸法、通知の再確認、メタデータのsmoke等がある。これらの製品機能を削ったわけではなく、残存試験が同等に網羅するとも扱わない。
+
+### 最終gate・自己レビュー
+
+| 確認 | 結果 |
+|---|---|
+| `uv run pytest tests/unit tests/integration -q --tb=short --junitxml=tmp/m1-m2-review/after-results.xml` | 362 passed、33.62秒。失敗・skipなし |
+| 収集nodeid・元CSV・JUnit照合 | 中107＋低1＋基盤1＋unreleased1の削除と、R1のパラメーター変更2件・解像度試験の改名1件だけで最終集合が一致。追加試験なし |
+| `uv run ruff format --check .` / `uv run ruff check .` | 156ファイル整形済み、lint成功。削除後の未使用importも除去 |
+| `uv run ty check --no-progress` | 成功。GUI通知経路の統合、残存fixture・補助コードの参照を確認 |
+| `uv lock --check` / `uv build` | 成功。55パッケージのlock整合、sdistとwheel生成。依存・メタデータの変更なし |
+| Windows Qtの局所プローブ | `QT_QPA_PLATFORM=windows`で初回画像前B→到着後B→Enter後path-bを確認し正常終了。修正した映像適用失敗の通知を撮影・目視確認 |
+| API文書・差分 | cleanupの意味を実サービスと照合。新しい公開型や互換分岐なし。Markdown参照と`git diff --check`成功 |
+| 実機映像・外部Codex | not run。模擬backend・ControlledCaptureでの検証 |
+| 全体UI/UX | not applicable。今回の範囲外 |
+
+資源未作成を新しいGUIフラグで表現せず、既存のサービス状態へ判断を揃えた。候補の更新は既存_devicesの比較を使い、専用通知と二重描画を減らした。テスト削除による検証範囲の縮小は明示したユーザー判断であり、すべて重複だったという理由付けはしていない。
+
 ## 10. 先送り
 
 全体UI/UXは別議論。削除したテストの復活や代替テストの作成を後続の自動作業として予約しない。
@@ -62,6 +113,6 @@ R3: 通常の映像失敗と保存後の適用失敗を「詳細を確認し、�
 ## 11. 完了チェックリスト
 
 - [x] 対象範囲・削除基準を確認した
-- [ ] R1〜R3を修正し検証した
-- [ ] 107件と見直し8件の扱い・最終件数を記録した
-- [ ] gateと未検証事項を記録した
+- [x] R1〜R3を修正し検証した
+- [x] 107件と見直し8件の扱い・最終件数を記録した
+- [x] gateと未検証事項を記録した

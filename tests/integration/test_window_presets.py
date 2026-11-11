@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
@@ -13,10 +14,24 @@ from gigas.game_io.capture.models import Frame
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
-from tests.integration.test_video_gui import PreviewClocks
 from tests.integration.test_video_gui import (
     video_shell as video_shell,  # noqa: PLC0414 -- expose the shared pytest fixture
 )
+
+
+@dataclass
+class PreviewClocks:
+    """Replay precise timer events beside a coarse Windows elapsed clock."""
+
+    elapsed: float = 0.0
+
+    def monotonic(self) -> float:
+        """Return elapsed time quantized to the Windows 15.625 ms tick."""
+        return 1000.0 + int(self.elapsed * 64) / 64
+
+    def perf_counter(self) -> float:
+        """Return the precise elapsed time of the same event."""
+        return 1000.0 + self.elapsed
 
 
 @pytest.mark.parametrize("fail", [False, True])

@@ -2,6 +2,8 @@
 
 2026-11-11。対象は `d88d608` → `9eb7b6d`。M1の終点は `6dfbb28`、M2の終点は `9eb7b6d`。レビュー開始時の作業ツリーはcleanだった。
 
+後続対応: 本書のR1〜R3は[unit_030](../unit_030/REVIEW_FIXES_AND_TEST_REDUCTION.md)で修正済み。ユーザーの追加指示により「中」107件も一律削除し、最終362件となった。以下の未修正表示・評価・件数はレビュー時点の記録であり、現在の状態は後続仕様を参照する。
+
 本書は[親仕様](IMPLEMENTATION_SIMPLIFICATION.md)の追補であり、新しい実装仕様ではない。製品コードと既存テストは変更していない。全体UI/UXの設計は対象外。
 
 ## 結論と指摘
@@ -158,10 +160,10 @@ integration配下にはQtウィジェットだけの試験もあり、unit配下
 |---|---:|---:|---|
 | [integration/test_answer_lifecycle.py](../../../tests/integration/test_answer_lifecycle.py) | 7 | 7 | Qt・模擬サービスイベント |
 | [integration/test_app_entry.py](../../../tests/integration/test_app_entry.py) | 2 | 6 | 独立Pythonプロセス・Qt起動 |
-| [integration/test_app_import.py](../../../tests/integration/test_app_import.py) | 1 | 1 | 独立Pythonプロセス |
+| `integration/test_app_import.py`（後続で削除） | 1 | 1 | 独立Pythonプロセス |
 | [integration/test_app_lifetime.py](../../../tests/integration/test_app_lifetime.py) | 7 | 11 | Qt・設定I/Oワーカー・模擬サービス |
 | [integration/test_app_settings.py](../../../tests/integration/test_app_settings.py) | 11 | 16 | Qt・設定I/Oワーカー・模擬サービス |
-| [integration/test_auth_choices.py](../../../tests/integration/test_auth_choices.py) | 2 | 2 | Qtウィジェット |
+| `integration/test_auth_choices.py`（後続で削除） | 2 | 2 | Qtウィジェット |
 | [integration/test_capture_configuration.py](../../../tests/integration/test_capture_configuration.py) | 1 | 5 | Qt・模擬取得サービス |
 | [integration/test_capture_failures.py](../../../tests/integration/test_capture_failures.py) | 12 | 20 | 取得サービス・プロセス／資源境界 |
 | [integration/test_capture_fallback.py](../../../tests/integration/test_capture_fallback.py) | 8 | 13 | 取得サービス・プロセス／資源境界 |
@@ -171,23 +173,23 @@ integration配下にはQtウィジェットだけの試験もあり、unit配下
 | [integration/test_codex_shutdown.py](../../../tests/integration/test_codex_shutdown.py) | 4 | 5 | Qt／asyncioワーカー・模擬接続 |
 | [integration/test_codex_transport.py](../../../tests/integration/test_codex_transport.py) | 11 | 21 | stdio子プロセス・障害注入 |
 | [integration/test_device_discovery_gui.py](../../../tests/integration/test_device_discovery_gui.py) | 5 | 5 | Qt・模擬取得サービス / Qt・取得サービス・実spawn（模擬backend） |
-| [integration/test_keyboard_workflow.py](../../../tests/integration/test_keyboard_workflow.py) | 8 | 14 | Qtウィジェット・キー／文字列操作 |
-| [integration/test_main_menus.py](../../../tests/integration/test_main_menus.py) | 9 | 11 | Qt・模擬サービス／設定ワーカー |
-| [integration/test_notifications.py](../../../tests/integration/test_notifications.py) | 11 | 11 | Qt・模擬サービス／設定ワーカー |
-| [integration/test_request_layout.py](../../../tests/integration/test_request_layout.py) | 8 | 9 | Qtウィジェット・キー／文字列操作 |
+| `integration/test_keyboard_workflow.py`（後続で削除） | 8 | 14 | Qtウィジェット・キー／文字列操作 |
+| `integration/test_main_menus.py`（後続で削除） | 9 | 11 | Qt・模擬サービス／設定ワーカー |
+| `integration/test_notifications.py`（後続で削除） | 11 | 11 | Qt・模擬サービス／設定ワーカー |
+| `integration/test_request_layout.py`（後続で削除） | 8 | 9 | Qtウィジェット・キー／文字列操作 |
 | [integration/test_resolution_application.py](../../../tests/integration/test_resolution_application.py) | 2 | 2 | Qt・模擬取得サービス |
 | [integration/test_settings_accept.py](../../../tests/integration/test_settings_accept.py) | 4 | 4 | Qt・設定I/Oワーカー・模擬サービス |
 | [integration/test_settings_apply_contract.py](../../../tests/integration/test_settings_apply_contract.py) | 4 | 4 | Qt・設定I/Oワーカー・模擬サービス |
 | [integration/test_settings_io.py](../../../tests/integration/test_settings_io.py) | 6 | 9 | ファイルI/O・入力検証 |
-| [integration/test_settings_keyboard.py](../../../tests/integration/test_settings_keyboard.py) | 3 | 9 | Qtウィジェット |
+| `integration/test_settings_keyboard.py`（後続で削除） | 3 | 9 | Qtウィジェット |
 | [integration/test_settings_recovery.py](../../../tests/integration/test_settings_recovery.py) | 4 | 5 | Qt・設定I/Oワーカー・模擬サービス |
 | [integration/test_settings_source_menu.py](../../../tests/integration/test_settings_source_menu.py) | 1 | 2 | Qt・設定I/Oワーカー・模擬サービス |
-| [integration/test_transcript_reading.py](../../../tests/integration/test_transcript_reading.py) | 9 | 19 | Qtウィジェット・キー／文字列操作 |
+| `integration/test_transcript_reading.py`（後続で削除） | 9 | 19 | Qtウィジェット・キー／文字列操作 |
 | [integration/test_ui_control_lifetime.py](../../../tests/integration/test_ui_control_lifetime.py) | 1 | 1 | Qt・設定I/Oワーカー・模擬サービス |
 | [integration/test_video_application.py](../../../tests/integration/test_video_application.py) | 8 | 13 | Qt・模擬取得サービス / Qt・取得サービス・実spawn（模擬backend） |
 | [integration/test_video_gui.py](../../../tests/integration/test_video_gui.py) | 9 | 12 | Qt描画・模擬取得サービス / Qt・取得サービス・実spawn（模擬backend） |
-| [integration/test_video_preview.py](../../../tests/integration/test_video_preview.py) | 1 | 1 | Qtウィジェット |
-| [integration/test_video_settings_gui.py](../../../tests/integration/test_video_settings_gui.py) | 7 | 8 | Qtウィジェット |
+| `integration/test_video_preview.py`（後続で削除） | 1 | 1 | Qtウィジェット |
+| `integration/test_video_settings_gui.py`（後続で削除） | 7 | 8 | Qtウィジェット |
 | [integration/test_window_presets.py](../../../tests/integration/test_window_presets.py) | 4 | 5 | Qt・模擬取得サービス / Qt・取得サービス・実spawn（模擬backend） |
 | [unit/test_capture_backend.py](../../../tests/unit/test_capture_backend.py) | 8 | 19 | 取得モデル・模擬backend／OS境界 |
 | [unit/test_capture_frames.py](../../../tests/unit/test_capture_frames.py) | 4 | 5 | 取得モデル・模擬backend／OS境界 |
@@ -195,7 +197,7 @@ integration配下にはQtウィジェットだけの試験もあり、unit配下
 | [unit/test_capture_platforms.py](../../../tests/unit/test_capture_platforms.py) | 7 | 13 | 取得モデル・模擬backend／OS境界 |
 | [unit/test_capture_transport.py](../../../tests/unit/test_capture_transport.py) | 4 | 8 | 共有メモリ・スレッド |
 | [unit/test_codex_connection.py](../../../tests/unit/test_codex_connection.py) | 30 | 49 | asyncio・模擬peer |
-| [unit/test_package.py](../../../tests/unit/test_package.py) | 2 | 2 | 導入済みメタデータ／pytest基盤 |
+| `unit/test_package.py`（後続で削除） | 2 | 2 | 導入済みメタデータ／pytest基盤 |
 | [unit/test_settings.py](../../../tests/unit/test_settings.py) | 6 | 11 | ファイルI/O・入力検証 |
 | [unit/test_video_settings.py](../../../tests/unit/test_video_settings.py) | 15 | 54 | ファイルI/O・入力検証 |
-| [unit/test_window_layout.py](../../../tests/unit/test_window_layout.py) | 6 | 11 | 純粋な寸法計算 |
+| `unit/test_window_layout.py`（後続で削除） | 6 | 11 | 純粋な寸法計算 |

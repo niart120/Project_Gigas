@@ -8,7 +8,7 @@ from tests.integration.test_video_application import (
 )
 
 
-def test_auto_resolution_waits_for_old_cleanup_and_first_new_frame(
+def test_auto_resolution_closes_editor_before_cleanup_and_uses_new_frame_dimensions(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
