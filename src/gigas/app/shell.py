@@ -3,7 +3,8 @@
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
@@ -93,6 +94,7 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
         self.window.reload_action.triggered.connect(self.reload)
+        self.window.settings_location_action.triggered.connect(self._open_settings_location)
         self.window.video_menu_opened.connect(self._open_video_menu)
         self.window.video_menu_closed.connect(self._close_video_menu)
         self.window.capture_device_requested.connect(self._select_video_device)
@@ -245,6 +247,7 @@ class ApplicationShell(QObject):
             self.dialog.changed.connect(self._render)
             self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
+            self.dialog.error_details_button.clicked.connect(self._show_settings_error)
         elif newly_shown:
             self.dialog.set_values(self.baseline)
             self.dialog.set_capture_target(self._active_capture_device)
@@ -257,6 +260,20 @@ class ApplicationShell(QObject):
         if newly_shown:
             self._refresh_on_open = True
         self._refresh_open_settings()
+
+    def _open_settings_location(self) -> None:
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent))):
+            self.window.notifications.publish(
+                Notice(
+                    "settings",
+                    "設定フォルダーを開けない",
+                    "設定フォルダーを開けませんでした。パスとフォルダーの存在を確認してください。",
+                    str(self.path.parent),
+                )
+            )
+
+    def _show_settings_error(self) -> None:
+        self.window.notifications.show_details("settings" if self.error else "video")
 
     def _refresh_open_settings(self) -> None:
         if not self._refresh_on_open:
@@ -609,6 +626,11 @@ class ApplicationShell(QObject):
             if self.dialog.capture_connection_error.toPlainText() != self.video.apply_error:
                 self.dialog.capture_connection_error.setPlainText(self.video.apply_error)
             self.dialog.capture_connection_error.hide()
+            self.dialog.error_details_button.setVisible(
+                bool(self.error or self.video.discovery_error)
+                or self.video.apply_state == "failed"
+                or self.video.cleanup_unconfirmed
+            )
 
     def request_close(self) -> None:
         """Interrupt the turn, then finish settings and service shutdown."""
@@ -727,17 +749,20 @@ class ApplicationShell(QObject):
             )
         if failure:
             self.window.status.setText("終了未確認")
+            self.window.refresh_close_progress()
         if not self.io_thread.wait(0) or not self._worker_released or not self.service.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
         if not self.video.shutdown_complete:
             if self.video.shutdown_error:
                 self.window.status.setText("終了未確認")
+                self.window.refresh_close_progress()
             else:
                 QTimer.singleShot(10, self._finish_shutdown)
             return
         if self.service.shutdown_error:
             self.window.status.setText("終了未確認")
+            self.window.refresh_close_progress()
             return
         self._stopped = True
         self.wait_timer.stop()

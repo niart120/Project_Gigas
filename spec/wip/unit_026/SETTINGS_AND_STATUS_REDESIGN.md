@@ -273,3 +273,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### A3 OK・適用・キャンセル
 
 `uv run pytest tests/integration/test_settings_accept.py -q --basetemp=tmp/pytest-root --tb=short`: OKが閉じない・Cancelが保存確認する3件red/2件pass→5件green。最初のFrame待ち、busy中×/Esc拒否、失敗/明示停止で古いOK失効、無変更OKの無保存終了、適用後Cancelの保持を確認。A2と認証回帰を合わせ11件green、担当ruff/format/ty成功。読込中はCancelで画面を閉じられ、読込自体を中断せず自動列挙意図だけ破棄する。refactor-done（適用完了とdialog破棄を小さい共通処理に分離）。
+
+### A4 復旧操作の結合
+
+`uv run pytest tests/integration/test_settings_recovery.py -q --basetemp=tmp/pytest-root`: 設定場所のメニュー未結合・詳細入口未実装の3件red→3件green。対象フォルダーを開く要求、失敗通知、設定保存失敗の非モーダルな詳細表示と編集値保持を確認。終了異常時は進捗領域も更新する。担当ruff/format/ty成功。refactor-skipped。
