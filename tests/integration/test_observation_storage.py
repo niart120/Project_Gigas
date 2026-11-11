@@ -148,6 +148,23 @@ def test_unknown_or_invalid_project_is_not_initialized(tmp_path: Path, metadata:
     assert (path / "project.json").read_text(encoding="utf-8") == metadata
 
 
+@pytest.mark.parametrize(
+    "timestamp",
+    ["20261112T00Z", "2026-W46-4T00:00:00Z", "2026-11-12T00:00Z", "2026-11-12T00:00:00,1Z"],
+)
+def test_non_rfc3339_time_is_rejected(tmp_path: Path, timestamp: str) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    writer.close()
+    path = writer.path / "project.json"
+    metadata = json.loads(path.read_bytes())
+    metadata["created_at"] = timestamp
+    original = json.dumps(metadata).encode()
+    path.write_bytes(original)
+    with pytest.raises(ProjectError, match="RFC 3339"):
+        ProjectWriter.open(writer.path)
+    assert path.read_bytes() == original
+
+
 LOCK_PROBE = """
 import sys
 from pathlib import Path

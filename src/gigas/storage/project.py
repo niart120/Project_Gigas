@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
@@ -276,8 +277,8 @@ def _identifier(value: object, prefix: str) -> str:
 def _timestamp(value: object) -> None:
     if (
         not isinstance(value, str)
-        or not value.endswith("Z")
-        or "T" not in value
+        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z", value)
+        is None
         or datetime.fromisoformat(value).tzinfo != UTC
     ):
         message = "UTCのRFC 3339時刻が必要です"
