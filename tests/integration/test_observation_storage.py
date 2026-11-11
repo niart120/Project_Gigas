@@ -198,35 +198,50 @@ writer.close()
 """
 
 
-def test_writer_ownership_is_exclusive_across_processes(tmp_path: Path) -> None:
+def test_archive_owner_allows_readers_and_memory_edits_but_excludes_other_writers(
+    tmp_path: Path,
+) -> None:
     writer = ProjectWriter.create(tmp_path / "locked")
+    observation = Observation.from_frame(sample_frame())
+    reader_probe = """
+import json
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+metadata = json.loads((root / "project.json").read_bytes())
+record = json.loads((root / "events.jsonl").read_bytes())
+assert metadata["project_id"] == record["project_id"]
+assert (root / record["payload"]["image_path"]).read_bytes().startswith(bytes.fromhex("89504e47"))
+(root / "memory").mkdir()
+(root / "memory/current.md").write_text("child interpretation", encoding="utf-8")
+"""
     try:
+        writer.record(observation)
+        before = (writer.path / "events.jsonl").read_bytes()
         with pytest.raises(ProjectError):
             ProjectWriter.open(writer.path)
         writer.reload()
         result = subprocess.run(  # noqa: S603 - fixed local Python probe
-            [sys.executable, "-c", LOCK_PROBE, str(writer.path)], timeout=10, check=False
+            [sys.executable, "-c", reader_probe + LOCK_PROBE, str(writer.path)],
+            timeout=10,
+            check=False,
         )
-        assert result.returncode == 2
+        assert (
+            result.returncode == 2
+        )  # Reading and memory editing succeeded; a second writer failed.
+        assert (writer.path / "memory/current.md").read_text(
+            encoding="utf-8"
+        ) == "child interpretation"
+        assert (writer.path / "events.jsonl").read_bytes() == before
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
     finally:
         writer.close()
-    result = subprocess.run(  # noqa: S603 - fixed local Python probe
-        [sys.executable, "-c", LOCK_PROBE, str(writer.path)], timeout=10, check=False
-    )
-    assert result.returncode == 0
-
-
-def test_process_exit_releases_lock_without_deleting_lock_file(tmp_path: Path) -> None:
-    writer = ProjectWriter.create(tmp_path / "locked")
-    writer.close()
-    code = "import os\n" + LOCK_PROBE.replace("writer.close()", "os._exit(0)")
-    result = subprocess.run(  # noqa: S603 - fixed local Python probe
-        [sys.executable, "-c", code, str(writer.path)], timeout=10, check=False
-    )
-    assert result.returncode == 0
-    assert (writer.path / ".gigas.lock").exists()
-    reopened = ProjectWriter.open(writer.path)
-    reopened.close()
+    abrupt_exit = "import os\n" + LOCK_PROBE.replace("writer.close()", "os._exit(0)")
+    for code in (abrupt_exit, LOCK_PROBE):
+        result = subprocess.run(  # noqa: S603 - fixed local Python probe
+            [sys.executable, "-c", code, str(writer.path)], timeout=10, check=False
+        )
+        assert result.returncode == 0
 
 
 def sample_frame(width: int = 16, height: int = 16) -> Frame:
