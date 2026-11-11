@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip**。U01〜U03の現行GUIを横断する独立した修正単位。[unit_024レビュー](../../complete/unit_024/UI_UX_REVIEW.md)のRV01〜RV11と、エラー説明の文章を許可する2026-11-11の追加指示を実装する。レビュー済みという状態を製品修正済みとは扱わない。
+状態: **complete（製品修正・受入・ローカル品質ゲート完了）**。U01〜U03のGUIを横断する独立した修正単位。[unit_024レビュー](../unit_024/UI_UX_REVIEW.md)のRV01〜RV11と、エラー説明の文章を許可する2026-11-11の追加指示を実装した。PRの状態は本書末尾の境界に従い、GitHubとGitで確認する。
 
 開始版は`fd99b84`、ブランチは`codex/uiux-review`。開始時clean、`origin/main`との差はレビュー記録の1 commitだけである。Constitutionは[AGENTS.md](../../../AGENTS.md)、[初期GUI方針](../../initial/01-overview.md)、[実行・停止の境界](../../initial/02-runtime.md)、[工程計画](../../initial/05-implementation.md)。Intent Deltaは、機器選択から接続までの一体化、画面の情報配置、再現不具合修正、エラー説明文の例外追加。
 
@@ -88,11 +88,11 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 
 実装前に失敗を確認し、各itemの実績を本節へ追記する。全体gateは`uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`、`uv run ruff check .`、`uv run ty check --no-progress`、unit/integration、`uv build`、`git diff --check`。Python3.12/3.13、代表画面の描画、実機映像切替、終了後プロセスの状態を確認する。実機・IME・DPIの結果は自動試験と分ける。
 
-画面・実機の詳細は[受入記録](UI_ACCEPTANCE.md)へ集約する。T06後の実機適用は確認済みだが、最終メニュー・通知の画面受入とは分ける。
+画面・実機の詳細は[受入記録](UI_ACCEPTANCE.md)へ集約した。T06後の実機適用と、完成後のメニュー・通知の画面受入を分けて記録している。
 
 T01: `uv run pytest tests/integration/test_ui_control_lifetime.py -q`で中断ボタン無効の期待したredを確認。設定画面終了待ちとアプリ終了を分け、設定画面終了待ちでは既存の中断・切断を維持した。新規接続は引き続き設定状態で制限する。`uv run pytest tests/integration/test_ui_control_lifetime.py tests/integration/test_app_lifetime.py tests/integration/test_codex_shutdown.py -q`は19 passed。対象ruff check成功、format適用後に対象1 passed。構造変更は不要と判断。
 
-現時点: 製品修正を進行中。画面・実機確認、全体品質gate、PRは未完了。
+最終状態: 製品修正、画面・実機確認、全体ローカル品質gateを完了した。PR作成・リモートcheck・merge・同期はこの記録の後に行い、実際のPR/Git状態を根拠にする。
 
 実機の事前確認: `uv run python -X utf8 tmp/uiux-refinement/hardware_preflight.py`を実行。DirectShowの`USB Video Device`（VID07CA/PID0575、Live Gamer 4K 2.1）で1920×1080のファイアレッドのタイトル画面を目視確認した。約3.06秒で連番1→175、実測57.69 FPS、保持した別読み手の画像は不変。正常解放`graceful`、サービス停止、子プロセス残存なし。これは既存取得基盤の事前確認であり、改善後の設定適用・メニュー・画面の受入を完了した根拠にはしない。
 
@@ -130,6 +130,31 @@ T13の起点: 最終描画で、800×600作業領域の承認欄はviewport258px
 
 T13: `uv run pytest tests/integration/test_request_layout.py -q`でFusion/Windowsスタイル×9/16ptの4件をredにした。承認の判断ボタンだけを縦に並べ、質問の回答行は維持した。固定幅や独自の文字計測は加えずQtの寸法計算を使う。同ファイル12 passed、`test_codex_gui.py`・`test_answer_lifecycle.py`・`test_keyboard_workflow.py`・`test_notifications.py`を含む関連58 passed、対象ruff/format・全体ty成功。横スクロール0、縦スクロールで各ボタン全体へ到達、Tab順とSpaceで1回だけ送信することを確認した。Meiryo実フォント16ptでもFusion/Windows両方の描画で確認し、独立レビューの必須指摘なし。追加構造整理は不要。
 
+### 最終品質ゲートとレビュー
+
+製品コード最終版は`191d5dc`。Windows、既定Python 3.12.10と隔離Python 3.13.5、Qt 6.12.0で検証した。依存・metadata・skillの変更はない。
+
+| コマンド／確認 | 結果・検査対象 |
+|---|---|
+| `uv sync --locked --dev` / `uv lock --check` | 成功。既存lockと依存を確認 |
+| `uv run ruff format --check .` / `uv run ruff check .` | 150 Pythonファイルの書式・lint成功 |
+| `uv run ty check --no-progress` | 全体の型検査成功。新しいignore/castなし |
+| `uv run pytest tests/unit -q --basetemp=tmp/pytest/final-unit -o faulthandler_timeout=30` | Python 3.12、136 passed |
+| `uv run pytest tests/integration -q --basetemp=tmp/pytest/final-integration -o faulthandler_timeout=30` | Python 3.12、259 passed。実Qt、模擬通信、明示した取得子プロセスの境界を検査 |
+| `uv run --isolated --python 3.13 --frozen pytest tests/unit tests/integration -q --basetemp=tmp/pytest/final-py313 -o faulthandler_timeout=30` | Python 3.13、395 passed |
+| `uv build` | wheelとsdist作成成功 |
+| `uv run python scripts/check_package.py` | Python 3.12の独立インストール、資材同梱、機器未検出時の取得子プロセス終了、module/console両起動終了を確認 |
+| `uv run --isolated --python 3.13 --frozen python scripts/check_package.py` | Python 3.13で同じ配布検査成功 |
+| `git diff --check` | 成功 |
+| 文書・仕様・画像の読取り、ローカル参照検査 | 規約、実装契約、実績と未検証の区別、画像内容を確認。完了移動後の参照とunit一意性を検査 |
+| skill validation / 公開サイト検証 | not applicable。skillとサイト公開は変更対象外 |
+
+最初の全unit実行では`--basetemp=tmp/pytest-final-unit`を指定したため、既存の「`tmp/pytest`配下」契約1件だけが失敗した。製品や試験の期待値は変えず、正しい配下へ変更して全136件を確認した。隔離Pythonとpackage検査ではsandboxのWindows実行ファイル準備が拒否されたため、同じコマンドを承認済みの通常権限で実行した。
+
+独立レビューはT01〜T13の仕様・差分・対応回帰を照合した。UTF-16選択端点、Qtの改行正規化、終了時失敗の通知相関、メニューの同名番号・設定再読込後の再適用、小画面の承認欠けは採用し、それぞれ回帰試験と修正を加えた。最終の必須指摘は残っていない。通知を閉じたことを復旧と見なさない、保存成功を接続成功と見なさない、回答書込を承認対象の実行成功と見なさない境界を維持した。T13の旧描画メモは修正前後を明示する記録へ更新した。
+
+エラー説明の例外はAGENTS.md・初期01・通知・利用者docsで揃えた。公開APIの型・docstringは`type-boundary-review`と`docstring-style`で確認し、最新の結果・世代・失敗識別を説明した。対象外のU04/U05/U06を完成機能に含めていない。
+
 ## 8. 先送り事項
 
 APIキー認証とモデル候補の取得・接続後切替はU06、シリアル機器接続はU05。マルチモニターDPI、長時間運転、スクリーンリーダーは環境で確認できない場合に未検証として残す。RV01〜RV10の現行不具合を未実装のまま完了扱いにしない。
@@ -137,10 +162,10 @@ APIキー認証とモデル候補の取得・接続後切替はU06、シリア�
 ## 9. 完了条件
 
 - [x] ユーザー指摘、現在のコード、NyXとの差を仕様化した
-- [ ] 全TDD itemを検証・commitし、後続工程の未実装と分けた
-- [ ] エラー説明文の例外を規約・製品・docsで整合させた
-- [ ] 代表画面と可能な実機確認を記録した
-- [ ] 品質gateと独立レビューを通過した
-- [ ] PRへ渡す変更・検証結果・未検証事項を揃えた
+- [x] 全TDD itemを検証・commitし、後続工程の未実装と分けた
+- [x] エラー説明文の例外を規約・製品・docsで整合させた
+- [x] 代表画面と可能な実機確認を記録した
+- [x] 品質gateと独立レビューを通過した
+- [x] PRへ渡す変更・検証結果・未検証事項を揃えた
 
 このunitの`complete`への移動は、実装・受入・ローカルgateを終えたPR提出可能な状態を表す。依頼全体の完了には、その後のPR check・レビュー・merge、main同期、安全なローカル／リモートブランチ整理も必要である。将来のmergeを本書で完了済みとはせず、実際のPR状態・merge SHA・最終Git同期結果で確認する。
