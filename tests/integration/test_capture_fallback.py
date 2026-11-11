@@ -114,19 +114,22 @@ def test_fallback_requires_clean_release_normal_exit_and_no_started_stream(
         assert not service.is_alive()
 
 
-def test_startup_deadline_is_shared_by_all_candidates(tmp_path: Path) -> None:
+def test_startup_deadline_is_shared_by_all_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     marker = str(tmp_path / "events.txt")
-    service = CaptureService(
-        backend_factory=FallbackBackend(marker, "wait-release"),
-        timeouts=CaptureTimeouts(startup=0.5, frame=1, stop=2, terminate=1),
-    )
+    now = [0.0]
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    service = CaptureService(backend_factory=FallbackBackend(marker, "wait-release"))
     service.start()
     try:
         assert service.connect(CaptureOptions("selected", 16, 16))
         wait_for(
             service,
-            lambda state: state.phase == "stopping" and Path(marker + ".releasing").exists(),
+            lambda state: state.backend == cv2.CAP_DSHOW and Path(marker + ".releasing").exists(),
         )
+        now[0] = 11.0
+        wait_for(service, lambda state: state.phase == "stopping")
         Path(marker + ".allow-release").touch()
         failed = wait_for(service, lambda state: state.phase == "error")
         assert failed.error
@@ -136,7 +139,11 @@ def test_startup_deadline_is_shared_by_all_candidates(tmp_path: Path) -> None:
     finally:
         Path(marker + ".allow-release").touch()
         service.shutdown()
-        service.join(6)
+        now[0] += 10
+        service.join(3)
+        if service.is_alive():
+            now[0] += 10
+            service.join(3)
         assert not service.is_alive()
 
 

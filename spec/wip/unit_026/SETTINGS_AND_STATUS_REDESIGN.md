@@ -323,3 +323,7 @@ test_settings_source_menuの3件red/1件pass→4件green。メニューの明示
 ### 全体回帰の旧UI契約移行
 
 全体試験で見つかった旧契約4箇所を、明示未接続・アプリ全体の終了確認・保存中Cancel禁止・メニューaction識別へ移行。対象test_device_discovery_gui/test_keyboard_workflow/test_main_menus/test_ui_control_lifetimeは38件成功。未保存値・既存中断・停止経路の保証を残し、製品不具合のred→greenとは扱わない。
+
+### C3c 開始期限試験の実時間依存除去
+
+全体gateで534件pass/1件fail。代替開始期限の試験が子プロセスを0.5秒以内に起動できると仮定しており、並行負荷の下で解放処理へ到達する前に期限切れとなった。実際のspawnとrelease入口を待ってから監視時計だけを進める試験に変更した。製品コードと期限は変更していない。fallback関連13件成功、独立レビュー・担当ruff/format/ty成功。全体再実行`uv run pytest tests/unit tests/integration -q`は535件成功（39.21秒）。
