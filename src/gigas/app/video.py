@@ -17,6 +17,14 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
 
+_CAPTURE_DIMENSIONS: dict[str, tuple[int | None, int | None]] = {
+    "auto": (None, None),
+    "hd": (1280, 720),
+    "full_hd": (1920, 1080),
+    "wqhd": (2560, 1440),
+    "four_k": (3840, 2160),
+}
+
 
 class CapturePort(Protocol):
     """A nonblocking capture service owned through application shutdown."""
@@ -304,8 +312,12 @@ class VideoController(QObject):
             self.apply_state = "complete"
             self.active_settings = None
             return
+        dimensions = _CAPTURE_DIMENSIONS.get(settings.capture_resolution)
+        if dimensions is None:
+            self._fail_application("取得解像度が未対応")
+            return
         try:
-            options = CaptureOptions(settings.capture_device, fps=settings.capture_fps)
+            options = CaptureOptions(settings.capture_device, *dimensions, fps=settings.capture_fps)
         except CaptureError as error:
             self._fail_application(str(error))
             return
