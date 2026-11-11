@@ -26,7 +26,7 @@
 
 [U01の基準点](../complete/unit_001/APP_STARTUP.md)は、起動・設定保存・最小GUI・設定I/Oの終了処理・指示資材の配布経路です。映像取得、シリアル通信、MCP、Codex接続、サービス用asyncioループ、プロジェクト保存はU01の完了に含みません。設定欄があることを接続・認証・有効値の確認と読み替えません。
 
-現在は[U02の親仕様](../wip/unit_007/CODEX_CONNECTION.md)へ着手しています。[M0調査](../complete/unit_016/CODEX_SDK_SELECTION.md)でSDK 0.167.0の要求保留中に受信が止まる制約を確認し、製品実装前の接続方式判断を残しています。[U03の映像取得](../planned/unit_008/VIDEO_CAPTURE.md)はU01だけを前提とし、SDK接続とは独立して着手できます。依存の詳細と推奨順は05を正本とします。
+現在は[U02の親仕様](../wip/unit_007/CODEX_CONNECTION.md)へ着手しています。[M0調査](../complete/unit_016/CODEX_SDK_SELECTION.md)でSDK 0.167.0の要求保留中に受信が止まる制約を確認し、直接接続への明示承認を受けM1を開始しています。[U03の映像取得](../planned/unit_008/VIDEO_CAPTURE.md)はU01だけを前提とし、SDK接続とは独立して着手できます。依存の詳細と推奨順は05を正本とします。
 
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 
