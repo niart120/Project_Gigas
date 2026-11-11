@@ -294,3 +294,7 @@ test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始
 ### 取得解像度と表示設定の結合確認
 
 `uv run pytest tests/integration/test_resolution_application.py -q --basetemp=tmp/pytest-root`: 2件成功。既存A1/A2/A3の組み合わせで、自動への変更は旧終了確認と新Frameを待ち、表示変更は要求と違う実到着画像でも再接続しないことを確認。追加の製品修正は不要で、初回から成功した結合確認として記録する。取得適用失敗・旧画像失効はtest_video_applicationの既存回帰と合わせて確認する。
+
+### A4a 現在エラーと通知履歴の分離
+
+独立レビューで、設定保存/読込の失敗後にフォルダーを開く操作も失敗すると、設定の詳細入口から別の失敗が開く不具合を再現。`uv run pytest tests/integration/test_settings_recovery.py -k 'form_details or direct_snapshot' -q --basetemp=tmp/pytest-ui`: 3件red→3件green。現在エラーの不変Noticeを直接表示し、最新履歴へ再publishしない。関連42件成功、担当ruff/format/ty・diffcheck成功、独立レビュー必須指摘なし。refactor-done（既存詳細表示とsnapshot表示の共通化）。

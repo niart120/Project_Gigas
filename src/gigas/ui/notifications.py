@@ -151,12 +151,24 @@ class NotificationCenter(QObject):
         selected = self._latest if source is None else source
         if selected not in self._notices:
             return
+        self.show_snapshot(self._notices[selected])
+
+    def show_snapshot(self, notice: Notice) -> None:
+        """Open a specific failure without publishing or replacing recent history.
+
+        Args:
+            notice: Immutable failure associated with the explicitly chosen UI action.
+                It need not appear in recent history. Later publications leave this
+                displayed snapshot and any text selection unchanged.
+        """
         if self.dialog is None:
             self.dialog = NoticeDialog(self._owner)
             self.dialog.sources.activated.connect(self._select_source)
             self.dialog.settings_button.clicked.connect(self.settings_requested)
         self._sync_sources()
-        self.dialog.display(self._notices[selected])
+        if self.dialog.sources.findData(notice.source) < 0:
+            self.dialog.sources.addItem(_SOURCES[notice.source], notice.source)
+        self.dialog.display(notice)
         self.dialog.settings_button.setEnabled(self._settings_available)
         self.dialog.show()
         fit_to_screen(self.dialog)

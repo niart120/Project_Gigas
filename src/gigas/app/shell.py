@@ -56,6 +56,7 @@ class ApplicationShell(QObject):
         self.ready = False
         self.error = ""
         self.error_operation = ""
+        self._settings_error_notice: Notice | None = None
         self.pending: str | None = None
         self.committed = False
         self._stopped = False
@@ -273,7 +274,10 @@ class ApplicationShell(QObject):
             )
 
     def _show_settings_error(self) -> None:
-        self.window.notifications.show_details("settings" if self.error else "video")
+        if self.error and self._settings_error_notice is not None:
+            self.window.notifications.show_snapshot(self._settings_error_notice)
+        else:
+            self.window.notifications.show_details("settings" if self.error else "video")
 
     def _refresh_open_settings(self) -> None:
         if not self._refresh_on_open:
@@ -313,6 +317,7 @@ class ApplicationShell(QObject):
         self._applying_settings = True
         self._close_after_apply = close_after
         self.error = ""
+        self._settings_error_notice = None
         target = (
             settings
             if settings is not None
@@ -451,6 +456,7 @@ class ApplicationShell(QObject):
             return
         self.operation = operation
         self.error = ""
+        self._settings_error_notice = None
         self._render()
         snapshot = settings
         if snapshot is None:
@@ -489,9 +495,10 @@ class ApplicationShell(QObject):
                     "編集内容と詳細を確認してください。"
                 )
             )
-            self.window.notifications.publish(
-                Notice("settings", self.error_operation, explanation, result.error)
+            self._settings_error_notice = Notice(
+                "settings", self.error_operation, explanation, result.error
             )
+            self.window.notifications.publish(self._settings_error_notice)
             if operation == "load":
                 self.ready = False
         if self.error and operation == "save":
