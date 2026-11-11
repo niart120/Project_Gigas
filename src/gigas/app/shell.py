@@ -96,8 +96,8 @@ class ApplicationShell(QObject):
         """Display the main window."""
         self.window.show()
         fit_to_screen(self.window)
-        self._worker.moveToThread(self.io_thread)
         self.io_thread.start()
+        self._worker.moveToThread(self.io_thread)
         self.service.start()
         self.video.start()
         self._request("load")

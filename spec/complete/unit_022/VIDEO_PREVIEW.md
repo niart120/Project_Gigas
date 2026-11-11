@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（P1〜P4a・統合gate・実機受入完了、PR検証で判明したP4bの修正記録を追記）**。[U03](../../wip/unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合した。
+状態: **complete（P1〜P4a・統合gate・実機受入完了、PR検証で判明したP4b/P4cの修正記録を追記）**。[U03](../../wip/unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合した。
 
 利用者は設定画面で機器の一覧を更新し、機器とモードを選んで保存する。主画面で接続し、同じ取得元から最新映像を表示する。
 
@@ -36,6 +36,7 @@ P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合�
 | refactor-skipped | P4 設定snapshotで接続し遅い表示・切断・終了を結合する | new | integration | red: shellのサービス注入・GUI結合が未実装で6件失敗。green: 新規8件と既存55件。最初から表示・監視・shell寿命を分離しており追加の構造変更なし |
 | refactor-skipped | P4a Windowsの粗い時計で表示更新が隔回になる退行を防ぐ | regression | integration | red: 30/60 FPSとも60枚中32枚だけ表示、2回再現。green: 各60枚を欠落なく表示し同時刻の重複イベントは抑制。表示時計の1行変更で構造変更不要 |
 | refactor-skipped | P4b 設定ワーカーをGUIスレッドで破棄してから終了を通知する | regression | integration | red: destroyed通知がI/Oスレッドで実行された。green: 保存完了→GUIで破棄→stoppedの順とGUI応答を確認。破棄手順をretireへ集約し、追加の構造変更なし |
+| refactor-skipped | P4c I/Oスレッド起動自体の失敗でもワーカーを回収する | regression | integration | red: QThread.start例外注入で15秒終了せず。green: 終了コード1と診断を返し、通常寿命も維持。起動と所属移動の順序だけを変更 |
 
 各itemをred→green→構造整理判断→検証→コミットの順で進める。
 
@@ -68,6 +69,8 @@ SettingsWorkerをI/Oスレッドへ移し、`QThread.finished → deleteLater`�
 修正では設定ワーカーを自身のI/Oスレッドから生成元GUIスレッドへ戻し、そこで遅延破棄する。shellは`destroyed`のqueued通知と各スレッドの終了を確認してから`stopped`を送る。起動前の失敗でもGUIで回収できるよう、I/Oスレッドへの移動は`start()`時に行う。保存を中断せず、無期限join・GCの無効化・固定sleepを追加しない。
 
 `uv run --no-sync pytest tests/integration/test_app_lifetime.py -k destroyed_on_gui --basetemp=tmp/pytest-worker-owner-red -q -o faulthandler_timeout=15 --tb=short`は変更前に破棄スレッドの不一致で失敗し、変更後に成功した。試験は遅い保存中のGUI応答、実ファイルの保存値、保存完了→GUIでの破棄→終了通知の順を観測する。同じ最小再現は修正後に2000回完走した。`test_app_lifetime.py`、`test_app_settings.py`、`test_app_entry.py`、`test_video_gui.py`、`test_codex_gui.py`、`test_codex_shutdown.py`の回帰68件と、対象の映像終了試験の100回再生が成功し、起動前後の失敗・保存待ち・終了取消し・映像とCodexの終了を確認した。対象ファイルのruff format/check・tyと`git diff --check`も成功。`retire()`の呼出しスレッドと最終I/O後という前提をdocstringへ記載し、type ignoreやcastは追加していない。この修正後の実機再確認と全体gateは親工程の再検証で扱う。
+
+P4c: 独立レビューで`io_thread.start()`自体の例外を注入すると、ワーカーが未起動スレッドへ移動済みのためGUIから回収できず、終了通知まで進まないことが判明した。起動失敗の既存subprocess試験へこの境界を追加し、`uv run --no-sync pytest tests/integration/test_app_entry.py -k io_thread_start --basetemp=tmp/pytest-io-start-red -q --tb=short`で15秒の外側期限による失敗を確認した。`start()`内をI/Oスレッド起動→ワーカーの所属移動の順に変更し、起動失敗時はGUIに残るワーカーをP4bの手順で回収する。`uv run --no-sync pytest tests/integration/test_app_entry.py tests/integration/test_app_lifetime.py tests/integration/test_video_gui.py --basetemp=tmp/pytest-io-start-green -q -o faulthandler_timeout=15 --tb=short`で28件成功した。失敗時の終了コード1・RuntimeError診断・不要なTracebackやQThread破棄警告がないこと・設定ファイル非作成に加え、正常な起動、保存、ワーカー回収、映像の終了を検証した。
 
 回帰は`uv run --no-sync pytest tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_app_entry.py tests/integration/test_codex_gui.py tests/integration/test_video_preview.py tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-video-regression -q --tb=short`で55件成功。起動途中の失敗、設定保存の待機、終了取消し、既存Codex操作、設定選択・映像描画を検査した。
 
