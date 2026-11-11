@@ -212,3 +212,18 @@ U02の冒頭で採用版候補を選び、以下の公開経路と未成立時�
 
 - [Python パッケージ定義](https://github.com/openai/codex/blob/27fcd7cbedd7efd63fd704bd01a0cfe1d7b85a26/sdk/python/pyproject.toml)
 
+
+## U04追加調査: 永続チャットと完全出力
+
+2026-11-12の[仕様改訂](../complete/unit_034/CHAT_OBSERVATION_PERSISTENCE.md)で、未選択チャットの観測・記録とephemeral撤去を採用方針にした。製品実装・本MCPの実接続は未実施。
+
+| 根拠・事項 | 確認済みと未確認 |
+|---|---|
+| 同梱codex-cli 0.167.0のgenerate-json-schema --experimental | ThreadStartParamsにephemeral/cwd/config、ThreadResumeParamsにthreadId/config/cwd、ThreadReadParamsにthreadId/includeTurnsがある。隔離CODEX_HOMEで生成成功。認証・実ターンなし |
+| [公式App Server](https://learn.chatgpt.com/docs/app-server) | 保存会話をread/resumeする公開経路を確認。現行docsの説明を採用版の保存・終了後の読込成功と同一視しない |
+| 永続化の副作用 | 会話・指示・ツール結果の保存量、flush時点、MCP configと短命Bearerの残存はM2実接続前に隔離環境で確認。既存認証のHOMEをチャットごとに分割しない |
+| 完全出力 | SDKへ包装する前の加工済みObservationをアプリの保存処理へ渡す。MCP側で再加工せず同じPNG/ID/時刻となることをM2で確認。middlewareは前提にしない。Codex通知の切詰め結果を原画像の正本にしない |
+| 保存完了を待たない応答 | 本MCPで保存を止めても画像応答が成立し、後続保存が同一であることをM2で確認。応答成功は保存・配送先での解釈成功を保証しない |
+| 再接続・再開 | 永続化と同一thread再開は別。新しい認証値の適用と旧値失効はU05/U08の入力公開・再開前に確認する |
+
+未成立なら依存する結合方式を見直し、認証値の秘密保持や再開成功を推測で確定しない。
