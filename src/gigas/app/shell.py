@@ -6,10 +6,13 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
+from gigas.runtime.codex.models import ConnectionOptions
+from gigas.services.codex import CodexServiceThread
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
 from gigas.ui.main_window import MainWindow
+from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.settings_dialog import SettingsDialog
 
 if TYPE_CHECKING:
@@ -22,12 +25,19 @@ class ApplicationShell(QObject):
     Args:
         path: Explicit settings path; tests must supply an isolated location.
         io: Synchronous settings operations isolated in the owned thread.
+        service: Optional unstarted Codex service owned until application shutdown.
     """
 
     requested = Signal(str, object)
     stopped = Signal()
 
-    def __init__(self, path: "Path", io: SettingsIO | None = None) -> None:
+    def __init__(
+        self,
+        path: "Path",
+        io: SettingsIO | None = None,
+        *,
+        service: CodexServiceThread | None = None,
+    ) -> None:
         """Construct views without displaying them."""
         super().__init__()
         self.path = path
@@ -40,6 +50,9 @@ class ApplicationShell(QObject):
         self.error_operation = ""
         self.pending: str | None = None
         self.committed = False
+        self._stopped = False
+        self._service_unavailable = False
+        self.service = CodexServiceThread() if service is None else service
         self.confirmation: QMessageBox | None = None
         self.wait_expired = False
         self.wait_timer = QTimer(self)
@@ -56,13 +69,43 @@ class ApplicationShell(QObject):
         self.window.settings_requested.connect(self.open_settings)
         self.window.close_requested.connect(self.request_close)
         self.window.cancel_close_requested.connect(self.cancel_close)
+        panel = self.window.connection
+        panel.connect_requested.connect(self.connect_codex)
+        panel.disconnect_requested.connect(self.service.disconnect_runtime)
+        panel.login_requested.connect(self.service.login)
+        panel.send_requested.connect(self.service.send)
+        panel.interrupt_requested.connect(self.service.interrupt)
+        panel.answer_requested.connect(self._answer_codex)
+        self.service.received.connect(panel.handle_event)
+        self.service.completed.connect(panel.handle_result)
+        self.service.finished.connect(self._service_finished)
 
     def start(self) -> None:
         """Display the main window."""
         self.window.show()
         fit_to_screen(self.window)
         self.io_thread.start()
+        self.service.start()
         self._request("load")
+
+    def connect_codex(self) -> None:
+        """Connect using the last successfully loaded or saved settings snapshot."""
+        if not self.ready or self.committed or self.pending is not None:
+            return
+        options = ConnectionOptions(
+            (self.path.parent / "runtime").resolve(),
+            self.baseline.model,
+            self.baseline.effort,
+            self.baseline.auth_method,
+        )
+        self.window.connection.activate(self.service.connect_runtime(options))
+
+    @Slot(object)
+    def _answer_codex(self, submission: object) -> None:
+        if isinstance(submission, AnswerSubmission) and not self.committed:
+            self.service.answer(
+                submission.token, decision=submission.decision, answers=submission.answers
+            )
 
     def open_settings(self) -> None:
         """Show the single settings editor without discarding its input."""
@@ -147,16 +190,29 @@ class ApplicationShell(QObject):
         if cancelable or self.committed:
             state = "閉じる待ち" if self.pending == "dialog" else "終了待ち"
             if self.wait_expired:
-                target = {"load": "設定読込", "save": "設定保存"}.get(
-                    self.operation, "ワーカー終了"
-                )
-                state = f"{state} · {target} · {self.path}"
+                targets = []
+                if self.operation is not None:
+                    targets.append(
+                        f"{'設定読込' if self.operation == 'load' else '設定保存'} · {self.path}"
+                    )
+                else:
+                    if not self.io_thread.wait(0):
+                        targets.append(f"設定終了 · {self.path}")
+                    if not self.service.wait(0):
+                        targets.append("Codex終了")
+                state = " · ".join([state, *targets])
         self.window.status.setText(state)
         self.window.cancel_close_button.setVisible(cancelable)
         self.window.cancel_close_button.setText(
             "閉じる取消し" if self.pending == "dialog" else "終了取消し"
         )
         self.window.settings_button.setEnabled(not self.committed)
+        self.window.connection.set_available(
+            self.ready
+            and not self.committed
+            and self.pending is None
+            and not self._service_unavailable
+        )
         if self.dialog is not None:
             self.dialog.status.setText(state)
             self.dialog.details.setPlainText(self.error)
@@ -169,7 +225,9 @@ class ApplicationShell(QObject):
             self.dialog.cancel_close_button.setText(self.window.cancel_close_button.text())
 
     def request_close(self) -> None:
-        """Finish pending I/O before releasing the owned worker."""
+        """Interrupt the turn, then finish settings and service shutdown."""
+        if not self.committed:
+            self.window.connection.interrupt()
         self._close("app")
 
     def _close(self, target: str) -> None:
@@ -219,6 +277,7 @@ class ApplicationShell(QObject):
         if target == "app":
             self.committed = True
             self.wait_timer.start()
+            self.service.shutdown()
             if self.io_thread.isRunning():
                 self.io_thread.quit()
             else:
@@ -243,10 +302,23 @@ class ApplicationShell(QObject):
         self._render()
 
     @Slot()
+    def _service_finished(self) -> None:
+        if not self.committed:
+            self._service_unavailable = True
+            self.window.connection.service_finished()
+        self._finish_shutdown()
+
+    @Slot()
     def _finish_shutdown(self) -> None:
-        if not self.io_thread.wait(0):
+        if not self.committed or self._stopped:
+            return
+        if not self.io_thread.wait(0) or not self.service.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
+        if self.service.shutdown_error:
+            self.window.status.setText(self.service.shutdown_error)
+            return
+        self._stopped = True
         self.wait_timer.stop()
         if self.dialog is not None:
             self.dialog.hide()

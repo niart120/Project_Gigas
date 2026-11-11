@@ -1,0 +1,1004 @@
+import asyncio
+from collections.abc import Coroutine
+from importlib import resources
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from gigas.runtime.codex.connection import CodexConnection, CodexConnectionError
+from gigas.runtime.codex.models import (
+    ConnectionOptions,
+    HumanRequest,
+    LoginEvent,
+    RequestResolved,
+    SessionStatus,
+    TextEvent,
+)
+from gigas.runtime.codex.transport import (
+    JsonObject,
+    JsonValue,
+    RpcId,
+    RpcNotification,
+    ServerRequest,
+    TransportClosed,
+    TransportError,
+    TransportEvent,
+)
+
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
+
+    from gigas.runtime.codex.models import ConnectionEvent
+
+
+def _model(name: str, *, default: bool = False) -> JsonObject:
+    return {
+        "id": name,
+        "model": name,
+        "isDefault": default,
+        "defaultReasoningEffort": "medium",
+        "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "medium"}],
+    }
+
+
+class FakePeer:
+    """A scripted RPC boundary; transport parsing and processes are tested separately."""
+
+    def __init__(self) -> None:
+        """Prepare a successful catalog and an empty notification queue."""
+        self.calls: list[tuple[str, JsonObject | None]] = []
+        self.replies: list[tuple[RpcId, JsonValue]] = []
+        self.rejections: list[tuple[RpcId, int, str]] = []
+        self.events: asyncio.Queue[TransportEvent] = asyncio.Queue()
+        self.started = False
+        self.closed = False
+        self.authenticated = True
+        self.failure: str | None = None
+        self.responses: dict[str, JsonValue] = {}
+        self.gates: dict[str, asyncio.Event] = {}
+        self.close_gate: asyncio.Event | None = None
+        self.close_calls = 0
+        self.respond_gate: asyncio.Event | None = None
+
+    async def start(self) -> None:
+        """Record process startup."""
+        self.started = True
+
+    async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+        """Return protocol fixtures, preserving observable call ordering."""
+        self.calls.append((method, params))
+        if method in self.gates:
+            await self.gates[method].wait()
+        if method == self.failure:
+            message = "PRIVATE-UPSTREAM-TEXT"
+            raise TransportError(message)
+        if method in self.responses:
+            return self.responses[method]
+        if method == "initialize":
+            return {"userAgent": "codex/0.167.0", "platformOs": "windows"}
+        if method == "account/read":
+            return {
+                "account": {"type": "chatgpt"} if self.authenticated else None,
+                "requiresOpenaiAuth": True,
+            }
+        if method == "config/read":
+            return {"config": {"mcp_servers": {"existing": {"enabled": True}}}}
+        if method == "model/list":
+            if params and params.get("cursor") == "page-2":
+                return {"data": [_model("catalog-default", default=True)], "nextCursor": None}
+            return {"data": [_model("other")], "nextCursor": "page-2"}
+        if method == "thread/start":
+            assert params is not None
+            return {
+                "thread": {"id": "thread-1"},
+                "approvalPolicy": params["approvalPolicy"],
+                "approvalsReviewer": params["approvalsReviewer"],
+                "model": params["model"],
+                "cwd": params["cwd"],
+                "sandbox": {"type": "readOnly"},
+            }
+        if method == "turn/start":
+            return {"turn": {"id": "turn-1", "status": "inProgress", "items": []}}
+        if method == "account/login/start":
+            return {"type": "chatgpt", "loginId": "login-1", "authUrl": "https://auth.openai.com/"}
+        if method == "account/login/cancel":
+            return {"status": "canceled"}
+        return {}
+
+    async def notify(self, method: str, params: JsonObject | None = None) -> None:
+        """Record client notifications."""
+        self.calls.append((method, params))
+
+    async def respond(self, request_id: RpcId, result: JsonValue) -> None:
+        """Record server-request answers."""
+        self.replies.append((request_id, result))
+        if self.respond_gate is not None:
+            await self.respond_gate.wait()
+
+    async def reject(self, request_id: RpcId, code: int, message: str) -> None:
+        """Record explicit protocol rejection."""
+        self.rejections.append((request_id, code, message))
+
+    async def next_event(self) -> TransportEvent:
+        """Wait for one scripted notification or request."""
+        return await self.events.get()
+
+    async def close(self) -> None:
+        """Publish the terminal event without retaining a worker."""
+        self.close_calls += 1
+        if self.close_gate is not None:
+            await self.close_gate.wait()
+        self.closed = True
+        self.events.put_nowait(TransportClosed("closed"))
+
+
+def _run(scenario: Coroutine[object, object, None]) -> None:
+    async def bounded() -> None:
+        async with asyncio.timeout(5):
+            await scenario
+
+    asyncio.run(bounded())
+
+
+async def _events_processed() -> None:
+    # FakePeer RPCs finish immediately; let the event consumer drain its queue.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+
+def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        assert peer.started
+        assert [method for method, _ in peer.calls] == [
+            "initialize",
+            "initialized",
+            "account/read",
+            "config/read",
+            "model/list",
+            "model/list",
+        ]
+        status = [event for event in events if isinstance(event, SessionStatus)][-1]
+        assert (status.phase, status.model, status.effort, status.authenticated) == (
+            "ready",
+            "catalog-default",
+            "medium",
+            True,
+        )
+        await connection.send("確認だけ")
+        start = next(params for method, params in peer.calls if method == "thread/start")
+        assert start is not None
+        assert start["developerInstructions"] == resources.files("gigas.prompts").joinpath(
+            "play.md"
+        ).read_text(encoding="utf-8")
+        assert start["sandbox"] == "read-only"
+        assert start["approvalsReviewer"] == "user"
+        assert start["approvalPolicy"] == "on-request"
+        assert start["ephemeral"] is True
+        assert start["config"] == {"mcp_servers.existing.enabled": False}
+        turn = next(params for method, params in peer.calls if method == "turn/start")
+        assert turn == {
+            "threadId": "thread-1",
+            "input": [{"type": "text", "text": "確認だけ"}],
+            "model": "catalog-default",
+            "effort": "medium",
+        }
+        await connection.close()
+        assert peer.closed
+
+    _run(scenario())
+
+
+def test_login_is_explicit_and_completion_rechecks_account(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        assert not any(method == "account/login/start" for method, _ in peer.calls)
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "login_required"
+        with pytest.raises(CodexConnectionError):
+            await connection.send("未認証")
+        await connection.login()
+        assert any(isinstance(event, LoginEvent) for event in events)
+        assert not any(method == "thread/start" for method, _ in peer.calls)
+        peer.authenticated = True
+        peer.events.put_nowait(
+            RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
+        )
+        await _events_processed()
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        assert sum(method == "account/read" for method, _ in peer.calls) == 2
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize(("model", "effort"), [("missing", ""), ("other", "ultra")])
+def test_invalid_model_or_effort_never_starts_a_thread(
+    tmp_path: Path, model: str, effort: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path, model, effort), lambda _: None
+        )
+        with pytest.raises(CodexConnectionError):
+            await connection.open()
+        assert not any(method == "thread/start" for method, _ in peer.calls)
+        assert peer.closed
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("contents", ["", "   "])
+def test_empty_packaged_instructions_do_not_start_a_thread(
+    tmp_path: Path, monkeypatch: "MonkeyPatch", contents: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        monkeypatch.setattr(
+            "gigas.runtime.codex.connection.read_play_instructions", lambda: contents
+        )
+        with pytest.raises(CodexConnectionError):
+            await connection.send("開始")
+        assert not any(method == "thread/start" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_initialization_failure_closes_peer_without_leaking_diagnostics(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.failure = "initialize"
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        with pytest.raises(CodexConnectionError) as error:
+            await connection.open()
+        assert "PRIVATE" not in str(error.value)
+        assert "PRIVATE" not in repr(events)
+        assert peer.closed
+
+    _run(scenario())
+
+
+def test_unimplemented_auth_method_is_explicit(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path, auth_method="api_key"), lambda _: None
+        )
+        with pytest.raises(CodexConnectionError):
+            await connection.open()
+        assert not any(method == "account/login/start" for method, _ in peer.calls)
+
+    _run(scenario())
+
+
+def test_unreadable_instructions_never_reach_thread_start(
+    tmp_path: Path, monkeypatch: "MonkeyPatch"
+) -> None:
+    def unavailable() -> str:
+        message = "PRIVATE-RESOURCE-PATH"
+        raise OSError(message)
+
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        monkeypatch.setattr("gigas.runtime.codex.connection.read_play_instructions", unavailable)
+        with pytest.raises(CodexConnectionError) as error:
+            await connection.send("開始")
+        assert "PRIVATE" not in str(error.value)
+        assert not any(method == "thread/start" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_unconfirmed_policy_does_not_start_a_turn(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.responses["thread/start"] = {
+            "thread": {"id": "thread-1"},
+            "model": "catalog-default",
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "auto_review",
+            "sandbox": {"type": "readOnly"},
+        }
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        with pytest.raises(CodexConnectionError):
+            await connection.send("開始")
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+def _question(request_id: RpcId = "question-1", *, blocking: bool = True) -> ServerRequest:
+    return ServerRequest(
+        request_id,
+        "item/tool/requestUserInput",
+        {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "question-item",
+            "isBlocking": blocking,
+            "questions": [
+                {
+                    "id": "route",
+                    "header": "進路",
+                    "question": "どちらへ進むか",
+                    "isOther": True,
+                    "isSecret": False,
+                    "options": [{"label": "東", "description": "東側の道"}],
+                }
+            ],
+        },
+    )
+
+
+def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question(7))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert request.rpc_id == 7
+        assert request.kind == "question"
+        assert request.questions[0].is_other
+        assert request.questions[0].options[0].label == "東"
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "waiting"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={})
+        await connection.answer(request.token, answers={"route": "西"})
+        assert peer.replies == [(7, {"answers": {"route": {"answers": ["西"]}}})]
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert RequestResolved(request.token) in events
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("kind", ["command", "file"])
+def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/started",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "item-1",
+                        "type": "fileChange",
+                        "changes": [
+                            {"path": "save.md", "diff": "+記録", "kind": {"type": "add"}},
+                        ],
+                    },
+                },
+            )
+        )
+        params: JsonObject = {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 10,
+            "reason": "確認",
+            "command": "Get-Date",
+            "cwd": str(tmp_path),
+        }
+        if kind == "command":
+            params["environmentId"] = "local"
+            params["availableDecisions"] = [
+                "decline",
+                "cancel",
+                {"applyNetworkPolicyAmendment": {}},
+            ]
+        method = (
+            "item/commandExecution/requestApproval"
+            if kind == "command"
+            else "item/fileChange/requestApproval"
+        )
+        peer.events.put_nowait(ServerRequest("approval-1", method, params))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert not peer.replies
+        assert request.kind == kind
+        if kind == "command":
+            assert request.decisions == ("decline", "cancel")
+            assert "Get-Date" in request.details
+            assert "local" in request.details
+            with pytest.raises(CodexConnectionError):
+                await connection.answer(request.token, decision="accept")
+        else:
+            assert "save.md" in request.details
+            assert "+記録" in request.details
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token)
+        await connection.answer(request.token, decision="decline")
+        assert peer.replies == [("approval-1", {"decision": "decline"})]
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("terminal", ["resolved", "completed", "stop"])
+def test_resolved_completed_or_stopped_question_rejects_late_answers(
+    tmp_path: Path, terminal: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question(blocking=False))
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        if terminal == "resolved":
+            peer.events.put_nowait(
+                RpcNotification(
+                    "serverRequest/resolved",
+                    {
+                        "threadId": "thread-1",
+                        "requestId": "question-1",
+                    },
+                )
+            )
+        elif terminal == "completed":
+            peer.events.put_nowait(
+                RpcNotification(
+                    "turn/completed",
+                    {
+                        "threadId": "thread-1",
+                        "turn": {"id": "turn-1", "status": "completed"},
+                    },
+                )
+            )
+        else:
+            await connection.stop()
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        assert not peer.replies
+        assert not peer.rejections
+        assert RequestResolved(request.token) in events
+        if terminal == "stop":
+            assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}) in peer.calls
+            assert isinstance(events[-1], SessionStatus)
+            assert events[-1].phase == "stopping"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_unknown_and_unsupported_mcp_requests_are_explicitly_rejected(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(ServerRequest(1, "future/unknown", {}))
+        peer.events.put_nowait(
+            ServerRequest(
+                2,
+                "mcpServer/elicitation/request",
+                {
+                    "threadId": "thread-1",
+                    "serverName": "external",
+                    "mode": "openai/userVerification",
+                },
+            )
+        )
+        await _events_processed()
+        assert [request_id for request_id, _, _ in peer.rejections] == [1, 2]
+        assert not peer.replies
+        assert not any(isinstance(event, HumanRequest) for event in events)
+        await connection.close()
+
+    _run(scenario())
+
+
+def _terminal(status: str = "completed") -> RpcNotification:
+    return RpcNotification(
+        "turn/completed",
+        {"threadId": "thread-1", "turn": {"id": "turn-1", "status": status}},
+    )
+
+
+@pytest.mark.parametrize("method", ["thread/start", "turn/start"])
+def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates[method] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        send = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        await connection.stop()
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopping"
+        peer.gates[method].set()
+        await send
+        if method == "thread/start":
+            assert not any(name == "turn/start" for name, _ in peer.calls)
+        else:
+            await connection.stop()
+            assert sum(name == "turn/interrupt" for name, _ in peer.calls) == 1
+            peer.events.put_nowait(_terminal("interrupted"))
+            await _events_processed()
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_notifications_before_start_response_preserve_text_requests_and_completion(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["turn/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        send = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+        )
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/agentMessage/delta",
+                {"threadId": "thread-1", "turnId": "turn-1", "itemId": "a", "delta": "応"},
+            )
+        )
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/completed",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {"type": "agentMessage", "id": "a", "text": "応答"},
+                },
+            )
+        )
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.gates["turn/start"].set()
+        await send
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert RequestResolved(request.token) in events
+        assert TextEvent("a", "応") in events
+        assert TextEvent("a", "応答", replace=True) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, answers={"route": "東"})
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        peer.gates["account/login/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        login = asyncio.create_task(connection.login())
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.login()
+        peer.authenticated = True
+        peer.events.put_nowait(
+            RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
+        )
+        await _events_processed()
+        peer.gates["account/login/start"].set()
+        await login
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        assert not any(isinstance(event, LoginEvent) for event in events)
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        peer.events.put_nowait(TransportClosed("PRIVATE-UPSTREAM-TEXT"))
+        for _ in range(8):
+            await asyncio.sleep(0)
+        assert peer.closed
+        assert RequestResolved(request.token) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "error"
+        assert "PRIVATE" not in repr(events)
+        with pytest.raises(CodexConnectionError):
+            await connection.send("再送しない")
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("method", ["initialize", "turn/start"])
+def test_cancelled_operation_closes_owned_peer(tmp_path: Path, method: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates[method] = asyncio.Event()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        if method == "initialize":
+            operation = asyncio.create_task(connection.open())
+        else:
+            await connection.open()
+            operation = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+        assert peer.closed
+        assert sum(name == method for name, _ in peer.calls) == 1
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_close_is_shared_and_survives_caller_cancellation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.close_gate = asyncio.Event()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        first = asyncio.create_task(connection.close())
+        await _events_processed()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        second = asyncio.create_task(connection.close())
+        await _events_processed()
+        assert not second.done()
+        peer.close_gate.set()
+        await second
+        assert peer.closed
+        assert peer.close_calls == 1
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_close_cancels_login_and_never_emits_a_late_url(tmp_path: Path, pending: bool) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        if pending:
+            peer.gates["account/login/start"] = asyncio.Event()
+            login = asyncio.create_task(connection.login())
+            await _events_processed()
+            await connection.close()
+            with pytest.raises(asyncio.CancelledError):
+                await login
+            assert not any(isinstance(event, LoginEvent) for event in events)
+        else:
+            await connection.login()
+            await connection.close()
+            assert ("account/login/cancel", {"loginId": "login-1"}) in peer.calls
+        assert peer.closed
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "closed"
+
+    _run(scenario())
+
+
+def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.respond_gate = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        requests = [event for event in events if isinstance(event, HumanRequest)]
+        assert len(requests) == 1
+        answer = asyncio.create_task(connection.answer(requests[0].token, answers={"route": "東"}))
+        await _events_processed()
+        peer.events.put_nowait(_terminal())
+        peer.events.put_nowait(
+            RpcNotification(
+                "serverRequest/resolved", {"threadId": "thread-1", "requestId": "question-1"}
+            )
+        )
+        await _events_processed()
+        peer.respond_gate.set()
+        await answer
+        assert len(peer.replies) == 1
+        assert events.count(RequestResolved(requests[0].token)) == 1
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "ready"
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_terminal_status_and_late_text_do_not_masquerade_as_success(
+    tmp_path: Path, status: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_terminal(status))
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/agentMessage/delta",
+                {"threadId": "thread-1", "turnId": "turn-1", "itemId": "old", "delta": "遅い本文"},
+            )
+        )
+        await _events_processed()
+        assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == ("error" if status == "failed" else "stopped")
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("kind", "extra"),
+    [
+        ("command", {"networkApprovalContext": {"host": "example.org", "protocol": "https"}}),
+        ("command", {"additionalPermissions": {"network": {"enabled": True}}}),
+        ("command", {"kind": "writeStdin"}),
+        ("command", {"kind": "humanCommand"}),
+        ("command", {"environmentId": "remote"}),
+        ("command", {"command": None}),
+        ("command", {"cwd": None}),
+        ("file", {"grantRoot": "C:/private"}),
+        ("file", {}),
+    ],
+)
+def test_unsupported_or_incomplete_approvals_cannot_be_accepted(
+    tmp_path: Path, kind: str, extra: JsonObject
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        params: JsonObject = {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 10,
+            "command": "Get-Date",
+            "cwd": str(tmp_path),
+            "availableDecisions": ["accept", "decline", "cancel"],
+        }
+        params.update(extra)
+        method = (
+            "item/commandExecution/requestApproval"
+            if kind == "command"
+            else "item/fileChange/requestApproval"
+        )
+        if kind == "file" and "grantRoot" in extra:
+            peer.events.put_nowait(
+                RpcNotification(
+                    "item/started",
+                    {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "item": {
+                            "id": "item-1",
+                            "type": "fileChange",
+                            "changes": [
+                                {"path": "save.md", "diff": "+record", "kind": {"type": "add"}}
+                            ],
+                        },
+                    },
+                )
+            )
+        peer.events.put_nowait(ServerRequest("restricted", method, params))
+        await _events_processed()
+        assert not any(isinstance(event, HumanRequest) for event in events)
+        assert not peer.replies
+        assert [request_id for request_id, _, _ in peer.rejections] == ["restricted"]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_file_approval_preserves_change_type_and_move_target(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/started",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "type": "fileChange",
+                        "id": "file-1",
+                        "changes": [
+                            {
+                                "path": "old.txt",
+                                "diff": "-old\n+new",
+                                "kind": {"type": "update", "move_path": "new.txt"},
+                            }
+                        ],
+                    },
+                },
+            )
+        )
+        peer.events.put_nowait(
+            ServerRequest(
+                "file-approval",
+                "item/fileChange/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "startedAtMs": 1,
+                },
+            )
+        )
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert "old.txt" in request.details
+        assert "new.txt" in request.details
+        assert "update" in request.details
+        await connection.answer(request.token, decision="accept")
+        assert peer.replies == [("file-approval", {"decision": "accept"})]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_changed_file_patch_invalidates_previously_presented_approval(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/fileChange/patchUpdated",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "changes": [{"path": "a.txt", "diff": "+first", "kind": {"type": "add"}}],
+                },
+            )
+        )
+        peer.events.put_nowait(
+            ServerRequest(
+                "file-approval",
+                "item/fileChange/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "startedAtMs": 1,
+                },
+            )
+        )
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        peer.events.put_nowait(
+            RpcNotification(
+                "item/fileChange/patchUpdated",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "file-1",
+                    "changes": [{"path": "b.txt", "diff": "+different", "kind": {"type": "add"}}],
+                },
+            )
+        )
+        await _events_processed()
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(request.token, decision="accept")
+        assert RequestResolved(request.token) in events
+        assert [request_id for request_id, _, _ in peer.rejections] == ["file-approval"]
+        assert not peer.replies
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_cancel_decision_disables_other_answers_before_write_and_terminal(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.respond_gate = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+        peer.events.put_nowait(_question())
+        peer.events.put_nowait(
+            ServerRequest(
+                "approval",
+                "item/commandExecution/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "command",
+                    "startedAtMs": 1,
+                    "command": "Get-Date",
+                    "cwd": str(tmp_path),
+                    "availableDecisions": ["accept", "cancel"],
+                },
+            )
+        )
+        await _events_processed()
+        question, approval = [event for event in events if isinstance(event, HumanRequest)]
+        answer = asyncio.create_task(connection.answer(approval.token, decision="cancel"))
+        await _events_processed()
+        assert RequestResolved(question.token) in events
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopping"
+        with pytest.raises(CodexConnectionError):
+            await connection.answer(question.token, answers={"route": "東"})
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.respond_gate.set()
+        await answer
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        assert peer.replies == [("approval", {"decision": "cancel"})]
+        await connection.close()
+
+    _run(scenario())
