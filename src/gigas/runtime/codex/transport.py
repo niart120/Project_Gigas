@@ -6,6 +6,7 @@ import math
 import os
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,9 @@ class ServerRequest:
 class TransportClosed:
     """A terminal connection event.
 
+    This event closes message routing. Only a successful awaited ``close()``
+    confirms that the owned process has exited.
+
     Attributes:
         reason: Diagnostic category without payloads or stderr contents.
     """
@@ -119,8 +123,9 @@ def _decode_frame(raw: bytes) -> JsonObject:
 class StdioTransport:
     """Own one app-server process and route its newline-delimited JSON frames.
 
-    All methods must run on one asyncio event loop. Incoming frames are limited
-    to 1 MiB. This transport does not interpret or approve server requests.
+    All methods must run on one asyncio event loop. Sent and received frames,
+    including the trailing newline, are limited to 1 MiB. This transport does
+    not interpret or approve server requests.
 
     Args:
         command: Executable and arguments, passed directly without a shell.
@@ -147,6 +152,8 @@ class StdioTransport:
         self._process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task[None] | None = None
         self._stderr: asyncio.Task[None] | None = None
+        self._starting: asyncio.Task[None] | None = None
+        self._closing: asyncio.Task[None] | None = None
         self._writer_lock = asyncio.Lock()
         self._events: asyncio.Queue[TransportEvent] = asyncio.Queue()
         self._pending: dict[str, tuple[str, asyncio.Future[JsonValue]]] = {}
@@ -154,20 +161,41 @@ class StdioTransport:
         self._closed: TransportClosed | None = None
 
     async def start(self) -> None:
-        """Start the child process and its stdout and stderr readers."""
-        if self._process is not None:
-            return
+        """Start one child and its readers, sharing concurrent startup calls.
+
+        Cancelling startup waits for the created process to be cleaned up. A
+        transport that failed or was closed cannot be restarted.
+
+        Raises:
+            TransportError: Startup failed or the transport is already closed.
+        """
+        self._check_open()
+        if self._starting is None:
+            self._starting = asyncio.create_task(self._start_process(), name="gigas-codex-start")
+        try:
+            await asyncio.shield(self._starting)
+            self._check_open()
+        except (asyncio.CancelledError, TransportError):
+            await self.close()
+            raise
+
+    async def _start_process(self) -> None:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        self._process = await asyncio.create_subprocess_exec(
-            *self._command,
-            cwd=self._cwd,
-            env=os.environ | self._env,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            limit=MAX_FRAME_BYTES,
-            creationflags=flags,
-        )
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                *self._command,
+                cwd=self._cwd,
+                env=os.environ | self._env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                limit=MAX_FRAME_BYTES,
+                creationflags=flags,
+            )
+        except (OSError, ValueError, TypeError):
+            self._finish("Process start failed")
+            message = "Process start failed"
+            raise TransportError(message) from None
         self._reader = asyncio.create_task(self._read_stdout(), name="gigas-codex-stdout")
         self._stderr = asyncio.create_task(self._discard_stderr(), name="gigas-codex-stderr")
 
@@ -206,15 +234,42 @@ class StdioTransport:
                 future.exception()
 
     async def notify(self, method: str, params: JsonObject | None = None) -> None:
-        """Send a notification without expecting a response."""
+        """Send a notification without expecting a response.
+
+        Args:
+            method: Protocol method name.
+            params: Object parameters or None to send JSON null.
+
+        Raises:
+            TransportError: The connection failed or the frame is invalid.
+        """
         await self._write({"method": method, "params": params})
 
     async def respond(self, request_id: RpcId, result: JsonValue) -> None:
-        """Send a result; the connection owner must first validate request liveness."""
+        """Send a result after the owner has validated request liveness.
+
+        Args:
+            request_id: Original server request ID; booleans are invalid.
+            result: JSON result appropriate to the server request's method.
+
+        Raises:
+            TransportError: The connection failed or the frame is invalid.
+
+        The connection owner handles duplicate replies and expired requests.
+        """
         await self._write({"id": _request_id(request_id), "result": result})
 
     async def reject(self, request_id: RpcId, code: int, message: str) -> None:
-        """Send a protocol error for a server request using its original ID."""
+        """Send a protocol error without interpreting its cancellation semantics.
+
+        Args:
+            request_id: Original server request ID; booleans are invalid.
+            code: Protocol error code selected by the connection owner.
+            message: Diagnostic to transmit to the peer.
+
+        Raises:
+            TransportError: The connection failed or the frame is invalid.
+        """
         await self._write(
             {"id": _request_id(request_id), "error": {"code": code, "message": message}}
         )
@@ -231,20 +286,53 @@ class StdioTransport:
         return event
 
     async def close(self) -> None:
-        """Stop the owned child and release its reader tasks."""
-        self._finish("Transport closed")
+        """Wait for termination of the owned child and release reader tasks.
+
+        Concurrent calls share one cleanup. Cancellation of a caller does not
+        cancel cleanup; await close again before stopping the event loop. This
+        method confirms the owned child's exit, not arbitrary descendants or
+        the completion of files written by tools.
+
+        Raises:
+            TransportError: The operating system could not terminate the child.
+        """
+        if self._closing is None:
+            self._finish("Transport closed")
+            self._closing = asyncio.create_task(self._close_process(), name="gigas-codex-close")
+        await asyncio.shield(self._closing)
+
+    async def _close_process(self) -> None:
+        if self._starting is not None:
+            with suppress(TransportError):
+                await asyncio.shield(self._starting)
         process = self._process
         if process is None:
             return
         if process.stdin is not None:
             process.stdin.close()
-        if process.returncode is None:
-            process.terminate()
-        await process.wait()
         tasks = [task for task in (self._reader, self._stderr) if task is not None]
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        waiter = asyncio.create_task(process.wait(), name="gigas-codex-wait")
+        try:
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.terminate()
+            try:
+                await asyncio.wait_for(asyncio.shield(waiter), timeout=self._close_timeout)
+            except TimeoutError:
+                if process.returncode is None:
+                    with suppress(ProcessLookupError):
+                        process.kill()
+                await waiter
+            if process.stdin is not None:
+                with suppress(ConnectionError, OSError):
+                    await process.stdin.wait_closed()
+        except OSError:
+            message = "Process shutdown failed"
+            raise TransportError(message) from None
+        finally:
+            for task in (*tasks, waiter):
+                task.cancel()
+            await asyncio.gather(*tasks, waiter, return_exceptions=True)
 
     async def _write(self, frame: JsonObject) -> None:
         process = self._process
@@ -262,8 +350,7 @@ class StdioTransport:
             message = "Invalid outgoing RPC frame"
             raise TransportError(message) from None
         async with self._writer_lock:
-            if self._closed is not None:
-                raise TransportError(self._closed.reason)
+            self._check_open()
             try:
                 process.stdin.write(data)
                 await process.stdin.drain()
@@ -272,15 +359,21 @@ class StdioTransport:
                 message = "Write failed"
                 raise TransportError(message) from None
 
+    def _check_open(self) -> None:
+        if self._closed is not None:
+            raise TransportError(self._closed.reason)
+
     async def _read_stdout(self) -> None:
         process = self._process
         if process is None or process.stdout is None:
             return
         try:
             while raw := await process.stdout.readline():
-                self._route(_decode_frame(raw))
+                if self._closed is None:
+                    self._route(_decode_frame(raw))
         except (TransportError, ValueError, RecursionError):
             self._finish("Invalid RPC frame")
+            await self._discard_stream(process.stdout)
         except (ConnectionError, OSError):
             self._finish("Read failed")
         else:
@@ -332,5 +425,12 @@ class StdioTransport:
         process = self._process
         if process is None or process.stderr is None:
             return
-        while await process.stderr.read(65536):
+        await self._discard_stream(process.stderr)
+
+    @staticmethod
+    async def _discard_stream(stream: asyncio.StreamReader) -> None:
+        try:
+            while await stream.read(65536):
+                pass
+        except (ConnectionError, OSError):
             pass

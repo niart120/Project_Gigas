@@ -36,7 +36,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 |---|---|---|---|---|
 | refactor-skipped | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 実peerで文字列/整数ID、保留要求、逆順応答、通知、拒否返信を確認 |
 | refactor-done | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | EOFの全待機解放、不正frame8種、timeout/取消し、重複/未知応答、秘匿診断を確認 |
-| todo | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | Windows非表示、実process |
+| refactor-done | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | 起動/終了取消し・並行呼出し・Windows非表示・terminate/kill後waitを実peerで確認 |
 | todo | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 認証なし・無効モデル・資材失敗も対象 |
 | todo | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 明示要求schemaと拒否既定 |
 | todo | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | turn終了と中断受付を分ける |
@@ -58,6 +58,15 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - refactor-done: green後にUTF-8/行サイズ/JSONの検証を `_decode_frame` へ分離し、同じ試験が13 passed。上限は改行を含む1 MiBで送受信双方に適用する。
 - 検証: 対象pytest、ruff check/format、ty checkが成功。JSON payloadとstderrを診断へ転記せず、通常RPCエラー後は接続を継続できる。
 - commit: `fix(codex): 接続失敗と要求取消しで待機を解放する`。
+
+### T03 実行履歴
+
+- red: 起動失敗の対象pytestは、生の `FileNotFoundError` が返り公開 `TransportError` と終了イベントにならないため1 failed。
+- green: startup/cleanupを共有taskにし、起動途中のclose・取消しでも生成されたprocessを回収する。close呼出しの取消しではcleanupを取り消さず、次のcloseで同じ処理を待つ。対象試験は20 passed。
+- refactor-done: green後に閉鎖検査とpipe排出を共有処理へ整理した。終了は所有processのwait完了まで確認し、任意の子孫や書込収束を保証しない。端末イベント単独をprocess終了の根拠にはしない。
+- Windows実行: python launcherと実processのPIDを混同しないようpeerはbase interpreterを使う。非表示起動、cwd/env、320 KiBのstderr排出を確認。kill分岐はterminateだけをno-opへ故障注入し、実peerへのkillとwait完了を観測した。
+- 検証: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport` は20 passed。対象ruff check/format・ty check、`uv lock --check`、`uv build` が成功。公開型はAny/cast/ignoreを追加せず、Google style docstringで寿命・取消し・失敗契約を記載した。
+- commit: `fix(codex): 起動取消しと終了競合から子プロセスを回収する`。
 
 ## 6. 対象ファイル
 

@@ -1,7 +1,11 @@
 """Small line-oriented peer for transport integration tests."""
 
+import ctypes
 import json
+import os
 import sys
+from pathlib import Path
+from threading import Event
 
 
 def send(message: object) -> None:
@@ -78,6 +82,29 @@ def rpc_error() -> None:
     sys.stdin.read()
 
 
+def lifetime() -> None:
+    """Remain alive after stdin closes until explicitly terminated."""
+    console = False
+    if sys.platform == "win32":
+        console = bool(ctypes.windll.kernel32.GetConsoleWindow())
+    sys.stderr.write("TOP_SECRET" * 32768)
+    sys.stderr.flush()
+    send(
+        {
+            "method": "probe/started",
+            "params": {
+                "pid": os.getpid(),
+                "cwd": str(Path.cwd()),
+                "environment": os.environ.get("GIGAS_TRANSPORT_TEST"),
+                "console": console,
+            },
+        }
+    )
+    if sys.stdin.readline():
+        send({"method": "probe/held", "params": None})
+    Event().wait()
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "multiplex"
     if mode == "multiplex":
@@ -88,5 +115,7 @@ if __name__ == "__main__":
         late_response()
     elif mode == "rpc-error":
         rpc_error()
+    elif mode == "lifetime":
+        lifetime()
     else:
         invalid(mode)
