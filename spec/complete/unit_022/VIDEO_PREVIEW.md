@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（GUI結合実装済み、統合gate・実機受入待ち）**。[U03](../unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合する。
+状態: **complete（P1〜P4a・統合gate・実機受入完了）**。[U03](../unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合した。
 
 利用者は設定画面で機器の一覧を更新し、機器とモードを選んで保存する。主画面で接続し、同じ取得元から最新映像を表示する。
 
@@ -44,7 +44,7 @@ P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合�
 
 ## 7. 検証
 
-下記の対象試験・型・lintは実行済み。全体の品質gateと配布検証、代表画面、実ゲームの文字判読・比率・切断・終了は本書の実装記録時点ではnot runで、統合検証の受入条件として残す。模擬映像の描画成功は実機受入の代替にしない。
+下記の各TDD対象試験に加え、最終コードで全体の品質gate・配布検証・実機受入を実施した。`uv run pytest tests/unit tests/integration`で227件成功し、ruff format/check・ty・lock・build・隔離wheelの起動/終了も成功。[親仕様の統合gate](../unit_008/VIDEO_CAPTURE.md)に実行範囲を集約する。[実機受入記録](HARDWARE_ACCEPTANCE.md)はLive Gamer 4K 2.1系の文字判読・比率・切断・再接続・表示中終了と未検証事項を所有する。模擬映像の描画成功とは別の根拠として扱う。
 
 P1: `uv run --no-sync pytest tests/unit/test_video_settings.py tests/unit/test_settings.py tests/integration/test_settings_io.py --basetemp=tmp/pytest-video-settings -q`で設定の旧値・既定値・型/範囲・コメント・既存ファイル保護を検査。初回green34件、その後保存値が既存の整数と等しくなるbool/floatの拒否を追加した。対象ruff・tyも成功。各APIの属性説明と`docs/settings.md`へ範囲を記載した。
 
@@ -56,17 +56,19 @@ P4: `uv run --no-sync pytest tests/integration/test_video_gui.py --basetemp=tmp/
 
 P4a: 実機計測で表示30 FPSに対し約15.6 FPSの到着が観測されたため、表示の間隔判定を調査した。WindowsのPython 3.12.10では`time.get_clock_info()`が`monotonic`を`GetTickCount64()`・分解能0.015625秒、`perf_counter`を`QueryPerformanceCounter()`・分解能0.0000001秒と報告した。34 msごとのイベントでも粗い時計では31.25 msの差となり、次回表示期限33.33 msに届かず省略する。30/60 FPSに対する34/17 msのQtイベントを固定時計で60回再生する試験を追加し、変更前は両方で28枚の欠落を2回再現した。表示判定だけを`perf_counter()`へ変えた後、`uv run --no-sync pytest tests/integration/test_video_gui.py --basetemp=tmp/pytest-video-clock-green -q --tb=short`で10件成功。各イベントで最新画像を表示し、同時刻の重複イベントは抑制した。タイマーや描画処理の負荷によらず一定FPSを保証する試験ではない。実機の表示頻度改善はこの変更の試験時点では未検証で、統合検証で再測定する。
 
+P4aの最終実機再計測では、表示へ渡した新しい画像の頻度は世代1が26.33 FPS、世代2が24.04 FPSだった。修正前の約15.6 FPSからの改善を確認し、上限30 FPSに対する実測値として記録した。一定の表示速度や機器内部の遅延を保証する結果ではない。測定方法と対象条件は[実機記録](HARDWARE_ACCEPTANCE.md)を参照する。
+
 回帰は`uv run --no-sync pytest tests/integration/test_app_settings.py tests/integration/test_app_lifetime.py tests/integration/test_app_entry.py tests/integration/test_codex_gui.py tests/integration/test_video_preview.py tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-video-regression -q --tb=short`で55件成功。起動途中の失敗、設定保存の待機、終了取消し、既存Codex操作、設定選択・映像描画を検査した。
 
 型とdocstringは`CapturePort`で監視サービスの境界を定め、状態・FrameはM1の型を再利用した。GUIからのjoinは終了確認後の`join(0)`だけで、無期限joinやtype ignore・castを追加していない。`uv run --no-sync ruff check`と`uv run --no-sync ty check --no-progress`を`src/gigas/app/video.py`、`app/shell.py`、`ui/main_window.py`、`ui/video_panel.py`、新規試験に対して実行し成功。Qt既存メソッドと衝突した初回の`disconnect`・`render`はそれぞれ`disconnect_capture`・`render_state`へ修正した。利用手順は`docs/video.md`へ記載し、GUIには説明本文を追加していない。
 
 ## 8. 先送り事項
 
-観測保存・MCP・新フレーム待ちはU04、入力はU05。実機検証は本工程内の未完事項であり、後続へ移して完了扱いにしない。
+観測保存・MCP・新フレーム待ちはU04、入力はU05。実機の取得・表示・切断・再接続・終了は本工程で確認した。物理抜去・機器内部の遅延、長時間・他モード・表示倍率の網羅確認は未検証として[実機記録](HARDWARE_ACCEPTANCE.md)に残す。
 
 ## 9. 完了チェックリスト
 
 - [x] 機器非依存の設定とM1依存の結合を分けた
-- [ ] TDD項目を検証しコミットした
-- [ ] 製品gateと文書・型・docstringを確認した
-- [ ] 代表画面と必要な実機受入を実施し未確認範囲を区別した
+- [x] TDD項目を検証しコミットした
+- [x] 製品gateと文書・型・docstringを確認した
+- [x] 代表画面と必要な実機受入を実施し未確認範囲を区別した

@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（設計済み・TDD着手）**。[U03](../unit_008/VIDEO_CAPTURE.md)の取得基盤を、[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)の調査から実装する。利用者が保存された機器パスを選んで接続し、一つの取得元から最新フレームと取得状態を読めることを目的とする。
+状態: **complete（C1〜C5・配布gate・実機結合完了）**。[U03](../unit_008/VIDEO_CAPTURE.md)の取得基盤を、[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)の調査から実装した。利用者が保存された機器パスを選んで接続し、一つの取得元から最新フレームと取得状態を読めることを目的とする。
 
 ## 2. 対象範囲・対象外
 
@@ -10,7 +10,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 
 ## 3. 前提・関連文書
 
-[03](../../initial/03-game-io.md)、[02](../../initial/02-runtime.md)、[07](../../initial/07-verification.md)、M0を正本とする。OpenCV 4.14.0.94、NumPy 2.5.4、列挙1.4.0のWindows実列挙と物理機器からのBGR取得は確認済み。入力信号は黒・青のため実ゲームの画質確認は残る。
+[03](../../initial/03-game-io.md)、[02](../../initial/02-runtime.md)、[07](../../initial/07-verification.md)、M0を正本とする。OpenCV 4.14.0.94、NumPy 2.5.4、列挙1.4.0のWindows実列挙と物理機器からのBGR取得をM0で確認した。M0時点では黒・青の画像だったが、最終製品経路の実ゲーム映像は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)で確認した。
 
 ## 4. 振る舞い仕様・設計
 
@@ -48,11 +48,13 @@ C3: `uv run --no-sync pytest tests/unit/test_capture_backend.py tests/unit/test_
 
 C4: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/integration/test_capture_service.py --basetemp=tmp/pytest-capture -q` はcaptureサービス未実装importのred後、33 passed。実spawn・共有メモリ・Pipeで列挙、画像、切断直後の失効、正常release、再接続世代、終了を確認。Windowsの共有メモリattachでページ丸めがあるため有効画像範囲だけをコピーし、Pipe.pollの閉鎖例外を正常な停止として処理した。担当ruff/ty pass。試験peerを通常pytest・spawn・型検査の全経路でimportするためtests/integration/peersをpackage化し、tyのsource rootへrepo rootを追加。検査対象src/testsは維持。native APIは子、監視と共有slotは親と責務分離済みで追加refactorなし。
 
-配布物の追加検証: root担当で実wheelから機器を開かないspawn列挙・不在pathの拒否・終了を確認する予定。C1〜C5のTDDとは別の配布gateとして結果を追記する。
+配布物の追加検証: `uv run python scripts/check_package.py`でrepo外にwheelを新規インストールし、`python -I`から取得サービスを起動した。実spawnで列挙して不在pathを拒否し、監視スレッドと子の終了を確認した。物理機器は開かず、PySide6をimportせずに取得サービスを利用できた。同時にwheel/sdistの指示資材と両entry pointのGUI開閉を確認した。C1〜C5のTDDとは別の配布gateである。
 
 C5: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/integration/test_capture_failures.py tests/integration/test_capture_service.py --basetemp=tmp/pytest-capture -q` は起動期限が未実装で列挙中のままとなるred後、51 passed（単体30・実spawn結合21）。短いstartup期限の試験は子の起動期限だけを検証し、各機器呼出固着の試験では子が列挙/open/read/releaseへ到達したmarkerを確認してから停止した。read停止期限、read失敗、異常死、共有Lock保持中の死亡、force後の新世代接続、過大制御通知、列挙結果後の終了固着、spawnとLock生成失敗、画像/通知監視例外、join/親close失敗、停止Pipeのclose失敗後のforce回収を確認した。終了未確認ではサービスAPIも再受付を拒否し、未回収資源の参照を保持する。
 
-制御通知を最大64 KiBのJSON、列挙を64デバイスに制限し、サイズ上限付き受信へ変更した。フレームは共有メモリに限定する。C5の担当ruff/format/tyはpass、ignore/castは追加なし。期限、最新画像、終了回収を別メソッドへ分けた実装を確認し、green後の追加構造変更は不要と判断した。実機の映像取得・プレビュー・機器再接続はroot担当で最終版を固定後に確認する。
+制御通知を最大64 KiBのJSON、列挙を64デバイスに制限し、サイズ上限付き受信へ変更した。フレームは共有メモリに限定する。C5の担当ruff/format/tyはpass、ignore/castは追加なし。期限、最新画像、終了回収を別メソッドへ分けた実装を確認し、green後の追加構造変更は不要と判断した。最終版`f612734`を固定後にLive Gamer 4K 2.1系で列挙・実映像・切断・再接続・表示中終了を確認し、両接続ともcleanupはgraceful、最終残存子は0だった。実ドライバの固着・物理抜去は実施していない。
+
+全体のunit/integrationは227件成功、ruff format/check・ty・lock・build・差分検査も成功。具体的な統合gateと独立レビューの採否は[親仕様](../unit_008/VIDEO_CAPTURE.md)、実機条件と計測限界は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)へ集約した。
 
 ## 8. 先送り事項
 
@@ -63,4 +65,4 @@ C5: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_c
 - [x] M0の採用判断と契約を照合した
 - [x] 各TDD項目を検証しコミットした
 - [x] 型・docstring・公開docsを整合させた
-- [ ] gateと未検証事項を記録した
+- [x] gateと未検証事項を記録した
