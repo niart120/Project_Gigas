@@ -4,7 +4,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gigas.game_io.models import Frame
+    from gigas.game_io.capture.models import Frame
 
 
 class FrameStore:

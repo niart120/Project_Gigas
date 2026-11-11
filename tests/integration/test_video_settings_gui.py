@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
-from gigas.game_io.models import DeviceInfo
+from gigas.game_io.capture.models import DeviceInfo
 from gigas.storage.settings import Settings
 from gigas.ui.settings_dialog import SettingsDialog
 

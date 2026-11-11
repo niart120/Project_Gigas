@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from gigas.game_io.frames import FrameStore
-from gigas.game_io.models import CaptureError, Frame
+from gigas.game_io.capture.frames import FrameStore
+from gigas.game_io.capture.models import CaptureError, Frame
 
 
 def frame(generation: int = 1, sequence: int = 1, value: int = 2) -> Frame:

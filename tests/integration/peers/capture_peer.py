@@ -9,9 +9,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from gigas.game_io._capture_process import Channel, SharedSlot, WorkerMessage, send_message
-from gigas.game_io.backend import IndexedDevice
-from gigas.game_io.models import DeviceInfo, Frame
+from gigas.game_io.capture._process import Channel, SharedSlot, WorkerMessage, send_message
+from gigas.game_io.capture.backend import IndexedDevice
+from gigas.game_io.capture.models import DeviceInfo, Frame
 
 _original_publish = SharedSlot.publish
 

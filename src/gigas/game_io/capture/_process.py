@@ -8,16 +8,16 @@ from multiprocessing.shared_memory import SharedMemory
 from struct import Struct
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from gigas.game_io.backend import acquire_frames
-from gigas.game_io.models import CaptureError, DeviceInfo, Frame
+from gigas.game_io.capture.backend import acquire_frames
+from gigas.game_io.capture.models import CaptureError, DeviceInfo, Frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from multiprocessing.context import BaseContext
     from multiprocessing.synchronize import Lock
 
-    from gigas.game_io.backend import CaptureBackend
-    from gigas.game_io.models import CaptureOptions
+    from gigas.game_io.capture.backend import CaptureBackend
+    from gigas.game_io.capture.models import CaptureOptions
 
 _HEADER = Struct("<QQq")
 MESSAGE_LIMIT = 65536

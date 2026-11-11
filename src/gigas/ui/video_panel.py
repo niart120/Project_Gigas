@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureSnapshot
-    from gigas.game_io.models import Frame
+    from gigas.game_io.capture.models import Frame
     from gigas.storage.settings import Settings
 
 _PHASE_LABELS = {

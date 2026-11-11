@@ -6,12 +6,12 @@ import cv2
 import numpy as np
 import pytest
 
-from gigas.game_io import backend as capture_backend
-from gigas.game_io.backend import IndexedDevice, OpenCVBackend, acquire_frames
-from gigas.game_io.models import CaptureError, CaptureOptions, DeviceInfo
+from gigas.game_io.capture import backend as capture_backend
+from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend, acquire_frames
+from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
 
 if TYPE_CHECKING:
-    from gigas.game_io.models import Frame
+    from gigas.game_io.capture.models import Frame
 
 
 class Camera:

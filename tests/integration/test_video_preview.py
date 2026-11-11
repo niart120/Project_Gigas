@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
-from gigas.game_io.models import Frame
+from gigas.game_io.capture.models import Frame
 from gigas.ui.video_panel import VideoView
 
 

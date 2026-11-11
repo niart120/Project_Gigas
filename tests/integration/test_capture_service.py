@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gigas.game_io._capture_process import SharedSlot
 from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
-from gigas.game_io.models import CaptureOptions
+from gigas.game_io.capture._process import SharedSlot
+from gigas.game_io.capture.models import CaptureOptions
 from tests.integration.peers.capture_peer import PeerBackend
 
 if TYPE_CHECKING:
-    from gigas.game_io.models import Frame
+    from gigas.game_io.capture.models import Frame
 
 
 def wait_for(

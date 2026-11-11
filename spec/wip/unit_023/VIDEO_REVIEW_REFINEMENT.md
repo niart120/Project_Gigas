@@ -55,7 +55,7 @@ U04はこの共有APIの上に要求後の鮮度条件・停止状態の再確�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | R1 読み取り専用portを分け、遅い読み手が画像を保持しても取得とプレビューが進む | new/regression | integration | reader APIの欠如でred→2件green。実spawnでopen1回・同じ世代の連番進行・保持画素不変・切断時失効を確認。MCP実接続の検証ではない |
-| todo | R2 取得をcaptureパッケージへまとめる | characterization | unit/integration/package | tidy-firstとして振る舞い変更と分離。greenを確認して移動し、公開import/実spawn/配布を再検証 |
+| refactor-done | R2 取得をcaptureパッケージへまとめる | characterization | unit/integration/package | R1のgreen後に移動。公開import・取得/GUI結合を3.12/3.13で各83 passed、配布wheelのspawn/終了も成功 |
 | todo | R3 機器を一覧だけから選択し用途別の設定を明示保存する | regression | integration | パス手入力不要、未検出・同名・更新・未保存選択・既存値保護、取得寸法固定 |
 | todo | R4 表示プリセットを切り替えても取得と共有画像を変えない | new | unit/integration | 4段階・保存/再読込・画面内配置・接続中反映・表示診断除去 |
 
@@ -67,7 +67,7 @@ R1→R2を先に完了し、参照先の移動を固定してR3→R4へ進む。
 
 ## 7. 検証計画と現在地
 
-NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1の実装と下記模擬境界の自動試験を完了した。R2〜R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
+NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1/R2の実装と下記模擬境界の自動試験を完了した。R3/R4、新UIの代表画面・最終実機再確認はnot run。R1〜R4後にruff/ty、全体unit/integration、wheel smoke、参照先を検査し、Live Gamer 4K 2.1の接続・表示・再接続・終了を再確認する。Python 3.12/3.13のCIを最新HEADで通してからPRをマージする。
 
 ### R1: 読み取り専用APIと複数読み手
 
@@ -79,6 +79,18 @@ NyXとの仕様照合と現FrameStoreのロック範囲は確認済み。R1の�
 - 型/docstring: `uv run --no-sync ruff check src/gigas/game_io tests/integration/test_capture_service.py tests/integration/peers/capture_peer.py`、同範囲の`ruff format --check`、`uv run --no-sync ty check --no-progress`は成功。戻り値CaptureSnapshot、画像のNone、ロック解放と保持画像の寿命をdocstring・公開API文書で照合した。新しいAny/cast/ignoreはない。
 - tidy判断: R1は公開APIの振る舞い変更、R2の配置整理は別コミットへ分離する。reader追加は小さい委譲のみで重複整理は不要のためrefactor-skipped。GUI側の専用readerへの接続はR3で行う。
 - 独立レビュー: 製品APIに必須指摘なし。試験側Eventの8秒期限が取得待機と停止待機の合計より短いという指摘を採用し、試験の`finally`で必ず解放する待機へ修正した。対象2件を再実行して成功した。
+
+### R2: 取得パッケージの配置整理
+
+2026-11-11、R1のgreenを起点に`game_io/capture.py`を`game_io/capture/service.py`へ、backend・models・framesを同パッケージ内へ、`_capture_process.py`を`capture/_process.py`へ移動した。新しい`capture/__init__.py`で4つの公開型を再公開し、製品・試験・spawn peer・配布検証・公開API文書の参照先を統一した。旧平置きの互換shimは設けていない。取得と停止の処理・試験の期待値は変えていない。
+
+- tidy判断: R1とは独立した構造変更。人工的なredを作らず、変更前の53件greenに対して、変更後は取得系と影響するGUI/設定を合わせて83件検査した。
+- 3.12: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/unit/test_video_settings.py tests/integration/test_capture_service.py tests/integration/test_capture_failures.py tests/integration/test_video_gui.py tests/integration/test_video_preview.py tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-capture-r2-312 -q -o faulthandler_timeout=30`はPython 3.12.10で83 passed。
+- 3.13: `UV_PROJECT_ENVIRONMENT=tmp/u03/ci-python313`を指定し、同じ対象を`uv run --python 3.13 --no-sync pytest`・`--basetemp=tmp/pytest-capture-r2-313`で実行してPython 3.13.5で83 passed。
+- 配布: `uv run --no-sync python scripts/check_package.py`はsdist/wheelを作り、repo外の新規環境でresource一致、実spawnによる列挙と不存在パス拒否、子の終了、Qt非依存、module/scriptのGUI起動・終了を確認した。最初のsandbox実行は一時領域の書込拒否でbuild前に停止し、通常一時領域での再実行は成功した。機器は開いていない。
+- 型/docstring: 変更Python範囲のruff/formatと全体`ty check --no-progress`、`git diff --check`は成功。公開入口は既存サービス3型とR1のReader、値型は`capture.models`に統一した。型の緩和やignore追加はない。
+- 参照: src/tests/scripts/docs/READMEの旧`game_io.models`・`frames`・`backend`・`_capture_process`参照は0件。過去の完了仕様は当時の配置を記録する履歴として維持し、恒常設計は親作業で更新する。
+- 独立レビュー: staged 21ファイルを読み、追加必須指摘なし。処理差分は公開入口の再公開とimportのみ、spawn target・peer・故障注入先・公開説明の新配置が一致することを確認した。
 
 ## 8. 先送り事項
 

@@ -25,7 +25,7 @@ from gigas.storage.settings import Settings
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gigas.game_io.models import DeviceInfo
+    from gigas.game_io.capture.models import DeviceInfo
 
 
 class SettingsDialog(QDialog):

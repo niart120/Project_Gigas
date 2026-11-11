@@ -1,12 +1,14 @@
 # 映像取得API
 
-`gigas.game_io.models.CaptureOptions` は接続に使う機器パスと要求モードを保持します。幅は16〜3840、高さは16〜2160、取得FPSは1〜120の整数です。既定値は1920×1080・60 FPSです。値が不正なら`CaptureError`を送出します。
+取得サービスの入口は`gigas.game_io.capture`です。`CaptureService`、`CaptureReader`、`CaptureSnapshot`、`CaptureTimeouts`を公開しています。
+
+`gigas.game_io.capture.models.CaptureOptions` は接続に使う機器パスと要求モードを保持します。幅は16〜3840、高さは16〜2160、取得FPSは1〜120の整数です。既定値は1920×1080・60 FPSです。値が不正なら`CaptureError`を送出します。
 
 `DeviceInfo`は表示名とDirectShowの機器パスを持ちます。`select_device(devices, device_path)`は完全一致したパスが一つだけある場合に返し、不在・空文字列・重複は失敗します。表示名や列挙順の番号への読み替えは行いません。パスはWindowsのデバイスインターフェースの識別子であり、恒久的な物理シリアル番号ではありません。
 
 `Frame`はBGR uint8・3チャンネルの連続した`bytes`、幅・高さ、接続世代、世代内連番、UTC取得時刻、`monotonic_ns`を持つ変更不能な値です。時刻はホストで取得が完了した時点を示し、キャプチャーデバイス内部の遅延や撮像時刻を保証しません。
 
-`FrameStore`は最新1枚だけを保持します。`begin(generation)`で旧画像を消し、その世代の新しい連番だけを`publish(frame)`で受け付けます。`latest()`は`Frame | None`を返し、`invalidate()`後は次の`begin`まで画像を返しません。表示用の加工には別のバッファを使い、共有した`Frame.bgr`を変更しません。
+`gigas.game_io.capture.frames.FrameStore`は最新1枚だけを保持します。`begin(generation)`で旧画像を消し、その世代の新しい連番だけを`publish(frame)`で受け付けます。`latest()`は`Frame | None`を返し、`invalidate()`後は次の`begin`まで画像を返しません。表示用の加工には別のバッファを使い、共有した`Frame.bgr`を変更しません。
 
 取得にはWindows DirectShow、OpenCV-headless 4.14.0.94、NumPy 2.5.4、cv2-enumerate-cameras 1.4.0を使います。FourCCはデバイスの既定のままです。要求寸法と実フレーム寸法が一致しない場合や、BGR uint8・3チャンネルでない場合は接続を失敗させます。FPSプロパティは要求し、機器の報告値を実測レートと分けて扱います。名前やindexの自動フォールバック、模擬映像への切替は行いません。
 

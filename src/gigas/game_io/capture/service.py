@@ -8,18 +8,18 @@ from dataclasses import dataclass, replace
 from threading import Condition, Thread
 from typing import TYPE_CHECKING, Literal
 
-from gigas.game_io._capture_process import SharedSlot, receive_message, worker_main
-from gigas.game_io.backend import OpenCVBackend
-from gigas.game_io.frames import FrameStore
-from gigas.game_io.models import CaptureError
+from gigas.game_io.capture._process import SharedSlot, receive_message, worker_main
+from gigas.game_io.capture.backend import OpenCVBackend
+from gigas.game_io.capture.frames import FrameStore
+from gigas.game_io.capture.models import CaptureError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from multiprocessing.process import BaseProcess
 
-    from gigas.game_io._capture_process import Channel
-    from gigas.game_io.backend import CaptureBackend
-    from gigas.game_io.models import CaptureOptions, DeviceInfo, Frame
+    from gigas.game_io.capture._process import Channel
+    from gigas.game_io.capture.backend import CaptureBackend
+    from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
 
 __all__ = ["CaptureReader", "CaptureService", "CaptureSnapshot", "CaptureTimeouts"]
 

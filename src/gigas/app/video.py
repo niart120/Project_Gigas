@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from gigas.game_io.capture import CaptureService, CaptureSnapshot
-from gigas.game_io.models import CaptureError, CaptureOptions
+from gigas.game_io.capture.models import CaptureError, CaptureOptions
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
-    from gigas.game_io.models import DeviceInfo
+    from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
 
 

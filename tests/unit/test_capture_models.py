@@ -1,6 +1,6 @@
 import pytest
 
-from gigas.game_io.models import CaptureError, CaptureOptions, DeviceInfo, select_device
+from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo, select_device
 
 
 def test_selects_exact_path_despite_duplicate_names_and_changed_indices() -> None:

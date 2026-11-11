@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gigas.game_io import _capture_process as process_module
-from gigas.game_io import capture as capture_module
-from gigas.game_io._capture_process import SharedSlot
 from gigas.game_io.capture import CaptureService, CaptureTimeouts
-from gigas.game_io.models import CaptureOptions
+from gigas.game_io.capture import _process as process_module
+from gigas.game_io.capture import service as capture_module
+from gigas.game_io.capture._process import SharedSlot
+from gigas.game_io.capture.models import CaptureOptions
 from tests.integration.peers.capture_peer import (
     PeerBackend,
     hanging_after_list_worker,
@@ -22,7 +22,7 @@ from tests.integration.test_capture_service import wait_for
 if TYPE_CHECKING:
     from multiprocessing.context import BaseContext
 
-    from gigas.game_io.capture import _Session
+    from gigas.game_io.capture.service import _Session
 
 
 def test_worker_startup_deadline_invalidates_request_and_reaps_process() -> None:
