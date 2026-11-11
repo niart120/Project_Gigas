@@ -375,7 +375,9 @@ class VideoController(QObject):
             return
         self._last_failure = key
         title = f"{self._attempt_name}失敗"
-        explanation = "映像の処理に失敗しました。設定で機器と接続状態を確認してください。"
+        explanation = (
+            "映像の処理に失敗しました。詳細を確認し、設定で機器を選び直して適用してください。"
+        )
         if service_exited:
             title = "映像サービス終了"
             explanation = "映像サービスが終了しました。詳細を確認してください。"
@@ -387,7 +389,7 @@ class VideoController(QObject):
         elif self._attempt_name == "映像適用":
             explanation = (
                 "設定は保存されましたが、映像への適用に失敗しました。"
-                "設定で機器と接続状態を確認してください。"
+                "詳細を確認し、設定で機器を選び直して適用してください。"
             )
         self.failed.emit(Notice("video", title, explanation, detail))
 
