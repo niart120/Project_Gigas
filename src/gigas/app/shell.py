@@ -79,7 +79,6 @@ class ApplicationShell(QObject):
         self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
         self.video.changed.connect(self._video_changed)
-        self.video.devices_changed.connect(self._update_capture_devices)
         self.video.failed.connect(self.window.notifications.publish)
         self.confirmation: QMessageBox | None = None
         self.wait_expired = False
@@ -180,7 +179,6 @@ class ApplicationShell(QObject):
                 searching=self.video.discovering,
                 error=self.video.discovery_error,
             )
-        self._render_capture_menu()
 
     def _render_capture_menu(self) -> None:
         self.window.set_capture_devices(

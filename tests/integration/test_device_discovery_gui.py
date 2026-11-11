@@ -2,7 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Event
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
@@ -116,13 +116,19 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
     capture.state = replace(
         capture.state, devices=(DeviceInfo("Current camera", "path-b"),), devices_revision=1
     )
-    capture.stream(1)
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(lambda: dialog.capture_choices.currentText() == "Current camera")
     dialog.model.setText("unsaved")
-    dialog.capture_choices.setCurrentIndex(0)
+    dialog.tabs.setCurrentIndex(1)
+    choices = dialog.capture_choices
+    choices.showPopup()
+    choices.view().setCurrentIndex(choices.model().index(0, 0))
+    capture.stream(1)
+    qtbot.waitUntil(lambda: not shell.video.applying)
+    qtbot.keyClick(choices.view(), Qt.Key.Key_Return)
+    assert choices.currentData() == ""
     capture.stream(2, bytes([0, 255, 0]))
     view = shell.window.video.view
     qtbot.waitUntil(

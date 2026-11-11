@@ -222,12 +222,14 @@ class SettingsDialog(QDialog):
             searching: Whether enumeration is in progress.
             error: Current enumeration failure, available through notification details.
         """
-        selected = str(self.capture_choices.currentData() or "")
-        self._devices = tuple(device for device in devices if device.path)
         state = "列挙失敗" if error else "検索中" if searching else ""
         self.capture_discovery_status.setText(state)
         self.capture_discovery_status.setVisible(bool(state))
-        self._sync_capture_choice(selected)
+        devices = tuple(device for device in devices if device.path)
+        if devices != self._devices:
+            selected = str(self.capture_choices.currentData() or "")
+            self._devices = devices
+            self._sync_capture_choice(selected)
 
     def _sync_capture_choice(self, selected: str) -> None:
         with QSignalBlocker(self.capture_choices):

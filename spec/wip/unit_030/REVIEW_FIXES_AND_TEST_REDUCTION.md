@@ -31,7 +31,7 @@
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | R1: 未生成取消から最新機器／未接続へ進める | regression | integration | 既存のlatest target試験を実サービス境界へ書換え、unreleasedの誤期待を削除。2件red→関連45件green |
-| todo | R2: 初回画像で候補のキー選択を戻さない | regression | integration | 残す機器発見GUI試験を書換え |
+| refactor-done | R2: 初回画像で候補のキー選択を戻さない | regression | integration | 残す機器発見GUI試験でred→5件green。通知経路整理後28件green |
 | todo | R3: 失敗時の案内先と現UIを一致させる | review | docs/UI | 固定文言テストは作らない |
 | todo | テスト整理: 中107件と見直し8件を整理 | refactor | tests | 107件の削除をnodeidで照合。低の重複、製品外の確認も整理 |
 
@@ -50,6 +50,8 @@ src/gigas/app/video.py、shell.py、ui/settings_dialog.py、対応する既存te
 R1/R2は既存試験のred/greenを確認する。最後に収集nodeidとの差分、unit/integration全体、ruff format/check、ty、lock、build、Markdown参照とgit diff --checkを確認する。Windowsの代表操作は局所プローブで確認する。実機・外部Codexはnot run予定。
 
 R1: `uv run pytest tests/integration/test_video_application.py -k latest_target -q --tb=short`は2件ともfailedとcompleteの差でred。判定分岐を削除後、`uv run pytest tests/integration/test_video_application.py tests/integration/test_capture_failures.py tests/integration/test_capture_fallback.py -q --tb=short`は45件成功（31.25秒）。既存の終了未確認・フォールバック制約も通過。APIのcleanup説明をdocstring-styleで実装と照合し、未生成取消の意味を追記した。
+
+R2: `test_streaming_settings_use_cached_devices_without_interrupting_preview`を初回フレーム到着中のキー選択へ書換え、確定値がpath-bへ戻ることでredを確認。機器候補の再構築を変更時だけにしてdevice_discovery_guiの5件成功。green後に専用devices_changed通知を撤去し、一覧revisionも既存changedの通知判定へ統合。shellの同一イベント中のメニュー描画を一回にした。`uv run pytest tests/integration/test_device_discovery_gui.py tests/integration/test_video_application.py tests/integration/test_main_menus.py -q --tb=short`は28件成功（3.21秒）。
 
 ## 10. 先送り
 

@@ -76,7 +76,6 @@ class VideoController(QObject):
     """
 
     changed = Signal()
-    devices_changed = Signal()
     failed = Signal(object)
 
     def __init__(
@@ -107,7 +106,7 @@ class VideoController(QObject):
         self._generation = 0
         self._next_image = 0.0
         self._preview_fps = 30
-        self._last_state: tuple[str, str, str, bool, str, str] | None = None
+        self._last_state: tuple[str, str, str, bool, str, str, int] | None = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(34)
@@ -313,7 +312,6 @@ class VideoController(QObject):
             self._revision = snapshot.devices_revision
             if not enumerating:
                 self._discovery_error = ""
-            self.devices_changed.emit()
         self._notify_failure(snapshot, alive=alive)
         self._render()
         if (
@@ -333,6 +331,7 @@ class VideoController(QObject):
             alive,
             self.apply_state,
             self._request_error,
+            self._revision,
         )
         if state != self._last_state:
             self._last_state = state
