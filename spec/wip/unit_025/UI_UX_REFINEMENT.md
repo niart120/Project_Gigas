@@ -72,7 +72,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
-| todo | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。ASCII選択→emoji置換でQt位置1が文字途中になる |
+| refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
 
 ## 6. 対象ファイルと責務
 
@@ -91,6 +91,8 @@ T02: `uv run pytest tests/integration/test_transcript_reading.py -q --basetemp=t
 T02の独立レビューで、変更範囲内の端点が新しいemojiのUTF-16途中へ入る候補を指摘された。実ウィジェットで`abcd`の先頭1文字選択→`🐉XY`への置換を調べ、位置0–1のまま選択文字が空になることを確認。進行中のT03へ混ぜず、T11として回帰試験と修正を追加する。
 
 T03: 回答直後の誤った送信済み表示・解決通知での上書き・サービスの結果未通知を先にred（5 failed / 4 passed）で確認。`AnswerResult(token, outcome)`と送信失敗の`AnswerDeliveryError`を追加し、未実行の拒否・途中取消し・未接続・旧世代・サービス終了を区別した。確定結果を上書きせず、暫定unknownだけ遅延結果で確定できる。`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-review-t03`は81 passed。対象ruff/format・全体ty・差分検査成功。独立レビューで必須指摘なし。task生成直後の取消しという追加観点も検証し、未送信の1回通知を確認した。結果生成・拒否処理を共通化し、公開説明と型・docstringの契約を揃えた。green後の追加構造変更は不要と判断。
+
+T11: T03完了後に選択。`uv run pytest tests/integration/test_transcript_reading.py -q`でASCIIからemojiへの置換4例が選択文字を失うred（4 failed / 9 passed）を確認。置換範囲内の端点をUnicode文字境界へ進める最小修正により、同ファイルと`test_codex_gui.py`は25 passed。対象ruff/format・全体ty成功。変更範囲内の選択は元の文字を保持できないため、端点を収める契約をdocstringへ明記した。追加構造変更は不要。
 
 ## 8. 先送り事項
 

@@ -6,6 +6,7 @@ from pytestqt.qtbot import QtBot
 from gigas.runtime.codex.models import TextEvent
 from gigas.services.codex import ServiceEvent
 from gigas.ui.connection_panel import ConnectionPanel
+from gigas.ui.transcript import Transcript
 
 
 @pytest.fixture
@@ -140,3 +141,25 @@ def test_replacement_above_a_wrapped_view_keeps_its_visible_passage(
     assert not retained.isNull()
     top = transcript.cursorRect(retained).top()
     assert 0 <= top <= transcript.fontMetrics().lineSpacing()
+
+
+@pytest.mark.parametrize(
+    ("text", "anchor", "position"),
+    [("🐉XY", 0, 1), ("🐉XY", 1, 0), ("X🐉Y", 1, 2), ("XY🐉", 2, 3)],
+)
+def test_replacement_clamps_selection_to_complete_unicode_characters(
+    qtbot: QtBot, text: str, anchor: int, position: int
+) -> None:
+    transcript = Transcript()
+    qtbot.addWidget(transcript)
+    transcript.set_text("abcd")
+    cursor = transcript.textCursor()
+    cursor.setPosition(anchor)
+    cursor.setPosition(position, QTextCursor.MoveMode.KeepAnchor)
+    transcript.setTextCursor(cursor)
+
+    transcript.set_text(text)
+
+    cursor = transcript.textCursor()
+    assert cursor.selectedText() == "🐉"
+    assert (cursor.anchor() > cursor.position()) == (anchor > position)

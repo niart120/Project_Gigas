@@ -15,6 +15,15 @@ def _utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
+def _character_boundary(text: str, offset: int) -> int:
+    position = 0
+    for character in text:
+        if position >= offset:
+            break
+        position += 2 if ord(character) > 0xFFFF else 1
+    return position
+
+
 def _replacement(previous: str, text: str) -> tuple[int, int, str]:
     prefix = 0
     limit = min(len(previous), len(text))
@@ -49,8 +58,9 @@ class Transcript(QPlainTextEdit):
         """Update changed text and retain selection and the visible passage.
 
         Follow the new tail only when previously at the tail with no selection.
-        Selection endpoints inside the changed range are clamped to its replacement;
-        selection outside that range keeps its text and direction. The viewport
+        Selection endpoints inside the changed range are clamped to its replacement
+        and advanced to a whole Unicode character boundary; selection outside that
+        range keeps its text and direction. The viewport
         remains anchored to previously visible text outside the changed range.
 
         Args:
@@ -80,7 +90,7 @@ class Transcript(QPlainTextEdit):
                 )
             if position == end:
                 return start + inserted_length
-            return start + min(position - start, inserted_length)
+            return start + _character_boundary(inserted, position - start)
 
         anchor, position = shifted(selected.anchor()), shifted(selected.position())
         edit = QTextCursor(self.document())
