@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
@@ -56,6 +56,7 @@ class ApplicationShell(QObject):
         self.pending: str | None = None
         self.committed = False
         self._stopped = False
+        self._worker_released = False
         self._service_unavailable = False
         self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
@@ -70,10 +71,12 @@ class ApplicationShell(QObject):
         self.wait_timer.timeout.connect(self._show_wait_details)
         self.io_thread = QThread(self)
         self._worker = SettingsWorker(path, SettingsIO() if io is None else io)
-        self._worker.moveToThread(self.io_thread)
         self.requested.connect(self._worker.perform)
         self._worker.completed.connect(self._complete)
-        self.io_thread.finished.connect(self._worker.deleteLater)
+        self._worker.destroyed.connect(
+            self._settings_worker_destroyed, Qt.ConnectionType.QueuedConnection
+        )
+        self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
         self.window.close_requested.connect(self.request_close)
@@ -93,6 +96,7 @@ class ApplicationShell(QObject):
         """Display the main window."""
         self.window.show()
         fit_to_screen(self.window)
+        self._worker.moveToThread(self.io_thread)
         self.io_thread.start()
         self.service.start()
         self.video.start()
@@ -224,7 +228,7 @@ class ApplicationShell(QObject):
                         f"{'設定読込' if self.operation == 'load' else '設定保存'} · {self.path}"
                     )
                 else:
-                    if not self.io_thread.wait(0):
+                    if not self.io_thread.wait(0) or not self._worker_released:
                         targets.append(f"設定終了 · {self.path}")
                     if not self.service.wait(0):
                         targets.append("Codex終了")
@@ -317,6 +321,8 @@ class ApplicationShell(QObject):
             if self.io_thread.isRunning():
                 self.io_thread.quit()
             else:
+                if not self.io_thread.isFinished():
+                    self._worker.retire()
                 self._finish_shutdown()
         elif target == "dialog" and self.dialog is not None:
             self.dialog.hide()
@@ -345,10 +351,15 @@ class ApplicationShell(QObject):
         self._finish_shutdown()
 
     @Slot()
+    def _settings_worker_destroyed(self) -> None:
+        self._worker_released = True
+        self._finish_shutdown()
+
+    @Slot()
     def _finish_shutdown(self) -> None:
         if not self.committed or self._stopped:
             return
-        if not self.io_thread.wait(0) or not self.service.wait(0):
+        if not self.io_thread.wait(0) or not self._worker_released or not self.service.wait(0):
             QTimer.singleShot(10, self._finish_shutdown)
             return
         if not self.video.shutdown_complete:

@@ -50,6 +50,19 @@ class SettingsWorker(QObject):
         super().__init__()
         self._path = path
         self._io = io
+        self._owner_thread = self.thread()
+
+    @Slot()
+    def retire(self) -> None:
+        """Return to the creating thread before deferred QObject destruction.
+
+        Call from this worker's affinity thread after its final I/O operation.
+        Keeping destruction on the GUI thread avoids concurrent Python QObject
+        destruction and GUI signal registration competing for Qt locks and the GIL.
+        """
+        if self.thread() != self._owner_thread and not self.moveToThread(self._owner_thread):
+            return
+        self.deleteLater()
 
     @Slot(str, object)
     def perform(self, operation: str, snapshot: object) -> None:

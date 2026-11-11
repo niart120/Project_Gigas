@@ -3,7 +3,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from PySide6.QtCore import QThread, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
@@ -244,3 +244,57 @@ def test_long_wait_target_keeps_closure_controls_inside_screen(
     assert shell.window.cancel_close_button.isVisible()
     assert shell.dialog.cancel_close_button.isVisible()
     shell.cancel_close()
+
+
+def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    entered = Event()
+    release = Event()
+    events: list[tuple[str, QThread]] = []
+    gui_thread = QThread.currentThread()
+
+    def save(path: Path, settings: Settings) -> None:
+        entered.set()
+        if not release.wait(5):
+            message = "save was not released"
+            raise TimeoutError(message)
+        save_settings(path, settings)
+        events.append(("saved", QThread.currentThread()))
+
+    def destroyed() -> None:
+        events.append(("destroyed", QThread.currentThread()))
+
+    shell = ApplicationShell(tmp_path / "settings.toml", SettingsIO(load_settings, save))
+    shell._worker.destroyed.connect(destroyed, Qt.ConnectionType.DirectConnection)
+    shell.stopped.connect(lambda: events.append(("stopped", QThread.currentThread())))
+    shell.start()
+    try:
+        qtbot.waitUntil(lambda: shell.ready)
+        shell.open_settings()
+        assert shell.dialog is not None
+        shell.dialog.model.setPlainText("saved before shutdown")
+        shell.save()
+        qtbot.waitUntil(entered.is_set)
+        shell.request_close()
+        pulse = Event()
+        QTimer.singleShot(0, pulse.set)
+        qtbot.waitUntil(pulse.is_set)
+        assert shell.window.isVisible()
+        assert not events
+        release.set()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+        assert [name for name, _thread in events] == ["saved", "destroyed", "stopped"]
+        assert events[0][1] != gui_thread
+        assert events[1][1] == gui_thread
+        assert events[2][1] == gui_thread
+        assert load_settings(shell.path).model == "saved before shutdown"
+        assert shell.io_thread.wait(0)
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: shell.operation is None)
+        if shell.window.isVisible():
+            if shell.dialog is not None:
+                shell.dialog.set_values(shell.baseline)
+            shell.request_close()
+            qtbot.waitUntil(lambda: not shell.window.isVisible())
