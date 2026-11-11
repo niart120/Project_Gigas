@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（P1〜P4a・統合gate・実機受入完了、PR検証で判明したP4bの修正記録を追記）**。[U03](../unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合した。
+状態: **complete（P1〜P4a・統合gate・実機受入完了、PR検証で判明したP4bの修正記録を追記）**。[U03](../../wip/unit_008/VIDEO_CAPTURE.md)と[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)に従い、選択・接続・最新映像の表示・切断・終了をGUIへ結合した。
 
 利用者は設定画面で機器の一覧を更新し、機器とモードを選んで保存する。主画面で接続し、同じ取得元から最新映像を表示する。
 
@@ -45,7 +45,7 @@ P4では`app/video.py`の`VideoController`がGUIと取得サービスを結合�
 
 ## 7. 検証
 
-下記の各TDD対象試験に加え、P4aまでの実装で全体の品質gate・配布検証・実機受入を実施した。`uv run pytest tests/unit tests/integration`で227件成功し、ruff format/check・ty・lock・build・隔離wheelの起動/終了も成功。PRでの再検証で発見した停止とP4bの修正検証は後段に記録する。[親仕様の統合gate](../unit_008/VIDEO_CAPTURE.md)に実行範囲を集約する。[実機受入記録](HARDWARE_ACCEPTANCE.md)はLive Gamer 4K 2.1系の文字判読・比率・切断・再接続・表示中終了と未検証事項を所有する。模擬映像の描画成功とは別の根拠として扱う。
+下記の各TDD対象試験に加え、P4aまでの実装で全体の品質gate・配布検証・実機受入を実施した。`uv run pytest tests/unit tests/integration`で227件成功し、ruff format/check・ty・lock・build・隔離wheelの起動/終了も成功。PRでの再検証で発見した停止とP4bの修正検証は後段に記録する。[親仕様の統合gate](../../wip/unit_008/VIDEO_CAPTURE.md)に実行範囲を集約する。[実機受入記録](HARDWARE_ACCEPTANCE.md)はLive Gamer 4K 2.1系の文字判読・比率・切断・再接続・表示中終了と未検証事項を所有する。模擬映像の描画成功とは別の根拠として扱う。
 
 P1: `uv run --no-sync pytest tests/unit/test_video_settings.py tests/unit/test_settings.py tests/integration/test_settings_io.py --basetemp=tmp/pytest-video-settings -q`で設定の旧値・既定値・型/範囲・コメント・既存ファイル保護を検査。初回green34件、その後保存値が既存の整数と等しくなるbool/floatの拒否を追加した。対象ruff・tyも成功。各APIの属性説明と`docs/settings.md`へ範囲を記載した。
 

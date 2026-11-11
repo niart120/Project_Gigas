@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（C1〜C5・配布gate・実機結合完了）**。[U03](../unit_008/VIDEO_CAPTURE.md)の取得基盤を、[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)の調査から実装した。利用者が保存された機器パスを選んで接続し、一つの取得元から最新フレームと取得状態を読めることを目的とする。
+状態: **complete（C1〜C5・配布gate・実機結合完了）**。[U03](../../wip/unit_008/VIDEO_CAPTURE.md)の取得基盤を、[M0](../../complete/unit_020/VIDEO_CAPTURE_DESIGN.md)の調査から実装した。利用者が保存された機器パスを選んで接続し、一つの取得元から最新フレームと取得状態を読めることを目的とする。
 
 ## 2. 対象範囲・対象外
 
@@ -56,7 +56,7 @@ C5: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_c
 
 制御通知を最大64 KiBのJSON、列挙を64デバイスに制限し、サイズ上限付き受信へ変更した。フレームは共有メモリに限定する。C5の担当ruff/format/tyはpass、ignore/castは追加なし。期限、最新画像、終了回収を別メソッドへ分けた実装を確認し、green後の追加構造変更は不要と判断した。最終版`f612734`を固定後にLive Gamer 4K 2.1系で列挙・実映像・切断・再接続・表示中終了を確認し、両接続ともcleanupはgraceful、最終残存子は0だった。実ドライバの固着・物理抜去は実施していない。
 
-全体のunit/integrationは227件成功、ruff format/check・ty・lock・build・差分検査も成功。具体的な統合gateと独立レビューの採否は[親仕様](../unit_008/VIDEO_CAPTURE.md)、実機条件と計測限界は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)へ集約した。
+全体のunit/integrationは227件成功、ruff format/check・ty・lock・build・差分検査も成功。具体的な統合gateと独立レビューの採否は[親仕様](../../wip/unit_008/VIDEO_CAPTURE.md)、実機条件と計測限界は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)へ集約した。
 
 C5a: [PR #5のPython 3.13 CI](https://github.com/niart120/Project_Gigas/actions/runs/42954760949/job/130307117443)で、release固着試験が旧read通知を読んで`read != release`で失敗した。`uv run --no-sync pytest 'tests/integration/test_capture_failures.py::test_blocked_native_boundary_is_forced_closed_after_explicit_stop[hang-release]' --basetemp=tmp/pytest-capture-ci-race -q`を用い、4枚目まで取得してread通知の発行を確実に通す条件で同じ失敗をローカル再現した（1 failed）。
 
