@@ -25,7 +25,8 @@ def _die_with_lock(self: SharedSlot, frame: Frame) -> None:
 
 def _entered(marker: str, operation: str) -> None:
     if marker:
-        Path(marker + ".entered").write_text(operation, encoding="utf-8")
+        # Each boundary publishes its own flag; no reader observes overwritten content.
+        Path(marker + ".entered." + operation).touch()
 
 
 class PeerCamera:

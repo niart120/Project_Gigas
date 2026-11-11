@@ -31,6 +31,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 | refactor-skipped | C3 DirectShow取得が要求を適用し実フレーム検証と解放を行う | new | unit | 読込失敗・寸法不一致・例外 |
 | refactor-skipped | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
 | refactor-skipped | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
+| refactor-skipped | C5a 故障注入の到達通知で別の操作を誤認しない | regression | integration | read到達後のrelease待機、通知の上書き競合を除去 |
 
 一度に一項目だけをred→greenへ進め、各項目の検証と仕様状態を一つの論理コミットへまとめる。
 
@@ -55,6 +56,12 @@ C5: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_c
 制御通知を最大64 KiBのJSON、列挙を64デバイスに制限し、サイズ上限付き受信へ変更した。フレームは共有メモリに限定する。C5の担当ruff/format/tyはpass、ignore/castは追加なし。期限、最新画像、終了回収を別メソッドへ分けた実装を確認し、green後の追加構造変更は不要と判断した。最終版`f612734`を固定後にLive Gamer 4K 2.1系で列挙・実映像・切断・再接続・表示中終了を確認し、両接続ともcleanupはgraceful、最終残存子は0だった。実ドライバの固着・物理抜去は実施していない。
 
 全体のunit/integrationは227件成功、ruff format/check・ty・lock・build・差分検査も成功。具体的な統合gateと独立レビューの採否は[親仕様](../unit_008/VIDEO_CAPTURE.md)、実機条件と計測限界は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)へ集約した。
+
+C5a: [PR #5のPython 3.13 CI](https://github.com/niart120/Project_Gigas/actions/runs/42954760949/job/130307117443)で、release固着試験が旧read通知を読んで`read != release`で失敗した。`uv run --no-sync pytest 'tests/integration/test_capture_failures.py::test_blocked_native_boundary_is_forced_closed_after_explicit_stop[hang-release]' --basetemp=tmp/pytest-capture-ci-race -q`を用い、4枚目まで取得してread通知の発行を確実に通す条件で同じ失敗をローカル再現した（1 failed）。
+
+到達通知を操作ごとのファイル（`.entered.read`・`.entered.release`等）へ分離し、対象操作のファイル作成を待つよう修正した。共通ファイルの存在を別操作の到達と取り違えることと、内容の上書き中に空文字列を読む競合を除いた。同じ再現コマンドは1 passed、対象2ファイルのruff check/format・ty checkもpass。独立レビューで、先行readを踏む条件、対象operationだけの待機、既存のforce・期限・画像失効・未完release・残存子のassertが維持されていることを確認した。追加の構造変更は不要で、製品コード・依存・実機条件は変更していない。
+
+C5a後の全体再検査は別原因を調査中。独立basetempを指定した実行は226 passedと`test_tmp_path_stays_in_workspace`の固定パス期待による1 failedだった。標準basetempでのPython 3.12全体再実行は219/227付近で停止しており、固有試験の成功を全体gate成功として扱わない。Python 3.13を含む全体gateとremote CIの最終結果は親仕様へ追記する。
 
 ## 8. 先送り事項
 

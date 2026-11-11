@@ -50,7 +50,7 @@ def test_blocked_native_boundary_is_forced_closed_after_explicit_stop(
     scenario: str,
 ) -> None:
     marker = tmp_path / "release.txt"
-    entered = Path(str(marker) + ".entered")
+    entered = Path(str(marker) + ".entered." + scenario.removeprefix("hang-"))
     service = CaptureService(
         backend_factory=PeerBackend(str(marker), scenario),
         timeouts=CaptureTimeouts(startup=5, frame=5, stop=0.15, terminate=1),
@@ -62,10 +62,10 @@ def test_blocked_native_boundary_is_forced_closed_after_explicit_stop(
         else:
             assert service.connect(CaptureOptions("path-b", 16, 16))
         if scenario == "hang-release":
-            wait_for(service, lambda state: state.frame is not None)
+            # Exercise release after read has already published its own marker.
+            wait_for(service, lambda state: state.frame is not None and state.frame.sequence >= 4)
             service.disconnect()
         wait_for(service, lambda _state: entered.exists())
-        assert entered.read_text(encoding="utf-8") == scenario.removeprefix("hang-")
         before = time.monotonic()
         service.disconnect()
         assert service.snapshot().frame is None
