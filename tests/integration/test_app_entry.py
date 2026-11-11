@@ -52,7 +52,7 @@ QApplication.exec = staticmethod(run_loop)
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("failure", ["path", "before_thread", "after_thread"])
+@pytest.mark.parametrize("failure", ["path", "before_thread", "io_thread_start", "after_thread"])
 def test_startup_failure_is_diagnosed_and_cleaned_up(tmp_path: Path, failure: str) -> None:
     probe = "from gigas.app import main\n"
     if failure != "path":
@@ -61,7 +61,13 @@ from gigas.app.shell import ApplicationShell
 original_start = ApplicationShell.start
 def fail_start(self):
 """
-        if failure == "after_thread":
+        if failure == "io_thread_start":
+            probe += """
+    def fail_io_start():
+        raise RuntimeError('injected startup failure')
+    self.io_thread.start = fail_io_start
+"""
+        if failure in {"after_thread", "io_thread_start"}:
             probe += "    original_start(self)\n"
         probe += """
     raise RuntimeError('injected startup failure')

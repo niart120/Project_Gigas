@@ -20,7 +20,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "cv2-enumerate-cameras==1.4.0",
+    "numpy==2.5.4",
     "openai-codex-cli-bin==0.167.0",
+    "opencv-python-headless==4.14.0.94",
     "pyside6-essentials==6.12.0",
     "tomlkit==0.15.2",
 ]
@@ -117,7 +120,7 @@ known-first-party = ["gigas"]
 
 [tool.ty.environment]
 python-version = "3.12"
-root = ["./src"]
+root = ["./src", "."]
 
 [tool.ty.src]
 include = ["src", "tests"]
