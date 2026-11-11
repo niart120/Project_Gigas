@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
+    QLabel,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -127,7 +128,8 @@ class VideoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
-        self.status = ElidedLabel("未接続", self)
+        self.status = QLabel("未接続", self)
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.source = ElidedLabel(parent=self)
         self.status.hide()
         self.source.hide()

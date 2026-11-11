@@ -129,8 +129,10 @@ def test_automatic_discovery_preserves_edits_and_connection_uses_saved_mode(
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
+    assert dialog.capture_choices.currentData() == ""
     dialog.model.setText("unsaved model")
     dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
+    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
     assert capture.refreshes == 1
     assert not dialog.capture_refresh_button.isEnabled()
     capture.state = replace(
