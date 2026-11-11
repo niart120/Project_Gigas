@@ -15,6 +15,11 @@ def _utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
+def _paragraph_text(text: str) -> str:
+    # Qt inserts hard breaks as one paragraph separator; keep soft breaks and NBSP.
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\u2029", "\n")
+
+
 def _character_boundary(text: str, offset: int) -> int:
     position = 0
     for character in text:
@@ -62,11 +67,14 @@ class Transcript(QPlainTextEdit):
         and advanced to a whole Unicode character boundary; selection outside that
         range keeps its text and direction. The viewport
         remains anchored to previously visible text outside the changed range.
+        Hard paragraph breaks use Qt's single-character length. Soft line breaks
+        and nonbreaking spaces remain unchanged in the document.
 
         Args:
             text: Complete conversation rendered as plain text, including newlines.
         """
-        previous = self.toPlainText()
+        previous = _paragraph_text(self.document().toRawText())
+        text = _paragraph_text(text)
         if text == previous:
             return
         start, end, inserted = _replacement(previous, text)

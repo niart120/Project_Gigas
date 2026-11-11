@@ -121,6 +121,46 @@ def test_update_keeps_backward_selection_direction(panel: ConnectionPanel) -> No
     assert updated.anchor() == end
 
 
+@pytest.mark.parametrize("separator", ["\r\n", "\r", "\r\r\n", "\u2029"])
+@pytest.mark.parametrize("backward", [False, True])
+def test_paragraph_updates_preserve_selection_and_visible_history(
+    panel: ConnectionPanel, separator: str, backward: bool
+) -> None:
+    selected, visible = _select_history(panel)
+    if backward:
+        cursor = panel.transcript.textCursor()
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        cursor.setPosition(end)
+        cursor.setPosition(start, QTextCursor.MoveMode.KeepAnchor)
+        panel.transcript.setTextCursor(cursor)
+        panel.transcript.verticalScrollBar().setValue(20)
+    panel.handle_event(
+        ServiceEvent(1, TextEvent("intro", f"追加{separator}冒頭 🐉", role="user", replace=True))
+    )
+    cursor = panel.transcript.textCursor()
+    assert cursor.selectedText() == selected
+    assert (cursor.position() < cursor.anchor()) == backward
+    assert panel.transcript.cursorForPosition(QPoint(0, 0)).block().text() == visible
+    panel.handle_event(ServiceEvent(1, TextEvent("tail", "追記")))
+    assert panel.transcript.textCursor().selectedText() == selected
+
+
+@pytest.mark.parametrize("spacing", ["\u2028", "\u00a0"])
+def test_updates_keep_soft_breaks_and_nonbreaking_spaces(qtbot: QtBot, spacing: str) -> None:
+    transcript = Transcript()
+    qtbot.addWidget(transcript)
+    original = f"A{spacing}KEEP{spacing}B\n\t&nbsp;"
+    transcript.set_text(original)
+    transcript.setTextCursor(transcript.document().find("KEEP"))
+
+    transcript.set_text("new\n" + original)
+    assert transcript.textCursor().selectedText() == "KEEP"
+    transcript.set_text("new\n" + original + "\nappend")
+    assert transcript.textCursor().selectedText() == "KEEP"
+    assert transcript.document().toRawText().count(spacing) == 2
+    assert "\t&nbsp;" in transcript.toPlainText()
+
+
 def test_replacement_above_a_wrapped_view_keeps_its_visible_passage(
     panel: ConnectionPanel, qtbot: QtBot
 ) -> None:

@@ -75,7 +75,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
-| todo | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 横断レビュー後、CRLFの前置追加で選択消失を再現 |
+| refactor-skipped | T12: Qtが正規化する改行を含む本文更新でも選択・閲覧位置を保持 | regression | integration | 6 failed / 17 passed→35 passed |
 
 ## 6. 対象ファイルと責務
 
@@ -107,7 +107,7 @@ T06: `uv run --no-sync pytest tests/integration/test_video_application.py --base
 
 T06の追加redでは、未保存選択中の旧設定接続、未接続からの保存待ちを切断できない状態、未選択の明示接続、ポーリングによる切断の再無効化を確認・修正。独立レビューで旧終了未確認と新接続失敗の表示混同もredにして修正した。最終の同ファイル17 passed、関連試験97 passed、対象ruff/format・全体ty・差分検査成功。実CaptureServiceと模擬backendのspawn試験でFPS切替の解放順、新フレーム、別読み手が保持した画像の不変性を確認した。これは物理キャプチャーの実機試験とは区別する。追加構造整理は不要。
 
-横断レビューの追加観測: `before\nKEEP`の`KEEP`を選択した状態で`new\r\nbefore\nKEEP`へ更新すると、QtがCRLFを1改行へ正規化し、選択が空になることを実ウィジェットで確認した。T06へ混ぜず、そのcommit後にT12を進める。Python文字列の長さとQtへ実際に挿入される本文の差を揃える。
+T12: 横断レビューで`before\nKEEP`の`KEEP`を選択した状態から`new\r\nbefore\nKEEP`へ更新すると選択が消えることを実ウィジェットで確認。T06のcommit後、`uv run pytest tests/integration/test_transcript_reading.py -q --basetemp=tmp/pytest-t12-red --tb=short`でCRLF・ソフト改行・非改行空白を含む6 failed / 17 passedのredを確認した。本文の比較元をQtの`toRawText()`へ変え、段落改行だけを1文字へ揃えて23 passed。通常空白への置換は行わず、非改行空白とソフト改行を保持する。同ファイルと`test_codex_gui.py`は35 passed、対象ruff/format・全体ty成功。正逆の選択、閲覧位置、更新後の再追記を検証し、追加構造変更は不要。
 
 ## 8. 先送り事項
 
