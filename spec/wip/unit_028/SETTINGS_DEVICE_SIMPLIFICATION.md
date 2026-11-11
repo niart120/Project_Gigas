@@ -36,7 +36,7 @@
 |---|---|---|---|---|
 | refactor-skipped | S1 フォームは単一の編集値を保持し、一覧更新で変更せず、保存中も閉じられる | regression | integration | 既存フォーム試験を書換え |
 | refactor-skipped | S2 保存後の最新機器へ旧資源解放後に切替し、未接続は未開始の接続を取り消す | regression | integration | 既存取得制御・切替試験を書換え |
-| todo | S3 モーダルのOK／適用は保存までを共有し、接続成否と閉じる操作を分離する | regression | integration | 既存適用・保存失敗・受理試験を書換え |
+| refactor-skipped | S3 モーダルのOK／適用は保存までを共有し、接続成否と閉じる操作を分離する | regression | integration | 既存適用・保存失敗・受理試験を書換え |
 | todo | S4 設定中断・保存中の閉じる・アプリ終了で、I/Oとサービスの寿命を保つ | regression | integration | 既存終了・キーボード・復旧試験を整理 |
 
 ## 7. 設計メモ
@@ -60,6 +60,10 @@ M0の現行状態棚卸しを踏襲する。既存captureサービスの世代�
 ### S2 最新の映像反映先
 
 `uv run pytest tests/integration/test_video_application.py -q -k 'latest_target or reapplying_same' --tb=short`: 既存の一時停止・接続経路の2試験を、処理中の未接続／次機器への置換と同条件再適用へ書換え。重複切断・再接続による3件redから3件pass。最新反映先だけを保持し、接続／停止action、自動列挙予約、操作可否の重複状態を撤去。refactor-skipped。保存・失敗・実spawnの既存回帰はShell結合後に同じファイルで検証する。
+
+### S3 保存と映像反映の結合
+
+既存適用・OK試験8件を先に書換え、旧action参照による結合未対応を確認。Shellを単一のSettingsRequestへ置換し、メニュー同期・接続待ち閉じる・再読込・旧save経路を撤去した。保存ボタンsignalのboolが設定引数へ入る不具合による2件失敗を修正し、8件pass。取得・解放失敗、原本保護、実spawn、通知詳細を含む関連7ファイルの既存試験は42件pass（`uv run pytest`、`-q --tb=short`）。新規試験ファイルは追加せず、旧ラベル・一時停止・モデルレス同期だけの試験を削除した。設定から開く通知詳細はモーダルの子として到達可能にし、重複する設定ボタンを撤去。refactor-skipped。
 
 ## 10. 先送り
 

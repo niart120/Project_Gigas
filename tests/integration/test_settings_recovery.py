@@ -54,29 +54,24 @@ def test_save_error_details_remain_accessible_from_settings(
     details = shell.window.notifications.dialog
     assert details is not None
     assert details.isVisible()
-    assert not details.isModal()
+    assert details.parentWidget() is dialog
+    assert details.isModal()
     assert details.details.toPlainText() == shell.error
     assert dialog.model.text() == "edited"
 
 
-@pytest.mark.parametrize("operation", ["save", "load"])
 def test_form_details_keep_current_error_after_another_settings_failure(
     controlled: tuple[ApplicationShell, ControlledIO],
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
-    operation: str,
 ) -> None:
     shell, io = controlled
     dialog = shell.dialog
     assert dialog is not None
-    if operation == "save":
-        io.fail = True
-        io.release.set()
-        dialog.model.setText("edited")
-        dialog.save_button.click()
-    else:
-        shell.path.write_text("[broken", encoding="utf-8")
-        shell.window.reload_action.trigger()
+    io.fail = True
+    io.release.set()
+    dialog.model.setText("edited")
+    dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     original = shell.window.notifications.notices["settings"]
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda _url: False)

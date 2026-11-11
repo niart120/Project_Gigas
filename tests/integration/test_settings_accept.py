@@ -1,4 +1,3 @@
-from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -10,22 +9,16 @@ from tests.integration.test_settings_apply_contract import (
 from tests.integration.test_settings_apply_contract import open_editor
 
 
-def test_ok_waits_for_first_frame_before_closing(
+def test_ok_closes_after_save_before_first_frame(
     app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
     dialog.ok_button.click()
-    qtbot.waitUntil(lambda: len(capture.connections) == 1)
-    assert dialog.isVisible()
-    assert not dialog.closing_allowed
-    dialog.close()
-    qtbot.keyClick(dialog, Qt.Key.Key_Escape)
-    assert dialog.isVisible()
-    assert shell.confirmation is None
-    capture.stream()
     qtbot.waitUntil(lambda: not dialog.isVisible())
+    assert load_settings(shell.path).capture_device == "path-b"
+    assert capture.snapshot().phase == "connecting"
     assert shell.window.isVisible()
 
 
@@ -46,7 +39,7 @@ def test_cancel_discards_only_edits_since_last_apply(
     assert dialog.model.text() == "applied"
 
 
-def test_failed_ok_does_not_close_on_later_apply_retry(
+def test_connection_failure_keeps_saved_choice_and_apply_retry_open(
     app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = app
@@ -55,8 +48,9 @@ def test_failed_ok_does_not_close_on_later_apply_retry(
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
     dialog.ok_button.click()
     qtbot.waitUntil(lambda: shell.video.apply_state == "failed")
-    assert dialog.isVisible()
-    assert dialog.closing_allowed
+    assert not dialog.isVisible()
+    dialog = open_editor(shell, capture)
+    assert dialog.capture_choices.currentData() == "path-b"
     capture.accept_connection = True
     dialog.save_button.click()
     qtbot.waitUntil(lambda: len(capture.connections) == 1)
@@ -65,30 +59,7 @@ def test_failed_ok_does_not_close_on_later_apply_retry(
     assert dialog.isVisible()
 
 
-def test_stopping_ok_clears_automatic_close_and_unstarted_target(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
-) -> None:
-    shell, capture = app
-    dialog = open_editor(shell, capture)
-    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
-    dialog.ok_button.click()
-    qtbot.waitUntil(lambda: len(capture.connections) == 1)
-    shell.window.video.disconnect_action.trigger()
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    if capture.snapshot().phase == "enumerating":
-        capture.complete_enumeration()
-        shell.video.timer.timeout.emit()
-    assert dialog.isVisible()
-    assert dialog.capture_target == ""
-    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: len(capture.connections) == 2)
-    capture.stream()
-    qtbot.waitUntil(lambda: not shell.video.applying)
-    assert dialog.isVisible()
-
-
-def test_ok_without_changes_closes_without_save_or_connection(
+def test_ok_without_changes_starts_selected_device_without_resaving(
     app: tuple[ApplicationShell, ControlledCapture],
 ) -> None:
     shell, capture = app
@@ -98,4 +69,4 @@ def test_ok_without_changes_closes_without_save_or_connection(
     assert not dialog.isVisible()
     assert shell.operation is None
     assert shell.path.stat().st_mtime_ns == original
-    assert not capture.connections
+    assert len(capture.connections) == 1
