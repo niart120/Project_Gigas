@@ -34,7 +34,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 認証不要peerプロセス、単一reader |
+| refactor-skipped | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 実peerで文字列/整数ID、保留要求、逆順応答、通知、拒否返信を確認 |
 | todo | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | payloadを例外へ漏らさない |
 | todo | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | Windows非表示、実process |
 | todo | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 認証なし・無効モデル・資材失敗も対象 |
@@ -42,6 +42,14 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | todo | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | turn終了と中断受付を分ける |
 
 各itemをred→green→必要なrefactor→検証→commitの順に進め、履歴を本書へ記録する。固定語句の文書検査は製品テストにしない。
+
+### T01 実行履歴
+
+- red: `uv run pytest tests/integration/test_codex_transport.py -q` は `gigas.runtime` 未実装の `ModuleNotFoundError` で失敗した。
+- green: 単一stdout reader、要求別Future、writer lock、IDを保持するserver request/notification、結果・拒否返信を追加。同じpytestは1 passed。
+- 検証: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport`、対象5ファイルのruff check/format、ty checkが成功。実peerは認証不要で、実Codex受入の代替ではない。
+- refactor-skipped: transport/peer/公開イベント型の境界を確認し、追加の構造変更は不要。EOF・timeout・取消しはT02、部分起動と終了保証はT03で続ける。
+- commit: `feat(codex): 単一受信のstdio接続で要求と通知を振り分ける`。
 
 ## 6. 対象ファイル
 
