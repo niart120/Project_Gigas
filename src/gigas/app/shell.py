@@ -97,7 +97,6 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
-        self.window.settings_location_action.triggered.connect(self._open_settings_location)
         self.window.video_menu_opened.connect(self.refresh_video_devices)
         self.window.capture_device_requested.connect(self._select_video_device)
         self.window.window_size_requested.connect(self.change_window_size)
@@ -223,6 +222,7 @@ class ApplicationShell(QObject):
             self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
             self.dialog.error_details_button.clicked.connect(self._show_settings_error)
+            self.dialog.open_folder_button.clicked.connect(self._open_settings_location)
         if self.dialog.isVisible():
             self.dialog.raise_()
             self.dialog.activateWindow()
@@ -238,14 +238,14 @@ class ApplicationShell(QObject):
 
     def _open_settings_location(self) -> None:
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent))):
-            self.window.notifications.publish(
-                Notice(
-                    "settings",
-                    "設定フォルダーを開けない",
-                    "設定フォルダーを開けませんでした。パスとフォルダーの存在を確認してください。",
-                    str(self.path.parent),
-                )
+            notice = Notice(
+                "settings",
+                "設定フォルダーを開けない",
+                "設定フォルダーを開けませんでした。パスとフォルダーの存在を確認してください。",
+                str(self.path.parent),
             )
+            self.window.notifications.publish(notice)
+            self.window.notifications.show_snapshot(notice, parent=self.dialog)
 
     def _show_settings_error(self) -> None:
         notice = self._settings_error_notice or self.window.notifications.notices.get("video")

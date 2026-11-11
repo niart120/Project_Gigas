@@ -56,7 +56,12 @@ class SettingsDialog(QDialog):
         general_form = self._tab("一般")
         self.location = QLineEdit(str(path), self)
         self.location.setReadOnly(True)
-        general_form.addRow("設定ファイル", self.location)
+        location_row = QHBoxLayout()
+        location_row.addWidget(self.location, 1)
+        self.open_folder_button = QPushButton("フォルダを開く", self)
+        self.open_folder_button.setAutoDefault(False)
+        location_row.addWidget(self.open_folder_button)
+        general_form.addRow("設定ファイル", location_row)
         display_form = self._group(general_form, "表示")
         self.window_size_preset = QComboBox(self)
         for preset in WINDOW_SIZE_PRESETS:

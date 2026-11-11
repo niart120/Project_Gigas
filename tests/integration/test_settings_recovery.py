@@ -19,7 +19,7 @@ from tests.integration.test_settings_apply_contract import (
 
 
 @pytest.mark.parametrize("succeeds", [False, True])
-def test_settings_location_menu_opens_own_directory_and_reports_failure(
+def test_settings_location_opens_own_directory_and_reports_failure(
     app: tuple[ApplicationShell, ControlledCapture],
     monkeypatch: pytest.MonkeyPatch,
     succeeds: bool,
@@ -32,9 +32,17 @@ def test_settings_location_menu_opens_own_directory_and_reports_failure(
         return succeeds
 
     monkeypatch.setattr(QDesktopServices, "openUrl", open_url)
-    shell.window.settings_location_action.trigger()
+    shell.open_settings()
+    assert shell.dialog is not None
+    shell.dialog.open_folder_button.click()
     assert opened == [shell.path.parent]
     assert ("settings" in shell.window.notifications.notices) is not succeeds
+    if not succeeds:
+        details = shell.window.notifications.dialog
+        assert details is not None
+        assert details.isVisible()
+        assert details.parentWidget() is shell.dialog
+        assert details.details.toPlainText() == str(shell.path.parent)
 
 
 def test_save_error_details_remain_accessible_from_settings(
@@ -75,9 +83,15 @@ def test_form_details_keep_current_error_after_another_settings_failure(
     qtbot.waitUntil(lambda: shell.operation is None)
     original = shell.window.notifications.notices["settings"]
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda _url: False)
-    shell.window.settings_location_action.trigger()
+    shell.open_settings()
+    assert shell.dialog is not None
+    shell.dialog.open_folder_button.click()
     latest = shell.window.notifications.notices["settings"]
     assert latest is not original
+    details = shell.window.notifications.dialog
+    assert details is not None
+    assert details.notice is latest
+    details.close()
 
     dialog.error_details_button.click()
 

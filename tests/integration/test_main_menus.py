@@ -103,19 +103,6 @@ def test_status_region_keeps_short_state_when_splitter_is_dragged_to_the_edge(qt
     assert region.rect().contains(window.video.status.geometry())
 
 
-def test_recovery_menu_actions_can_be_bound_without_statusbar_controls(qtbot: QtBot) -> None:
-    window = MainWindow()
-    qtbot.addWidget(window)
-    actions = (window.settings_location_action,)
-    triggered: list[object] = []
-    for action in actions:
-        assert action in window.file_menu.actions()
-        action.triggered.connect(lambda _checked=False, selected=action: triggered.append(selected))
-        action.trigger()
-    assert triggered == list(actions)
-    assert not window.statusBar().findChildren(QPushButton)
-
-
 def test_file_and_codex_menus_use_live_actions_and_exit_lifetime(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:

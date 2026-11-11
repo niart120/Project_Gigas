@@ -117,7 +117,6 @@ class MainWindow(QMainWindow):
         self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
-        self.settings_location_action = self.file_menu.addAction("設定ファイルの場所を開く")
         self.file_menu.addSeparator()
         self.exit_action = self.file_menu.addAction("終了")
         self.exit_action.triggered.connect(self.close)

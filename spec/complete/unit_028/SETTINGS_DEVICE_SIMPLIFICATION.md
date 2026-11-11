@@ -2,7 +2,7 @@
 
 ## 1. 概要・起点
 
-状態: **wip**。[unit_027 M1](../unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のユーザー指示により、合意したM0の操作を実装する。既存状態に分岐を追加して温存せず、旧経路とそれを固定する試験を整理する。
+状態: **complete**。[unit_027 M1](../../wip/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)の子仕様。2026-11-11のユーザー指示により、合意したM0の操作を実装する。既存状態に分岐を追加して温存せず、旧経路とそれを固定する試験を整理する。
 
 ## 2. 対象範囲
 
@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[親仕様](../unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[初期I/O設計](../../initial/03-game-io.md)、[実装計画](../../initial/05-implementation.md)、[前回実装記録](../../complete/unit_026/SETTINGS_AND_STATUS_REDESIGN.md)を参照する。M0の操作仕様は記録済み、製品実装の検証は本書で行う。
+[親仕様](../../wip/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[初期I/O設計](../../initial/03-game-io.md)、[実装計画](../../initial/05-implementation.md)、[前回実装記録](../unit_026/SETTINGS_AND_STATUS_REDESIGN.md)を参照する。M0の操作仕様は記録済み、製品実装の検証は本書で行う。
 
 ## 5. 振る舞いと試験の整理
 
@@ -38,7 +38,7 @@
 | refactor-skipped | S2 保存後の最新機器へ旧資源解放後に切替し、未接続は未開始の接続を取り消す | regression | integration | 既存取得制御・切替試験を書換え |
 | refactor-skipped | S3 モーダルのOK／適用は保存までを共有し、接続成否と閉じる操作を分離する | regression | integration | 既存適用・保存失敗・受理試験を書換え |
 | refactor-done | S4 設定中断・保存中の閉じる・アプリ終了で、I/Oとサービスの寿命を保つ | regression | integration | 既存終了・キーボード・復旧試験を整理 |
-| todo | S5 設定パスの隣から保存フォルダーを開き、失敗詳細を確認できる | regression | integration | 追加指示による入口移動。既存復旧試験を書換え、メニュー配線だけの試験を削除 |
+| refactor-skipped | S5 設定パスの隣から保存フォルダーを開き、失敗詳細を確認できる | regression | integration | 追加指示による入口移動。既存復旧試験を書換え、メニュー配線だけの試験を削除 |
 
 ## 7. 設計メモ
 
@@ -76,6 +76,14 @@ M0の現行状態棚卸しを踏襲する。既存captureサービスの世代�
 
 ユーザー指示により「設定ファイルの場所を開く」を主画面メニューから設定の一般タブへ移す。既存の読み取り専用・コピー可能なパス欄の隣に「フォルダを開く」を置く。ファイル選択による保存先切替は追加しない。保存中・読込失敗中も場所は参照でき、開けない場合は同じ設定画面から詳細を確認できる。元の機能は前回改修の`fb596fc`で導入されたもの。
 
+### S5 入口の移動と最終確認
+
+既存のフォルダー操作・失敗詳細試験を新しいボタンへ書き換え、未実装の入口による3件失敗／2件成功から5件成功を確認した。旧メニューの配線だけを確認する1件は削除。refactor-skipped（入口移動だけで独立した構造整理は不要）。`uv run pytest tests/integration/test_settings_recovery.py tests/integration/test_main_menus.py tests/integration/test_keyboard_workflow.py tests/integration/test_video_settings_gui.py -q --tb=short`は38件成功。全体513件成功後の変更に対応する範囲を再検証した。現在の収集件数は512件（開始時556件から44件減）。
+
+追加変更後もruff format/check、ty、build、diff --checkが成功。Windows Qtで一般タブを表示し、パスとボタンの配置、編集禁止中も場所を開けることを確認した。OSのフォルダー起動は既存のQDesktopServices呼出しを維持し、試験では成功／失敗を代替応答で確認した。実Explorer起動は未実施。
+
+自己レビューでは、公開メソッドの型・docstringと利用者向けdocsを照合した。互換用の旧経路やAny／type ignoreは追加せず、captureの公開サービス契約・依存・パッケージメタデータは維持。文書のローカル参照、unitの一意性、仮テキストを確認した。全体UI/UXとM2へ範囲を広げていない。
+
 ## 10. 先送り
 
 親M2の映像情報・専用計測・回答カード・旧公開機器helper。全体UI/UXはジャーナルの別議論、物理入力の即時停止はU05。
@@ -83,6 +91,6 @@ M0の現行状態棚卸しを踏襲する。既存captureサービスの世代�
 ## 11. 完了チェックリスト
 
 - [x] 操作契約と既存試験の書換え・削除方針を記録した
-- [ ] S1〜S4を実装し、不要状態・旧経路を撤去した
-- [ ] 対応する既存試験・利用者docsを更新した
-- [ ] 品質gate・代表画面・未検証事項を記録した
+- [x] S1〜S5を実装し、不要状態・旧経路を撤去した
+- [x] 対応する既存試験・利用者docsを更新した
+- [x] 品質gate・代表画面・未検証事項を記録した
