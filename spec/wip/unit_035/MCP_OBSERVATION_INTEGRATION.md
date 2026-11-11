@@ -25,7 +25,7 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 - snapshotを一度採用し、新フレームを待たない。ObservationはPNG bytes・出力形式と寸法・ID・元FrameのUTC/世代/連番/寸法を持ち、Frame本体を保持しない。オリジナル/FullHD（既定）/HDのみ。比率維持縮小、拡大なし。確定後は再加工しない。
 - 同じ画像とIDをMCPへ包装し、アプリが非同期保存する。保存開始・完了・進行でMCP応答と次観測を待たせない。保存失敗は独立して既存通知・詳細へ報告する。通常終了で進行中の保存を回収するが、障害時の無損失は保証しない。
 - 保存形式は新契約へ直接変更する。画像の並列書込は可能で、直列／並列は実装時に選ぶ。プロセスロックとアプリ内の同期を混同せず、共有JSONLの採番・追記を保護する。
-- 設定は既存映像タブの観測解像度とTOML observation.resolutionへ統合する。適用済み設定を観測開始時に一度読む。変更だけで取得元・Codexを再接続しない。
+- 設定は既存I/Oタブの映像入力グループの観測解像度とTOML observation.resolutionへ統合する。適用済み設定を観測開始時に一度読む。変更だけで取得元・Codexを再接続しない。
 - プロジェクトメニューは新規作成・開く。前回パス一件を復元する。未選択チャットはアプリデータ配下chatsへ永続保存する。同じwriterを使い、接続中に保存先を差し替えない。
 - 接続ごとのloopback HTTP/Bearerを既存サービス用ループで所有し、切断で旧受付を閉じる。MCPはwriterを所有しない。thread/startは永続化し、実thread IDと記録先を結ぶ。画像応答と実モデル受信は別に検証する。
 
@@ -54,7 +54,11 @@ src/gigas/game_io/observation.py、services/observation.py、storage/project.py�
 
 ## 9. 検証
 
-開始時にコード・試験・Gitを確認。実装テストはまだnot run。各項目のred/greenコマンド・結果をここへ記録する。
+開始時にコード・試験・Gitを確認。各項目のred/greenコマンド・結果をここへ記録する。
+
+- R02/R04監査: FakePeer＋実Connectionで両方未修正を再現。R02はthread/start保留中の停止でturn/startなしなのにQt原稿が消える。R04はfailed終端後もpeerは開いているが次の明示送信が拒否される。既存関連単体試験4 passed, 45 deselectedはこの問題を捕捉していない。実runtime再現ではない。
+- 隔離runtime調査: `uv run python -X utf8 tmp/m2-thread-persistence-probe.py`。同梱0.167.0へinitialize→thread/start(ephemeral:false)→EOF終了→再起動→thread/read(includeTurns:true)を実行し、同ID/cwd・空turnsを取得できた。開始直後の同readは-32601（list_turns is not supported yet）。隔離HOMEに明示したfake bearer文字列は残らなかった。認証・モデル呼出しなし、無効化したMCP設定・空threadのみであり、有効MCP/実会話の秘密値非保存や復元を証明しない。証拠はignored tmp/m2-thread-persistence-70_jf54s/results.json。製品構成での検証はM2-07/08に残す。
+- `uv lock --check`: 成功（開始時依存55件、依存変更なし）。
 
 必要gate: uv sync --dev、uv lock --check、ruff format/check、ty、unit/integration、uv build、git diff --check。公開APIの型・docstring・利用者docsを照合する。実HTTP・実Codex・実機は別結果として記録する。
 
