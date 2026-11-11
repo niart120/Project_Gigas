@@ -91,6 +91,7 @@ def acquire_frames(
     stopped: "Callable[[], bool]",
     publish: "Callable[[Frame], None]",
     opened: "Callable[[float | None], None]",
+    released: "Callable[[], None] | None" = None,
 ) -> None:
     """Resolve a device, acquire validated frames, and always release its handle.
 
@@ -101,6 +102,7 @@ def acquire_frames(
         stopped: Nonblocking cancellation check, including after a blocking read.
         publish: Receives each valid frame; may skip it if the reader is busy.
         opened: Receives device-reported FPS, or None for an unavailable value.
+        released: Optional notification after the native release returned normally.
 
     Raises:
         CaptureError: Selection, opening, reading, or the actual frame format fails.
@@ -151,3 +153,5 @@ def acquire_frames(
             )
     finally:
         camera.release()
+        if released is not None:
+            released()

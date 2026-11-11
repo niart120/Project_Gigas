@@ -29,7 +29,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 | refactor-skipped | C1 設定値を検査し機器パスで一意に選択する | new | unit | 同名・空ID・不在・重複・無効モード |
 | refactor-skipped | C2 最新1枚の画像・連番・時計を加工から保護する | new | unit | 受信停止と再接続世代 |
 | refactor-skipped | C3 DirectShow取得が要求を適用し実フレーム検証と解放を行う | new | unit | 読込失敗・寸法不一致・例外 |
-| todo | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
+| refactor-skipped | C4 spawn取得・列挙と正常停止を監視する | new | integration | 模擬機器境界を子で使用、実IPCと終了確認 |
 | todo | C5 open/read/release固着・異常終了・ロック保持中死亡から有限終了する | edge | integration | 古い画像の失効、再接続、強制終了を区別 |
 
 一度に一項目だけをred→greenへ進め、各項目の検証と仕様状態を一つの論理コミットへまとめる。
@@ -45,6 +45,10 @@ C1: `uv run --no-sync pytest tests/unit/test_capture_models.py --basetemp=tmp/py
 C2: `uv run --no-sync pytest tests/unit/test_capture_frames.py tests/unit/test_capture_models.py --basetemp=tmp/pytest-capture -q` は未実装importによるred後、21 passed。最新1枚・加工分離・時計保持・切断と旧世代の拒否を確認。担当ruff/tyはpass。責務はFrameと共有slotに分離済みのため追加refactorなし。
 
 C3: `uv run --no-sync pytest tests/unit/test_capture_backend.py tests/unit/test_capture_frames.py tests/unit/test_capture_models.py --basetemp=tmp/pytest-capture -q` はbackend未実装importのred後、30 passed。DirectShow明示・pathなし除外・要求モード・BGR検査・停止中read結果の破棄・例外時releaseを模擬境界で確認。担当ruff/ty pass、`uv lock --check` pass、`uv build`でwheel/sdist生成成功。依存はOpenCV-headless 4.14.0.94・NumPy 2.5.4・列挙1.4.0を固定。型境界はCamera/CaptureBackend Protocol、画像境界はobjectからNumPy実値を検査し、ignore/castなし。追加refactor不要。実機openは実行していない。
+
+C4: `uv run --no-sync pytest tests/unit/test_capture_models.py tests/unit/test_capture_frames.py tests/unit/test_capture_backend.py tests/integration/test_capture_service.py --basetemp=tmp/pytest-capture -q` はcaptureサービス未実装importのred後、33 passed。実spawn・共有メモリ・Pipeで列挙、画像、切断直後の失効、正常release、再接続世代、終了を確認。Windowsの共有メモリattachでページ丸めがあるため有効画像範囲だけをコピーし、Pipe.pollの閉鎖例外を正常な停止として処理した。担当ruff/ty pass。試験peerを通常pytest・spawn・型検査の全経路でimportするためtests/integration/peersをpackage化し、tyのsource rootへrepo rootを追加。検査対象src/testsは維持。native APIは子、監視と共有slotは親と責務分離済みで追加refactorなし。
+
+配布物の追加検証: root担当で実wheelから機器を開かないspawn列挙・不在pathの拒否・終了を確認する予定。C1〜C5のTDDとは別の配布gateとして結果を追記する。
 
 ## 8. 先送り事項
 
