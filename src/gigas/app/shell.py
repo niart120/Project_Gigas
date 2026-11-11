@@ -65,6 +65,7 @@ class ApplicationShell(QObject):
         self._refresh_on_open = False
         self._refresh_menu_on_open = False
         self._capture_after_save: Settings | None = None
+        self._menu_target_after_save: str | None = None
         self._applying_settings = False
         self._close_after_apply = False
         self._settings_saved = False
@@ -147,6 +148,7 @@ class ApplicationShell(QObject):
             refresh_devices: Discover once after an explicit UI disconnection.
         """
         self._capture_after_save = None
+        self._menu_target_after_save = None
         self._applying_settings = False
         self._close_after_apply = False
         self._refresh_on_open = False
@@ -302,8 +304,12 @@ class ApplicationShell(QObject):
 
         Args:
             settings: Menu-selected snapshot, rejected while the editor is dirty.
-                An empty device requests disconnection without forgetting the saved
-                device. None uses the editor's separate target, or the active target.
+                An empty device clears the saved selection before disconnecting.
+                A successful save also updates the editor's requested target unless
+                a stop or application close has cancelled that request.
+                None uses the editor's values and separate target, or the baseline
+                settings and active target when no editor exists. A temporary stop
+                that retains the saved device uses ``disconnect_video`` instead.
             close_after: Close the settings dialog only after saving and any capture
                 transition succeed. Any failure or explicit stop discards this intent.
 
@@ -330,8 +336,7 @@ class ApplicationShell(QObject):
             if self.dialog is not None
             else self._active_capture_device
         )
-        if settings is not None and not path:
-            target = replace(target, capture_device=self.baseline.capture_device)
+        self._menu_target_after_save = path if settings is not None else None
         capture_target = replace(target, capture_device=path)
         self._capture_after_save = capture_target if self._capture_differs(capture_target) else None
         self._refresh_on_open = False
@@ -341,6 +346,9 @@ class ApplicationShell(QObject):
             self._request("save", settings=target)
         else:
             capture_target, self._capture_after_save = self._capture_after_save, None
+            if self.dialog is not None and self._menu_target_after_save is not None:
+                self.dialog.set_capture_target(self._menu_target_after_save)
+            self._menu_target_after_save = None
             if capture_target is not None:
                 self.video.apply_capture(capture_target)
             self._finish_settings_apply()
@@ -470,6 +478,7 @@ class ApplicationShell(QObject):
         operation = self.operation
         self.operation = None
         capture_target, self._capture_after_save = self._capture_after_save, None
+        menu_target, self._menu_target_after_save = self._menu_target_after_save, None
         if result.settings is not None:
             self.baseline = result.settings
             self.ready = True
@@ -478,6 +487,8 @@ class ApplicationShell(QObject):
                 self.dialog.set_values(result.settings, preserve_target=operation == "save")
                 if operation == "load":
                     self.dialog.set_capture_target(self._active_capture_device)
+                elif menu_target is not None:
+                    self.dialog.set_capture_target(menu_target)
             self.video.set_preview_fps(self.baseline.preview_fps)
             self.window.video.view.set_letterbox(self.baseline.preview_letterbox)
             if self.window.current_window_size_preset != self.baseline.window_size_preset:
@@ -643,6 +654,7 @@ class ApplicationShell(QObject):
     def request_close(self) -> None:
         """Interrupt the turn, then finish settings and service shutdown."""
         self._capture_after_save = None
+        self._menu_target_after_save = None
         self._applying_settings = False
         self._close_after_apply = False
         self._refresh_on_open = False

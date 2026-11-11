@@ -315,3 +315,11 @@ test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始
 ### A6 映像情報
 
 test_video_informationは未実装の4件red→4件green。表示メニューから現在の要求値・実到着・API・途中失敗・世代・終了状態の固定snapshotを開く。撮像操作と失敗通知を発生させず、コピー中に更新せず、再表示で更新する。関連65件成功、担当ruff/format/ty・diffcheck成功。offscreen620×440の内容・閉じるボタンを目視確認。refactor-skipped。主画面への寸法・FPS常設は行わない。
+
+### A7 メニュー選択と設定の同期
+
+test_settings_source_menuの3件red/1件pass→4件green。メニューの明示未接続も設定画面と同じく保存機器を空にし、一時停止だけは保存しない。開いている設定画面との同期漏れを追加3件red/3件pass→6件greenで修正し、保存成功後だけ選択を同期、保存失敗では保持、保存中の停止で同期予定も破棄する。関連62件成功、担当ruff/format/ty・diffcheck成功。refactor-skipped。
+
+### 全体回帰の旧UI契約移行
+
+全体試験で見つかった旧契約4箇所を、明示未接続・アプリ全体の終了確認・保存中Cancel禁止・メニューaction識別へ移行。対象test_device_discovery_gui/test_keyboard_workflow/test_main_menus/test_ui_control_lifetimeは38件成功。未保存値・既存中断・停止経路の保証を残し、製品不具合のred→greenとは扱わない。
