@@ -3,7 +3,9 @@
 import ctypes
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from threading import Event
 
@@ -105,6 +107,26 @@ def lifetime() -> None:
     Event().wait()
 
 
+def inherited_pipe() -> None:
+    """Leave a child holding output pipes after this peer is terminated."""
+    subprocess.Popen(  # noqa: S603 -- fixed test peer and temporary release path
+        [sys.executable, __file__, "inherited-pipe-child", str(Path.cwd() / "release-child")],
+        stdin=subprocess.DEVNULL,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    send({"method": "probe/started", "params": {"pid": os.getpid()}})
+    Event().wait()
+
+
+def inherited_pipe_child() -> None:
+    """Keep inherited handles open until the test releases them or times out."""
+    release = Path(sys.argv[2])
+    deadline = time.monotonic() + 10
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "multiplex"
     if mode == "multiplex":
@@ -117,5 +139,9 @@ if __name__ == "__main__":
         rpc_error()
     elif mode == "lifetime":
         lifetime()
+    elif mode == "inherited-pipe":
+        inherited_pipe()
+    elif mode == "inherited-pipe-child":
+        inherited_pipe_child()
     else:
         invalid(mode)

@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from gigas.runtime.codex.transport import (
     StdioTransport,
     TransportClosed,
     TransportError,
+    _ProcessProtocol,
 )
 
 PEER = Path(__file__).parent / "peers" / "codex_transport_peer.py"
@@ -197,27 +199,53 @@ def test_close_waits_for_child_exit_and_releases_all_tasks(
         terminated: list[int] = []
         killed: list[int] = []
         waited: list[int] = []
-        original_terminate = asyncio.subprocess.Process.terminate
-        original_kill = asyncio.subprocess.Process.kill
-        original_wait = asyncio.subprocess.Process.wait
+        loop = asyncio.get_running_loop()
+        original_spawn = loop.subprocess_exec
 
-        def terminate(process: asyncio.subprocess.Process) -> None:
-            terminated.append(process.pid)
-            if not force_kill:
-                original_terminate(process)
+        async def observed_spawn(
+            factory: Callable[[], _ProcessProtocol],
+            *command: str,
+            cwd: Path,
+            env: dict[str, str],
+            stdin: int,
+            stdout: int,
+            stderr: int,
+            creationflags: int,
+        ) -> tuple[asyncio.SubprocessTransport, _ProcessProtocol]:
+            process, protocol = await original_spawn(
+                factory,
+                *command,
+                cwd=cwd,
+                env=env,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                creationflags=creationflags,
+            )
+            original_terminate = process.terminate
+            original_kill = process.kill
+            original_exited = protocol.process_exited
 
-        def kill(process: asyncio.subprocess.Process) -> None:
-            killed.append(process.pid)
-            original_kill(process)
+            def terminate() -> None:
+                terminated.append(process.get_pid())
+                if not force_kill:
+                    original_terminate()
 
-        async def wait(process: asyncio.subprocess.Process) -> int:
-            result = await original_wait(process)
-            waited.append(process.pid)
-            return result
+            def kill() -> None:
+                killed.append(process.get_pid())
+                original_kill()
 
-        monkeypatch.setattr(asyncio.subprocess.Process, "terminate", terminate)
-        monkeypatch.setattr(asyncio.subprocess.Process, "kill", kill)
-        monkeypatch.setattr(asyncio.subprocess.Process, "wait", wait)
+            def exited() -> None:
+                waited.append(process.get_pid())
+                assert process.get_returncode() is not None
+                original_exited()
+
+            monkeypatch.setattr(process, "terminate", terminate)
+            monkeypatch.setattr(process, "kill", kill)
+            monkeypatch.setattr(protocol, "process_exited", exited)
+            return process, protocol
+
+        monkeypatch.setattr(loop, "subprocess_exec", observed_spawn)
         transport = StdioTransport(
             (*PEER_COMMAND, "lifetime"),
             tmp_path,
@@ -256,37 +284,38 @@ def test_process_created_during_start_cancellation_or_close_is_reaped(
 ) -> None:
     async def scenario() -> None:
         baseline = asyncio.all_tasks()
-        original_spawn = asyncio.create_subprocess_exec
+        loop = asyncio.get_running_loop()
+        original_spawn = loop.subprocess_exec
         spawned = asyncio.Event()
         release = asyncio.Event()
-        processes: list[asyncio.subprocess.Process] = []
+        processes: list[tuple[asyncio.SubprocessTransport, _ProcessProtocol]] = []
 
         async def delayed_spawn(
+            factory: Callable[[], _ProcessProtocol],
             *command: str,
             cwd: Path,
             env: dict[str, str],
             stdin: int,
             stdout: int,
             stderr: int,
-            limit: int,
             creationflags: int,
-        ) -> asyncio.subprocess.Process:
-            process = await original_spawn(
+        ) -> tuple[asyncio.SubprocessTransport, _ProcessProtocol]:
+            process, protocol = await original_spawn(
+                factory,
                 *command,
                 cwd=cwd,
                 env=env,
                 stdin=stdin,
                 stdout=stdout,
                 stderr=stderr,
-                limit=limit,
                 creationflags=creationflags,
             )
-            processes.append(process)
+            processes.append((process, protocol))
             spawned.set()
             await release.wait()
-            return process
+            return process, protocol
 
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", delayed_spawn)
+        monkeypatch.setattr(loop, "subprocess_exec", delayed_spawn)
         transport = StdioTransport((*PEER_COMMAND, "lifetime"), tmp_path)
         starting = asyncio.create_task(transport.start())
         closing: asyncio.Task[None] | None = None
@@ -304,15 +333,16 @@ def test_process_created_during_start_cancellation_or_close_is_reaped(
             if closing is not None:
                 await closing
             assert len(processes) == 1
-            assert processes[0].returncode is not None
+            assert processes[0][0].get_returncode() is not None
             assert asyncio.all_tasks() == baseline
         finally:
             release.set()
             await transport.close()
-            for process in processes:
-                if process.returncode is None:
+            for process, protocol in processes:
+                if process.get_returncode() is None:
                     process.kill()
-                await process.wait()
+                process.close()
+                await protocol.closed
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))
 
@@ -322,20 +352,24 @@ def test_cancelled_close_does_not_cancel_cleanup(
 ) -> None:
     async def scenario() -> None:
         baseline = asyncio.all_tasks()
-        original_wait = asyncio.subprocess.Process.wait
+        original_exited = _ProcessProtocol.process_exited
         reaped = asyncio.Event()
         release = asyncio.Event()
         calls = 0
 
-        async def delayed_wait(process: asyncio.subprocess.Process) -> int:
+        async def release_exit(protocol: _ProcessProtocol) -> None:
+            await release.wait()
+            original_exited(protocol)
+
+        delayed: list[asyncio.Task[None]] = []
+
+        def delayed_exit(protocol: _ProcessProtocol) -> None:
             nonlocal calls
             calls += 1
-            result = await original_wait(process)
             reaped.set()
-            await release.wait()
-            return result
+            delayed.append(asyncio.create_task(release_exit(protocol)))
 
-        monkeypatch.setattr(asyncio.subprocess.Process, "wait", delayed_wait)
+        monkeypatch.setattr(_ProcessProtocol, "process_exited", delayed_exit)
         transport = StdioTransport((*PEER_COMMAND, "lifetime"), tmp_path)
         await transport.start()
         try:
@@ -348,10 +382,33 @@ def test_cancelled_close_does_not_cancel_cleanup(
                 await closing
             release.set()
             await transport.close()
+            await asyncio.gather(*delayed)
             assert calls == 1
             assert asyncio.all_tasks() == baseline
         finally:
             release.set()
+            await transport.close()
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
+def test_close_releases_pipes_still_held_by_a_descendant(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        baseline = asyncio.all_tasks()
+        transport = StdioTransport((*PEER_COMMAND, "inherited-pipe"), tmp_path, close_timeout=0.1)
+        await transport.start()
+        closing: asyncio.Task[None] | None = None
+        try:
+            started = await transport.next_event()
+            assert isinstance(started, RpcNotification)
+            assert started.method == "probe/started"
+            closing = asyncio.create_task(transport.close())
+            await asyncio.wait_for(asyncio.shield(closing), timeout=1)
+            assert asyncio.all_tasks() == baseline
+        finally:
+            (tmp_path / "release-child").touch()
+            if closing is not None:
+                await closing
             await transport.close()
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))

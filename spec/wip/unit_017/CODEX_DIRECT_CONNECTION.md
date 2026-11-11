@@ -22,7 +22,7 @@
 
 readerは振分けだけを行い、人間の回答・他RPCを待たない。Future登録は送信前。未知・重複・取消し後の応答を別要求へ適用しない。受信不正・EOFはすべての待機へ伝え、自動再接続しない。診断へ受信payload・stderr・資格情報をそのまま含めない。
 
-`close()`は冪等で所有app-serverのwait完了を待つ。期限付きterminate後、必要ならkillしてwaitし、reader/stderrを回収する。Windowsは引数配列、shellなし、CREATE_NO_WINDOW。行サイズ上限を明示する。closeは任意のツール子孫・旧ファイル書込の終了まで保証しない（U07/U09で検証）。
+`close()`は冪等で所有app-serverの終了確認を待つ。期限付きterminate後、必要ならkillし、公開asyncio protocolのprocess_exitedで終了を確認してからstdioを閉じる。子孫がpipeを継承していても、所有processの終了とpipeのEOF待ちを結合しない。Windowsは引数配列、shellなし、CREATE_NO_WINDOW。行サイズ上限を明示する。closeは任意のツール子孫・旧ファイル書込の終了まで保証しない（U07/U09で検証）。
 
 `runtime/codex/connection.py`の`CodexConnection`が認証、モデル、thread/turn、要求種別・有効性、型付き表示イベントを所有する。設定値保存と認証・モデル利用を区別する。同梱play.mdはresourcesで取得しthread/startのdeveloperInstructionsへ渡す。空資材・読込・配送失敗は開始成功にしない。開発repoを実行cwdに使わない。
 
@@ -37,6 +37,7 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 | refactor-skipped | T01 server requestを保留しても通知と順不同RPC応答を受信できる | new | integration | 実peerで文字列/整数ID、保留要求、逆順応答、通知、拒否返信を確認 |
 | refactor-done | T02 EOF・不正入力・timeout・取消しで待機を解放し遅い応答を誤適用しない | edge | integration | EOFの全待機解放、不正frame8種、timeout/取消し、重複/未知応答、秘匿診断を確認 |
 | refactor-done | T03 部分起動失敗・連続close・強制終了で所有プロセスとタスクを回収する | edge | integration | 起動/終了取消し・並行呼出し・Windows非表示・terminate/kill後waitを実peerで確認 |
+| refactor-skipped | T04 子孫がpipeを継承しても所有プロセス終了後にcloseを完了する | edge | integration | process_exitedとpipe閉鎖を公開asyncio APIで分離 |
 | refactor-done | C01 初期化・認証・モデル検証を経て指示を配送してturnを開始する | new | unit/integration | 公開RPC境界のfakeで認証、全cursor、モデル/effort、資材失敗、要求設定照合を確認 |
 | refactor-skipped | C02 質問・承認を一度だけ回答し解決・停止後の回答を拒否する | new | unit/integration | 型付き質問/command/file、明示判断、resolved/完了/停止後の回答拒否を確認 |
 | refactor-done | C03 開始と停止の競合、通知・切断・終了を順序に従って扱う | edge | unit/integration | 開始応答前の停止・通知、login競合、EOF、並行closeと取消しを確認 |
@@ -68,6 +69,15 @@ readerは振分けだけを行い、人間の回答・他RPCを待たない。Fu
 - Windows実行: python launcherと実processのPIDを混同しないようpeerはbase interpreterを使う。非表示起動、cwd/env、320 KiBのstderr排出を確認。kill分岐はterminateだけをno-opへ故障注入し、実peerへのkillとwait完了を観測した。
 - 検証: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport` は20 passed。対象ruff check/format・ty check、`uv lock --check`、`uv build` が成功。公開型はAny/cast/ignoreを追加せず、Google style docstringで寿命・取消し・失敗契約を記載した。
 - commit: `fix(codex): 起動取消しと終了競合から子プロセスを回収する`。
+
+### T04 実行履歴
+
+- 独立レビューで、親peerを終了しても孫processがstdout/stderrを継承すると、高水準 `Process.wait()` がpipe EOF待ちを続けることを再現した。孫が4秒保持した試行では `close_timeout=0.1` に対しcloseは4.02秒かかった。
+- red: `uv run pytest tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-transport-review -k descendant` は、孫processへpipe解放を通知する前のcloseが1秒以内に完了せず1 failed。後処理で孫を解放し、試験processは残さない。
+- green: `loop.subprocess_exec` と公開 `SubprocessProtocol` / `SubprocessTransport` を使い、所有processの `process_exited` を待ってからstdioを `close()` する。private asyncio API、子孫の一括kill、資格情報は使わない。stderrはprotocol callbackで保持せず排出し、stdinのflow controlとstdoutの行上限を維持した。
+- 検証: 対象transport pytestは21 passed。対象3ファイルのruff format/check、tyが成功。起動途中のclose、開始取消し、close取消し、terminate/kill、320 KiBのstderr、要求と通知の振分けを同じ実peer試験で再確認した。
+- refactor-skipped: processとpipeを分ける内部protocolは今回の修正に必要な構造であり、green後の追加整理は不要と判断した。公開 `StdioTransport` APIは維持し、closeのdocstringへ継承pipeの回収範囲を記載した。
+- commit: `fix(codex): 子孫の継承パイプで接続終了を待たせない`。
 
 ### C01 実行履歴
 

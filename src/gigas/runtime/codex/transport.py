@@ -8,7 +8,7 @@ import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -120,6 +120,70 @@ def _decode_frame(raw: bytes) -> JsonObject:
     return _object(_json_value(json.loads(raw.decode("utf-8"))))
 
 
+class _ProcessProtocol(asyncio.SubprocessProtocol):
+    """Separate owned-process exit from pipe lifetimes using public asyncio APIs."""
+
+    def __init__(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.stdout = asyncio.StreamReader(limit=MAX_FRAME_BYTES)
+        self.exited: asyncio.Future[None] = loop.create_future()
+        self.closed: asyncio.Future[None] = loop.create_future()
+        self._paused = False
+        self._stdin_closed = False
+        self._draining: asyncio.Future[None] | None = None
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        if isinstance(transport, asyncio.SubprocessTransport):
+            stdout = transport.get_pipe_transport(1)
+            if isinstance(stdout, asyncio.ReadTransport):
+                self.stdout.set_transport(stdout)
+
+    def pipe_data_received(self, fd: int, data: bytes) -> None:
+        if fd == 1:
+            self.stdout.feed_data(data)
+        # stderr is intentionally drained here without retaining its contents.
+
+    def pipe_connection_lost(self, fd: int, exc: Exception | None) -> None:
+        if fd == 1:
+            if exc is None:
+                self.stdout.feed_eof()
+            else:
+                self.stdout.set_exception(exc)
+        elif fd == 0:
+            self._stdin_closed = True
+            self.resume_writing()
+
+    def process_exited(self) -> None:
+        if not self.exited.done():
+            self.exited.set_result(None)
+
+    @override
+    def connection_lost(self, exc: Exception | None) -> None:
+        self._stdin_closed = True
+        self.resume_writing()
+        if not self.closed.done():
+            self.closed.set_result(None)
+
+    def pause_writing(self) -> None:
+        self._paused = True
+
+    def resume_writing(self) -> None:
+        self._paused = False
+        if self._draining is not None and not self._draining.done():
+            self._draining.set_result(None)
+
+    async def drain(self) -> None:
+        if self._paused and not self._stdin_closed:
+            self._draining = asyncio.get_running_loop().create_future()
+            try:
+                await self._draining
+            finally:
+                self._draining = None
+        if self._stdin_closed:
+            message = "Process stdin closed"
+            raise TransportError(message)
+
+
 class StdioTransport:
     """Own one app-server process and route its newline-delimited JSON frames.
 
@@ -149,9 +213,9 @@ class StdioTransport:
         self._env = dict(env) if env is not None else {}
         self._request_timeout = request_timeout
         self._close_timeout = close_timeout
-        self._process: asyncio.subprocess.Process | None = None
+        self._process: asyncio.SubprocessTransport | None = None
+        self._protocol: _ProcessProtocol | None = None
         self._reader: asyncio.Task[None] | None = None
-        self._stderr: asyncio.Task[None] | None = None
         self._starting: asyncio.Task[None] | None = None
         self._closing: asyncio.Task[None] | None = None
         self._writer_lock = asyncio.Lock()
@@ -182,14 +246,14 @@ class StdioTransport:
     async def _start_process(self) -> None:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
-            self._process = await asyncio.create_subprocess_exec(
+            self._process, self._protocol = await asyncio.get_running_loop().subprocess_exec(
+                _ProcessProtocol,
                 *self._command,
                 cwd=self._cwd,
                 env=os.environ | self._env,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                limit=MAX_FRAME_BYTES,
                 creationflags=flags,
             )
         except (OSError, ValueError, TypeError):
@@ -197,7 +261,6 @@ class StdioTransport:
             message = "Process start failed"
             raise TransportError(message) from None
         self._reader = asyncio.create_task(self._read_stdout(), name="gigas-codex-stdout")
-        self._stderr = asyncio.create_task(self._discard_stderr(), name="gigas-codex-stderr")
 
     async def request(self, method: str, params: JsonObject | None) -> JsonValue:
         """Send a request and return the result corresponding to its ID.
@@ -290,8 +353,9 @@ class StdioTransport:
 
         Concurrent calls share one cleanup. Cancellation of a caller does not
         cancel cleanup; await close again before stopping the event loop. This
-        method confirms the owned child's exit, not arbitrary descendants or
-        the completion of files written by tools.
+        method confirms the owned child's exit and closes this connection's
+        pipes even if a descendant inherited them. It does not terminate
+        arbitrary descendants or confirm files written by tools.
 
         Raises:
             TransportError: The operating system could not terminate the child.
@@ -306,37 +370,38 @@ class StdioTransport:
             with suppress(TransportError):
                 await asyncio.shield(self._starting)
         process = self._process
-        if process is None:
+        protocol = self._protocol
+        if process is None or protocol is None:
             return
-        if process.stdin is not None:
-            process.stdin.close()
-        tasks = [task for task in (self._reader, self._stderr) if task is not None]
-        waiter = asyncio.create_task(process.wait(), name="gigas-codex-wait")
+        stdin = process.get_pipe_transport(0)
+        if stdin is not None:
+            stdin.close()
         try:
-            if process.returncode is None:
+            if process.get_returncode() is None:
                 with suppress(ProcessLookupError):
                     process.terminate()
             try:
-                await asyncio.wait_for(asyncio.shield(waiter), timeout=self._close_timeout)
+                await asyncio.wait_for(asyncio.shield(protocol.exited), timeout=self._close_timeout)
             except TimeoutError:
-                if process.returncode is None:
+                if process.get_returncode() is None:
                     with suppress(ProcessLookupError):
                         process.kill()
-                await waiter
-            if process.stdin is not None:
-                with suppress(ConnectionError, OSError):
-                    await process.stdin.wait_closed()
+                await asyncio.shield(protocol.exited)
         except OSError:
             message = "Process shutdown failed"
             raise TransportError(message) from None
         finally:
-            for task in (*tasks, waiter):
-                task.cancel()
-            await asyncio.gather(*tasks, waiter, return_exceptions=True)
+            process.close()
+            await asyncio.shield(protocol.closed)
+            if self._reader is not None:
+                self._reader.cancel()
+                await asyncio.gather(self._reader, return_exceptions=True)
 
     async def _write(self, frame: JsonObject) -> None:
         process = self._process
-        if process is None or process.stdin is None:
+        protocol = self._protocol
+        stdin = process.get_pipe_transport(0) if process is not None else None
+        if not isinstance(stdin, asyncio.WriteTransport) or protocol is None:
             message = "Transport is not connected"
             raise TransportError(message)
         try:
@@ -352,9 +417,9 @@ class StdioTransport:
         async with self._writer_lock:
             self._check_open()
             try:
-                process.stdin.write(data)
-                await process.stdin.drain()
-            except (ConnectionError, OSError):
+                stdin.write(data)
+                await protocol.drain()
+            except (ConnectionError, OSError, TransportError):
                 self._finish("Write failed")
                 message = "Write failed"
                 raise TransportError(message) from None
@@ -364,16 +429,16 @@ class StdioTransport:
             raise TransportError(self._closed.reason)
 
     async def _read_stdout(self) -> None:
-        process = self._process
-        if process is None or process.stdout is None:
+        protocol = self._protocol
+        if protocol is None:
             return
         try:
-            while raw := await process.stdout.readline():
+            while raw := await protocol.stdout.readline():
                 if self._closed is None:
                     self._route(_decode_frame(raw))
         except (TransportError, ValueError, RecursionError):
             self._finish("Invalid RPC frame")
-            await self._discard_stream(process.stdout)
+            await self._discard_stream(protocol.stdout)
         except (ConnectionError, OSError):
             self._finish("Read failed")
         else:
@@ -420,12 +485,6 @@ class StdioTransport:
             if not future.done():
                 future.set_exception(TransportError(reason))
         self._events.put_nowait(self._closed)
-
-    async def _discard_stderr(self) -> None:
-        process = self._process
-        if process is None or process.stderr is None:
-            return
-        await self._discard_stream(process.stderr)
 
     @staticmethod
     async def _discard_stream(stream: asyncio.StreamReader) -> None:
