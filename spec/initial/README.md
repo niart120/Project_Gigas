@@ -19,6 +19,7 @@
 | [07-verification.md](07-verification.md) | 受入確認の観点と担当工程。実施結果は作業仕様を参照 |
 | [08-sdk-compatibility.md](08-sdk-compatibility.md) | 外部仕様の調査根拠、採用版、未確認事項と確認期限 |
 | [09-control-flows.md](09-control-flows.md) | 開始・観測操作・停止・再開など、複数部品にまたがる処理順序 |
+| [10-ui-interaction.md](10-ui-interaction.md) | 左右配置、共通入力と目標トグル、公開計画・履歴、Goal識別、一時停止とGoal破棄の操作要求 |
 
 各工程の親仕様は到達点・前提・冒頭の調査設計・子工程の分割・受入条件を所有します。子仕様は、着手する部分の詳細契約・TDD・検証結果を所有します。文書を複製して計画用と実装用の正本を分けず、着手時に`spec/planned`から`spec/wip`へ、完了時に`spec/complete`へ移します。
 
