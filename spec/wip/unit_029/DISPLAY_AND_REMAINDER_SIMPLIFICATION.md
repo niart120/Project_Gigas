@@ -33,7 +33,7 @@
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | R1 映像の取得・失敗・解放を維持して、情報画面と専用計測・旧選択APIを撤去する | regression | unit / integration | 専用試験を削除し、取得の既存試験から計測assertだけを除く。削除そのもののredは作らない |
-| todo | R2 回答処理後は短い結果へ移り、二重送信防止と秘密入力の消去を維持する | regression | integration | 再展開試験を結果表示へ書換え、手動折りたたみ専用試験を削除 |
+| refactor-skipped | R2 回答処理後は短い結果へ移り、二重送信防止と秘密入力の消去を維持する | regression | integration | 再展開試験を結果表示へ書換え、手動折りたたみ専用試験を削除 |
 | todo | R3 次ターンの開始確認で処理済みカードを片付け、失敗・遅延結果を保持する | regression | unit / integration | 既存の開始競合・カード寿命試験を拡張／統合 |
 
 整理対象は`test_video_information`、`test_capture_models`の旧helper試験、取得backend/service/protocolの計測部分、回答layout/lifecycle/GUIの重複観点。異なる障害・公開契約の試験を、件数削減だけのために一つの巨大試験へまとめない。全体の件数と削除理由を最後に記録する。
@@ -50,9 +50,15 @@
 
 各項目で対応する既存試験を実行し、最後にunit/integration全体、ruff format/check、ty、lock整合、build、差分を確認する。公開APIと利用者docs、型境界、ローカルMarkdown参照をレビューする。Windows Qtで回答中／結果表示と次ターンの代表画面を確認する。実機・外部Codex接続は今回未実施なら明記する。
 
-## 10. 先送り
+### R1
 
 R1検証: 映像情報専用の試験ファイルと旧`select_device`の6ケースを削除。取得試験は画像更新・再接続の契約を残してFPSのassertを除いた。`uv run pytest tests/unit/test_capture_models.py tests/unit/test_capture_backend.py tests/unit/test_capture_transport.py tests/integration/test_capture_service.py tests/integration/test_capture_fallback.py tests/integration/test_main_menus.py tests/integration/test_video_gui.py -q --tb=short`は85件成功（12.27秒）。`test_capture_platforms.py`は13件成功。tyで残っていた旧callback引数を見つけて削除し、型検査・ruff・差分検査が成功。撤去後の不在を調べる試験は作らず、削除に伴う状態縮小を振る舞い変更と一緒に行ったためrefactor-skipped。
+
+### R2
+
+既存の再展開試験をコンパクトな結果表示と通常入力の下書き保持へ書き換え、変更前後とも`uv run pytest tests/integration/test_request_layout.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py -q --tb=short`で26件成功。既存の秘密入力試験へ提出後の消去確認を加えた。手動折りたたみ専用1件、詳しい狭幅試験と重複する旧スクロール試験1件を削除。フォント×スタイルの4ケースは代表2ケースへ絞った。削除対象以外の振る舞いは変えず、撤去専用のredや不在検査は追加しない。refactor-skipped。ruff成功。
+
+## 10. 先送り
 
 全体UI/UXは実装整理後の別議論。U06でGoal・回答履歴の設計、U07で終了中の操作、U05で物理入力の即時停止を扱う。
 

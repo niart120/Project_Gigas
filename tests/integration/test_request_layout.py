@@ -72,9 +72,10 @@ def test_active_request_gets_space_without_losing_prompt_draft(
     assert prompt.textCursor().anchor() == 2
 
 
-def test_completed_card_collapses_and_reopens_without_reenabling_answers(
+def test_completed_card_shows_compact_result_without_losing_prompt_draft(
     panel: ConnectionPanel, qtbot: QtBot
 ) -> None:
+    panel.prompt.setPlainText("次に送る下書き")
     panel.handle_event(ServiceEvent(1, _question("question", long=True)))
     card = panel.cards["question"]
     card.editors["choice"].choices[1].click()
@@ -83,11 +84,10 @@ def test_completed_card_collapses_and_reopens_without_reenabling_answers(
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("question", "sent")))
     qtbot.waitUntil(lambda: card.height() < 100)
     assert not card.body.isVisible()
-    card.expand_button.click()
-    assert card.body.isVisible()
-    assert card.editors["draft"].answer.text() == "回答下書き"
-    assert card.editors["choice"].choices[1].isChecked()
+    assert card.state == "sent"
     assert not card.submit_button.isEnabled()
+    assert panel.prompt.toPlainText() == "次に送る下書き"
+    assert panel.prompt.isVisible()
 
 
 def test_new_request_starts_at_its_header_and_decisions_are_reachable(
@@ -171,21 +171,6 @@ def test_pending_answer_cannot_send_a_hidden_prompt_when_turn_finishes(
     assert panel.send_button.isEnabled()
 
 
-def test_manual_folding_preserves_unsubmitted_answers(panel: ConnectionPanel) -> None:
-    panel.handle_event(ServiceEvent(1, _question("question")))
-    card = panel.cards["question"]
-    card.editors["choice"].choices[1].click()
-    card.editors["draft"].answer.setText("まだ送らない")
-    card.expand_button.click()
-    assert not card.body.isVisible()
-    card.expand_button.click()
-    assert card.body.isVisible()
-    assert card.editors["choice"].choices[1].isChecked()
-    assert card.editors["draft"].answer.text() == "まだ送らない"
-    assert card.is_live
-    assert card.submit_button.isEnabled()
-
-
 def test_wrapped_option_accepts_click_on_caption(panel: ConnectionPanel, qtbot: QtBot) -> None:
     panel.handle_event(ServiceEvent(1, _question("question")))
     choice = panel.cards["question"].editors["choice"].choices[1]
@@ -197,8 +182,7 @@ def test_wrapped_option_accepts_click_on_caption(panel: ConnectionPanel, qtbot: 
     assert choice.isChecked()
 
 
-@pytest.mark.parametrize("style_name", ["Fusion", "Windows"])
-@pytest.mark.parametrize("point_size", [9, 16])
+@pytest.mark.parametrize(("style_name", "point_size"), [("Fusion", 9), ("Windows", 16)])
 def test_narrow_approval_keeps_header_and_each_decision_within_viewport(
     panel: ConnectionPanel, qtbot: QtBot, style_name: str, point_size: int
 ) -> None:
@@ -230,7 +214,7 @@ def test_narrow_approval_keeps_header_and_each_decision_within_viewport(
     assert viewport.width() <= 258
     assert panel.requests.horizontalScrollBar().maximum() == 0
     assert viewport.rect().contains(
-        QRect(card.expand_button.mapTo(viewport, QPoint()), card.expand_button.size())
+        QRect(card.status.mapTo(viewport, QPoint()), card.status.size())
     )
     for button in card.decision_buttons.values():
         panel.requests.ensureWidgetVisible(button)

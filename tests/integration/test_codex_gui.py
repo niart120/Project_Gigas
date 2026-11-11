@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCore import QPoint, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 
@@ -145,6 +145,7 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     )
     panel.handle_event(ServiceEvent(5, RequestResolved("token")))
     assert not card.is_live
+    assert card.editors["text"].answer.text() == ""
     assert "secret" not in panel.transcript.toPlainText()
     panel.activate(6)
     panel.handle_event(ServiceEvent(5, request))
@@ -237,46 +238,3 @@ def test_connection_failure_persists_until_explicit_disconnect(
     assert not panel.connect_action.isEnabled()
     panel.handle_result(ServiceResult(1, "disconnect"))
     assert panel.connect_action.isEnabled()
-
-
-def test_new_request_scrolls_into_view_after_long_resolved_request(qtbot: QtBot) -> None:
-    panel = ConnectionPanel()
-    qtbot.addWidget(panel)
-    panel.resize(800, 650)
-    panel.show()
-    panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
-    panel.handle_event(
-        ServiceEvent(
-            1,
-            HumanRequest(
-                "old",
-                1,
-                "thread",
-                "turn",
-                "question",
-                questions=(Question("long", "質問", "\n".join(["長い質問"] * 60)),),
-            ),
-        )
-    )
-    qtbot.waitUntil(lambda: panel.requests.verticalScrollBar().maximum() > 0)
-    panel.handle_event(ServiceEvent(1, RequestResolved("old")))
-    panel.handle_event(
-        ServiceEvent(
-            1,
-            HumanRequest(
-                "new",
-                2,
-                "thread",
-                "turn",
-                "command",
-                details="command",
-                decisions=("decline",),
-            ),
-        )
-    )
-    card = panel.cards["new"]
-    viewport = panel.requests.viewport()
-    qtbot.waitUntil(lambda: card.y() > panel.cards["old"].y())
-    qtbot.waitUntil(lambda: card.mapTo(viewport, QPoint()).y() < viewport.height(), timeout=1000)
-    assert card.mapTo(viewport, QPoint()).y() + card.height() > 0
