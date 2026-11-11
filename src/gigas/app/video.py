@@ -17,6 +17,28 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
 
+_CAPTURE_DIMENSIONS: dict[str, tuple[int | None, int | None]] = {
+    "auto": (None, None),
+    "hd": (1280, 720),
+    "full_hd": (1920, 1080),
+    "wqhd": (2560, 1440),
+    "four_k": (3840, 2160),
+}
+_BACKEND_NAMES = {
+    0: "テスト",
+    200: "V4L2",
+    700: "DirectShow / DSHOW",
+    1200: "AVFoundation",
+    1400: "Media Foundation / MSMF",
+    1800: "GStreamer",
+}
+
+
+def _fps_text(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "未取得"
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
 
 class CapturePort(Protocol):
     """A nonblocking capture service owned through application shutdown."""
@@ -80,6 +102,7 @@ class VideoController(QObject):
         """Prepare polling without starting the service or accessing devices."""
         super().__init__(parent)
         self.panel = panel
+        self.panel.info_action.triggered.connect(self.show_information)
         self.service: CapturePort = CaptureService() if service is None else service
         self.active_settings: Settings | None = None
         self.reader = self.service.reader()
@@ -211,6 +234,48 @@ class VideoController(QObject):
         self.timer.start()
         self._poll()
 
+    def show_information(self) -> None:
+        """Display current diagnostics once, without capture commands or failure notices.
+
+        Requests come from the configuration accepted for this connection, rather
+        than unsaved edits. The modeless text remains fixed until explicitly reopened.
+        """
+        snapshot = self.reader.snapshot()
+        if self._started and not self.service.is_alive() and not self._closing:
+            snapshot = replace(snapshot, phase="error", frame=None, error="映像サービス終了")
+        settings = self.active_settings
+        requested = "未要求"
+        fps = "未要求"
+        if settings is not None:
+            dimensions = _CAPTURE_DIMENSIONS.get(settings.capture_resolution)
+            if dimensions is not None:
+                requested = "自動" if dimensions[0] is None else f"{dimensions[0]}x{dimensions[1]}"
+            fps = str(settings.capture_fps)
+        frame = snapshot.frame
+        actual = "未取得" if frame is None else f"{frame.width}x{frame.height}"
+        backend = "未選択"
+        if snapshot.backend is not None:
+            backend = f"{_BACKEND_NAMES.get(snapshot.backend, 'API')} ({snapshot.backend})"
+        rows = [
+            f"状態: {snapshot.phase}",
+            f"要求解像度: {requested}",
+            f"要求FPS: {fps}",
+            f"到着画像: {actual}",
+            f"機器報告FPS: {_fps_text(snapshot.reported_fps)}",
+            f"実測FPS: {_fps_text(snapshot.measured_fps)}",
+            f"取得方式: {backend}",
+            f"世代: {snapshot.generation}",
+            f"連番: {frame.sequence if frame is not None else '未取得'}",
+            f"終了確認: {snapshot.cleanup}",
+        ]
+        if snapshot.error:
+            rows.append(f"取得エラー: {snapshot.error}")
+        if self._request_error:
+            rows.append(f"操作エラー: {self._request_error}")
+        if snapshot.diagnostics:
+            rows.extend(("試行診断:", *snapshot.diagnostics))
+        self.panel.show_information("\n".join(rows))
+
     def set_available(
         self,
         available: bool,
@@ -304,8 +369,12 @@ class VideoController(QObject):
             self.apply_state = "complete"
             self.active_settings = None
             return
+        dimensions = _CAPTURE_DIMENSIONS.get(settings.capture_resolution)
+        if dimensions is None:
+            self._fail_application("取得解像度が未対応")
+            return
         try:
-            options = CaptureOptions(settings.capture_device, fps=settings.capture_fps)
+            options = CaptureOptions(settings.capture_device, *dimensions, fps=settings.capture_fps)
         except CaptureError as error:
             self._fail_application(str(error))
             return

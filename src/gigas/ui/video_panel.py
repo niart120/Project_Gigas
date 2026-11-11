@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
+    QLabel,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
 
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.elided_label import ElidedLabel
+from gigas.ui.geometry import fit_to_screen
+from gigas.ui.video_info import VideoInfoDialog
 
 if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureSnapshot
@@ -30,7 +33,7 @@ _PHASE_LABELS = {
 
 
 class VideoView(QWidget):
-    """Draw one copied BGR frame with its original aspect ratio.
+    """Draw one copied BGR frame, preserving its aspect ratio by default.
 
     The widget owns its QImage independently of the capture source. Repeated
     updates for the same generation and sequence do not reconvert the image.
@@ -42,6 +45,7 @@ class VideoView(QWidget):
         self._image = QImage()
         self._key: tuple[int, int] | None = None
         self._preview_size = QSize(640, 360)
+        self._letterbox = True
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_preview_size(self, width: int, height: int) -> None:
@@ -53,6 +57,18 @@ class VideoView(QWidget):
     def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
         """Prefer the selected display target without imposing a minimum size."""
         return self._preview_size
+
+    def set_letterbox(self, enabled: bool) -> None:
+        """Change preview fitting without changing the source frame or connection.
+
+        Args:
+            enabled: True fits the complete image with black margins, preserving
+                its aspect ratio. False stretches it to fill the preview. The
+                mode also applies to future frames, including after clearing.
+        """
+        if self._letterbox != enabled:
+            self._letterbox = enabled
+            self.update()
 
     def set_frame(self, frame: "Frame | None") -> None:
         """Display the latest frame or clear the image when capture stops.
@@ -74,12 +90,16 @@ class VideoView(QWidget):
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 -- Qt override
-        """Paint letterboxed video without changing the shared source pixels."""
+        """Paint fitted or stretched video without changing the shared pixels."""
         del event
         painter = QPainter(self)
         painter.fillRect(self.rect(), Qt.GlobalColor.black)
         if not self._image.isNull():
-            size = self._image.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
+            size = (
+                self._image.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                if self._letterbox
+                else self.size()
+            )
             target = QRect(
                 (self.width() - size.width()) // 2,
                 (self.height() - size.height()) // 2,
@@ -109,8 +129,11 @@ class VideoPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.connect_action = QAction("接続", self)
-        self.disconnect_action = QAction("切断", self)
-        self.status = ElidedLabel("未接続", self)
+        self.disconnect_action = QAction("映像を停止", self)
+        self.info_action = QAction("映像情報…", self)
+        self.info_dialog: VideoInfoDialog | None = None
+        self.status = QLabel("未接続", self)
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.source = ElidedLabel(parent=self)
         self.status.hide()
         self.source.hide()
@@ -120,6 +143,25 @@ class VideoPanel(QWidget):
         self.disconnect_action.triggered.connect(self.disconnect_requested)
         self.connect_action.setEnabled(False)
         self.disconnect_action.setEnabled(False)
+
+    def show_information(self, details: str) -> None:
+        """Open or explicitly refresh frozen diagnostics without changing capture.
+
+        Args:
+            details: Read-only plain text captured at the explicit request time.
+        """
+        if self.info_dialog is None:
+            self.info_dialog = VideoInfoDialog(self)
+        self.info_dialog.display(details)
+        self.info_dialog.show()
+        fit_to_screen(self.info_dialog)
+        self.info_dialog.raise_()
+        self.info_dialog.activateWindow()
+
+    def close_information(self) -> None:
+        """Close the owned diagnostic window after main-window closure is confirmed."""
+        if self.info_dialog is not None:
+            self.info_dialog.close()
 
     def render_state(
         self,

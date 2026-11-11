@@ -3,11 +3,13 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -15,7 +17,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,79 +42,92 @@ class SettingsDialog(QDialog):
     changed = Signal()
     capture_refresh_requested = Signal()
     close_requested = Signal()
-    cancel_close_requested = Signal()
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
         super().__init__(parent)
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
+        self._saved_device = ""
         self._selected_device = ""
+        self._edited_device: str | None = None
+        self._closing_allowed = True
         self._devices: tuple[DeviceInfo, ...] = ()
         self._devices_checked = False
         self._devices_searching = False
         self.setWindowTitle("設定")
-        self.resize(560, 440)
+        self.resize(620, 440)
         layout = QVBoxLayout(self)
-        self.location = QLineEdit(str(path), self)
-        self.location.setReadOnly(True)
-        layout.addWidget(QLabel("保存先", self))
-        layout.addWidget(self.location)
         self.tabs = QTabWidget(self)
         layout.addWidget(self.tabs, 1)
-        self.video_form = self._tab("映像")
-        self.capture_choices = QComboBox(self)
-        self.capture_choices.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.capture_choices.setMinimumContentsLength(12)
-        self.capture_choices.addItem("未選択", "")
-        self.capture_choices.currentIndexChanged.connect(self._choose_capture_device)
-        self.capture_refresh_button = QPushButton("一覧更新", self)
-        self.capture_refresh_button.clicked.connect(self.capture_refresh_requested)
-        selection = QHBoxLayout()
-        selection.addWidget(self.capture_choices, 1)
-        selection.addWidget(self.capture_refresh_button)
-        self.video_form.addRow("機器", selection)
-        self.capture_discovery_status = QLabel("未確認", self)
-        self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
-        self.video_form.addRow("機器一覧", self.capture_discovery_status)
-        self.capture_discovery_error = QPlainTextEdit(self)
-        self.capture_discovery_error.setReadOnly(True)
-        self.capture_discovery_error.setMaximumHeight(70)
-        self.capture_discovery_error.hide()
-        self.video_form.addRow(self.capture_discovery_error)
-        connection = QHBoxLayout()
-        self.capture_connect_button = QToolButton(self)
-        self.capture_disconnect_button = QToolButton(self)
-        self.capture_connection_status = QLabel("未接続", self)
-        self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
-        for widget in (
-            self.capture_connect_button,
-            self.capture_disconnect_button,
-            self.capture_connection_status,
-        ):
-            connection.addWidget(widget)
-        connection.addStretch()
-        self.video_form.addRow("映像", connection)
-        self.capture_connection_error = QPlainTextEdit(self)
-        self.capture_connection_error.setReadOnly(True)
-        self.capture_connection_error.setMaximumHeight(70)
-        self.capture_connection_error.hide()
-        self.video_form.addRow(self.capture_connection_error)
-        self.capture_fps = self._rate_field(60)
-        self.preview_fps = self._rate_field(30)
-        for label, field in (
-            ("取得FPS", self.capture_fps),
-            ("表示FPS", self.preview_fps),
-        ):
-            self.video_form.addRow(label, field)
+        general_form = self._tab("一般")
+        self.location = QLineEdit(str(path), self)
+        self.location.setReadOnly(True)
+        general_form.addRow("設定ファイル", self.location)
+        display_form = self._group(general_form, "表示")
         self.window_size_preset = QComboBox(self)
         for preset in WINDOW_SIZE_PRESETS:
             self.window_size_preset.addItem(preset.label, preset.key)
         self.window_size_preset.setCurrentIndex(self.window_size_preset.findData("full_hd"))
         self.window_size_preset.currentIndexChanged.connect(self.changed)
-        self.video_form.addRow("ウィンドウサイズ", self.window_size_preset)
-        agent_form = self._tab("エージェント")
+        display_form.addRow("ウィンドウサイズ", self.window_size_preset)
+        self.preview_mode = QComboBox(self)
+        self.preview_mode.addItem("レターボックス", True)
+        self.preview_mode.addItem("ストレッチ", False)
+        self.preview_mode.currentIndexChanged.connect(self.changed)
+        display_form.addRow("プレビュー方式", self.preview_mode)
+        self.preview_fps = self._rate_field(30)
+        display_form.addRow("表示FPS", self.preview_fps)
+        io_form = self._tab("I/O")
+        capture_form = self._group(io_form, "映像入力")
+        self.capture_choices = QComboBox(self)
+        self.capture_choices.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.capture_choices.setMinimumContentsLength(12)
+        self.capture_choices.addItem("未接続", "")
+        self.capture_choices.currentIndexChanged.connect(self._choose_capture_device)
+        self.capture_choices.activated.connect(self._choose_capture_device)
+        self.capture_refresh_button = QPushButton("一覧更新", self)
+        self.capture_refresh_button.clicked.connect(self.capture_refresh_requested)
+        selection = QHBoxLayout()
+        selection.addWidget(self.capture_choices, 1)
+        selection.addWidget(self.capture_refresh_button)
+        self.capture_discovery_status = QLabel(self)
+        self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.capture_discovery_status.hide()
+        selection.addWidget(self.capture_discovery_status)
+        capture_form.addRow("機器", selection)
+        self.capture_discovery_error = QPlainTextEdit(self)
+        self.capture_discovery_error.setReadOnly(True)
+        self.capture_discovery_error.setMaximumHeight(70)
+        self.capture_discovery_error.hide()
+        self.capture_connection_status = QLabel(self)
+        self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.capture_connection_status.setWordWrap(True)
+        self.capture_connection_status.hide()
+        capture_form.addRow(self.capture_connection_status)
+        self.capture_connection_error = QPlainTextEdit(self)
+        self.capture_connection_error.setReadOnly(True)
+        self.capture_connection_error.setMaximumHeight(70)
+        self.capture_connection_error.hide()
+        self.capture_fps = self._rate_field(60)
+        capture_form.addRow("取得FPS", self.capture_fps)
+        self.capture_resolution = QComboBox(self)
+        for label, key in (
+            ("自動", "auto"),
+            ("4K", "four_k"),
+            ("WQHD", "wqhd"),
+            ("FullHD", "full_hd"),
+            ("HD", "hd"),
+        ):
+            self.capture_resolution.addItem(label, key)
+        self.capture_resolution.setCurrentIndex(self.capture_resolution.findData("full_hd"))
+        self.capture_resolution.currentIndexChanged.connect(self.changed)
+        capture_form.addRow("取得解像度", self.capture_resolution)
+        controller_form = self._group(io_form, "コントローラー")
+        self.serial_port = self._text_field()
+        controller_form.addRow("シリアルポート", self.serial_port)
+        agent_form = self._tab("Codex")
         self.model = self._text_field()
         self.effort = self._text_field()
         self.auth_method = QComboBox(self)
@@ -124,37 +138,34 @@ class SettingsDialog(QDialog):
         agent_form.addRow("モデル", self.model)
         agent_form.addRow("エフォート", self.effort)
         agent_form.addRow("認証方式", self.auth_method)
-        input_form = self._tab("入力")
-        self.serial_port = self._text_field()
-        input_form.addRow("シリアルポート", self.serial_port)
-        self.status = QLabel("変更なし", self)
+        self.status = QLabel(self)
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.status)
+        self.status.hide()
+        error_row = QHBoxLayout()
+        error_row.addWidget(self.status, 1)
+        self.error_details_button = QPushButton("詳細…", self)
+        self.error_details_button.setAutoDefault(False)
+        self.error_details_button.hide()
+        error_row.addWidget(self.error_details_button)
+        layout.addLayout(error_row)
         self.details = QPlainTextEdit(self)
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(90)
         self.details.hide()
         layout.addWidget(self.details)
-        actions = QHBoxLayout()
-        actions.addStretch()
-        self.save_button = QPushButton("適用", self)
-        self.reload_button = QPushButton("再読込", self)
-        self.close_button = QPushButton("閉じる", self)
-        self.cancel_close_button = QPushButton("閉じる取消し", self)
-        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
-        self.cancel_close_button.hide()
-        for button in (
-            self.save_button,
-            self.reload_button,
-            self.close_button,
-            self.cancel_close_button,
-        ):
+        actions = QDialogButtonBox(self)
+        self.ok_button = actions.addButton(QDialogButtonBox.StandardButton.Ok)
+        self.close_button = actions.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self.save_button = actions.addButton(QDialogButtonBox.StandardButton.Apply)
+        self.close_button.setText("キャンセル")
+        self.save_button.setText("適用")
+        for button in (self.ok_button, self.close_button, self.save_button):
             button.setAutoDefault(False)
-            actions.addWidget(button)
-        self.close_button.clicked.connect(self.close)
-        layout.addLayout(actions)
+            button.setDefault(False)
+        actions.rejected.connect(self.reject)
+        layout.addWidget(actions)
 
     def _tab(self, title: str) -> QFormLayout:
         scroll = QScrollArea(self.tabs)
@@ -163,6 +174,26 @@ class SettingsDialog(QDialog):
         form = QFormLayout(page)
         scroll.setWidget(page)
         self.tabs.addTab(scroll, title)
+        return form
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 -- Qt override
+        """Handle Enter only for a focused button, never for an implicit default.
+
+        Child widgets handle their own keys first, including combo-popup selection.
+        Other keys retain the dialog's standard navigation and Escape behavior.
+        """
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            event.accept()
+            focused = self.focusWidget()
+            if isinstance(focused, QPushButton) and focused.isEnabled():
+                focused.click()
+            return
+        super().keyPressEvent(event)
+
+    def _group(self, parent_form: QFormLayout, title: str) -> QFormLayout:
+        group = QGroupBox(title, self)
+        form = QFormLayout(group)
+        parent_form.addRow(group)
         return form
 
     def _text_field(self) -> QLineEdit:
@@ -207,6 +238,8 @@ class SettingsDialog(QDialog):
     ) -> None:
         """Replace selectable devices without changing any unsaved setting.
 
+        Saved and selected device paths remain selectable when absent from the catalog.
+
         Args:
             devices: Enumerated names and nonempty paths. Paths are stored unchanged.
             checked: Whether any successful enumeration has supplied these identities.
@@ -220,50 +253,87 @@ class SettingsDialog(QDialog):
             state = "列挙失敗"
         elif searching:
             state = "検索中"
-        elif checked:
-            state = "取得済み" if self._devices else "機器なし"
         else:
-            state = "未確認"
+            state = ""
         self.capture_discovery_status.setText(state)
+        self.capture_discovery_status.setVisible(bool(state))
         if self.capture_discovery_error.toPlainText() != error:
             self.capture_discovery_error.setPlainText(error)
-        self.capture_discovery_error.setVisible(bool(error))
         self._sync_capture_choice()
 
     def _sync_capture_choice(self) -> None:
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
-            self.capture_choices.addItem("未選択", "")
+            self.capture_choices.addItem("未接続", "")
             for label, path in capture_device_choices(self._devices):
                 self.capture_choices.addItem(label, path)
-            selected = self.capture_choices.findData(self._selected_device)
-            if selected < 0:
-                missing = "未検出" if self._devices_checked else "未確認"
-                self.capture_choices.addItem(
-                    "検索中" if self._devices_searching else missing, self._selected_device
-                )
-                selected = self.capture_choices.count() - 1
-            self.capture_choices.setCurrentIndex(selected)
+            missing = "未検出" if self._devices_checked else "未確認"
+            state = "検索中" if self._devices_searching else missing
+            for role, path in (
+                ("保存済み", self._saved_device),
+                ("選択中", self._selected_device),
+            ):
+                if path and self.capture_choices.findData(path) < 0:
+                    self.capture_choices.addItem(f"{role} ({state})", path)
+            self.capture_choices.setCurrentIndex(
+                self.capture_choices.findData(self._selected_device)
+            )
 
     def _choose_capture_device(self) -> None:
         path = self.capture_choices.currentData()
         if isinstance(path, str):
+            previous = self._selected_device, self._edited_device
             self._selected_device = path
-            self.changed.emit()
+            self._edited_device = path
+            if previous != (self._selected_device, self._edited_device):
+                self.changed.emit()
+
+    @property
+    def capture_target(self) -> str:
+        """Return the requested live device path; an empty string requests disconnection."""
+        return self._selected_device
+
+    def set_capture_target(self, path: str) -> None:
+        """Synchronize the live target without replacing the saved device.
+
+        Args:
+            path: Current live device path, or an empty string for disconnected state.
+                This clears an explicit unsaved device choice without emitting changed.
+        """
+        self._selected_device = path
+        self._edited_device = None
+        self._sync_capture_choice()
+
+    @property
+    def closing_allowed(self) -> bool:
+        """Return whether Cancel, Escape, and the window close control may request closure."""
+        return self._closing_allowed
+
+    def set_closing_allowed(self, allowed: bool) -> None:
+        """Enable or suppress closure requests without accepting or rejecting the dialog."""
+        self._closing_allowed = allowed
+        self.close_button.setEnabled(allowed)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Request closure without discarding edits."""
         event.ignore()
-        self.close_requested.emit()
+        self.reject()
 
     def reject(self) -> None:
         """Route Escape through the same closure decision as the close button."""
-        self.close_requested.emit()
+        if self._closing_allowed:
+            self.close_requested.emit()
 
     def values(self) -> Settings:
-        """Return the form's current values without stripping whitespace."""
+        """Return settings, retaining the saved device until an explicit source choice.
+
+        An explicit disconnected choice clears the saved device on Apply. Synchronizing
+        a stopped live target does not clear it. Text whitespace is retained.
+        """
         return Settings(
-            capture_device=self._selected_device,
+            capture_device=(
+                self._saved_device if self._edited_device is None else self._edited_device
+            ),
             serial_port=self._text_value(self.serial_port),
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),
@@ -271,10 +341,18 @@ class SettingsDialog(QDialog):
             capture_fps=int(self.capture_fps.currentData()),
             preview_fps=int(self.preview_fps.currentData()),
             window_size_preset=str(self.window_size_preset.currentData()),
+            capture_resolution=str(self.capture_resolution.currentData()),
+            preview_letterbox=bool(self.preview_mode.currentData()),
         )
 
-    def set_values(self, values: Settings) -> None:
-        """Replace displayed values without emitting user-edit notifications."""
+    def set_values(self, values: Settings, *, preserve_target: bool = False) -> None:
+        """Replace settings and saved-device baseline without emitting edit notifications.
+
+        Args:
+            values: Saved settings to display, replacing unsaved field edits.
+            preserve_target: Keep the current live target when true. Otherwise use the
+                saved device as the target. Both paths clear an explicit device edit.
+        """
         with QSignalBlocker(self):
             for field, value in (
                 (self.serial_port, values.serial_port),
@@ -289,11 +367,18 @@ class SettingsDialog(QDialog):
                 (self.preview_fps, values.preview_fps),
             ):
                 self._set_rate(field, value)
-            self._selected_device = values.capture_device
+            self._saved_device = values.capture_device
+            self._edited_device = None
+            if not preserve_target:
+                self._selected_device = values.capture_device
             self._sync_capture_choice()
             self.window_size_preset.setCurrentIndex(
                 self.window_size_preset.findData(values.window_size_preset)
             )
+            self.capture_resolution.setCurrentIndex(
+                self.capture_resolution.findData(values.capture_resolution)
+            )
+            self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
 
     def _text_value(self, field: QLineEdit) -> str:
         current = field.text()
@@ -301,7 +386,12 @@ class SettingsDialog(QDialog):
         return original if current == displayed else current
 
     def set_editable(self, enabled: bool) -> None:
-        """Control editing while retaining selection and copying of values."""
+        """Control editing and closure while retaining selection and copying of values.
+
+        Call set_closing_allowed separately when read-only fields may still be closed,
+        such as after a settings load failure.
+        """
+        self.set_closing_allowed(enabled)
         for field in (self.serial_port, self.model, self.effort):
             field.setReadOnly(not enabled)
         self.auth_method.setEnabled(enabled)
@@ -311,5 +401,7 @@ class SettingsDialog(QDialog):
             self.preview_fps,
             self.capture_refresh_button,
             self.window_size_preset,
+            self.capture_resolution,
+            self.preview_mode,
         ):
             field.setEnabled(enabled)

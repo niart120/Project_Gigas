@@ -66,9 +66,9 @@ class Backend:
             IndexedDevice(DeviceInfo("Pathless", ""), 12),
         )
 
-    def open(self, index: int) -> Camera:
+    def open(self, device: IndexedDevice) -> Camera:
         """Record the index and return the camera."""
-        self.selected = index
+        self.selected = device.index
         return self.camera
 
 
@@ -105,12 +105,80 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     assert camera.released
 
 
+@pytest.mark.parametrize("automatic", [True, False])
+def test_resolution_request_preserves_actual_dimensions_and_unmodified_pixels(
+    automatic: bool,
+) -> None:
+    # Non-contiguous input also has to retain the row-major values, without resizing.
+    pixels = np.arange(24 * 64 * 3, dtype=np.uint8).reshape((24, 64, 3))[:, ::2]
+    camera = Camera([pixels, pixels])
+    frames: list[Frame] = []
+    options = CaptureOptions("path-a", None, None, 30) if automatic else CaptureOptions("path-a")
+    acquire_frames(
+        options, 9, Backend(camera), lambda: len(frames) == 2, frames.append, lambda _: None
+    )
+
+    assert [(frame.width, frame.height) for frame in frames] == [(32, 24), (32, 24)]
+    assert all(frame.bgr == pixels.tobytes() for frame in frames)
+    assert [(frame.generation, frame.sequence) for frame in frames] == [(9, 1), (9, 2)]
+    assert frames[1].monotonic_ns >= frames[0].monotonic_ns > 0
+    assert camera.properties[cv2.CAP_PROP_FPS] == options.fps
+    if automatic:
+        assert cv2.CAP_PROP_FRAME_WIDTH not in camera.properties
+        assert cv2.CAP_PROP_FRAME_HEIGHT not in camera.properties
+    else:
+        assert camera.properties[cv2.CAP_PROP_FRAME_WIDTH] == 1920
+        assert camera.properties[cv2.CAP_PROP_FRAME_HEIGHT] == 1080
+    assert camera.released
+
+
+def test_maximum_actual_resolution_is_accepted_without_requiring_the_requested_size() -> None:
+    pixels = np.broadcast_to(np.array([2, 4, 8], dtype=np.uint8), (2160, 3840, 3))
+    camera = Camera([pixels])
+    frames: list[Frame] = []
+    acquire_frames(
+        CaptureOptions("path-a"),
+        1,
+        Backend(camera),
+        lambda: bool(frames),
+        frames.append,
+        lambda _: None,
+    )
+    assert (frames[0].width, frames[0].height) == (3840, 2160)
+    assert frames[0].bgr == bytes([2, 4, 8]) * (3840 * 2160)
+    assert camera.released
+
+
+def test_resolution_change_after_first_frame_fails_without_publishing_new_dimensions() -> None:
+    original = np.full((24, 32, 3), 7, dtype=np.uint8)
+    camera = Camera([original, np.zeros((32, 32, 3), dtype=np.uint8)])
+    frames: list[Frame] = []
+    with pytest.raises(CaptureError):
+        acquire_frames(
+            CaptureOptions("path-a"),
+            1,
+            Backend(camera),
+            lambda: False,
+            frames.append,
+            lambda _: None,
+        )
+    assert len(frames) == 1
+    assert (frames[0].width, frames[0].height, frames[0].bgr) == (32, 24, original.tobytes())
+    assert camera.released
+
+
 @pytest.mark.parametrize(
     "outcome",
     [
         None,
         np.zeros((8, 16, 3), dtype=np.uint8),
         np.zeros((16, 16, 3), dtype=np.float32),
+        np.zeros((16, 16), dtype=np.uint8),
+        np.zeros((16, 16, 4), dtype=np.uint8),
+        np.zeros((16, 16, 3, 1), dtype=np.uint8),
+        np.broadcast_to(np.uint8(0), (16, 3841, 3)),
+        np.broadcast_to(np.uint8(0), (2161, 16, 3)),
+        np.broadcast_to(np.uint8(0), (1080, 7680, 3)),
         b"not-an-array",
     ],
 )
@@ -189,7 +257,12 @@ def test_opencv_adapter_uses_directshow_and_excludes_pathless_sources(
     monkeypatch.setattr(capture_backend, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(capture_backend, "enumerate_cameras", enumerate_devices)
     monkeypatch.setattr(capture_backend.cv2, "VideoCapture", open_device)
+    monkeypatch.setattr(
+        capture_backend.cv2.videoio_registry, "getCameraBackends", lambda: (cv2.CAP_DSHOW,)
+    )
+    monkeypatch.setattr(capture_backend.cv2.videoio_registry, "hasBackend", lambda _api: True)
     backend = OpenCVBackend()
-    assert backend.enumerate() == (IndexedDevice(DeviceInfo("A", "path-a"), 3),)
-    assert backend.open(3) is camera
+    device = IndexedDevice(DeviceInfo("A", "path-a"), 3, cv2.CAP_DSHOW)
+    assert backend.enumerate() == (device,)
+    assert backend.open(device) is camera
     assert calls == [(cv2.CAP_DSHOW,), (3, cv2.CAP_DSHOW)]

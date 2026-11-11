@@ -4,7 +4,7 @@ from threading import Event
 
 import pytest
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QApplication, QPushButton
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -31,6 +31,104 @@ def _stream(shell: ApplicationShell, capture: ControlledCapture, qtbot: QtBot) -
     qtbot.waitUntil(lambda: not shell.video.applying)
 
 
+@pytest.mark.parametrize(("width", "sizes"), [(800, [300, 480]), (1100, [700, 380])])
+def test_status_regions_follow_splitter_without_duplicate_conversation_labels(
+    qtbot: QtBot, width: int, sizes: list[int]
+) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(width, 550)
+    window.show()
+    window.connection.activate(1)
+    window.connection.handle_event(
+        ServiceEvent(1, SessionStatus("running", "model/" * 200, "high"))
+    )
+    window.video.status.setText("終了未確認")
+    window.video.source.setText("capture/" * 200)
+    for allocation in (sizes, list(reversed(sizes))):
+        window.splitter.setSizes(allocation)
+        QApplication.processEvents()
+        for pane, status, identifier in (
+            (window.video, window.video.status, window.video.source),
+            (window.splitter.widget(1), window.connection.status, window.connection.model),
+        ):
+            assert pane is not None
+            region = status.parentWidget()
+            assert region is not None
+            assert window.statusBar().isAncestorOf(region)
+            assert not window.connection.isAncestorOf(status)
+            assert identifier.parentWidget() is region
+            assert region.mapToGlobal(QPoint()).x() == pane.mapToGlobal(QPoint()).x()
+            assert status.isVisible()
+            assert identifier.isVisible()
+            assert status.width() >= status.fontMetrics().horizontalAdvance(status.text())
+            assert region.rect().contains(status.geometry())
+            assert region.rect().contains(identifier.geometry())
+        assert window.width() == width
+        window.resize(width - 40, 550)
+        QApplication.processEvents()
+        codex_region = window.connection.status.parentWidget()
+        conversation = window.splitter.widget(1)
+        assert codex_region is not None
+        assert conversation is not None
+        assert codex_region.mapToGlobal(QPoint()).x() == conversation.mapToGlobal(QPoint()).x()
+        window.resize(width, 550)
+    assert window.connection.model.text() == "model/" * 200 + " · high"
+
+
+def test_close_progress_appears_only_for_pending_work_and_keeps_cancel_action(qtbot: QtBot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    cancelled: list[bool] = []
+    window.cancel_close_requested.connect(lambda: cancelled.append(True))
+    window.refresh_close_progress()
+    assert not window.close_progress.isVisible()
+    assert not window.statusBar().isAncestorOf(window.cancel_close_button)
+    window.status.setText("終了待ち")
+    window.cancel_close_button.setVisible(True)
+    window.refresh_close_progress()
+    assert window.close_progress.isVisible()
+    assert window.cancel_close_button.isVisible()
+    window.cancel_close_button.click()
+    assert cancelled == [True]
+    window.cancel_close_button.hide()
+    window.refresh_close_progress()
+    assert window.close_progress.isVisible()
+    assert not window.cancel_close_button.isVisible()
+    window.status.clear()
+    window.refresh_close_progress()
+    assert not window.close_progress.isVisible()
+
+
+def test_status_region_keeps_short_state_when_splitter_is_dragged_to_the_edge(qtbot: QtBot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(800, 550)
+    window.show()
+    window.video.status.setText("release unconfirmed")
+    window.video.source.setText("long capture name/" * 100)
+    window.splitter.setSizes([1, 1000])
+    QApplication.processEvents()
+    region = window.video.status.parentWidget()
+    assert region is not None
+    assert region.width() > 0
+    assert region.rect().contains(window.video.status.geometry())
+
+
+def test_recovery_menu_actions_can_be_bound_without_statusbar_controls(qtbot: QtBot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    actions = (window.reload_action, window.settings_location_action)
+    triggered: list[object] = []
+    for action in actions:
+        assert action in window.file_menu.actions()
+        action.triggered.connect(lambda _checked=False, selected=action: triggered.append(selected))
+        action.trigger()
+    assert triggered == list(actions)
+    assert not window.statusBar().findChildren(QPushButton)
+
+
 def test_file_and_codex_menus_use_live_actions_and_exit_lifetime(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
@@ -38,7 +136,11 @@ def test_file_and_codex_menus_use_live_actions_and_exit_lifetime(
     window = shell.window
     assert window.settings_action in window.file_menu.actions()
     assert window.exit_action in window.file_menu.actions()
-    assert window.view_menu.actions() == list(window.window_size_actions.values())
+    assert [action for action in window.view_menu.actions() if not action.isSeparator()] == [
+        *window.window_size_actions.values(),
+        window.video.info_action,
+        window.notifications.entry_action,
+    ]
     panel = window.connection
     assert panel.connect_action in window.codex_menu.actions()
     assert panel.disconnect_action in window.codex_menu.actions()
@@ -70,7 +172,7 @@ def test_video_menu_discovers_on_open_without_waiting_for_a_refresh_button(
     assert capture.state.phase == "enumerating"
     capture.complete_enumeration((DeviceInfo("Found camera", "path-b"),))
     qtbot.waitUntil(lambda: "path-b" in shell.window.video_device_actions)
-    assert shell.window.video_device_actions["path-b"].isChecked()
+    assert shell.window.video_device_actions[""].isChecked()
     assert not capture.connections
     assert load_settings(shell.path) == shell.baseline
 
@@ -136,16 +238,14 @@ def test_streaming_menu_and_settings_share_choices_commands_and_active_identity(
     dialog = shell.dialog
     assert dialog is not None
     assert capture.refreshes == 0
-    assert dialog.capture_connect_button.defaultAction() is window.video.connect_action
-    assert dialog.capture_disconnect_button.defaultAction() is window.video.disconnect_action
     for path, action in window.video_device_actions.items():
         index = dialog.capture_choices.findData(path)
         assert index >= 0
         assert action.text().replace("&&", "&") == dialog.capture_choices.itemText(index)
         assert action.data() == path
     assert window.video.source.text() == "Camera & source (2)"
-    assert window.video.source.parentWidget() is window.statusBar()
-    assert window.video.status.parentWidget() is window.statusBar()
+    assert window.statusBar().isAncestorOf(window.video.source)
+    assert window.statusBar().isAncestorOf(window.video.status)
     assert not window.video.findChildren(QPushButton)
     dialog.model.setText("unsaved model")
     assert all(not action.isEnabled() for action in window.video_device_actions.values())
@@ -159,10 +259,11 @@ def test_streaming_menu_and_settings_share_choices_commands_and_active_identity(
     qtbot.waitUntil(lambda: capture.refreshes == 1)
     assert window.video.source.text() == ""
     assert shell.baseline.capture_device == "path-b"
-    assert window.video_device_actions["path-b"].isChecked()
+    assert window.video_device_actions[""].isChecked()
+    assert dialog.capture_target == ""
     capture.complete_enumeration(capture.state.devices)
     qtbot.waitUntil(window.video.connect_action.isEnabled)
-    dialog.capture_connect_button.click()
+    window.video.connect_action.trigger()
     assert len(capture.connections) == 2
 
 
@@ -178,7 +279,7 @@ def test_selecting_saved_menu_device_applies_configuration_changed_by_reload(
     save_settings(shell.path, replace(shell.baseline, capture_device=path, capture_fps=fps))
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.window.video_device_actions[path].isChecked()
+    assert shell.window.video_device_actions["path-b"].isChecked()
     assert shell.window.video.source.text() == "Camera & source (2)"
     assert len(capture.connections) == 1
     shell.window.video_device_actions[path].trigger()

@@ -19,6 +19,23 @@ from gigas.ui.video_panel import VideoPanel
 from tests.integration.peers.controlled_capture import ControlledCapture
 
 
+def test_notification_history_is_reopened_from_view_menu_after_dismissal(qtbot: QtBot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    notices = window.notifications
+    assert notices.entry_action in window.view_menu.actions()
+    assert not notices.entry_action.isEnabled()
+    notice = Notice("video", "映像接続失敗", "", "diagnostic")
+    notices.publish(notice)
+    notices.dismiss_button.click()
+    assert not notices.banner.isVisible()
+    notices.entry_action.trigger()
+    assert notices.dialog is not None
+    assert notices.dialog.isVisible()
+    assert notices.dialog.notice is notice
+
+
 def test_failures_keep_controls_reachable_and_history_after_recovery(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -39,7 +56,7 @@ def test_failures_keep_controls_reachable_and_history_after_recovery(
     assert panel.disconnect_action.isEnabled()
     notices.dismiss_button.click()
     assert not notices.banner.isVisible()
-    assert notices.entry_button.isEnabled()
+    assert notices.entry_action.isEnabled()
     panel.handle_result(ServiceResult(1, "send", "send failed"))
     shell._complete(OperationResult(settings=Settings()))
     assert set(notices.notices) == {"settings", "codex"}
@@ -56,7 +73,7 @@ def test_details_keep_copy_snapshot_until_explicitly_reopened(qtbot: QtBot) -> N
     notices = window.notifications
     first = Notice("video", "映像接続失敗", "接続を確認できませんでした。", "line\n" * 150)
     notices.publish(first)
-    notices.entry_button.click()
+    notices.entry_action.trigger()
     dialog = notices.dialog
     assert dialog is not None
     assert dialog.isVisible()

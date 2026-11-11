@@ -55,7 +55,9 @@ def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: 
     assert load_settings(shell.path) == Settings()
 
 
-def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot) -> None:
+def test_all_settings_round_trip_and_disconnect_preserves_last_device(
+    shell: ApplicationShell, qtbot: QtBot
+) -> None:
     save_settings(shell.path, Settings(auth_method="api_key"))
     shell.reload()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -81,7 +83,8 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
         other.open_settings()
         assert other.dialog is not None
         assert other.dialog.values() == values
-        assert other.dialog.capture_choices.currentData() == values.capture_device
+        assert other.dialog.capture_choices.currentData() == ""
+        assert other.dialog.capture_choices.findData(values.capture_device) >= 0
         assert other.dialog.model.text() == values.model
         assert other.dialog.auth_method.currentData() == "api_key"
         other.dialog.capture_choices.setCurrentIndex(0)
@@ -90,7 +93,9 @@ def test_all_settings_round_trip_and_clear(shell: ApplicationShell, qtbot: QtBot
         other.dialog.effort.clear()
         other.dialog.save_button.click()
         qtbot.waitUntil(lambda: other.operation is None)
-        assert load_settings(shell.path) == Settings(auth_method="api_key")
+        assert load_settings(shell.path) == Settings(
+            capture_device=values.capture_device, auth_method="api_key"
+        )
     finally:
         other.window.close()
         qtbot.waitUntil(lambda: not other.window.isVisible())
@@ -106,23 +111,15 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     assert not shell.dirty
 
 
-@pytest.mark.parametrize("target", ["button", "window", "escape", "application"])
 @pytest.mark.parametrize("choice", ["save", "discard", "cancel"])
-def test_dirty_close_choices(
-    shell: ApplicationShell, qtbot: QtBot, target: str, choice: str
+def test_dirty_application_close_choices(
+    shell: ApplicationShell, qtbot: QtBot, choice: str
 ) -> None:
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
     dialog.model.setText("edited")
-    if target == "button":
-        dialog.close_button.click()
-    elif target == "window":
-        dialog.close()
-    elif target == "escape":
-        qtbot.keyClick(dialog, Qt.Key.Key_Escape)
-    else:
-        shell.window.close()
+    shell.window.close()
     box = shell.confirmation
     assert box is not None
     buttons = {
@@ -141,23 +138,48 @@ def test_dirty_close_choices(
             assert load_settings(shell.path).model == "edited"
         else:
             assert not shell.path.exists()
-        assert shell.window.isVisible() == (target != "application")
+        assert not shell.window.isVisible()
+
+
+@pytest.mark.parametrize("target", ["button", "window", "escape"])
+def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
+    shell: ApplicationShell, qtbot: QtBot, target: str
+) -> None:
+    shell.open_settings()
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.model.setText("edited")
+    if target == "button":
+        dialog.close_button.click()
+    elif target == "window":
+        dialog.close()
+    else:
+        qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+    assert shell.confirmation is None
+    assert not dialog.isVisible()
+    assert not shell.path.exists()
+    assert shell.window.isVisible()
+    shell.open_settings()
+    assert dialog.model.text() == shell.baseline.model == ""
 
 
 def test_failed_reload_blocks_save_until_recovered(shell: ApplicationShell, qtbot: QtBot) -> None:
     shell.path.write_text("[broken", encoding="utf-8")
     shell.open_settings()
     assert shell.dialog is not None
-    shell.dialog.reload_button.click()
+    shell.window.reload_action.trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.dialog.save_button.isEnabled()
     assert str(shell.path) in shell.dialog.details.toPlainText()
     assert shell.path.read_text(encoding="utf-8") == "[broken"
     shell.path.write_text('[agent]\nmodel="repaired"', encoding="utf-8")
-    shell.dialog.reload_button.click()
+    shell.window.reload_action.trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.dialog.save_button.isEnabled()
+    assert shell.dialog.ok_button.isEnabled()
+    assert not shell.dialog.model.isReadOnly()
     assert shell.dialog.model.text() == "repaired"
+    shell.dialog.model.setText("after recovery")
+    assert shell.dialog.save_button.isEnabled()
 
 
 def test_save_failure_preserves_edits_and_reports_cleanup(
@@ -197,7 +219,7 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
     shell.open_settings()
     assert shell.dialog is not None
     shell.dialog.model.setText("edited")
-    shell.dialog.reload_button.click()
+    shell.window.reload_action.trigger()
     box = shell.confirmation
     assert box is not None
     assert box.button(QMessageBox.StandardButton.Save) is None
@@ -206,13 +228,13 @@ def test_reload_confirms_discard_and_keeps_values_on_failure(
     assert shell.operation is None
 
     shell.path.write_text("[broken", encoding="utf-8")
-    shell.dialog.reload_button.click()
+    shell.window.reload_action.trigger()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Discard).click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert shell.dialog.model.text() == "edited"
     assert not shell.dialog.save_button.isEnabled()
-    shell.dialog.close()
+    shell.window.close()
     assert shell.confirmation is not None
     assert shell.confirmation.button(QMessageBox.StandardButton.Save) is None
     shell.confirmation.button(QMessageBox.StandardButton.Cancel).click()
@@ -265,7 +287,7 @@ def test_unexpected_worker_failure_returns_without_exposing_exception_text(
         assert str(application.path) in diagnostic
         assert "private-setting-value" not in diagnostic
         assert dialog.save_button.isEnabled() == (operation == "save")
-        assert dialog.reload_button.isEnabled()
+        assert application.window.reload_action.isEnabled()
         assert not application.path.exists()
     finally:
         if application.dialog is not None:
@@ -296,9 +318,11 @@ def test_windows_fit_screen_and_long_error_keeps_actions_reachable(
         dialog.save_button.click()
         qtbot.waitUntil(lambda: application.operation is None)
         assert dialog.screen().availableGeometry().contains(dialog.frameGeometry())
-        for button in (dialog.save_button, dialog.reload_button, dialog.close_button):
+        for button in (dialog.ok_button, dialog.save_button, dialog.close_button):
             assert button.isVisible()
-            assert dialog.rect().contains(button.geometry())
+            assert dialog.rect().contains(button.mapTo(dialog, button.rect().topLeft()))
+            assert dialog.rect().contains(button.mapTo(dialog, button.rect().bottomRight()))
+        assert application.window.reload_action in application.window.file_menu.actions()
         assert dialog.details.toPlainText().endswith("diagnostic-path/")
     finally:
         application.window.close()

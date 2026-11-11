@@ -52,6 +52,7 @@ class ConnectionPanel(QWidget):
     The failed signal carries a Notice for display-safe failures. A generation's
     failure IDs correlate state events with command results; activating a new
     connection discards those IDs, without modifying retained notification history.
+    MainWindow places the status and model widgets in its shared status bar.
 
     Args:
         parent: Owning widget, if any.
@@ -95,10 +96,8 @@ class ConnectionPanel(QWidget):
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.model = ElidedLabel(parent=self)
-        state = QHBoxLayout()
-        state.addWidget(self.status, 1)
-        state.addWidget(self.model, 3)
-        layout.addLayout(state)
+        self.status.hide()
+        self.model.hide()
         login = QHBoxLayout()
         self.login_url = QLineEdit(self)
         self.login_url.setReadOnly(True)

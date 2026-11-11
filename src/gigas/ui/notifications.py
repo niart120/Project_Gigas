@@ -6,6 +6,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -96,7 +97,7 @@ class NotificationCenter(QObject):
     changes its displayed snapshot, or takes focus from the current operation.
 
     Args:
-        parent: Window owning the banner, status entry, and optional detail view.
+        parent: Window owning the banner, menu action, and optional detail view.
     """
 
     published = Signal(object)
@@ -123,9 +124,9 @@ class NotificationCenter(QObject):
         self.dismiss_button.clicked.connect(self.banner.hide)
         row.addWidget(self.dismiss_button)
         self.banner.hide()
-        self.entry_button = QPushButton("通知", parent)
-        self.entry_button.setEnabled(False)
-        self.entry_button.clicked.connect(self._show_latest)
+        self.entry_action = QAction("通知…", self)
+        self.entry_action.setEnabled(False)
+        self.entry_action.triggered.connect(self._show_latest)
 
     @property
     def notices(self) -> Mapping[NoticeSource, Notice]:
@@ -140,7 +141,7 @@ class NotificationCenter(QObject):
         self._notices[notice.source] = notice
         self._latest = notice.source
         self._title.setText(f"{_SOURCES[notice.source]} · {notice.title}")
-        self.entry_button.setEnabled(True)
+        self.entry_action.setEnabled(True)
         self.banner.show()
         self._sync_sources()
         self.published.emit(notice)
@@ -150,12 +151,24 @@ class NotificationCenter(QObject):
         selected = self._latest if source is None else source
         if selected not in self._notices:
             return
+        self.show_snapshot(self._notices[selected])
+
+    def show_snapshot(self, notice: Notice) -> None:
+        """Open a specific failure without publishing or replacing recent history.
+
+        Args:
+            notice: Immutable failure associated with the explicitly chosen UI action.
+                It need not appear in recent history. Later publications leave this
+                displayed snapshot and any text selection unchanged.
+        """
         if self.dialog is None:
             self.dialog = NoticeDialog(self._owner)
             self.dialog.sources.activated.connect(self._select_source)
             self.dialog.settings_button.clicked.connect(self.settings_requested)
         self._sync_sources()
-        self.dialog.display(self._notices[selected])
+        if self.dialog.sources.findData(notice.source) < 0:
+            self.dialog.sources.addItem(_SOURCES[notice.source], notice.source)
+        self.dialog.display(notice)
         self.dialog.settings_button.setEnabled(self._settings_available)
         self.dialog.show()
         fit_to_screen(self.dialog)

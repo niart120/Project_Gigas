@@ -3,9 +3,10 @@
 from html import escape
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
@@ -23,7 +24,73 @@ from gigas.ui.notifications import NotificationCenter
 from gigas.ui.video_panel import VideoPanel
 
 if TYPE_CHECKING:
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QResizeEvent
+
     from gigas.game_io.capture.models import DeviceInfo
+
+
+class _PaneStatuses(QWidget):
+    """Align two status rows with the panes without identifier width pressure."""
+
+    def __init__(
+        self, splitter: QSplitter, video: VideoPanel, connection: ConnectionPanel, parent: QWidget
+    ) -> None:
+        super().__init__(parent)
+        self._splitter = splitter
+        self._rows: list[QWidget] = []
+        for title, status, identifier in (
+            ("映像", video.status, video.source),
+            ("Codex", connection.status, connection.model),
+        ):
+            row = QWidget(self)
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(QLabel(title, row))
+            layout.addWidget(status)
+            layout.addWidget(identifier, 1)
+            status.show()
+            identifier.show()
+            row.installEventFilter(self)
+            self._rows.append(row)
+        for index in range(splitter.count()):
+            pane = splitter.widget(index)
+            if pane is not None:
+                pane.installEventFilter(self)
+        splitter.installEventFilter(self)
+        splitter.splitterMoved.connect(self._align)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
+        """Reserve line height while letting the pane widths determine truncation."""
+        return QSize(0, max(row.sizeHint().height() for row in self._rows))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 -- Qt override
+        """Avoid making long identifiers constrain the window width."""
+        return self.sizeHint()
+
+    def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
+        """Realign when the status bar receives its final allocation."""
+        super().resizeEvent(event)
+        self._align()
+
+    def eventFilter(self, watched: "QObject", event: QEvent) -> bool:  # noqa: N802
+        """Follow pane moves and font or state changes without copying status text."""
+        if event.type() in {QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.LayoutRequest}:
+            if event.type() == QEvent.Type.LayoutRequest:
+                self.updateGeometry()
+            self._align()
+        return super().eventFilter(watched, event)
+
+    def _align(self) -> None:
+        for index, row in enumerate(self._rows):
+            pane = self._splitter.widget(index)
+            if pane is None:
+                continue
+            minimum = max(0, row.minimumSizeHint().width())
+            if pane.minimumWidth() != minimum:
+                pane.setMinimumWidth(minimum)
+            left = self.mapFromGlobal(pane.mapToGlobal(QPoint())).x()
+            row.setGeometry(left, 0, min(pane.width(), max(0, self.width() - left)), self.height())
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +120,9 @@ class MainWindow(QMainWindow):
         self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
+        self.reload_action = self.file_menu.addAction("設定を再読込")
+        self.settings_location_action = self.file_menu.addAction("設定ファイルの場所を開く")
+        self.file_menu.addSeparator()
         self.exit_action = self.file_menu.addAction("終了")
         self.exit_action.triggered.connect(self.close)
         self.connection_menu = self.menuBar().addMenu("接続")
@@ -74,10 +144,24 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         layout = QVBoxLayout(central)
         self.notifications = NotificationCenter(self)
+        self.view_menu.addSeparator()
+        self.view_menu.addAction(self.notifications.entry_action)
         layout.addWidget(self.notifications.banner)
+        self.close_progress = QWidget(central)
+        progress_layout = QHBoxLayout(self.close_progress)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        self.status = ElidedLabel(parent=self.close_progress)
+        progress_layout.addWidget(self.status, 1)
+        self.cancel_close_button = QPushButton("終了取消し", self.close_progress)
+        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
+        self.cancel_close_button.hide()
+        progress_layout.addWidget(self.cancel_close_button)
+        self.close_progress.hide()
+        layout.addWidget(self.close_progress)
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.video = VideoPanel(self.splitter)
+        self.view_menu.insertAction(self.notifications.entry_action, self.video.info_action)
         conversation = QWidget(self.splitter)
         conversation_layout = QVBoxLayout(conversation)
         conversation_layout.addWidget(QLabel("Codex", conversation))
@@ -106,18 +190,22 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(1, 2)
         layout.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
-        self.status = ElidedLabel(parent=self)
-        self.statusBar().addWidget(self.status, 1)
-        self.statusBar().addPermanentWidget(QLabel("映像", self))
-        self.statusBar().addPermanentWidget(self.video.status)
-        self.statusBar().addPermanentWidget(self.video.source, 2)
-        self.video.status.show()
-        self.video.source.show()
-        self.statusBar().addPermanentWidget(self.notifications.entry_button)
-        self.cancel_close_button = QPushButton("終了取消し", self)
-        self.cancel_close_button.clicked.connect(self.cancel_close_requested)
-        self.cancel_close_button.hide()
-        self.statusBar().addPermanentWidget(self.cancel_close_button)
+        self.statusBar().setSizeGripEnabled(False)
+        self._pane_statuses = _PaneStatuses(
+            self.splitter, self.video, self.connection, self.statusBar()
+        )
+        self.statusBar().addWidget(self._pane_statuses, 1)
+
+    def refresh_close_progress(self) -> None:
+        """Reflect direct status and cancel-button updates without changing shutdown.
+
+        Call after setting ``status`` text and ``cancel_close_button`` visibility.
+        The progress region is hidden only when the text is empty and the button
+        is explicitly hidden, independently of the parent's current visibility.
+        """
+        self.close_progress.setVisible(
+            bool(self.status.text()) or not self.cancel_close_button.isHidden()
+        )
 
     def set_capture_devices(
         self,
@@ -129,17 +217,18 @@ class MainWindow(QMainWindow):
         error: str,
         enabled: bool,
     ) -> None:
-        """Reflect saved selection without changing the active capture identity.
+        """Reflect the current acquisition target without selecting a saved device.
 
         Args:
             devices: Latest successful catalog, shared with the settings dialog.
-            selected_device: Persisted path; missing identities remain represented.
+            selected_device: Current target path, or empty for disconnected. An
+                active identity missing from the catalog remains represented.
             checked: Whether a catalog has been successfully received.
             searching: Whether discovery and its cleanup are pending.
             error: Current catalog failure, shown as a short state here.
             enabled: Whether selecting a device may save and apply settings.
         """
-        choices = (("未選択", ""), *capture_device_choices(devices))
+        choices = (("未接続", ""), *capture_device_choices(devices))
         if selected_device not in {path for _label, path in choices}:
             missing = "未検出" if checked else "未確認"
             choices += (("検索中" if searching else missing, selected_device),)
@@ -191,7 +280,7 @@ class MainWindow(QMainWindow):
 
         Args:
             key: A validated saved preset. Controls may reduce the actual preview
-                below its scaled target, preserving the source image's aspect ratio.
+                below its scaled target; the selected preview fitting mode stays active.
         """
         screen = self.screen()
         if screen is None:
@@ -211,6 +300,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Route window closure through application lifetime management."""
         if self.allow_close:
+            self.video.close_information()
             self.notifications.close_details()
             event.accept()
         else:

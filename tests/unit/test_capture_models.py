@@ -25,6 +25,21 @@ def test_default_mode_and_supported_boundaries() -> None:
     assert CaptureOptions("path-a", 3840, 2160, 120).width == 3840
 
 
+def test_automatic_mode_leaves_both_dimensions_unspecified() -> None:
+    options = CaptureOptions("path-a", None, None, 30)
+    assert options.width is None
+    assert options.height is None
+    assert options.fps == 30
+
+
+@pytest.mark.parametrize(("width", "height"), [(None, 1080), (1920, None)])
+def test_automatic_mode_cannot_specify_only_one_dimension(
+    width: int | None, height: int | None
+) -> None:
+    with pytest.raises(CaptureError):
+        CaptureOptions("path-a", width, height)
+
+
 @pytest.mark.parametrize(
     ("width", "height", "fps"),
     [

@@ -54,7 +54,7 @@ def test_settings_shortcut_opens_and_refocuses_the_single_editor(
     assert capture.refreshes == 1
 
 
-def test_settings_shortcut_does_not_displace_an_unsaved_confirmation(
+def test_settings_shortcut_does_not_displace_an_unsaved_exit_confirmation(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, _capture = video_shell
@@ -62,7 +62,7 @@ def test_settings_shortcut_does_not_displace_an_unsaved_confirmation(
     dialog = shell.dialog
     assert dialog is not None
     dialog.model.setText("unsaved")
-    dialog.close()
+    shell.window.exit_action.trigger()
     confirmation = shell.confirmation
     assert confirmation is not None
     qtbot.waitUntil(confirmation.isActiveWindow)
@@ -73,6 +73,10 @@ def test_settings_shortcut_does_not_displace_an_unsaved_confirmation(
     assert not opened
     assert dialog.model.text() == "unsaved"
     confirmation.button(QMessageBox.StandardButton.Cancel).click()
+    assert shell.pending is None
+    assert shell.window.isVisible()
+    assert dialog.isVisible()
+    assert dialog.model.text() == "unsaved"
 
 
 @pytest.mark.parametrize(

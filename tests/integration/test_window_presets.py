@@ -99,10 +99,12 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert shell.window.video.connect_action in shell.window.video_menu.actions()
         assert shell.window.video.disconnect_action in shell.window.video_menu.actions()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
+        assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
         for widget in (
             shell.window.menuBar(),
             shell.window.connection.send_button,
-            shell.window.notifications.entry_button,
+            shell.window.video.status,
+            shell.window.connection.status,
         ):
             assert widget.isVisible()
             assert available.contains(QRect(widget.mapToGlobal(QPoint()), widget.size()))
