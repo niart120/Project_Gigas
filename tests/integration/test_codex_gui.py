@@ -5,6 +5,7 @@ from PySide6.QtCore import QPoint, QUrl
 from PySide6.QtWidgets import QLineEdit
 from pytestqt.qtbot import QtBot
 
+from gigas.app.settings_worker import OperationResult
 from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.models import (
     ConnectionOptions,
@@ -17,8 +18,29 @@ from gigas.runtime.codex.models import (
     TextEvent,
 )
 from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
+from gigas.storage.settings import Settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
+
+
+def test_settings_load_failure_preserves_session_stop(qtbot: QtBot, tmp_path: Path) -> None:
+    shell = ApplicationShell(tmp_path / "settings.toml")
+    qtbot.addWidget(shell.window)
+    shell._complete(OperationResult(settings=Settings()))
+    panel = shell.window.connection
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("running", authenticated=True)))
+    shell.operation = "load"
+    shell._complete(OperationResult(error="read failure"))
+    assert panel.interrupt_button.isEnabled()
+    assert panel.disconnect_button.isEnabled()
+    with qtbot.waitSignal(panel.interrupt_requested):
+        panel.interrupt_button.click()
+    with qtbot.waitSignal(panel.disconnect_requested):
+        panel.disconnect_button.click()
+    panel.handle_result(ServiceResult(1, "disconnect"))
+    shell._render()
+    assert not panel.connect_button.isEnabled()
 
 
 def test_panel_login_text_send_failure_interrupt_and_disconnect(qtbot: QtBot) -> None:

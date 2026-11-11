@@ -70,6 +70,7 @@ class ConnectionPanel(QWidget):
         self._generation = 0
         self._connected = False
         self._available = True
+        self._settings_ready = True
         self._status = SessionStatus("closed")
         self._pending: set[str] = set()
         self._texts: dict[str, tuple[str, str]] = {}
@@ -147,9 +148,15 @@ class ConnectionPanel(QWidget):
         self.login_url.clear()
         self._render()
 
-    def set_available(self, available: bool) -> None:
-        """Enable commands only while application settings and lifetime permit them."""
+    def set_available(self, available: bool, *, settings_ready: bool = True) -> None:
+        """Update command availability without coupling sessions to settings I/O.
+
+        Args:
+            available: Whether application lifetime permits session commands.
+            settings_ready: Whether settings permit a new connection.
+        """
         self._available = available
+        self._settings_ready = settings_ready
         self._render()
 
     def service_finished(self) -> None:
@@ -286,7 +293,7 @@ class ConnectionPanel(QWidget):
     def _render(self) -> None:
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
-        self.connect_button.setEnabled(available and not self._connected)
+        self.connect_button.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_button.setEnabled(available and self._connected)
         self.login_button.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
