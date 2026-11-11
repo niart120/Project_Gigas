@@ -14,6 +14,27 @@ Windows x64/Python 3.13.5の隔離環境で、固定runtimeのinitialize、未�
 
 採用版のGUI結合・全体品質ゲートは[U02親仕様](../complete/unit_007/CODEX_CONNECTION.md)に記録します。新規ブラウザ認証、APIキー、承認accept後の実行、別版・別環境は、上記の受入結果に含みません。
 
+## U04 M0のMCP公開経路（2026-11-12）
+
+[M0子仕様](../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)で、同梱runtime `0.167.0`の公開schemaを生成し、公開tag `rust-v0.167.0`（`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`）の設定・通知処理を読んだ。製品MCP、認証付きHTTP、画像の実モデル配送は実行していない。
+
+| 根拠 | 確認した事実・設計への適用 |
+|---|---|
+| 同梱実行ファイルの`app-server generate-json-schema --experimental` | `ThreadStartParams.config`、`mcpServerStatus/list`のthreadId/serverName、`mcpServer/tool/call`のthreadId/server/tool/argumentsを確認。後二つは限定接続検証に利用できるが、専用の製品操作経路は作らない |
+| [採用tagの設定schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json#L4208)・[公式MCP設定](https://learn.chatgpt.com/docs/extend/mcp) | URL、http_headers、enabled_tools、required、startup_timeout_sec、tool_timeout_secが公開されている。現製品の外部MCP無効化とthread/start.configへ、アプリ専有サーバを追加する方針 |
+| [MCPのimage content](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) | 同じPNG bytesをbase64のimage contentで返し、観測ID・取得UTC・analysisを短いJSON textで返せる。structuredContentとの二重配送を必須にしない |
+| [採用tagのモデル配送と通知](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs#L695) | 通知用には切詰め結果、モデル側には元の結果を渡す。Gigasの保存PNGとMCP応答の同一性を、モデル内部の画像前処理まで拡張しない |
+| [通知結果上限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/pty/src/lib.rs#L25)・[切詰め処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/output-truncation/src/lib.rs#L69) | 結果全体を最大1 MiBのpreviewへ制限する。外側JSONが加わるためGigas現行の受信1 MiBでは不足し得る。M2で2 MiBの有界受信と実通知サイズを確認する |
+| [通知画像省略feature](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/features/src/lib.rs#L1922) | 開発中・既定false。切詰め後のtextに残る画像断片を消す保証もないため、U04の必須設定にしない |
+| [公式Python MCP SDK v2.3.0](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.3.0)・[ASGI組込み](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/run/asgi.md)・[実行設定](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/run/index.md) | Python >=3.10。`MCPServer.streamable_http_app(json_response=True, stateless_http=True)`を既存サービス用ループ上でホストする候補。lifespanによるsession manager起動・終了が必要。依存導入・Windows実行は未実施 |
+| [Streamable HTTPの寿命](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) | 接続／session IDを操作許可と同一視しない。U04はサーバ寿命に固定したAuthorization値を使い、切断後は再利用しない。入力世代との対応はU05で設計 |
+
+**採用する設計**: loopbackのOS割当ポートと接続ごとの不透明なBearer値をthread/start.configへ渡す。ハンドラがreader/writerを固定参照する構成とし、token履歴表や新たな権限管理をU04で先行実装しない。設定ファイル書換えやreload、別の受信所有者はU04に不要。既存read-only threadとdeveloperInstructionsを使い、保存はアプリが行う。
+
+**未確認と期限**: M2でSDK/ASGIのWindows起動終了、required・認証ヘッダーの実適用、本MCP画像のモデル受信、原寸PNGの容量、通知の実寸とGUI応答性を確認する。M0で公開経路は確認したが、製品接続の成功は未確認である。経路が失敗したら原因を記録し、方式・版・必要な固定縮小の再設計前に画像結合を受入しない。保存・観測の独立部分は進められる。
+
+U05の停止・次実行では旧tokenの失効と新tokenの公開が必要。保持threadへの設定反映／MCP再読込またはthread・接続再作成の効果は未検証で、物理入力公開前に確認する。新threadへの設定注入を確認したことは、U06の同一セッションGoal再開を確認したことではない。
+
 # 1. この文書の位置づけ
 
 **公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。製品経路の必要APIの実行確認はM1/M2で行います。
