@@ -253,3 +253,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### S2 フォーム再分類と設定保持
 
 `uv run pytest tests/integration/test_video_settings_gui.py --basetemp=tmp/pytest-settings --tb=short -q`: 新APIと配置が未実装の18件red→19件green。保存実機と取得先要求、既存認証・未知設定、処理中閉じる抑止を確認。standalone認証確認を含め20件green。担当ruff/format/ty成功、独立レビュー必須指摘なし。620×440と480×360の各3tab模擬描画は横縦scrollなし。Shell結合はA2/A3で行う。refactor-skipped。
+
+### S2a 未接続時の保存機器保持
+
+独立レビューで保存機器が未検出かつtargetが未接続のとき候補が消えることを発見。test_video_settings_guiのabsent_saved 3件red→3件green、全22件green。保存候補と未適用選択を区別して保持し、同一パスは重複しない。担当ruff/format/ty成功。refactor-skipped。

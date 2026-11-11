@@ -274,3 +274,53 @@ def test_ok_does_not_accept_before_the_owner_confirms_apply(qtbot: QtBot, tmp_pa
 
     assert accepted.count() == 0
     assert dialog.isVisible()
+
+
+@pytest.mark.parametrize("checked", [False, True])
+def test_disconnected_form_keeps_absent_saved_camera_selectable(
+    qtbot: QtBot, tmp_path: Path, checked: bool
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SettingsDialog(tmp_path / "settings.toml", parent)
+    qtbot.addWidget(dialog)
+    dialog.set_values(Settings(capture_device="saved-a"))
+    dialog.set_capture_target("")
+
+    dialog.set_capture_devices((), checked=checked)
+
+    saved = dialog.capture_choices.findData("saved-a")
+    assert saved >= 1
+    assert dialog.capture_choices.currentData() == ""
+    assert dialog.capture_target == ""
+    assert dialog.values().capture_device == "saved-a"
+    dialog.capture_choices.setCurrentIndex(saved)
+    assert dialog.capture_target == "saved-a"
+    assert dialog.values().capture_device == "saved-a"
+
+
+def test_absent_saved_and_selected_cameras_remain_distinct_choices(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SettingsDialog(tmp_path / "settings.toml", parent)
+    qtbot.addWidget(dialog)
+    dialog.set_values(Settings(capture_device="saved-a"))
+    dialog.set_capture_target("active-b")
+
+    dialog.set_capture_devices(())
+
+    saved = dialog.capture_choices.findData("saved-a")
+    active = dialog.capture_choices.findData("active-b")
+    assert saved >= 1
+    assert active >= 1
+    assert saved != active
+    assert dialog.capture_choices.itemText(saved) != dialog.capture_choices.itemText(active)
+    assert dialog.capture_choices.currentData() == "active-b"
+    assert dialog.values().capture_device == "saved-a"
+    dialog.capture_choices.setCurrentIndex(saved)
+    assert dialog.capture_target == "saved-a"
+    dialog.set_capture_devices(())
+    assert dialog.capture_choices.count() == 2
+    assert dialog.capture_choices.currentData() == "saved-a"

@@ -218,6 +218,8 @@ class SettingsDialog(QDialog):
     ) -> None:
         """Replace selectable devices without changing any unsaved setting.
 
+        Saved and selected device paths remain selectable when absent from the catalog.
+
         Args:
             devices: Enumerated names and nonempty paths. Paths are stored unchanged.
             checked: Whether any successful enumeration has supplied these identities.
@@ -245,14 +247,17 @@ class SettingsDialog(QDialog):
             self.capture_choices.addItem("未接続", "")
             for label, path in capture_device_choices(self._devices):
                 self.capture_choices.addItem(label, path)
-            selected = self.capture_choices.findData(self._selected_device)
-            if selected < 0:
-                missing = "未検出" if self._devices_checked else "未確認"
-                self.capture_choices.addItem(
-                    "検索中" if self._devices_searching else missing, self._selected_device
-                )
-                selected = self.capture_choices.count() - 1
-            self.capture_choices.setCurrentIndex(selected)
+            missing = "未検出" if self._devices_checked else "未確認"
+            state = "検索中" if self._devices_searching else missing
+            for role, path in (
+                ("保存済み", self._saved_device),
+                ("選択中", self._selected_device),
+            ):
+                if path and self.capture_choices.findData(path) < 0:
+                    self.capture_choices.addItem(f"{role} ({state})", path)
+            self.capture_choices.setCurrentIndex(
+                self.capture_choices.findData(self._selected_device)
+            )
 
     def _choose_capture_device(self) -> None:
         path = self.capture_choices.currentData()
