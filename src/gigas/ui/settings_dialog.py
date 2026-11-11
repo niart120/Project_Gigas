@@ -1,6 +1,5 @@
 """Settings editor with labels and values, without instructional prose."""
 
-from collections import Counter
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -16,11 +15,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from gigas.storage.settings import Settings
+from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.layout import WINDOW_SIZE_PRESETS
 
 if TYPE_CHECKING:
@@ -82,8 +83,8 @@ class SettingsDialog(QDialog):
         self.capture_discovery_error.hide()
         self.video_form.addRow(self.capture_discovery_error)
         connection = QHBoxLayout()
-        self.capture_connect_button = QPushButton("接続", self)
-        self.capture_disconnect_button = QPushButton("切断", self)
+        self.capture_connect_button = QToolButton(self)
+        self.capture_disconnect_button = QToolButton(self)
         self.capture_connection_status = QLabel("未接続", self)
         self.capture_connection_status.setTextFormat(Qt.TextFormat.PlainText)
         for widget in (
@@ -219,16 +220,8 @@ class SettingsDialog(QDialog):
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
             self.capture_choices.addItem("未選択", "")
-            counts = Counter(device.name for device in self._devices)
-            seen: Counter[str] = Counter()
-            for device in self._devices:
-                seen[device.name] += 1
-                label = (
-                    f"{device.name} ({seen[device.name]})"
-                    if counts[device.name] > 1
-                    else device.name
-                )
-                self.capture_choices.addItem(label, device.path)
+            for label, path in capture_device_choices(self._devices):
+                self.capture_choices.addItem(label, path)
             selected = self.capture_choices.findData(self._selected_device)
             if selected < 0:
                 missing = "未検出" if self._devices_checked else "未確認"

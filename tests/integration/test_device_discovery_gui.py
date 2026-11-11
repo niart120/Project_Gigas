@@ -194,8 +194,8 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
         dialog = shell.dialog
         assert dialog is not None
         qtbot.waitUntil(lambda: dialog.capture_choices.count() == 3)
-        qtbot.waitUntil(shell.window.video.connect_button.isEnabled)
-        shell.window.video.connect_button.click()
+        qtbot.waitUntil(shell.window.video.connect_action.isEnabled)
+        shell.window.video.connect_action.trigger()
         qtbot.waitUntil(lambda: service.snapshot().frame is not None)
         first = service.snapshot().frame
         assert first is not None

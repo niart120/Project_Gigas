@@ -479,4 +479,4 @@ class VideoController(QObject):
             available=self._available and not self._closing and self.service.is_alive(),
             settings_ready=self.can_connect,
         )
-        self.panel.disconnect_button.setEnabled(self.can_disconnect)
+        self.panel.disconnect_action.setEnabled(self.can_disconnect)

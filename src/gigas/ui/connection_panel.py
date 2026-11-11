@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -89,17 +89,12 @@ class ConnectionPanel(QWidget):
         self.cards: dict[str, RequestCard] = {}
         layout = QVBoxLayout(self)
         self._layout = layout
-        actions = QHBoxLayout()
-        self.connect_button = QPushButton("接続", self)
-        self.disconnect_button = QPushButton("切断", self)
-        self.login_button = QPushButton("ログイン", self)
+        self.connect_action = QAction("接続", self)
+        self.disconnect_action = QAction("切断", self)
+        self.login_action = QAction("ログイン", self)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.model = ElidedLabel(parent=self)
-        for widget in (self.connect_button, self.disconnect_button, self.login_button):
-            actions.addWidget(widget)
-        actions.addStretch()
-        layout.addLayout(actions)
         state = QHBoxLayout()
         state.addWidget(self.status, 1)
         state.addWidget(self.model, 3)
@@ -131,9 +126,9 @@ class ConnectionPanel(QWidget):
         turn_actions.addWidget(self.send_button)
         turn_actions.addWidget(self.interrupt_button)
         layout.addLayout(turn_actions)
-        self.connect_button.clicked.connect(self.connect_requested)
-        self.disconnect_button.clicked.connect(self._disconnect)
-        self.login_button.clicked.connect(self._login)
+        self.connect_action.triggered.connect(self.connect_requested)
+        self.disconnect_action.triggered.connect(self._disconnect)
+        self.login_action.triggered.connect(self._login)
         self.open_login_button.clicked.connect(self._open_login)
         self.send_button.clicked.connect(self._send)
         self.interrupt_button.clicked.connect(self.interrupt)
@@ -332,9 +327,9 @@ class ConnectionPanel(QWidget):
         self._layout.setStretchFactor(self.requests, 5 if requesting else 2)
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
-        self.connect_button.setEnabled(available and self._settings_ready and not self._connected)
-        self.disconnect_button.setEnabled(available and self._connected)
-        self.login_button.setEnabled(
+        self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
+        self.disconnect_action.setEnabled(available and self._connected)
+        self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
         ready = (

@@ -73,7 +73,7 @@ NyX `648f860e5afd582f80aa58645570a16bfc68a393`の比較結果はunit_024を参�
 | refactor-skipped | T05: 設定を開くと候補を非同期取得し、取得中は映像と編集を保持 | regression | integration | RV02。5 failed / 1 passed→80 passed |
 | refactor-skipped | T06: 設定適用で保存から安全な映像切替まで完結 | regression | integration | RV01。10 failed / 2 passed→97 passed |
 | refactor-skipped | T07: 再確認可能なエラー通知と幅制限で操作・診断を維持 | regression | integration | RV05、RV09。GUI 7 failed→146 passed、core 10 failed→65 passed |
-| todo | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03 |
+| refactor-skipped | T08: メニューと設定で接続処理を共有し、主画面の状態を集約 | regression | integration | RV03。新規11件、関連117 passed |
 | todo | T09: 未対応認証を新規選択させず既存値は保持 | regression | integration | RV10 |
 | todo | T10: 設定・送信のショートカットと終了取消し後の状態を確認 | regression | integration / manual | RV11 |
 | refactor-skipped | T11: 本文置換範囲内の選択端点もUnicode文字境界へ収める | edge | integration | T02独立レビューで発見。4 failed / 9 passed→25 passed |
@@ -116,6 +116,10 @@ T12: 横断レビューで`before\nKEEP`の`KEEP`を選択した状態から`new
 T07: `uv run pytest tests/integration/test_notifications.py -q --basetemp=tmp/pytest-review-t07`で初期7件のredを確認。発生元別の最近の失敗、非モーダル通知、モデルレスの詳細snapshot、選択・コピーの維持を実装した。追加redで詳細画面のEnter誤発火、旧失敗の取消し時再通知、成功した適用と後の取得失敗の混同、過去のローカルエラーがサービス終了を隠す経路を修正した。同ファイルは13 passed、関連GUI 13ファイル146 passed。
 
 T07のCodex側は`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_service.py -q --basetemp=tmp/pytest-t07-correlation-red`で10 failed / 53 passed。省略可能な`failure_id`を状態・例外・結果へ渡し、同じ失敗だけを対応付けた。独立レビューで終了時の中断失敗にも相関が必要と分かり、追加red→修正後は65 passed。型/docstring・API docsを確認し、ignore/castは追加していない。担当ruff/format・全体ty・差分検査成功、独立レビューの必須指摘はすべて解消。追加構造整理は不要。
+
+T08: メニューと設定の共有QAction、表示時の非同期列挙、保存前の選択印、取得中の名前、終了経路を先に7 failedのredで確認し、7 passedへ進めた。ファイル・接続・表示のメニューへ操作を集約し、映像領域は画像だけ、状態・表示名はステータスバーとした。旧button互換aliasを残さず、既存試験も実際のメニュー操作へ移行した。明示切断後の一覧更新はメニューと設定で共通化した。
+
+T08の追加redでは、長い同名機器の末尾番号が消える問題、重複IDを含む一覧更新後の旧action残存、設定再読込後に保存値と取得中の値が異なると選択済み項目から適用できない問題を確認・修正。`test_main_menus.py`の11件と関連11ファイル117 passed、対象18 Pythonファイルのruff/format・全体ty・差分検査成功。独立レビューの必須指摘を解消した。表示名の組立は設定とメニューで共用し、追加のgreen後構造整理は不要。
 
 ## 8. 先送り事項
 

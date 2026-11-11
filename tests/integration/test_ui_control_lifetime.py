@@ -49,11 +49,11 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
 
         assert shell.pending == "dialog"
         assert panel.interrupt_button.isEnabled()
-        assert panel.disconnect_button.isEnabled()
-        assert shell.window.video.disconnect_button.isEnabled()
+        assert panel.disconnect_action.isEnabled()
+        assert shell.window.video.disconnect_action.isEnabled()
         panel.interrupt_button.click()
-        panel.disconnect_button.click()
-        shell.window.video.disconnect_button.click()
+        panel.disconnect_action.trigger()
+        shell.window.video.disconnect_action.trigger()
         assert interrupted == [True]
         assert disconnected == [True]
         assert capture.disconnects == 1

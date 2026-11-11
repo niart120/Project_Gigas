@@ -35,7 +35,7 @@ def application(
         devices_revision=1,
     )
     capture.stream()
-    qtbot.waitUntil(shell.window.video.disconnect_button.isEnabled)
+    qtbot.waitUntil(shell.window.video.disconnect_action.isEnabled)
     shell.open_settings()
     assert shell.dialog is not None
     qtbot.waitUntil(
@@ -173,7 +173,7 @@ def test_dirty_selection_cannot_connect_saved_device_but_can_refresh(
     dialog = shell.dialog
     assert dialog is not None
     assert not dialog.capture_connect_button.isEnabled()
-    assert not shell.window.video.connect_button.isEnabled()
+    assert not shell.window.video.connect_action.isEnabled()
     assert dialog.capture_refresh_button.isEnabled()
     shell.connect_video()
     assert len(capture.connections) == 1
@@ -196,7 +196,7 @@ def test_disconnected_save_intent_can_be_cancelled_from_dialog(
     qtbot.waitUntil(io.entered.is_set)
     shell.video.timer.timeout.emit()
     assert dialog.capture_disconnect_button.isEnabled()
-    assert shell.window.video.disconnect_button.isEnabled()
+    assert shell.window.video.disconnect_action.isEnabled()
     dialog.capture_disconnect_button.click()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -217,7 +217,7 @@ def test_unselected_saved_device_cannot_be_explicitly_connected(
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert not shell.dialog.capture_connect_button.isEnabled()
-    assert not shell.window.video.connect_button.isEnabled()
+    assert not shell.window.video.connect_action.isEnabled()
     shell.connect_video()
     assert len(capture.connections) == 1
 
@@ -332,7 +332,7 @@ def test_display_only_apply_and_dirty_close_save_do_not_start_video(
 ) -> None:
     shell, capture, _io = application
     capture.finish_disconnect = True
-    shell.window.video.disconnect_button.click()
+    shell.window.video.disconnect_action.trigger()
     dialog = shell.dialog
     assert dialog is not None
     dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(15))

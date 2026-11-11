@@ -29,13 +29,13 @@ def shell(qtbot: QtBot, tmp_path: Path) -> Iterator[ApplicationShell]:
 
 
 def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot: QtBot) -> None:
-    shell.window.settings_button.click()
+    shell.window.settings_action.trigger()
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(dialog.isVisible)
     dialog.model.setText("edited")
 
-    shell.window.settings_button.click()
+    shell.window.settings_action.trigger()
 
     assert shell.dialog is dialog
     assert dialog.model.text() == "edited"
@@ -43,13 +43,13 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
 
 
 def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: QtBot) -> None:
-    shell.window.settings_button.click()
+    shell.window.settings_action.trigger()
     dialog = shell.dialog
     assert dialog is not None
     assert not shell.path.exists()
     dialog.close()
     assert not shell.path.exists()
-    shell.window.settings_button.click()
+    shell.window.settings_action.trigger()
     dialog.save_button.click()
     qtbot.waitUntil(shell.path.exists)
     assert load_settings(shell.path) == Settings()

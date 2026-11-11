@@ -29,7 +29,7 @@ uv sync
 uv run gigas
 ```
 
-`uv run python -m gigas`でも起動できます。右上の「設定…」で設定画面を開きます。保存先、項目の意味、エラー時の対処は[グローバル設定](docs/settings.md)を参照してください。
+`uv run python -m gigas`でも起動できます。「ファイル」→「設定…」で設定画面を開きます。保存先、項目の意味、エラー時の対処は[グローバル設定](docs/settings.md)を参照してください。
 
 ## wheelから起動
 

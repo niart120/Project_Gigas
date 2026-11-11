@@ -36,7 +36,7 @@ def test_failures_keep_controls_reachable_and_history_after_recovery(
     assert notices.banner.isVisible()
     assert notices.notices["settings"].details == shell.error
     assert panel.interrupt_button.isEnabled()
-    assert panel.disconnect_button.isEnabled()
+    assert panel.disconnect_action.isEnabled()
     notices.dismiss_button.click()
     assert not notices.banner.isVisible()
     assert notices.entry_button.isEnabled()
