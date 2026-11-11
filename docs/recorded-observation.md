@@ -6,7 +6,7 @@ Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。�
 
 `ProjectWriter`はアプリが原記録を書き込むための所有者です。プロジェクト選択中はアプリが一つ保持し、観測サービスはその参照を借ります。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
 
-このAPIは観測画像・取得時刻・IDの保存を終えてから結果を返します。MCPへの結合は未実装です。Codexが後で画像を解釈した公開応答や対話履歴は、受信した内容をアプリが別の記録として保存する対象です。解釈を待って画像保存を遅らせたり、保存済みの原観測を解釈結果で書き換えたりしません。対話履歴の保存とCodexによる`memory/`編集は、現在のAPIには未接続です。
+観測サービスは加工・符号化した画像を返し、同じ画像・取得時刻・IDを別の非同期処理で保存します。保存開始・完了は応答の前提ではありません。MCPへの結合は未実装です。Codexが後で画像を解釈した公開応答や対話履歴は、受信した内容をアプリが別の記録として保存する対象です。解釈を待って画像保存を遅らせたり、保存済みの原観測を解釈結果で書き換えたりしません。対話履歴の保存とCodexによる`memory/`編集は、現在のAPIには未接続です。
 
 ## 一枚を保存する
 
@@ -53,15 +53,19 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 ## 最新画像を非同期で観測する
 
-`ObservationService(reader, writer)`には、既存の`CaptureService.reader()`とアプリが所有するwriterを渡します。サービスが機器を開始・再接続したり、writerを開き直したりすることはありません。
+`ObservationService(reader, writer, resolution="full_hd", on_save_error=...)`には、既存の`CaptureService.reader()`とアプリが所有するwriterを渡します。サービスが機器を開始・再接続したり、writerを開き直したりすることはありません。
 
 `await service.observe()`はsnapshotを一度読み、`phase == "streaming"`で画像がある場合に採用します。呼出しより前に取得した最新キャッシュを使い、新しいフレームを待ちません。採用前の取得停止・エラーでは失敗し、採用後に取得が停止しても、その画像の保存を続けます。`captured_at`は元Frameの時刻を保持します。撮像時刻、機器内部の遅延、操作後の画面であることは保証しません。
 
-一件のワーカーで`Observation.from_frame()`、`writer.record()`の順に実行し、保存した同じ`Observation`を返します。符号化中はwriterの同期操作ロックを保持しません。この間のwriter.close()は自動的には拒否されないため、所有者は後述のdrain()で終了を待ってから閉じてください。処理は呼出側の既存asyncioループから別スレッドへ渡します。非同期メソッドは同じイベントループから使ってください。同時観測は一件だけとし、処理中の次要求は`ObservationError`の`code == "BUSY"`で拒否します。要求を待ち行列へ入れたり、自動で再実行したりしません。
+加工・符号化を別スレッドで行い、完成した同じ`Observation`を返却と非同期保存へ渡します。保存中も次の観測を取得・符号化して返せます。`BUSY`になるのは画像の加工・符号化自体が進行中の場合だけです。`resolution`の変更は同じイベントループ上で行い、変更後に開始する観測へ反映します。実行中の画像は変更しません。
+
+現在の実装は同期writerを再利用し、保存処理だけを`asyncio.Lock`で直列化します。このロックを観測の加工・返却では待ちません。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
+
+保存失敗は`on_save_error(observation, error)`へ通知し、観測成功を取り消しません。コールバックは同じイベントループで呼ばれるため、速やかに戻してください。省略時は観測IDと保存先をログへ記録します。`observe()`の成功直後にファイルが存在する保証はなく、障害時に未保存画像が失われる場合があります。
 
 ### 取消しと終了
 
-`observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。アプリはサービスとwriterの参照を保持し、`await service.drain()`で処理終了を確認します。保存済みの観測は、要求が取り消されても削除しません。
+`observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。アプリはサービスとwriterの参照を保持し、`await service.drain()`で進行中の符号化とすべての保存の終了を確認します。待機の取消しでは保存を取り消しません。保存エラーは別途通知するため、`drain()`完了は全画像の保存成功を意味しません。最後の符号化が失敗した場合も、それ以前の保存を回収してからその例外を返します。保存済みの観測は、要求が取り消されても削除しません。
 
 接続を切る場合は新しい観測要求を閉じて`drain()`を待ちます。プロジェクトを選択したままならwriterは保持します。保存先の切替やアプリ終了でプロジェクト自体を閉じるときにだけ、原記録処理の収束後に`writer.close()`を呼びます。
 
@@ -70,13 +74,13 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 ```python
 from gigas.game_io.observation import ObservationError
 from gigas.services.observation import ObservationService
-from gigas.storage.project import ProjectError, ProjectWriter
+from gigas.storage.project import ProjectWriter
 
 
 async def close_project(service: ObservationService, writer: ProjectWriter) -> None:
     try:
         await service.drain()
-    except (ObservationError, ProjectError):
+    except ObservationError:
         writer.close()
         raise
     else:
@@ -101,7 +105,8 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 | 結果 | 保存物と次の操作 |
 |---|---|
-| PNG符号化・画像保存の失敗 | 当該観測は失敗します。JSONLへまだ触れていないため、writerは引き続き使用できます |
+| PNG符号化の失敗 | 観測が失敗します。画像とJSONLは書きません |
+| 画像保存の失敗 | 観測成功は変えず、保存失敗を通知します。JSONLへまだ触れていないため、writerは引き続き使用できます |
 | JSONLの追記・flush・fsyncの失敗 | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
 | 保存完了後の要求取消し | 観測記録は保持します。保存成功を応答配送の成功とは扱いません |
 

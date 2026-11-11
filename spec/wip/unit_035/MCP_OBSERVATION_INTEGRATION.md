@@ -36,7 +36,7 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | M2-01 加工後の画像と取得元情報が対応し、同じbytesを保存・再読込できる | regression | unit/integration | 原寸・保存試験を置換。旧形式互換なし |
-| todo | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
+| green | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
 | todo | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | todo | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 既存settings試験へ統合 |
 | todo | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
@@ -87,3 +87,17 @@ RED: `uv run pytest tests/integration/test_observation_storage.py -q --tb=short`
 rootで`uv run pytest tests/unit tests/integration -q`: 415 passed。`uv run ruff format --check .`（168 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv build`、`git diff --check`成功。追加の構造整理は不要と判断。サービスの保存待ちはM2-02で変更するため、現時点の公開docsは同期保存の実装事実を維持する。実MCP/実機は未実施。M2-01は9e80a31へコミット済み。
 
 M2-01の独立レビューで必須修正なし。既存試験に残っていたJSONLの再シリアライズ・書戻しを除き、writerが生成した実バイト列をそのまま再読込検証へ使うよう整理した。`uv run pytest tests/integration/test_observation_storage.py -q`: 45 passed。新規試験や製品動作の変更なし。
+
+### M2-02 実装・検証
+
+観測の加工Taskと保存Taskの所有を分離した。同じObservationを返し、独立した保存へ渡す。現同期writerを再利用するため保存だけasyncio.Lockで直列化し、観測はこのロックを待たない。独自キュー・上限・保存見送りは追加しない。on_save_error（省略時logging）でIDと例外を報告し、drainでは進行中加工と保存を回収する。後続加工が失敗しても先行保存を待ってから加工例外を返す。
+
+RED: `uv run pytest tests/integration/test_observation_service.py tests/integration/test_capture_service.py -q --tb=short`: 4 failed / 13 passed（未対応callback、保存停止中の応答timeout）。GREEN: 同対象18 passed。旧保存中BUSY試験を応答・次観測・失敗通知・取消し回収へ書換え、後続加工失敗時の先行保存回収を1件追加した。待機には明示Eventを使い、短いsleepだけで保存完了を推測しない。
+
+root: `uv run pytest tests/unit tests/integration -q` 416 passed。全体ruff format（168 files）/ruff check/ty、uv build、git diff --check成功。公開API・docsの保存成功と観測成功を分けた。GUI通知への結合とMCPは未実装。
+
+### 実runtimeへのMCP公開経路（製品受入とは別）
+
+`uv run --with mcp==2.3.0 --with httpx==0.28.1 --link-mode copy python -X utf8 tmp/m2-mcp-runtime-probe.py`で実socketとSDK2.3.0、採用app-server0.167.0を使用した。thread/start.configでURL/Bearer/observeのみの公開、mcpServerStatus/listで認証・ツール認識、mcpServer/tool/callで固定PNG一致、Bearer欠落/誤値401、server/lifespan終了を確認。終了後接続は1秒ConnectTimeout。証拠はignored tmp/m2-mcp-runtime-f4m_uvsg/results.json。認証・turn/start・モデル呼出しは0回であり、モデル画像受信ではない。
+
+liveのthread/read(includeTurns:true)は-32601、falseは成功。その後の終了・再起動ではtrueで空threadを読めた。先行試行tmp/m2-mcp-runtime-ydxcz76dではreadなしのEOF直後にrolloutがなく再読込失敗。空threadの保存タイミングは安定保証としない。有効MCP設定のfake bearer単純文字列走査は隔離HOMEで0件だが、実turn/他の保存表現まで非保存を証明しない。通常ターン終端後の会話永続化・秘密値・画像受信はM2-07/08の受入へ残す。

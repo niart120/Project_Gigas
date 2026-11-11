@@ -237,7 +237,7 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
             )
             assert progressed.frame is not None
             assert progressed.frame.generation == first.generation
-            assert not request.done()
+            observed = await asyncio.wait_for(request, 3)
             assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
             service.disconnect()
             assert preview.snapshot().frame is None
@@ -249,6 +249,7 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
         finally:
             resume.set()
             observed = await request
+            await observer.drain()
         decoded = cv2.imdecode(np.frombuffer(observed.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         assert decoded is not None
         assert decoded.tobytes() == bytes([observed.source_frame.sequence % 256]) * (16 * 16 * 3)
