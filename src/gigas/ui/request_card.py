@@ -13,9 +13,13 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+from gigas.ui.wrapped_radio import WrappedRadioButton
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -54,6 +58,10 @@ def _text_label(text: str, parent: QWidget) -> QLabel:
     label = QLabel(text, parent)
     label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(True)
+    label.setMinimumWidth(0)
+    policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    policy.setHeightForWidth(True)
+    label.setSizePolicy(policy)
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return label
 
@@ -70,14 +78,16 @@ class QuestionInput(QGroupBox):
 
     def __init__(self, question: "Question", parent: QWidget) -> None:
         """Create choices and an optional masked free-answer field."""
-        super().__init__(question.header, parent)
+        super().__init__(parent)
+        self.setAccessibleName(question.header)
         self.question = question
         layout = QVBoxLayout(self)
+        layout.addWidget(_text_label(question.header, self))
         layout.addWidget(_text_label(question.question, self))
         self.choices: list[QRadioButton] = []
         self._group = QButtonGroup(self)
         for option in question.options:
-            button = QRadioButton(option.label, self)
+            button = WrappedRadioButton(option.label, self)
             self.choices.append(button)
             self._group.addButton(button)
             layout.addWidget(button)
@@ -123,6 +133,7 @@ class RequestCard(QGroupBox):
     """
 
     submitted = Signal(object)
+    changed = Signal()
 
     def __init__(self, request: "HumanRequest", parent: QWidget) -> None:
         """Create only the decision controls advertised by this request."""
@@ -131,24 +142,39 @@ class RequestCard(QGroupBox):
             parent,
         )
         self.request = request
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.state: RequestState = "waiting"
         self._result_received = False
         self.editors: dict[str, QuestionInput] = {}
         self.decision_buttons: dict[str, QPushButton] = {}
         layout = QVBoxLayout(self)
+        header = QHBoxLayout()
         self.status = _text_label("回答待ち", self)
-        layout.addWidget(self.status)
+        header.addWidget(self.status, 1)
+        self.expand_button = QToolButton(self)
+        self.expand_button.setText("詳細")
+        self.expand_button.setCheckable(True)
+        self.expand_button.setChecked(True)
+        self.expand_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.expand_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        header.addWidget(self.expand_button)
+        layout.addLayout(header)
+        self.body = QWidget(self)
+        body_layout = QVBoxLayout(self.body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.body)
+        self.expand_button.toggled.connect(self._expand)
         if request.details:
-            details = QPlainTextEdit(self)
+            details = QPlainTextEdit(self.body)
             details.setPlainText(request.details)
             details.setReadOnly(True)
             details.setMaximumHeight(180)
-            layout.addWidget(details)
+            body_layout.addWidget(details)
         for question in request.questions:
-            editor = QuestionInput(question, self)
+            editor = QuestionInput(question, self.body)
             self.editors[question.id] = editor
             editor.changed.connect(self._validate)
-            layout.addWidget(editor)
+            body_layout.addWidget(editor)
         actions = QHBoxLayout()
         actions.addStretch()
         self.submit_button = QPushButton("回答", self)
@@ -161,7 +187,7 @@ class RequestCard(QGroupBox):
             button.clicked.connect(lambda _checked=False, value=decision: self._decide(value))
             self.decision_buttons[decision] = button
             actions.addWidget(button)
-        layout.addLayout(actions)
+        body_layout.addLayout(actions)
         self._validate()
 
     @property
@@ -202,6 +228,16 @@ class RequestCard(QGroupBox):
         self.submit_button.setEnabled(False)
         for button in self.decision_buttons.values():
             button.setEnabled(False)
+        if state not in {"waiting", "sending"}:
+            self.expand_button.setChecked(False)
+        self.changed.emit()
+
+    def _expand(self, expanded: bool) -> None:
+        self.body.setVisible(expanded)
+        self.expand_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self.changed.emit()
 
     def _validate(self) -> None:
         self.submit_button.setEnabled(

@@ -80,6 +80,7 @@ class ConnectionPanel(QWidget):
         self._stopping = False
         self.cards: dict[str, RequestCard] = {}
         layout = QVBoxLayout(self)
+        self._layout = layout
         actions = QHBoxLayout()
         self.connect_button = QPushButton("接続", self)
         self.disconnect_button = QPushButton("切断", self)
@@ -205,6 +206,7 @@ class ConnectionPanel(QWidget):
             ):
                 card = RequestCard(event, self._request_content)
                 card.submitted.connect(self.answer_requested)
+                card.changed.connect(self._render)
                 self.cards[event.token] = card
                 self._request_layout.addWidget(card)
                 self.requests.show()
@@ -290,9 +292,13 @@ class ConnectionPanel(QWidget):
         if generation == self._generation and token in self.cards:
             self._request_layout.activate()
             self._request_content.adjustSize()
-            self.requests.ensureWidgetVisible(self.cards[token])
+            self.requests.verticalScrollBar().setValue(self.cards[token].y())
 
     def _render(self) -> None:
+        requesting = any(card.state in {"waiting", "sending"} for card in self.cards.values())
+        self.prompt.setVisible(not requesting)
+        self._layout.setStretchFactor(self.transcript, 1 if requesting else 3)
+        self._layout.setStretchFactor(self.requests, 5 if requesting else 2)
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
         self.connect_button.setEnabled(available and self._settings_ready and not self._connected)
@@ -300,7 +306,12 @@ class ConnectionPanel(QWidget):
         self.login_button.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
-        ready = available and phase in {"ready", "stopped"} and "send" not in self._pending
+        ready = (
+            available
+            and not requesting
+            and phase in {"ready", "stopped"}
+            and "send" not in self._pending
+        )
         self.send_button.setEnabled(ready and bool(self.prompt.toPlainText().strip()))
         self.prompt.setReadOnly(not ready)
         self.interrupt_button.setEnabled(
