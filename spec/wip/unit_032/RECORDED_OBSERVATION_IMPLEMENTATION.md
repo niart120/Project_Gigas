@@ -38,9 +38,13 @@ M0の「開始前／開始後」は、本実装ではワーカーへの投入を
 | refactor-done | P2: 正常な既存記録を読み、不正行の位置を報告して追記を拒否する | edge | integration | 未知種別・欠番・余剰項目、原本保持 |
 | refactor-skipped | P3: 別プロセスのwriterを拒否し、終了後に同じプロジェクトを開ける | new | integration | 実Windows OSロック、明示的reload |
 | refactor-skipped | O1: 元寸法・画素・時刻を持つPNGとIDを保存し再読込後も対応する | new | integration | 最大3840×2160、同Frameに別ID |
-| todo | O2: 最新snapshotの採用条件と取得停止前後の境界を守る | new | integration | 既存の遅いreader試験を実保存へ統合 |
+| refactor-done | O2: 最新snapshotの採用条件と取得停止前後の境界を守る | new | integration | 既存の遅いreader試験を実保存へ統合 |
 | todo | F1: 画像失敗とJSONL追記結果不明を区別して原本を保持する | edge | integration | 既存ファイル衝突、flush/fsync失敗 |
 | todo | C1: 同時要求を拒否し、要求取消し後も保存と所有権を回収する | edge | integration | 強いTask参照、drain、保存中close拒否 |
+
+| todo | R1: 非RFC3339の時刻を拒否する | regression | integration | レビューで基本ISO形式の受理を発見 |
+| todo | R2: 深すぎるJSONの読込失敗でもロックを残さない | regression | integration | レビューでRecursionError経路を発見 |
+| todo | R3: 不正な元Frameの識別値を永続化しない | regression | integration | boolを受理する既存Frameと保存schemaの境界 |
 
 ## 7. 設計メモ
 
@@ -73,3 +77,5 @@ P2: 同じstorage試験でopen未実装の17 failed→19 passed。JSONL一行の
 P3: storage試験の排他2 failed→21 passed。別Pythonプロセスで保有中の拒否と終了後の再取得、os._exitによる解放を確認。対象ruff/ty成功。OSロックと同期処理の排他だけを持ち、ロックファイルの削除・PID管理は追加していない。
 
 O1: record未実装の7 failed→storage 28 passed。原寸PNGの画素・保存bytes・ID・時刻・JSONL照合、再読込後採番、過去画像欠損の許容、既知payloadの拒否を確認。3840×2160の乱数画像も32 MiB以内で保存・復号。対象ruff/ty成功。
+
+O2: service未実装importでred→service/capture試験14 passed。既存の遅いreader試験を実際のPNG保存待ちへ置換し、単一デバイス・previewの進行・採用後の取得停止と保存継続を確認。対象ruff/ty成功。
