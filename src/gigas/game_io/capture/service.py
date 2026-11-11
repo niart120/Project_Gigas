@@ -63,6 +63,11 @@ class CaptureSnapshot:
         cleanup: Whether native release or forced process termination was confirmed.
         reported_fps: Device-reported nominal rate, independent of measured acquisition.
         measured_fps: Acquisition rate from frame sequence and monotonic timestamps.
+        backend: Explicit OpenCV API identifier chosen by the current or last worker,
+            or None before selection. Zero is reserved for injected test adapters.
+        diagnostics: Bounded attempt failure reasons in order, retained after a
+            successful fallback and reset on the next request. Intermediate failures
+            do not populate error; each request tries at most two APIs.
     """
 
     phase: Literal[
@@ -76,6 +81,8 @@ class CaptureSnapshot:
     cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
     reported_fps: float | None = None
     measured_fps: float | None = None
+    backend: int | None = None
+    diagnostics: tuple[str, ...] = ()
 
 
 class CaptureReader:
@@ -119,6 +126,11 @@ class _Session:
     stop_at: float = 0.0
     forced_at: float | None = None
     unconfirmed: bool = False
+    candidates: tuple[int, ...] = ()
+    backend: int | None = None
+    started: bool = False
+    normal_exit: bool = False
+    cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
 
 
 class CaptureService(Thread):
@@ -194,6 +206,8 @@ class CaptureService(Thread):
                 cleanup="none",
                 reported_fps=None,
                 measured_fps=None,
+                backend=None,
+                diagnostics=(),
             )
             self._condition.notify_all()
             return True
@@ -231,20 +245,85 @@ class CaptureService(Thread):
                     continue
                 _operation, options = pending
                 generation = self._state.generation
+            self._run_request(options, generation)
+
+    def _run_request(self, options: "CaptureOptions | None", generation: int) -> None:
+        started = time.monotonic()
+        preference: int | None = None
+        allowed: tuple[int, ...] = ()
+        attempted: set[int] = set()
+        last_cleanup = self._state.cleanup
+        for attempt in range(2):
+            with self._condition:
+                if self._cancel or self._closing:
+                    self._state = replace(self._state, phase="idle", cleanup=last_cleanup)
+                    return
             try:
-                session = self._spawn(options, generation)
+                session = (
+                    self._spawn(options, generation)
+                    if preference is None
+                    else self._spawn(options, generation, preference)
+                )
             except Exception:  # noqa: BLE001 -- thread boundary reports startup failures
                 with self._condition:
                     self._frames.invalidate()
                     self._state = replace(
-                        self._state,
-                        phase="error",
-                        error="映像取得プロセスの起動失敗",
+                        self._state, phase="error", error="映像取得プロセスの起動失敗"
                     )
-                continue
-            self._monitor(session, generation)
+                return
+            self._monitor(session, generation, started)
+            last_cleanup = session.cleanup
+            with self._condition:
+                if attempt == 0:
+                    allowed = session.candidates
+                if session.backend is not None:
+                    attempted.add(session.backend)
+                diagnostics = self._state.diagnostics
+                if session.error:
+                    label = str(session.backend) if session.backend is not None else "未選択"
+                    diagnostics += (f"取得方式 {label}: {session.error}",)
+                remaining = tuple(api for api in allowed if api not in attempted)
+                retry = (
+                    options is not None
+                    and attempt == 0
+                    and bool(remaining)
+                    and bool(session.error)
+                    and not session.started
+                    and session.released
+                    and session.normal_exit
+                    and session.cleanup == "graceful"
+                    and not self._cancel
+                    and not self._closing
+                )
+                if retry and time.monotonic() - started >= self._timeouts.startup:
+                    retry = False
+                    session.error = "映像取得の開始期限切れ"
+                    diagnostics += (session.error,)
+                if retry:
+                    preference = remaining[0]
+                    self._frames.begin(generation)
+                    self._state = replace(
+                        self._state,
+                        phase="connecting",
+                        error="",
+                        cleanup="none",
+                        reported_fps=None,
+                        measured_fps=None,
+                        diagnostics=diagnostics,
+                    )
+                else:
+                    self._state = replace(
+                        self._state,
+                        phase="error" if session.error else "idle",
+                        error=session.error,
+                        cleanup=session.cleanup,
+                        diagnostics=diagnostics,
+                    )
+                    return
 
-    def _spawn(self, options: "CaptureOptions | None", generation: int) -> _Session:
+    def _spawn(
+        self, options: "CaptureOptions | None", generation: int, api_preference: int | None = None
+    ) -> _Session:
         context = multiprocessing.get_context("spawn")
         with ExitStack() as rollback:
             slot = SharedSlot.create(context, options) if options is not None else None
@@ -266,7 +345,8 @@ class CaptureService(Thread):
                     stop_reader,
                     status_writer,
                     self._factory,
-                ),
+                )
+                + (() if api_preference is None else (api_preference,)),
                 name=f"gigas-capture-{generation}",
                 daemon=True,
             )
@@ -327,16 +407,22 @@ class CaptureService(Thread):
                         )
                 elif message.kind == "opened":
                     self._state = replace(self._state, reported_fps=message.fps)
+                elif message.kind == "candidates":
+                    session.candidates = message.candidates
+                    session.backend = message.backend
+                    self._state = replace(self._state, backend=message.backend)
+                elif message.kind == "started":
+                    session.started = True
                 elif message.kind == "released":
                     session.released = True
                 elif message.kind == "error":
-                    session.error = message.error
+                    session.error = session.error or message.error
                     self._frames.invalidate()
 
-    def _monitor(self, session: _Session, generation: int) -> None:
+    def _monitor(self, session: _Session, generation: int, started: float) -> None:
         sequence = 0
         first: Frame | None = None
-        started = progress = time.monotonic()
+        progress = time.monotonic()
         while session.process.is_alive():
             try:
                 self._messages(session)
@@ -345,11 +431,16 @@ class CaptureService(Thread):
                 if session.slot is not None and not cancel and not session.error:
                     frame = session.slot.read(generation, sequence)
                     if frame is not None:
-                        sequence = frame.sequence
-                        progress = time.monotonic()
-                        if first is None:
-                            first = frame
-                        self._publish(frame, first)
+                        now = time.monotonic()
+                        if first is None and now - started >= self._timeouts.startup:
+                            session.error = "映像取得の開始期限切れ"
+                        else:
+                            sequence = frame.sequence
+                            session.started = True
+                            progress = now
+                            if first is None:
+                                first = frame
+                            self._publish(frame, first)
             except Exception:  # noqa: BLE001 -- monitor failures must still stop/reap the worker
                 session.error = "映像監視処理が失敗"
             self._deadlines(session, started, progress, sequence)
@@ -383,7 +474,7 @@ class CaptureService(Thread):
                     session.error = "映像停止通知に失敗"
                 with self._condition:
                     self._frames.invalidate()
-                    self._state = replace(self._state, phase="stopping", error=session.error)
+                    self._state = replace(self._state, phase="stopping")
         elif session.forced_at is None and now - session.stop_at >= self._timeouts.stop:
             session.forced_at = now
             try:
@@ -417,6 +508,11 @@ class CaptureService(Thread):
                 session.error = "映像取得プロセスが終了"
             self._frames.invalidate()
         cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
+        session.normal_exit = session.process.exitcode == 0
+        if not session.normal_exit and session.forced_at is None and not self._cancel:
+            session.error = (
+                f"{session.error} / 取得子プロセスの異常終了 ({session.process.exitcode})"
+            )
         if session.forced_at is not None:
             cleanup = "forced"
         elif session.released or session.listed:
@@ -439,10 +535,4 @@ class CaptureService(Thread):
             cleanup = "unconfirmed"
         if cleanup == "unconfirmed":
             self._retained.append(session)
-        with self._condition:
-            self._state = replace(
-                self._state,
-                phase="error" if session.error else "idle",
-                error=session.error,
-                cleanup=cleanup,
-            )
+        session.cleanup = cleanup

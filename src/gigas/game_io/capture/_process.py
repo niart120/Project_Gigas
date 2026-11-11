@@ -48,10 +48,12 @@ class Channel(Protocol):
 class WorkerMessage:
     """A small state notification; images never travel through the pipe."""
 
-    kind: Literal["devices", "opened", "released", "error"]
+    kind: Literal["devices", "candidates", "opened", "started", "released", "error"]
     devices: "tuple[DeviceInfo, ...]" = ()
     fps: float | None = None
     error: str = ""
+    candidates: tuple[int, ...] = ()
+    backend: int | None = None
 
 
 def send_message(channel: Channel, message: WorkerMessage) -> None:
@@ -62,11 +64,13 @@ def send_message(channel: Channel, message: WorkerMessage) -> None:
             "devices": [{"name": d.name, "path": d.path} for d in message.devices],
             "fps": message.fps,
             "error": message.error,
+            "candidates": message.candidates,
+            "backend": message.backend,
         },
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
-    if len(data) > MESSAGE_LIMIT or len(message.devices) > 64:
+    if len(data) > MESSAGE_LIMIT or len(message.devices) > 64 or len(message.candidates) > 2:
         error = "映像機器の列挙結果が上限超過"
         raise CaptureError(error)
     channel.send_bytes(data)
@@ -79,7 +83,7 @@ def receive_message(channel: Channel) -> WorkerMessage:
     if not isinstance(value, dict):
         raise CaptureError(error)
     kind = value.get("kind")
-    if kind not in ("devices", "opened", "released", "error"):
+    if kind not in ("devices", "candidates", "opened", "started", "released", "error"):
         raise CaptureError(error)
     raw_devices = value.get("devices")
     if not isinstance(raw_devices, list) or len(raw_devices) > 64:
@@ -101,8 +105,22 @@ def receive_message(channel: Channel) -> WorkerMessage:
     match kind:
         case "devices":
             return WorkerMessage("devices", devices=tuple(devices))
+        case "candidates":
+            candidates, backend = value.get("candidates"), value.get("backend")
+            if (
+                not isinstance(candidates, list)
+                or not 1 <= len(candidates) <= 2
+                or any(type(api) is not int or not 0 <= api <= 10000 for api in candidates)
+                or len(set(candidates)) != len(candidates)
+                or type(backend) is not int
+                or backend not in candidates
+            ):
+                raise CaptureError(error)
+            return WorkerMessage("candidates", candidates=tuple(candidates), backend=backend)
         case "opened":
             return WorkerMessage("opened", fps=None if fps is None else float(fps))
+        case "started":
+            return WorkerMessage("started")
         case "released":
             return WorkerMessage("released")
         case _:
@@ -208,6 +226,7 @@ def worker_main(
     stop: Channel,
     status: Channel,
     factory: "Callable[[], CaptureBackend]",
+    api_preference: int | None = None,
 ) -> None:
     """Own all synchronous device calls until cancellation, failure, or forced exit."""
     slot = None
@@ -218,17 +237,30 @@ def worker_main(
             send_message(status, WorkerMessage("devices", devices=devices))
         elif memory_name is not None and lock is not None:
             slot = SharedSlot(SharedMemory(name=memory_name), lock)
+            started = False
+
+            def publish(frame: Frame) -> None:
+                nonlocal started
+                if not started:
+                    send_message(status, WorkerMessage("started"))
+                    started = True
+                slot.publish(frame)
+
             acquire_frames(
                 options,
                 generation,
                 backend,
                 lambda: _stop_requested(stop),
-                slot.publish,
+                publish,
                 lambda fps: send_message(status, WorkerMessage("opened", fps=fps)),
                 lambda: send_message(status, WorkerMessage("released")),
                 enumerated=lambda devices: send_message(
                     status, WorkerMessage("devices", devices=devices)
                 ),
+                candidates=lambda apis, backend: send_message(
+                    status, WorkerMessage("candidates", candidates=apis, backend=backend)
+                ),
+                api_preference=api_preference,
             )
     except Exception as failure:  # noqa: BLE001 -- sanitize the native driver boundary
         error = str(failure) if isinstance(failure, CaptureError) else "映像取得処理が失敗"

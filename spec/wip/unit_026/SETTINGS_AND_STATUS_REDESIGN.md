@@ -196,7 +196,8 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 | green | 取得解像度の要求への結合 | new / integration | 保存された5候補を対応する幅・高さの要求へ変換する |
 | todo | 取得設定適用の世代境界 | new / integration | 旧取得の解放を待つ、新設定の最初の画像で完了、失敗後旧画像を現在扱いしない、要求と実到着が違っても同じ要求値は適用済み、レターボックスを含む表示変更は再接続なし |
 | green | OS別の列挙と機器照合 | new / unit | 方式ごとに番号が違う同一機器、同名同型2台、欠落・空・重複ID、利用不可方式、既存Windows設定の保持 |
-| todo | 代替取得の停止境界 | new / integration | 旧取得回収前に次を開かない、終了未確認なら停止、停止要求で連鎖取消し、全体期限、中間失敗と最終失敗を区別 |
+| green | 代替取得の停止境界 | new / integration | 旧取得回収前に次を開かない、終了未確認なら停止、停止要求で連鎖取消し、全体期限、中間失敗と最終失敗を区別 |
+| todo | 現在の映像診断への到達 | new / integration | 表示メニューから要求・実寸法/FPS/API/途中失敗/世代/終了状態を確認し、コピー中のsnapshotを更新しない。取得設定・共有画像を変えない |
 
 通常ラベルが消えたことや説明の文面だけを試験にせず、代表画面・長名・小画面・通知時を目視する。keyboard focus、Tab順、標準ボタンの誤発火も受入で確認する。
 
@@ -285,3 +286,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### A5 明示未接続と一時停止
 
 人間レビューで記憶の必要性を再検討し、明示未接続の適用では保存機器を空にする契約へ変更。test_settings_apply_contractの2件red/4件pass→6件green。既存フォームとアプリ結合の契約を合わせ45件成功。明示選択と未編集を区別し、初期未接続・メニュー停止・一般設定のみの適用では保存機器を保持する。フォーマット・lint成功。refactor-skipped。A2/S2aの実施履歴は当時の契約を記録し、現在の契約は本項と第5節を正とする。
+
+### C3b 同一機器のAPIフォールバック
+
+test_capture_fallbackの6件red/4件pass→10件green。全候補共通の開始期限を越えて初回Frameを公開する問題を独立レビューで発見し、追加1件red→修正green。開始前の最大2候補、同一ID再照合、正常release通知・exit0・host gracefulの全確認、停止・終了による連鎖取消しを検証した。capture関連全106件成功（`uv run pytest`、`--basetemp=tmp/pytest-capture`）。対象ruff/format/ty・diffcheck成功、独立レビュー必須指摘なし。refactor-skipped。Windows以外の実機動作は未検証。

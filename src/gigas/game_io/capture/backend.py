@@ -185,6 +185,8 @@ def acquire_frames(
     opened: "Callable[[float | None], None]",
     released: "Callable[[], None] | None" = None,
     enumerated: "Callable[[tuple[DeviceInfo, ...]], None] | None" = None,
+    candidates: "Callable[[tuple[int, ...], int], None] | None" = None,
+    api_preference: int | None = None,
 ) -> None:
     """Resolve a device, acquire validated frames, and always release its handle.
 
@@ -199,6 +201,9 @@ def acquire_frames(
         released: Optional notification after the native release returned normally.
         enumerated: Optional notification of selectable identities from the same
             enumeration used to resolve the device, before selection and opening.
+        candidates: Receives at most two matching API identifiers and the chosen API.
+        api_preference: Explicit API to re-resolve for a retry, or None for the first
+            matching candidate. A missing API never substitutes another candidate.
 
     Raises:
         CaptureError: Selection, opening, or reading fails, pixels are not uint8 BGR
@@ -208,7 +213,23 @@ def acquire_frames(
     identities = device_catalog(devices)
     if enumerated is not None:
         enumerated(identities)
-    selected = select_candidates(devices, options.device_path)[0]
+    matching = select_candidates(devices, options.device_path)
+    if len(matching) > 2:
+        message = "映像取得方式の候補数が上限超過"
+        raise CaptureError(message)
+    selected = next(
+        (
+            device
+            for device in matching
+            if api_preference is None or device.backend == api_preference
+        ),
+        None,
+    )
+    if selected is None:
+        message = "指定した映像取得方式で同じ機器が見つからない"
+        raise CaptureError(message)
+    if candidates is not None:
+        candidates(tuple(device.backend for device in matching), selected.backend)
     if stopped():
         return
     camera = backend.open(selected)

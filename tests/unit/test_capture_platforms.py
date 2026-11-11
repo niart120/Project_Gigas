@@ -7,7 +7,7 @@ from tests.unit.test_capture_backend import Camera
 
 from gigas.game_io.capture import backend as module
 from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend
-from gigas.game_io.capture.models import CaptureError, DeviceInfo
+from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
 
 
 @pytest.mark.parametrize(
@@ -123,3 +123,26 @@ def test_duplicate_identity_within_one_api_is_rejected() -> None:
     )
     with pytest.raises(CaptureError):
         module.select_candidates(candidates, "identity")
+
+
+def test_more_than_two_matching_apis_are_rejected_before_open() -> None:
+    opened: list[IndexedDevice] = []
+
+    class TooManyCandidates:
+        def enumerate(self) -> tuple[IndexedDevice, ...]:
+            return tuple(IndexedDevice(DeviceInfo("Same", "identity"), 0, api) for api in (1, 2, 3))
+
+        def open(self, device: IndexedDevice) -> Camera:
+            opened.append(device)
+            return Camera([])
+
+    with pytest.raises(CaptureError):
+        module.acquire_frames(
+            CaptureOptions("identity"),
+            1,
+            TooManyCandidates(),
+            lambda: False,
+            lambda _frame: None,
+            lambda _rate: None,
+        )
+    assert not opened
