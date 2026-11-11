@@ -19,11 +19,15 @@ class Settings:
     """Global settings values independent of the UI and device libraries.
 
     Attributes:
-        capture_device: Selected capture source. An empty string leaves it unset.
+        capture_device: DirectShow device path. An empty string leaves it unset.
         serial_port: Selected serial port. An empty string leaves it unset.
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
         auth_method: Authentication preference, either chatgpt or api_key.
+        capture_width: Requested image width in pixels, from 16 to 3840.
+        capture_height: Requested image height in pixels, from 16 to 2160.
+        capture_fps: Requested integer capture rate, from 1 to 120 frames per second.
+        preview_fps: GUI update limit, from 1 to 60 frames per second.
     """
 
     capture_device: str = ""
@@ -31,6 +35,10 @@ class Settings:
     model: str = ""
     effort: str = ""
     auth_method: str = "chatgpt"
+    capture_width: int = 1920
+    capture_height: int = 1080
+    capture_fps: int = 60
+    preview_fps: int = 30
 
 
 class SettingsError(ValueError):
@@ -105,6 +113,10 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         model=_text(agent, "model", path),
         effort=_text(agent, "effort", path),
         auth_method=auth_method,
+        capture_width=_integer(capture, "width", path, 1920, 16, 3840),
+        capture_height=_integer(capture, "height", path, 1080, 16, 2160),
+        capture_fps=_integer(capture, "fps", path, 60, 1, 120),
+        preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
     )
 
 
@@ -126,6 +138,14 @@ def save_settings(path: "Path", settings: Settings) -> None:
     serial = _ensure_table(controller, "serial", path)
     agent = _ensure_table(document, "agent", path)
     _set_text(capture, "device", settings.capture_device)
+    for key, value in (
+        ("width", settings.capture_width),
+        ("height", settings.capture_height),
+        ("fps", settings.capture_fps),
+        ("preview_fps", settings.preview_fps),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or capture.get(key) != value:
+            capture[key] = value
     _set_text(serial, "port", settings.serial_port)
     _set_text(agent, "model", settings.model)
     _set_text(agent, "effort", settings.effort)
@@ -179,6 +199,21 @@ def _text(table: MutableMapping[str, object], key: str, path: "Path", default: s
         msg = f"{path}: {key} must be a string"
         raise SettingsError(msg)
     return str(value)
+
+
+def _integer(
+    table: MutableMapping[str, object],
+    key: str,
+    path: Path,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        msg = f"{path}: capture.{key} must be an integer from {minimum} to {maximum}"
+        raise SettingsError(msg)
+    return int(value)
 
 
 def _ensure_table(
