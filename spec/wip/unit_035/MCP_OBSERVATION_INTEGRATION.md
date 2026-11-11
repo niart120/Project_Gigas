@@ -39,9 +39,8 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 | refactor-skipped | M2-02 保存を止めても応答と次観測が進み、失敗報告・取消し・終了回収が成立する | regression | integration | 既存service試験を改訂 |
 | refactor-skipped | M2-03 R02/R04の現在状態を再現し、原稿と次の明示送信を保つ | regression | unit/GUI | 接続・会話UI拡張前の独立修正 |
 | green | M2-04 観測解像度の適用・取消し・保存が取得再接続を起こさず次観測へ反映される | new | unit/GUI | 設定部分検証済み。観測サービスへの配線はM2-06で確認 |
-| todo | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
-| todo | M2-06 保存先の新規作成・読込・復元・未選択チャットが接続と終了に結合する | new | GUI/integration | 既存settings/終了所有へ統合 |
-| todo | M2-07 永続threadと観測記録が対応し、終了後の公開readと画像参照が成立する | new | integration/runtime | 秘密値の残存も隔離確認 |
+| refactor-skipped | M2-05 本MCPで同じ画像/IDを返し、認証・停止・旧接続失効が成立する | new | integration | 実HTTPと模擬取得。モデル受信とは区別 |
+| todo | M2-06/07 保存先操作・復元・未選択チャット・永続thread対応が接続と終了に結合する | new | GUI/integration/runtime | 同じ接続寿命を二度改修しないよう一項目へ統合。公開read・秘密値の検証証拠は模擬結合と分ける |
 | todo | M2-08 実Codexが固定画像と実映像を受信し、保存と同一、停止・終了が進む | new | runtime/hardware | 模擬試験では完了にしない |
 
 ## 7. 設計メモ
@@ -51,6 +50,10 @@ M1コードと既存試験は存在する。MCP・保存先UIは未結合。R02/
 設定結合の注意: 現SettingsDialog.valuesはSettingsを再構築するため、UIに出さない前回パスを失わないよう保存済みsnapshotから更新する必要がある。Shellの既存適用はcapture=Trueなので、観測解像度だけの変更では取得の反映を行わない。一般設定の既存適用・明示再試行を壊さないことも確認する。
 
 新しいサービス用ループ、監視・自動復旧、保存段階の状態表を追加しない。後続の公開会話記録はU06。並列実装を前提にせず、必要な排他範囲を現コードから選ぶ。保存方式と設定の所有を確定した時点で、本節に具体的な選択理由を追記する。
+
+M2-06/07の結合方針: connect/loginは既存のruntime用cwdで行い、初回sendの中で保存先・ObservationService・MCPを準備する。保存先の障害をログイン失敗にしない。runtimeの既存送信排他・停止・取消しを再利用し、thread/start前の非同期準備と実thread ID受領後の非同期対応記録を、アプリ側callbackの二つの境界で待つ。writerやSDKサーバはruntimeへ渡さない。対応記録後にだけturn/startへ進み、準備失敗は既存の通知で報告して原稿と認証済み接続を保つ。実thread IDと保存先を診断へ残し、空threadの自動削除や自動再送は行わない。
+
+ProjectWriterにはthread.started行の追記と観測行のthread ID引数を追加し、現在thread・索引・登録済みID集合を持たせない。チャット外のPython観測APIにはthreadを要求しないが、アプリからのチャット観測には実IDを渡す。同期I/Oの待機が取消されても、取得したwriterと進行中書込の回収を終えるまで所有を保つ。
 
 ## 8. 対象ファイル
 
@@ -127,3 +130,13 @@ Settings.observation_resolutionとTOML observation.resolutionを追加し、既�
 RED: video_settings/settings_apply_contract/settings_acceptの既存試験改訂で16 failed / 57 passed。GREEN同対象73 passed、関連settings/GUI8ファイル116 passed。root全体`uv run pytest tests/unit tests/integration -q`: 430 passed。全体ruff format（168files）/ruff check/ty、uv build、git diff --check成功。設定コードとGUIの実ラベルを読んで確認した。実画面の目視は最終結合時に行う。
 
 現アプリにObservationServiceの所有がまだないため、未使用hookは作らず、適用値はbaselineへ保持する。サービスループへの反映と次観測に効くことはM2-06の結合条件に残し、設定部分のgreenを全結合完了とは扱わない。
+
+### M2-05 MCP公開部の実装・検証
+
+ObservationMcpServerは既存サービスループで使うloopback HTTP公開部とし、接続ごとの名前とBearer、OS割当ポートを持つ。MCP SDK 2.3.0のstateless HTTPとuvicorn 0.54.0を使用。observeは同じObservationのPNGをbase64化して画像とJSONテキストを返し、保存を待たない。writerや記録先は所有しない。受付終了後のHTTP/SDK回収はclose、保存回収はアプリからObservationService.drainを呼ぶ。SDK起動失敗でUvicornがSystemExitを出す場合もアプリ終了にせず起動例外へ変換する。
+
+RED: 新しい実HTTP試験はgigas.mcp未実装により収集失敗。GREEN: `uv run --no-sync pytest tests/integration/test_observation_mcp.py -q` 4 passed。保存を停止したまま二つの応答、保存PNG/ID/メタデータとの一致、Bearer/Host/Origin拒否、旧Bearer拒否、起動失敗、close取消し後の再回収を確認。固定Frameを使い、実モデルの画像受信とは区別する。
+
+`uv run --no-sync pytest tests/unit tests/integration -q --basetemp=tmp/pytest-mcp-full`: 434 passed。ruff format（172 files）/ruff check/ty、uv lock --check、uv build、git diff --check成功。rootで公開API、所有、認証、応答の型とdocsを照合し、追加の構造整理なし。
+
+依存の宣言・lockはuv addで更新したが、起動中のgigas.exe（PID65012）が実行ファイルを保持しているため同期は承認済み権限でも失敗した。アプリを停止せず、必要依存だけuv pip installで反映し、試験は--no-syncで実行した。`uv sync --dev`の最終成功は未確認として残す。Codexへの製品配線・実モデル・GUI・実機は後続の受入に残る。
