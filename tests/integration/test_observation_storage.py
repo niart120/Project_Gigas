@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -9,7 +10,10 @@ import cv2
 import numpy as np
 import pytest
 
+from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
+from gigas.game_io.observation import ObservationError
+from gigas.storage import project
 from gigas.storage.project import ProjectError, ProjectWriter
 
 
@@ -262,3 +266,87 @@ def test_invalid_recorded_observation_is_rejected_without_rewriting(
     with pytest.raises(ProjectError, match="行1"):
         ProjectWriter.open(writer.path)
     assert log.read_bytes() == original
+
+
+@pytest.mark.parametrize("failure", ["encode", "png_sync", "collision"])
+def test_image_failure_preserves_log_and_writer_remains_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        first = writer.record(sample_frame())
+        log = writer.path / "events.jsonl"
+        before = log.read_bytes()
+        with monkeypatch.context() as patch:
+            if failure == "encode":
+                patch.setattr(observation_module, "MAX_PNG_BYTES", 1)
+            elif failure == "collision":
+                patch.setattr(observation_module, "uuid4", lambda: UUID(first.observation_id[4:]))
+            else:
+
+                def broken_sync(_descriptor: int) -> None:
+                    message = "image sync failure"
+                    raise OSError(message)
+
+                patch.setattr(project.os, "fsync", broken_sync)
+            with pytest.raises((ProjectError, ObservationError)):
+                writer.record(sample_frame())
+        assert log.read_bytes() == before
+        assert (writer.path / first.image_path).read_bytes() == first.png_bytes
+        assert len(list((writer.path / "observations").iterdir())) == 1
+        writer.record(sample_frame())
+        assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 2
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize("failure", ["partial", "sync"])
+def test_uncertain_log_preserves_data_and_requires_explicit_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        writer.record(sample_frame())
+        log = writer.path / "events.jsonl"
+        before = log.read_bytes()
+        fsync = os.fsync
+        with monkeypatch.context() as patch:
+            if failure == "partial":
+
+                def partial_append(path: Path, row: bytes) -> None:
+                    with path.open("ab", buffering=0) as stream:
+                        stream.write(row[: len(row) // 2])
+                    message = "partial append failure"
+                    raise OSError(message)
+
+                patch.setattr(project, "_append_row", partial_append)
+            else:
+                inode = log.stat().st_ino
+
+                def broken_log_sync(descriptor: int) -> None:
+                    if os.fstat(descriptor).st_ino == inode:
+                        message = "log sync failure"
+                        raise OSError(message)
+                    fsync(descriptor)
+
+                patch.setattr(project.os, "fsync", broken_log_sync)
+            with pytest.raises(ProjectError, match="未確定"):
+                writer.record(sample_frame())
+        after = log.read_bytes()
+        assert after.startswith(before)
+        assert len(after) > len(before)
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
+        with pytest.raises(ProjectError, match="再読込"):
+            writer.record(sample_frame())
+        assert log.read_bytes() == after
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
+        if failure == "partial":
+            with pytest.raises(ProjectError, match="行2"):
+                writer.reload()
+            assert log.read_bytes() == after
+        else:
+            writer.reload()
+            writer.record(sample_frame())
+            assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 3
+    finally:
+        writer.close()
