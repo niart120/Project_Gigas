@@ -277,3 +277,7 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 ### A4 復旧操作の結合
 
 `uv run pytest tests/integration/test_settings_recovery.py -q --basetemp=tmp/pytest-root`: 設定場所のメニュー未結合・詳細入口未実装の3件red→3件green。対象フォルダーを開く要求、失敗通知、設定保存失敗の非モーダルな詳細表示と編集値保持を確認。終了異常時は進捗領域も更新する。担当ruff/format/ty成功。refactor-skipped。
+
+### 既存試験の契約移行
+
+旧フッターボタンをメニューへ、設定の破棄確認を標準Cancelへ移した既存4ファイル（test_app_settings、test_video_application、test_device_discovery_gui、test_app_lifetime）は53件成功（`uv run pytest`、`--basetemp=tmp/pytest-ui`）。アプリ全体の終了確認は維持し、設定読込中Cancelと保存中の閉じる禁止を分けて確認。担当ruff/format/ty成功。設定ファイルの整数0/1を真偽値として受け入れる疑いは再現せず、既存の読み込み検証で拒否される2件を特性確認として追加した。製品不具合のred→greenとは扱わない。

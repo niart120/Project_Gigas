@@ -76,8 +76,10 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     qtbot.waitUntil(io.entered.is_set)
     assert capture.disconnects == 0
     assert capture.snapshot().phase == "streaming"
-    assert not dialog.capture_connect_button.isEnabled()
-    assert dialog.capture_disconnect_button.isEnabled()
+    assert not shell.window.video.connect_action.isEnabled()
+    assert shell.window.video.disconnect_action.isEnabled()
+    assert not dialog.ok_button.isEnabled()
+    assert not dialog.close_button.isEnabled()
     shell.connect_video()
     assert len(capture.connections) == 1
     io.release.set()
@@ -95,7 +97,8 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     capture.stream()
     qtbot.waitUntil(lambda: not shell.video.applying)
     assert shell.video.apply_state == "complete"
-    assert dialog.capture_connection_status.text() == "取得中"
+    assert shell.window.video.status.text() == "取得中"
+    assert dialog.capture_connection_status.isHidden()
 
 
 def test_save_failure_preserves_stream_and_unsaved_values(
@@ -172,7 +175,6 @@ def test_dirty_selection_cannot_connect_saved_device_but_can_refresh(
     choose_second(shell)
     dialog = shell.dialog
     assert dialog is not None
-    assert not dialog.capture_connect_button.isEnabled()
     assert not shell.window.video.connect_action.isEnabled()
     assert dialog.capture_refresh_button.isEnabled()
     shell.connect_video()
@@ -182,7 +184,7 @@ def test_dirty_selection_cannot_connect_saved_device_but_can_refresh(
     assert capture.connections[-1].device_path == "path-b"
 
 
-def test_disconnected_save_intent_can_be_cancelled_from_dialog(
+def test_disconnected_save_intent_can_be_cancelled_from_menu(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, io = application
@@ -195,9 +197,8 @@ def test_disconnected_save_intent_can_be_cancelled_from_dialog(
     dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     shell.video.timer.timeout.emit()
-    assert dialog.capture_disconnect_button.isEnabled()
     assert shell.window.video.disconnect_action.isEnabled()
-    dialog.capture_disconnect_button.click()
+    shell.window.video.disconnect_action.trigger()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     for _ in range(3):
@@ -206,18 +207,19 @@ def test_disconnected_save_intent_can_be_cancelled_from_dialog(
     assert shell.baseline.capture_device == "path-b"
 
 
-def test_unselected_saved_device_cannot_be_explicitly_connected(
+def test_missing_saved_device_cannot_be_explicitly_connected(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
     capture.finish_disconnect = True
     shell.disconnect_video()
     assert shell.dialog is not None
-    shell.dialog.capture_choices.setCurrentIndex(0)
-    shell.dialog.save_button.click()
+    save_settings(shell.path, replace(shell.baseline, capture_device=""))
+    shell.window.reload_action.trigger()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert not shell.dialog.capture_connect_button.isEnabled()
     assert not shell.window.video.connect_action.isEnabled()
+    assert shell.dialog.capture_target == ""
+    assert shell.baseline.capture_device == ""
     shell.connect_video()
     assert len(capture.connections) == 1
 
@@ -265,7 +267,7 @@ def test_real_spawn_applies_saved_fps_after_release_and_keeps_held_frame(
     assert marker.read_text(encoding="utf-8") == "released\nreleased\n"
 
 
-def test_empty_selection_saves_and_only_disconnects(
+def test_empty_selection_preserves_saved_device_and_only_disconnects(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
@@ -273,7 +275,9 @@ def test_empty_selection_saves_and_only_disconnects(
     shell.dialog.capture_choices.setCurrentIndex(0)
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert shell.baseline.capture_device == ""
+    assert shell.baseline.capture_device == "path-a"
+    assert load_settings(shell.path).capture_device == "path-a"
+    assert shell.dialog.capture_target == ""
     assert capture.disconnects == 1
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: shell.video.apply_state == "complete")
@@ -292,7 +296,7 @@ def test_manual_stop_cancels_connection_waiting_for_save(
     shell.dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     if stop == "disconnect":
-        shell.dialog.capture_disconnect_button.click()
+        shell.window.video.disconnect_action.trigger()
         capture.complete_disconnect()
     else:
         shell.request_close()
@@ -313,21 +317,21 @@ def test_saved_device_connect_and_disconnect_refresh_are_explicit(
     shell, capture, _io = application
     dialog = shell.dialog
     assert dialog is not None
-    dialog.capture_disconnect_button.click()
+    shell.window.video.disconnect_action.trigger()
     assert capture.disconnects == 1
     assert capture.refreshes == 0
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: capture.refreshes == 1)
     capture.complete_enumeration((DeviceInfo("First", "path-a"),))
-    qtbot.waitUntil(dialog.capture_connect_button.isEnabled)
-    dialog.capture_connect_button.click()
+    qtbot.waitUntil(shell.window.video.connect_action.isEnabled)
+    shell.window.video.connect_action.trigger()
     assert len(capture.connections) == 2
     capture.stream()
     qtbot.waitUntil(lambda: not shell.video.applying)
     assert capture.refreshes == 1
 
 
-def test_display_only_apply_and_dirty_close_save_do_not_start_video(
+def test_display_only_apply_and_application_close_save_do_not_start_video(
     application: tuple[ApplicationShell, ControlledCapture, ControlledIO], qtbot: QtBot
 ) -> None:
     shell, capture, _io = application
@@ -342,7 +346,7 @@ def test_display_only_apply_and_dirty_close_save_do_not_start_video(
     assert len(capture.connections) == 1
     assert shell.baseline.preview_fps == 15
     choose_second(shell)
-    dialog.close_button.click()
+    shell.window.close()
     assert shell.confirmation is not None
     button = shell.confirmation.button(QMessageBox.StandardButton.Save)
     assert button is not None

@@ -247,3 +247,22 @@ def test_invalid_image_settings_cannot_overwrite_existing_file(
         save_settings(path, values)
 
     assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(("invalid", "replacement"), [(0, False), (1, True)])
+def test_valid_boolean_save_cannot_overwrite_an_invalid_existing_integer(
+    tmp_path: Path, invalid: int, replacement: bool
+) -> None:
+    path = tmp_path / "settings.toml"
+    original = (
+        f"# retained\n[gui]\npreview_letterbox = {invalid}\ncustom = 7\n"
+        '[capture]\nwidth = "legacy"\n'
+    )
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(SettingsError, match="preview_letterbox"):
+        load_settings(path)
+    with pytest.raises(SettingsError, match="preview_letterbox"):
+        save_settings(path, Settings(preview_letterbox=replacement))
+
+    assert path.read_text(encoding="utf-8") == original

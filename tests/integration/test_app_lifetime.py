@@ -82,7 +82,7 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
     assert io.thread != QThread.currentThread()
     assert shell.dialog.model.isReadOnly()
     assert not shell.dialog.save_button.isEnabled()
-    assert not shell.dialog.reload_button.isEnabled()
+    assert not shell.window.reload_action.isEnabled()
     shell.save()
     shell.reload()
     io.release.set()
@@ -101,7 +101,10 @@ def test_pending_close_follows_save_result(
     io.fail = fail
     assert shell.dialog is not None
     shell.dialog.model.setText("edited")
-    shell.save()
+    if target == "dialog":
+        shell.dialog.ok_button.click()
+    else:
+        shell.save()
     qtbot.waitUntil(io.entered.is_set)
     if target == "app":
         shell.window.close()
@@ -190,7 +193,7 @@ def test_shutdown_commit_waits_for_thread_cleanup_and_cannot_be_cancelled(
         shell.window.close()
         qtbot.waitUntil(wait_called.is_set)
         assert shell.committed
-        assert shell.io_thread.isFinished()
+        qtbot.waitUntil(shell.io_thread.isFinished)
         assert shell.window.isVisible()
         assert not shell.window.cancel_close_button.isVisible()
         shell.cancel_close()
@@ -242,7 +245,8 @@ def test_long_wait_target_keeps_closure_controls_inside_screen(
     assert shell.dialog is not None
     assert shell.dialog.screen().availableGeometry().contains(shell.dialog.frameGeometry())
     assert shell.window.cancel_close_button.isVisible()
-    assert shell.dialog.cancel_close_button.isVisible()
+    assert shell.window.close_progress.isVisible()
+    assert shell.window.close_progress.rect().contains(shell.window.cancel_close_button.geometry())
     shell.cancel_close()
 
 
