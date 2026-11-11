@@ -181,7 +181,9 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
     assert len(capture.connections) == 1
     assert capture.state.generation == 1
     assert dialog.capture_target == ""
-    assert dialog.values().capture_device == "path-b"
+    assert dialog.values().capture_device == ""
+    assert shell.baseline.capture_device == "path-b"
+    assert load_settings(shell.path) == shell.baseline
     assert dialog.values().model == "unsaved"
     assert not dialog.capture_refresh_button.isEnabled()
 
