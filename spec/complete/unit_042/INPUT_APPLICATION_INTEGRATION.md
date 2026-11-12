@@ -134,3 +134,5 @@ thread IDを採用して既存RecordingServiceへ非同期投入し、保存成�
 U06が主画面のpause/stop、U07が追加指示による計画的終了を所有し、共通中断を利用する。上記の実機検証はボタン撤去前の実績であり、撤去後の実画面・実機再検証ではない。
 
 分離後の検証: 関連90件、`uv run pytest tests/unit tests/integration -q --basetemp tmp/pytest-stop-final` 663件成功。ruff format/check、ty、uv lock --check、uv build、git diff --check成功。既存試験を改訂し、保存後の適用継続、切替中の最新適用先維持、設定・詳細を閉じた後の中断、終了時の接続回収を確認した。差分再レビューで追加の修正必須事項なし。実画面目視と実機再検証は未実施。
+
+配布物の検証: `uv run python scripts/check_package.py` 成功。現行のcapture/config.pyからCaptureOptionsを読み、repo外の新規環境へwheelをインストールし、同梱資材・取得workerの起動と回収・module/console script両入口のGUI起動終了を確認した。実機は開かない。
