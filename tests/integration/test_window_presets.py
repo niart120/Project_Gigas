@@ -112,12 +112,17 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert [name for name, candidate in actions.items() if candidate.isChecked()] == [key]
         available = shell.window.screen().availableGeometry()
         assert available.contains(shell.window.frameGeometry())
-        assert shell.window.settings_action in shell.window.file_menu.actions()
+        assert not shell.window.settings_button.icon().isNull()
+        assert (
+            shell.window.settings_button.geometry().right()
+            < shell.window.menuBar().actionGeometry(shell.window.project_menu.menuAction()).left()
+        )
         assert shell.window.video_device_actions[""].isCheckable()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
         for widget in (
             shell.window.menuBar(),
+            shell.window.settings_button,
             shell.window.connection.send_button,
             shell.window.video.status,
             shell.window.connection.status,

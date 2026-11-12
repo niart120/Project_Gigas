@@ -1,15 +1,17 @@
 """Main application window."""
 
 from html import escape
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -117,15 +119,20 @@ class MainWindow(QMainWindow):
         self.window_size_actions: dict[str, QAction] = {}
         self.window_size_group = QActionGroup(self)
         self.window_size_group.setExclusive(True)
-        self.file_menu = self.menuBar().addMenu("ファイル")
-        self.settings_action = self.file_menu.addAction("設定…")
+        self.settings_action = QAction("設定", self)
+        self.addAction(self.settings_action)
         self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
         self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
-        self.file_menu.addSeparator()
-        self.exit_action = self.file_menu.addAction("終了")
-        self.exit_action.triggered.connect(self.close)
+        self.settings_action.setIcon(QIcon(str(Path(__file__).with_name("settings.svg"))))
+        self.settings_button = QToolButton(self)
+        self.settings_button.setDefaultAction(self.settings_action)
+        self.settings_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.settings_button.setAccessibleName("設定")
+        self.settings_button.setToolTip("")
+        self.settings_button.setAutoRaise(True)
+        self.menuBar().setCornerWidget(self.settings_button, Qt.Corner.TopLeftCorner)
         self.project_menu = self.menuBar().addMenu("プロジェクト")
         self.new_project_action = self.project_menu.addAction("新規作成")
         self.new_project_action.triggered.connect(self.new_project_requested)

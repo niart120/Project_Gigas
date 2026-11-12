@@ -42,7 +42,7 @@ def shell(
 
 
 def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot: QtBot) -> None:
-    shell.window.settings_action.trigger()
+    qtbot.mouseClick(shell.window.settings_button, Qt.MouseButton.LeftButton)
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(dialog.isVisible)
@@ -53,6 +53,9 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
     assert shell.dialog is dialog
     assert dialog.model.text() == "edited"
     assert dialog.isModal()
+    dialog.close_button.click()
+    qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
+    qtbot.waitUntil(dialog.isVisible)
 
 
 def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: QtBot) -> None:
