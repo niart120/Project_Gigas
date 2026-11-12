@@ -8,7 +8,8 @@ import pytest
 
 from gigas.game_io.capture import backend as capture_backend
 from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend, acquire_frames
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, DeviceInfo
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame

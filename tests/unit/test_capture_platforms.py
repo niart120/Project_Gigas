@@ -7,7 +7,8 @@ from tests.unit.test_capture_backend import Camera
 
 from gigas.game_io.capture import backend as module
 from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, DeviceInfo
 
 
 @pytest.mark.parametrize(

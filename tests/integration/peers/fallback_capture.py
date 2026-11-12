@@ -11,7 +11,8 @@ import cv2
 
 from gigas.game_io.capture._process import Channel, worker_main
 from gigas.game_io.capture.backend import IndexedDevice
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, DeviceInfo
 from tests.integration.peers.capture_peer import PeerCamera
 
 if TYPE_CHECKING:

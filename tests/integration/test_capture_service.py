@@ -11,7 +11,8 @@ import pytest
 
 from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
 from gigas.game_io.capture._process import SharedSlot
-from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import DeviceInfo
 from gigas.services.observation import ObservationService
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter

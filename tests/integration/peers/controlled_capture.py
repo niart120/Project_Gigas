@@ -4,7 +4,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
-from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import DeviceInfo, Frame
 
 
 class ControlledCapture:

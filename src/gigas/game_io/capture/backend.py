@@ -11,12 +11,8 @@ import cv2
 import numpy as np
 from cv2_enumerate_cameras import enumerate_cameras
 
-from gigas.game_io.capture.models import (
-    CaptureError,
-    CaptureOptions,
-    DeviceInfo,
-    Frame,
-)
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, DeviceInfo, Frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from gigas.game_io.capture import CaptureService
-from gigas.game_io.capture.models import CaptureError, CaptureOptions
+from gigas.game_io.capture.config import CaptureOptions, resolve_capture_options
+from gigas.game_io.capture.models import CaptureError
 from gigas.ui.notifications import Notice
 from gigas.ui.video_panel import VideoPanel
 
@@ -16,14 +17,6 @@ if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader, CaptureSnapshot
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.storage.settings import Settings
-
-_CAPTURE_DIMENSIONS: dict[str, tuple[int | None, int | None]] = {
-    "auto": (None, None),
-    "hd": (1280, 720),
-    "full_hd": (1920, 1080),
-    "wqhd": (2560, 1440),
-    "four_k": (3840, 2160),
-}
 
 
 class CapturePort(Protocol):
@@ -251,12 +244,10 @@ class VideoController(QObject):
             self.apply_state = "complete"
             self.active_settings = None
             return
-        dimensions = _CAPTURE_DIMENSIONS.get(settings.capture_resolution)
-        if dimensions is None:
-            self._fail_application("取得解像度が未対応")
-            return
         try:
-            options = CaptureOptions(settings.capture_device, *dimensions, fps=settings.capture_fps)
+            options = resolve_capture_options(
+                settings.capture_device, settings.capture_resolution, settings.capture_fps
+            )
         except CaptureError as error:
             self._fail_application(str(error))
             return

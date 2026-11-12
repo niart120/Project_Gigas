@@ -103,3 +103,5 @@ OSが強制終了を完了できない場合は`stopping`・`unconfirmed`を返�
 `gigas.game_io.capture.backend.IndexedDevice(info, index, backend=0)`は機器識別子と方式固有の一時的な番号を組み合わせます。`CaptureBackend.enumerate()`は`tuple[IndexedDevice, ...]`を返し、`open(device)`は選択した`IndexedDevice`全体を受け取って機器を開きます。番号だけを引数にする契約ではありません。実機では明示したOpenCV API番号を使い、既定の0は試験用実装に限ります。
 
 `device_catalog()`は同じ非空識別子を一つの表示候補へまとめます。`select_candidates()`は同じ識別子の方式別候補を順に返し、欠落・同一方式内の重複を拒否します。`acquire_frames()`はこの同期境界を使い、実寸法のFrameを`publish`へ渡します。`open()`が返したハンドルを`finally`で解放し、`released`は正常復帰後だけ通知します。末尾の任意引数`candidates`は候補APIと選択APIの通知、`api_preference`は再列挙時に選ぶ明示APIです。指定APIの候補が消えた場合に、別方式へ黙って置き換えません。
+
+接続設定の型は`gigas.game_io.capture.config.CaptureOptions`から参照します。同モジュールの`resolve_capture_options(device_path, resolution, fps)`は保存済みの解像度プリセットを要求寸法へ変換し、検証済みの接続設定を返します。未接続の判定と接続の適用は呼出し側が担当します。

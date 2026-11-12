@@ -10,7 +10,8 @@ from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.app.video import VideoController
 from gigas.game_io.capture import CaptureService
-from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import DeviceInfo
 from gigas.storage.settings import Settings, load_settings, save_settings
 from gigas.ui.video_panel import VideoPanel
 from tests.integration.peers.capture_peer import PeerBackend

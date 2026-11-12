@@ -1,4 +1,4 @@
-"""Immutable capture configuration and device identity."""
+"""Immutable captured frames and device identity."""
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -63,42 +63,3 @@ class DeviceInfo:
 
     name: str
     path: str
-
-
-@dataclass(frozen=True, slots=True)
-class CaptureOptions:
-    """Validated settings applied only when opening a new capture connection.
-
-    Args:
-        device_path: Nonempty path selected from the current device enumeration.
-        width: Requested width from 16 through 3840 pixels, or None for automatic mode.
-        height: Requested height from 16 through 2160 pixels, or None for automatic mode.
-        fps: Requested capture rate, from 1 through 120 frames per second.
-
-    Both dimensions must be None to leave the device's current resolution unchanged.
-    Explicit dimensions are requests; frames retain the actual dimensions and pixels.
-
-    Raises:
-        CaptureError: The path is empty, only one dimension is None, or a value is invalid.
-    """
-
-    device_path: str
-    width: int | None = 1920
-    height: int | None = 1080
-    fps: int = 60
-
-    def __post_init__(self) -> None:
-        """Reject invalid connection requests before accessing a device."""
-        if not isinstance(self.device_path, str) or not self.device_path:
-            message = "映像取得元が未選択"
-            raise CaptureError(message)
-        if (self.width is None) != (self.height is None):
-            message = "自動解像度は幅と高さを両方未指定にする必要がある"
-            raise CaptureError(message)
-        values = [(self.fps, 1, 120, "取得FPS")]
-        if self.width is not None and self.height is not None:
-            values.extend(((self.width, 16, 3840, "幅"), (self.height, 16, 2160, "高さ")))
-        for value, low, high, label in values:
-            if type(value) is not int or not low <= value <= high:
-                message = f"{label}: {low}〜{high}の整数が必要"
-                raise CaptureError(message)

@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 
     from gigas.game_io.capture._process import Channel
     from gigas.game_io.capture.backend import CaptureBackend
-    from gigas.game_io.capture.models import CaptureOptions, DeviceInfo, Frame
+    from gigas.game_io.capture.config import CaptureOptions
+    from gigas.game_io.capture.models import DeviceInfo, Frame
 
 __all__ = ["CaptureReader", "CaptureService", "CaptureSnapshot", "CaptureTimeouts"]
 

@@ -1,6 +1,7 @@
 import pytest
 
-from gigas.game_io.capture.models import CaptureError, CaptureOptions
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError
 
 
 def test_default_mode_and_supported_boundaries() -> None:
