@@ -10,7 +10,7 @@
 
 ## 関連文書・着手条件
 
-[レビュー](../../dev-journal.md)、[U05](../../planned/unit_010/INPUT_AND_STOP.md)、[実行設計](../../initial/02-runtime.md)。既存Qt画面と模擬通知で再現済み。外部プロトコルの追加確認は不要。
+[レビュー](../../dev-journal.md)、[U05](../../wip/unit_010/INPUT_AND_STOP.md)、[実行設計](../../initial/02-runtime.md)。既存Qt画面と模擬通知で再現済み。外部プロトコルの追加確認は不要。
 
 ## 振る舞い・設計
 
