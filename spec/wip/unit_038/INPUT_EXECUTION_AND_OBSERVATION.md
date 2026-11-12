@@ -39,10 +39,10 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | T01 protocol別の既定・baud検証と設定往復・接続用値の解決 | new | unit/integration | 既存settings試験を拡張。14件の期待失敗→36件成功。構造整理不要 |
-| todo | T02 有限列の全体検査と3形式の完全状態・neutralのbyte列 | new | unit | NyXの代表値と独立した期待byte列を使う |
+| refactor-skipped | T01 protocol別の既定・baud検証と設定往復・接続用値の解決 | new | unit/integration | 既存settings試験を拡張。14件の期待失敗→36件成功。09c8c21 |
+| green | T02 有限列の全体検査と3形式の完全状態・neutralのbyte列 | new | unit | 未実装importによるred→69件成功。代表byte列・全体拒否・巨大な有限値・不変性。構造整理不要 |
 | todo | T03 read開始時計が取得・共有領域・readerを通って保持される | new | unit/integration | 既存capture試験を改訂 |
-| todo | T04 単一serial workerで開閉・送信・進行中write取消しを回収する | new | unit/integration | pySerial境界を模擬し、部分writeと例外も確認 |
+| todo | T04 単一serial workerで開閉・送信を扱い、取消し後も進行中writeを回収する | new | unit/integration | pySerial境界を模擬し、部分writeと例外も確認 |
 | todo | T05 run/操作と観測を共通窓口で順序保存し、取消し後も回収する | new | integration | 既存保存・観測試験へ統合 |
 | todo | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 長い待機、保存待ち、通信失敗、古いGrantを含む |
 | todo | T07 操作後のFrameを選び、結果・観測ID・非同期保存を結び付ける | new | integration | 最新cache observe維持、取得変更・期限・符号化競合・停止 |
@@ -50,6 +50,18 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 ## 7. 設計メモ
 
 共通実行部は完全入力状態と送出結果を扱い、port・baud・bytesはserial adapterに閉じ込める。未実装BT用の選択肢や追加の状態管理は作らない。受付済み操作はasyncioの取消しで止め、開始済み同期I/Oと保存は所有者が回収する。
+
+### シリアル停止の採用方式
+
+[pySerial 3.5 Windows実装](https://github.com/pyserial/pyserial/blob/v3.5/serial/serialwin32.py)では、writeはOSの完了を待つ。cancel_writeは取消し要求だけで完了待ちを行わず、write開始前の呼出しは後続writeを取り消さない。closeもwriteの完了回収を代行しない。[CancelIoExの契約](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)も取消しとI/O完了を区別する。
+
+採用する内部実装は、操作取消し後も開始済みwriteの自然完了を回収し、その後neutralを送る方式とする。cancel_writeの競合制御や固定期限を追加しない。write回収前にneutral/close/次接続へ進まず、待機中は停止処理未完了として扱う。ドライバーが戻らない場合の停止時間は保証しない。実際の保持・解除と通信断の挙動はM2の実機受入で確認する。
+
+### MCP公開前に解決する制約
+
+採用Codex 0.167.0の[期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)は、tool_timeout_sec省略時も300秒の既定期限を使う。0は無効化ではなくゼロ秒であり、[要求実行](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)の経過時間制限はprogress通知では延長されない。これは採用版ソースの確認結果であり、長時間HTTP試験は未実施。
+
+M1の内部APIはこの期限に依存しない。M2では公開前に、時間上限を設けない一要求の契約を成立させるruntime・公開方式を確定する。大きい固定期限への置換、入力の暗黙の分割、非同期受付ツールの追加では解決済みとしない。60秒超の試験だけでも任意の長い有限列の成立証拠にはならない。
 
 ## 8. 対象ファイル
 

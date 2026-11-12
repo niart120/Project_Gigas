@@ -99,8 +99,8 @@ NyXの期限なしhold、dummy、接続cache、実行後の自動再構築、key
 
 | 事項 | 担当・期限 | 理由と影響 |
 |---|---|---|
-| write中の停止 | U05 M1のserial停止方式確定前 | writeの完了時間には固定上限を設けない。進行中writeの回収・取消し可否とneutral/closeを確認し、未収束を完了にしない |
-| 長いMCP要求 | U05 M1のMCP境界設計時、M2の公開前受入 | アプリ独自の要求期限は設けない。runtime・SDK・HTTPの公開経路で長い有限操作を維持する方式を確定し、60秒超の完了・途中停止を確認する。短時間プローブでは未検証 |
+| write中の停止 | M1で内部実装、M2で実機受入 | pySerialのWindows実装を確認し、取消し後も開始済みwriteを回収してからneutral/closeへ進む方式を採用した。固定期限やcancel_writeの独自競合制御は置かない。実ドライバーでの時間・物理解除は未確認 |
+| 長いMCP要求 | M2の公開境界実装前 | M1の静的調査で採用runtimeの既定300秒期限とprogressによる延長不可を確認した。内部APIに上限を加えず、公開方式を再検討する。60秒超の成功だけでは長い有限列全般を検証したことにならない。詳細は[M1子](../unit_038/INPUT_EXECUTION_AND_OBSERVATION.md) |
 | Goal継続と全介入 | [U06](../../planned/unit_011/GOAL_EXECUTION.md) | 本工程の通常ターンと停止部品へ継続通知・追加指示・制限を接続する |
 | 停止後の再開 | [U06](../../planned/unit_011/GOAL_EXECUTION.md)・[U08](../../planned/unit_013/RESUME.md) | 本工程の世代失効・旧処理収束を共用し、同一セッションの保持Goal再開はU06、保存参照からの復帰はU08で作る |
 | 長時間の遅延・機器条件 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | 短い実機操作と停止の確認を先に完了する。未確認の通信断時保証は明記して引き継ぐ |
