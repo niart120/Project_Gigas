@@ -18,7 +18,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 コールバックから得た設定は、初回には`thread/start`へ渡します。次の送信では`thread/unsubscribe`の完了後に同じIDを`thread/resume`し、その設定を読み込みます。返されたID・モデル・承認設定・sandboxを確認してから`turn/start`へ進みます。アプリはこの経路で[ゲームI/O MCP](observation-mcp.md)の公開情報を更新し、プロトコル切替後も同じ会話を維持します。コールバック省略時は、初回に作ったthreadをそのまま使います。
 
-`on_thread_started(thread_id)`もasyncコールバックで、初回にランタイムが返したthread IDをアプリが記録する境界です。完了するまで`turn/start`を送りません。再開時には呼びません。準備または対応記録の失敗は`CodexConnectionError`とfailure_id付き状態で報告し、接続・認証を保持します。詳細な保存先・thread IDなどはコールバックの所有者が記録してください。初回の対応記録に失敗したthreadは採用せず、次の明示送信で準備し直します。自動再送はしません。
+`on_thread_started(thread_id)`は初回に返されたthread IDをアプリへ渡すasyncコールバックです。アプリはIDを採用し、記録を非同期投入してからrunを開始します。永続化の完了をturn/startの条件にせず、保存失敗は通知へ残します。再開時には呼びません。
 
 アプリが記録先を準備する場合、開発者指示には`observations/<観測ID>.png`と`events.jsonl`の参照方法を追加します。画像保存は非同期なので、応答直後にファイルが存在することや、障害時に全画像が残ることは保証しません。MCPのURL・認証値は表示イベントやこの案内へ含めません。
 

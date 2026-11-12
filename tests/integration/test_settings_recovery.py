@@ -179,3 +179,16 @@ def test_direct_snapshot_preserves_history_and_copy_selection(qtbot: QtBot) -> N
     assert details.notice is current
     assert details.details.textCursor().selectedText() == current.details
     assert notices.notices["settings"] is latest
+
+
+def test_device_failure_details_use_latest_notification(
+    controlled: tuple[ApplicationShell, ControlledIO],
+) -> None:
+    shell, _io = controlled
+    notices = shell.window.notifications
+    notices.publish(Notice("input", "接続失敗", "", "old input"))
+    latest = Notice("video", "接続失敗", "", "new video")
+    notices.publish(latest)
+    shell._show_settings_error()
+    assert notices.dialog is not None
+    assert notices.dialog.notice is latest

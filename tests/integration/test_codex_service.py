@@ -1176,3 +1176,25 @@ def test_input_switch_keeps_only_latest_target_or_explicit_stop(
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
     assert service.shutdown_error == ""
+
+
+def test_thread_save_failure_does_not_prevent_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def check() -> None:
+        service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
+        await service._prepare_turn("input", None)
+        assert service._writer is not None
+
+        def fail(thread_id: str) -> None:
+            raise OSError(thread_id)
+
+        monkeypatch.setattr(service._writer, "record_thread", fail)
+        await service._thread_started("thread-1")
+        assert service._grant is not None
+        assert service._grant.thread_id == "thread-1"
+        await service._input.close()
+        await service._close_recording()
+        service._writer.close()
+
+    asyncio.run(check())

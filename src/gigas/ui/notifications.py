@@ -150,12 +150,14 @@ class NotificationCenter(QObject):
         self._sync_sources()
         self.published.emit(notice)
 
-    def show_details(self, source: NoticeSource | None = None) -> None:
+    def show_details(
+        self, source: NoticeSource | None = None, *, parent: QWidget | None = None
+    ) -> None:
         """Explicitly open or refresh a source, defaulting to the newest failure."""
         selected = self._latest if source is None else source
         if selected not in self._notices:
             return
-        self.show_snapshot(self._notices[selected])
+        self.show_snapshot(self._notices[selected], parent=parent)
 
     def show_snapshot(self, notice: Notice, *, parent: QWidget | None = None) -> None:
         """Open a specific failure without publishing or replacing recent history.

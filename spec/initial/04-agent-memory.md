@@ -109,7 +109,7 @@ M2では加工・符号化済みObservationをアプリへ渡した後、保存�
 | `project_id` | 原記録先の`project.json`と同じID。未選択チャットにも存在する |
 | `payload` | 下記のthread対応、または観測・画像・元Frameの対応 |
 
-`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはU04 M1で、加工後の画像情報とthread対応はU04 M2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録が成功するまで最初のターンを始めません。操作イベントはU05 M1で追加しました。Goal・公開会話のイベントは後続工程で追加します。
+`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはU04 M1で、加工後の画像情報とthread対応はU04 M2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録は非同期投入し、保存成功を最初のターンの開始条件にしません。操作イベントはU05 M1で追加しました。Goal・公開会話のイベントは後続工程で追加します。
 
 観測payloadは`observation_id`、`captured_at`、`image_path`、`image`、`source_frame`とし、チャットからの観測には実`thread_id`も記録します。単独APIからの観測に架空のthreadを作りません。`observation_id`は`obs-`にUUIDを続けた永続識別子、`captured_at`は元FrameのUTC、`image_path`は`observations/<observation_id>.png`形式の記録先相対パスです。`image`には`mime_type: "image/png"`と出力`width`・`height`、`source_frame`には元Frameの`generation`・`sequence`・`width`・`height`を保存します。取得世代と連番はサービス寿命内の補助情報であり、アプリ再起動後も一意なFrame識別子としては扱いません。
 

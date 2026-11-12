@@ -756,7 +756,7 @@ class CodexServiceThread(QThread):
             if writer is None or observations is None or self._recording is None:
                 message = "チャットの記録先が準備されていません"
                 raise ProjectError(message)
-            await self._recording.record_thread(thread_id)
+            self._recording.submit_thread(thread_id)
             observations.thread_id = thread_id
 
     async def _close_connection(self) -> None:

@@ -109,6 +109,9 @@ class ApplicationShell(QObject):
         self.window.settings_requested.connect(self.open_settings)
         self.window.new_project_requested.connect(self._new_project)
         self.window.open_project_requested.connect(self._open_project)
+        self.window.input_menu.aboutToShow.connect(self.refresh_input_ports)
+        self.window.input_port_requested.connect(self._select_input_port)
+        self.window.input_protocol_requested.connect(self._select_input_protocol)
         self.window.video_menu_opened.connect(self.refresh_video_devices)
         self.window.capture_device_requested.connect(self._select_video_device)
         self.window.window_size_requested.connect(self.change_window_size)
@@ -229,6 +232,26 @@ class ApplicationShell(QObject):
             self.dialog.stop_button.setEnabled(not self.committed)
         self._render()
 
+    def _select_input_port(self, port: str) -> None:
+        self.apply_settings(
+            replace(self.baseline, serial_port=port), capture=False, input_apply=True
+        )
+
+    def _select_input_protocol(self, protocol: str) -> None:
+        self.apply_settings(
+            replace(
+                self.baseline,
+                serial_protocol=protocol,
+                serial_baudrate=(
+                    self.baseline.serial_baudrate
+                    if protocol == self.baseline.serial_protocol
+                    else get_protocol(protocol).default_baudrate
+                ),
+            ),
+            capture=False,
+            input_apply=True,
+        )
+
     def refresh_video_devices(self) -> None:
         """Discover now if possible, without reserving a later refresh."""
         if self._can_edit:
@@ -237,7 +260,9 @@ class ApplicationShell(QObject):
     @Slot(str)
     def _select_video_device(self, path: str) -> None:
         if self.dialog is None or not self.dialog.isVisible():
-            self.apply_settings(replace(self.baseline, capture_device=path))
+            self.apply_settings(
+                replace(self.baseline, capture_device=path), capture=True, input_apply=False
+            )
         self._render()
 
     @Slot()
@@ -399,13 +424,10 @@ class ApplicationShell(QObject):
             self.window.notifications.show_snapshot(notice, parent=self.dialog)
 
     def _show_settings_error(self) -> None:
-        notice = (
-            self._settings_error_notice
-            or self.window.notifications.notices.get("input")
-            or self.window.notifications.notices.get("video")
-        )
-        if notice is not None:
-            self.window.notifications.show_snapshot(notice, parent=self.dialog)
+        if self._settings_error_notice is not None:
+            self.window.notifications.show_snapshot(self._settings_error_notice, parent=self.dialog)
+        else:
+            self.window.notifications.show_details(parent=self.dialog)
 
     def _cancel_settings(self) -> None:
         if self.dialog is not None and not self.committed and not self._exit_requested:
@@ -415,11 +437,18 @@ class ApplicationShell(QObject):
             self._render()
 
     def apply_settings(
-        self, settings: Settings | None = None, *, close_after: bool = False
+        self,
+        settings: Settings | None = None,
+        *,
+        close_after: bool = False,
+        capture: bool | None = None,
+        input_apply: bool | None = None,
     ) -> bool:
         """Save and apply one snapshot without waiting for capture success.
 
         Args:
+            capture: Override capture application for a device-menu selection.
+            input_apply: Override input application for a device-menu selection.
             settings: Explicit snapshot, or None for the visible editor's values.
             close_after: Close the visible editor after saving succeeds, including
                 when capture subsequently fails. Saving failure keeps edits visible.
@@ -447,8 +476,12 @@ class ApplicationShell(QObject):
         serial_fields = {"serial_port", "serial_protocol", "serial_baudrate"}
         request = _SettingsRequest(
             target,
-            capture=not changed or bool(changed - serial_fields - {"observation_resolution"}),
-            input_apply=not changed or bool(changed & serial_fields),
+            capture=(not changed or bool(changed - serial_fields - {"observation_resolution"}))
+            if capture is None
+            else capture,
+            input_apply=(not changed or bool(changed & serial_fields))
+            if input_apply is None
+            else input_apply,
             close_dialog=close_after,
         )
         self._settings_error_notice = None
@@ -573,6 +606,12 @@ class ApplicationShell(QObject):
         )
         self.video.set_available(not closing)
         self._render_capture_menu()
+        self.window.set_input_choices(
+            self._serial_ports,
+            self.baseline.serial_port,
+            self.baseline.serial_protocol,
+            enabled=self._can_edit and (self.dialog is None or not self.dialog.isVisible()),
+        )
         if self.dialog is not None and self.dialog.isVisible():
             message = (
                 self._settings_error_notice.title

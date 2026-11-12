@@ -116,7 +116,7 @@ async def close_project(
 
 ## 会話と観測の対応
 
-`writer.record_thread(thread_id)`は、実際のCodex会話IDを`thread.started`行のpayloadへ`runtime: "codex"`とともに記録します。非同期の利用者は`await recording.record_thread(thread_id)`を使います。アプリはthread/startからIDを取得した後、最初のturn/start前にこの保存を完了させます。失敗した場合はターンを投入せず、対応保存の失敗を扱います。
+`writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにrunを開始します。失敗は既存の通知へ残し、入力許可とは分離します。
 
 `writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
 

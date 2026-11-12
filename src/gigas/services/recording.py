@@ -34,15 +34,9 @@ class RecordingService:
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
 
-    async def record_thread(self, thread_id: str) -> None:
-        """Wait for a real thread record; cancellation leaves its save owned.
-
-        Raises:
-            ProjectError: The thread is invalid or persistence fails.
-        """
-        await asyncio.shield(
-            self._submit(partial(self._writer.record_thread, thread_id), thread_id)
-        )
+    def submit_thread(self, thread_id: str) -> None:
+        """Queue the thread record without delaying execution; report save failures."""
+        self._submit(partial(self._writer.record_thread, thread_id), thread_id)
 
     def submit_input(self, event: "InputEvent") -> None:
         """Submit an input event without waiting; report failures through callbacks/logging."""

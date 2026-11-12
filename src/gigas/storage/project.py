@@ -172,7 +172,7 @@ class ProjectWriter:
         """Append one typed run or operation event without connection metadata.
 
         Args:
-            event: Start or final outcome. Start records must succeed before input.
+            event: Start or final outcome. Start records are submitted asynchronously before input.
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.

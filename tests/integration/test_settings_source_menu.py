@@ -52,3 +52,25 @@ def test_menu_offline_selection_saves_before_stopping_and_preserves_stream_on_fa
 
     shell.open_settings()
     assert dialog.capture_choices.currentData() == shell.baseline.capture_device
+
+
+def test_device_menus_apply_only_the_selected_connection(
+    application: tuple[ApplicationShell, ControlledCapture, ControlledIO],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell, capture, _io = application
+    assert shell.dialog is not None
+    shell.dialog.close_button.click()
+    applied = []
+    monkeypatch.setattr(shell.service, "apply_input", applied.append)
+    shell.window.video_device_actions["path-a"].trigger()
+    assert applied == []
+    before = len(capture.connections)
+    action = next(a for a in shell.window.input_protocol_menu.actions() if a.data() == "3ds")
+    action.trigger()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert shell.baseline.serial_protocol == "3ds"
+    assert shell.baseline.serial_baudrate == 115200
+    assert len(capture.connections) == before
+    assert applied == [None]

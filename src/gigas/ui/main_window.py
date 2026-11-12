@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.input.config import PROTOCOLS
+from gigas.game_io.input.serial import SerialPort
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.elided_label import ElidedLabel
@@ -100,6 +102,8 @@ class MainWindow(QMainWindow):
     open_project_requested = Signal()
     close_requested = Signal()
     window_size_requested = Signal(str)
+    input_port_requested = Signal(str)
+    input_protocol_requested = Signal(str)
     video_menu_opened = Signal()
     capture_device_requested = Signal(str)
 
@@ -131,6 +135,9 @@ class MainWindow(QMainWindow):
         self.video_menu = self.connection_menu.addMenu("映像")
         self.video_menu.setToolTipsVisible(True)
         self.video_menu.aboutToShow.connect(self.video_menu_opened)
+        self.input_menu = self.connection_menu.addMenu("入力")
+        self.input_port_menu = self.input_menu.addMenu("ポート")
+        self.input_protocol_menu = self.input_menu.addMenu("プロトコル")
         self.codex_menu = self.connection_menu.addMenu("Codex")
         self.view_menu = self.menuBar().addMenu("表示")
         for preset in WINDOW_SIZE_PRESETS:
@@ -189,6 +196,36 @@ class MainWindow(QMainWindow):
             self.splitter, self.video, self.connection, self.statusBar()
         )
         self.statusBar().addWidget(self._pane_statuses, 1)
+
+    def set_input_choices(
+        self, ports: tuple[SerialPort, ...], port: str, protocol: str, *, enabled: bool
+    ) -> None:
+        """Show saved input selections; absent saved ports remain selectable."""
+        choices = [("未接続", ""), *((p.identifier, p.identifier) for p in ports)]
+        if port not in {value for _, value in choices}:
+            choices.append((port, port))
+        for menu, items, selected, signal in (
+            (self.input_port_menu, choices, port, self.input_port_requested),
+            (
+                self.input_protocol_menu,
+                [(p.label, p.key) for p in PROTOCOLS],
+                protocol,
+                self.input_protocol_requested,
+            ),
+        ):
+            if [a.data() for a in menu.actions()] == [value for _, value in items]:
+                menu.setEnabled(enabled)
+                for action in menu.actions():
+                    action.setChecked(action.data() == selected)
+                continue
+            menu.clear()
+            menu.setEnabled(enabled)
+            for label, value in items:
+                action = menu.addAction(label.replace("&", "&&"))
+                action.setData(value)
+                action.setCheckable(True)
+                action.setChecked(value == selected)
+                action.triggered.connect(lambda _checked=False, v=value, sig=signal: sig.emit(v))
 
     def refresh_close_progress(self) -> None:
         """Show pending shutdown status without owning shutdown state."""
