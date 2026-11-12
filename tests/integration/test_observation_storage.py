@@ -248,7 +248,7 @@ assert (root / record["payload"]["image_path"]).read_bytes().startswith(bytes.fr
 
 def sample_frame(width: int = 16, height: int = 16) -> Frame:
     pixels = np.random.default_rng(41).integers(0, 256, (height, width, 3), dtype=np.uint8)
-    return Frame(pixels.tobytes(), width, height, 2, 7, datetime(2000, 1, 1, tzinfo=UTC), 123)
+    return Frame(pixels.tobytes(), width, height, 2, 7, datetime(2000, 1, 1, tzinfo=UTC), 123, 100)
 
 
 @pytest.mark.parametrize(

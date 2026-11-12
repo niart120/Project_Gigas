@@ -68,9 +68,21 @@ class Backend:
         return self.camera
 
 
-def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata() -> None:
+def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pixels = np.arange(16 * 16 * 3, dtype=np.uint8).reshape((16, 16, 3))
     camera = Camera([pixels])
+    tick = 10
+    read = camera.read
+
+    def timed_read() -> tuple[bool, object]:
+        nonlocal tick
+        tick = 20
+        return read()
+
+    monkeypatch.setattr(camera, "read", timed_read)
+    monkeypatch.setattr(capture_backend, "monotonic_ns", lambda: tick)
     backend = Backend(camera)
     frames: list[Frame] = []
     listed: list[tuple[DeviceInfo, ...]] = []
@@ -94,7 +106,7 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     pixels[:] = 0
     assert any(frames[0].bgr)
     assert (frames[0].generation, frames[0].sequence) == (7, 1)
-    assert frames[0].monotonic_ns > 0
+    assert (frames[0].read_started_ns, frames[0].monotonic_ns) == (10, 20)
     assert camera.released
 
 

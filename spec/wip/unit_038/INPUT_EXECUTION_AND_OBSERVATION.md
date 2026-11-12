@@ -40,8 +40,8 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 protocol別の既定・baud検証と設定往復・接続用値の解決 | new | unit/integration | 既存settings試験を拡張。14件の期待失敗→36件成功。09c8c21 |
-| green | T02 有限列の全体検査と3形式の完全状態・neutralのbyte列 | new | unit | 未実装importによるred→69件成功。代表byte列・全体拒否・巨大な有限値・不変性。構造整理不要 |
-| todo | T03 read開始時計が取得・共有領域・readerを通って保持される | new | unit/integration | 既存capture試験を改訂 |
+| refactor-skipped | T02 有限列の全体検査と3形式の完全状態・neutralのbyte列 | new | unit | 未実装importによるred→69件成功。代表byte列・全体拒否・巨大な有限値・不変性。b71a3b1 |
+| green | T03 read開始時計が取得・共有領域・readerを通って保持される | new | unit/integration | 既存capture試験の18件期待失敗→37件成功。取得/観測/保存/video結合83件成功。型・lint成功。構造整理不要 |
 | todo | T04 単一serial workerで開閉・送信を扱い、取消し後も進行中writeを回収する | new | unit/integration | pySerial境界を模擬し、部分writeと例外も確認 |
 | todo | T05 run/操作と観測を共通窓口で順序保存し、取消し後も回収する | new | integration | 既存保存・観測試験へ統合 |
 | todo | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 長い待機、保存待ち、通信失敗、古いGrantを含む |

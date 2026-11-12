@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.backend import CaptureBackend
     from gigas.game_io.capture.models import CaptureOptions
 
-_HEADER = Struct("<QQqII")
+_HEADER = Struct("<QQQqII")
 _MAX_PIXELS = 3840 * 2160 * 3
 MESSAGE_LIMIT = 65536
 
@@ -162,6 +162,7 @@ class SharedSlot:
                 0,
                 frame.sequence,
                 frame.monotonic_ns,
+                frame.read_started_ns,
                 int(frame.captured_at.timestamp() * 1_000_000),
                 frame.width,
                 frame.height,
@@ -175,7 +176,7 @@ class SharedSlot:
             return None
         try:
             buffer = self._buffer()
-            sequence, tick, timestamp, width, height = _HEADER.unpack_from(buffer)
+            sequence, tick, read_started_ns, timestamp, width, height = _HEADER.unpack_from(buffer)
             if sequence <= after_sequence:
                 return None
             self._validate_dimensions(width, height)
@@ -187,6 +188,7 @@ class SharedSlot:
                 sequence,
                 datetime.fromtimestamp(timestamp / 1_000_000, UTC),
                 tick,
+                read_started_ns,
             )
         finally:
             self.lock.release()

@@ -19,6 +19,7 @@ def image(width: int, height: int, sequence: int) -> Frame:
         sequence,
         datetime(2026, 11, 11, 1, 2, 3, 456789, tzinfo=UTC),
         1_000_000 + sequence,
+        900_000 + sequence,
     )
 
 

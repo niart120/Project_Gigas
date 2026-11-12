@@ -31,6 +31,7 @@ frame = Frame(
     sequence=1,
     captured_at=datetime.now(UTC),
     monotonic_ns=0,
+    read_started_ns=0,
 )
 
 with TemporaryDirectory(dir=Path.cwd()) as temporary:

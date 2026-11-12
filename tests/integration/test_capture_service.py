@@ -91,10 +91,11 @@ def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
     assert not service.connect(options)
     assert not service.refresh_devices()
     snapshot = wait_for(
-        service, lambda state: state.frame is not None and state.frame.sequence >= 3
+        service.reader(), lambda state: state.frame is not None and state.frame.sequence >= 3
     )
     frame = snapshot.frame
     assert frame is not None
+    assert 0 < frame.read_started_ns <= frame.monotonic_ns
     assert snapshot.phase == "streaming"
     assert frame.bgr == bytes([frame.sequence % 256]) * (16 * 16 * 3)
     # The sequence counts device acquisitions, not samples already read by the host.
