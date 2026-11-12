@@ -342,22 +342,17 @@ class InputService:
                 if step.kind == "press":
                     neutral_attempted = False
                     result = replace(result, input_sent="unknown", neutral="unconfirmed")
-                    await device.send(step.state)
+                    cancelled = await _send(device, step.state)
                     result = replace(result, input_sent="sent")
+                    if cancelled:
+                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
                     await _wait(step.duration_ms)
                     neutral_attempted = True
-                    neutral_task = asyncio.create_task(device.send(InputState()))
-                    try:
-                        await asyncio.shield(neutral_task)
-                    except asyncio.CancelledError:
-                        # The release is already submitted. Keep its delivery result
-                        # even though the remainder of the sequence is cancelled.
-                        await asyncio.shield(neutral_task)
-                        result = replace(
-                            result, neutral="sent", completed_steps=result.completed_steps + 1
-                        )
-                        raise
+                    cancelled = await _send(device, InputState())
                     result = replace(result, neutral="sent")
+                    if cancelled:
+                        result = replace(result, completed_steps=result.completed_steps + 1)
+                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
                 else:
                     await _wait(step.duration_ms)
                 result = replace(result, completed_steps=result.completed_steps + 1)
@@ -426,6 +421,17 @@ class InputService:
             )
         )
         return result
+
+
+async def _send(device: InputDevice, state: InputState) -> bool:
+    # Keep the transport result separate from cancellation of the operation.
+    task = asyncio.create_task(device.send(state))
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.shield(task)
+        return True
+    return False
 
 
 async def _wait(duration_ms: int) -> None:

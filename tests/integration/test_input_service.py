@@ -580,11 +580,14 @@ def test_close_waits_for_open_before_closing_candidate(harness: Harness) -> None
     asyncio.run(scenario())
 
 
-def test_stop_during_completed_neutral_write_preserves_connection(harness: Harness) -> None:
+@pytest.mark.parametrize("write_number", [2, 3], ids=["press", "neutral"])
+def test_stop_during_completed_write_preserves_delivery_and_connection(
+    harness: Harness, write_number: int
+) -> None:
     entered, release = Event(), Event()
 
     class Port:
-        """Hold the final neutral write while keeping actual SerialInput ownership."""
+        """Hold a press or neutral write with actual SerialInput ownership."""
 
         def __init__(self) -> None:
             """Count writes and observe close without a real port."""
@@ -594,7 +597,7 @@ def test_stop_during_completed_neutral_write_preserves_connection(harness: Harne
         def write(self, data: bytes) -> int:
             """Return full delivery only after the controlled final release."""
             self.writes += 1
-            if self.writes == 3:
+            if self.writes == write_number:
                 entered.set()
                 if not release.wait(5):
                     raise TimeoutError
@@ -620,12 +623,18 @@ def test_stop_during_completed_neutral_write_preserves_connection(harness: Harne
         result = await operation
         try:
             assert result.code == "INTERRUPTED"
+            assert result.input_sent == "sent"
             assert result.neutral == "sent"
-            assert result.completed_steps == 1
+            assert result.completed_steps == write_number - 2
             assert harness.service.connected
             assert not port.closed
             assert port.writes == 3
         finally:
             await harness.close()
+        finished = next(
+            row["payload"] for row in harness.records() if row["type"] == "input.operation_finished"
+        )
+        assert isinstance(finished, dict)
+        assert finished["input_sent"] == "sent"
 
     asyncio.run(scenario())
