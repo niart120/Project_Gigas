@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 import tomlkit
 from tomlkit.exceptions import ParseError, TOMLKitError
 
+from gigas.game_io.input.config import get_protocol, resolve_baudrate
+
 if TYPE_CHECKING:
     from tomlkit.toml_document import TOMLDocument
 
@@ -23,6 +25,8 @@ class Settings:
     Attributes:
         capture_device: Opaque capture-device identifier. An empty string leaves it unset.
         serial_port: Selected serial port. An empty string leaves it unset.
+        serial_protocol: Firmware protocol: ch552, pokecon, or 3ds.
+        serial_baudrate: Supported rate, or None for the protocol default.
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
         auth_method: Authentication preference, either chatgpt or api_key.
@@ -50,6 +54,8 @@ class Settings:
     preview_letterbox: bool = True
     observation_resolution: "ObservationResolution" = "full_hd"
     last_project_path: str = ""
+    serial_protocol: str = "ch552"
+    serial_baudrate: int | None = None
 
 
 class SettingsError(ValueError):
@@ -121,9 +127,19 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         msg = f"{path}: auth_method must be chatgpt or api_key"
         raise SettingsError(msg)
 
+    try:
+        protocol = get_protocol(serial.get("protocol", "ch552"))
+        baudrate = serial.get("baudrate")
+        effective_baudrate = resolve_baudrate(protocol, baudrate)
+    except ValueError as error:
+        message = f"{path}: {error}"
+        raise SettingsError(message) from error
+
     return Settings(
         capture_device=_text(capture, "device", path),
         serial_port=_text(serial, "port", path),
+        serial_protocol=protocol.key,
+        serial_baudrate=effective_baudrate if baudrate is not None else None,
         model=_text(agent, "model", path),
         effort=_text(agent, "effort", path),
         auth_method=auth_method,
@@ -176,6 +192,11 @@ def save_settings(path: "Path", settings: Settings) -> None:
         if not isinstance(value, int) or isinstance(value, bool) or capture.get(key) != value:
             capture[key] = value
     _set_text(serial, "port", settings.serial_port)
+    _set_text(serial, "protocol", settings.serial_protocol)
+    if settings.serial_baudrate is None:
+        serial.pop("baudrate", None)
+    else:
+        serial["baudrate"] = settings.serial_baudrate
     _set_text(agent, "model", settings.model)
     _set_text(agent, "effort", settings.effort)
     _set_text(agent, "auth_method", settings.auth_method)

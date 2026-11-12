@@ -21,6 +21,7 @@ preview_letterbox = true
 
 [controller.serial]
 port = ""
+protocol = "ch552"
 
 [agent]
 model = ""
@@ -39,6 +40,8 @@ auth_method = "chatgpt"
 | `gui.window_size_preset` | 表示サイズ。`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
 | `gui.preview_letterbox` | `true`は比率を保ち黒い余白を付ける「レターボックス」、`false`は表示枠へ合わせる「ストレッチ」。取得画像は変更しない |
 | `controller.serial.port` | シリアルポート名。例は `COM3` |
+| `controller.serial.protocol` | `ch552`（既定）・`pokecon`・`3ds`のいずれか |
+| `controller.serial.baudrate` | 整数の通信速度。省略時はCH552/PokeConで9600、3DSで115200。CH552は9600、PokeConは9600/19200/38400/57600/115200、3DSは9600/19200/57600/115200から選ぶ |
 | `agent.model` | 使用したいモデル |
 | `agent.effort` | 使用したい推論エフォート |
 | `agent.auth_method` | 認証方式。指定できる値は `chatgpt` と `api_key` |
