@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture.models import DeviceInfo
 from gigas.storage.settings import Settings, load_settings, save_settings
+from gigas.ui.main_window import MainWindow
 from gigas.ui.settings_dialog import SettingsDialog
 from tests.integration.peers.controlled_capture import ControlledCapture
 
@@ -55,6 +56,19 @@ def open_editor(shell: ApplicationShell, capture: ControlledCapture) -> Settings
     return dialog
 
 
+def test_editor_keeps_project_path_when_editing_visible_settings(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    dialog = SettingsDialog(tmp_path / "settings.toml", window)
+    original = Settings(last_project_path=str(tmp_path / "project"))
+    dialog.set_values(original)
+    dialog.model.setText("changed")
+
+    assert dialog.values() == replace(original, model="changed")
+
+
 def test_explicit_offline_apply_clears_saved_device_after_same_device_can_start(
     app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
@@ -90,17 +104,45 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
     assert not capture.connections
 
 
-def test_explicit_general_apply_uses_selected_device(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+@pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize("observation_only", [False, True])
+def test_apply_capture_effect_depends_on_changed_settings(
+    app: tuple[ApplicationShell, ControlledCapture],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    running: bool,
+    observation_only: bool,
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
-    dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+    codex_connects: list[object] = []
+    applied_resolutions: list[str] = []
+    monkeypatch.setattr(shell.service, "connect_runtime", codex_connects.append)
+    monkeypatch.setattr(shell.service, "set_observation_resolution", applied_resolutions.append)
+    if running:
+        dialog.save_button.click()
+        qtbot.waitUntil(lambda: len(capture.connections) == 1)
+        capture.stream()
+        qtbot.waitUntil(lambda: not shell.video.applying)
+    frame = capture.snapshot().frame
+    if observation_only:
+        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
+    else:
+        dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert not shell.baseline.preview_letterbox
+    if observation_only:
+        assert shell.baseline.observation_resolution == "hd"
+        assert load_settings(shell.path).observation_resolution == "hd"
+        assert capture.snapshot().frame is frame
+    else:
+        assert not shell.baseline.preview_letterbox
     assert dialog.capture_choices.currentData() == "path-a"
-    assert len(capture.connections) == 1
+    assert len(capture.connections) == int(running or not observation_only)
+    assert capture.disconnects == 0
+    assert codex_connects == []
+    assert applied_resolutions[-1] == shell.baseline.observation_resolution
     assert dialog.save_button.isEnabled()
 
 

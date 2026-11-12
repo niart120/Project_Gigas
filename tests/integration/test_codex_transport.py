@@ -412,3 +412,28 @@ def test_close_releases_pipes_still_held_by_a_descendant(tmp_path: Path) -> None
             await transport.close()
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
+def test_transport_receives_two_mib_but_sends_at_most_one_mib(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        transport = StdioTransport((*PEER_COMMAND, "sized"), tmp_path)
+        await transport.start()
+        try:
+            sent_size = await transport.request(
+                "probe/length", {"payload": "x" * (1024 * 1024 - 100)}
+            )
+            assert isinstance(sent_size, int)
+            assert 1024 * 1024 - 100 < sent_size <= 1024 * 1024
+            result = await transport.request("probe/sized", {"size": 2 * 1024 * 1024})
+            assert isinstance(result, str)
+            assert 2 * 1024 * 1024 - 100 < len(result) < 2 * 1024 * 1024
+            with pytest.raises(TransportError, match="Outgoing RPC frame exceeds 1 MiB"):
+                await transport.request("probe/length", {"payload": "x" * (1024 * 1024)})
+            assert isinstance(await transport.request("probe/length", {}), int)
+            with pytest.raises(TransportError, match="Invalid RPC frame"):
+                await transport.request("probe/sized", {"size": 2 * 1024 * 1024 + 1})
+            assert await transport.next_event() == TransportClosed("Invalid RPC frame")
+        finally:
+            await transport.close()
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=10))

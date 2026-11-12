@@ -1,3 +1,4 @@
+import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -22,21 +23,34 @@ def test_ok_closes_after_save_before_first_frame(
     assert shell.window.isVisible()
 
 
+@pytest.mark.parametrize("observation", [False, True])
 def test_cancel_discards_only_edits_since_last_apply(
-    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot, *, observation: bool
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
-    dialog.model.setText("applied")
+    if observation:
+        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
+    else:
+        dialog.model.setText("applied")
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    dialog.model.setText("discard")
+    if observation:
+        dialog.observation_resolution.setCurrentIndex(
+            dialog.observation_resolution.findData("original")
+        )
+    else:
+        dialog.model.setText("discard")
     dialog.close_button.click()
     assert shell.confirmation is None
     assert not dialog.isVisible()
-    assert load_settings(shell.path).model == "applied"
     shell.open_settings()
-    assert dialog.model.text() == "applied"
+    if observation:
+        assert load_settings(shell.path).observation_resolution == "hd"
+        assert dialog.observation_resolution.currentData() == "hd"
+    else:
+        assert load_settings(shell.path).model == "applied"
+        assert dialog.model.text() == "applied"
 
 
 def test_connection_failure_keeps_saved_choice_and_apply_retry_open(

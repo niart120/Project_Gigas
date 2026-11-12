@@ -117,6 +117,8 @@ sequenceDiagram
 
 ## S02 — 操作列と事後観測
 
+以下はU05の操作前記録と事後観測を含む初期案。U04単独observeは[改訂契約](../complete/unit_034/CHAT_OBSERVATION_PERSISTENCE.md)により、完全出力の引渡し後、保存完了を待たず応答する。U05では原画像保存の非待機化を検討するが、物理入力前の操作開始記録は別の安全上の要件として判断する。この図をU04の保存待ちの根拠にしない。
+
 ```mermaid
 sequenceDiagram
     participant R as Codex

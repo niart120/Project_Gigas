@@ -18,7 +18,8 @@ type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValu
 type JsonObject = dict[str, JsonValue]
 type RpcId = str | int
 
-MAX_FRAME_BYTES = 1024 * 1024
+MAX_RECEIVE_FRAME_BYTES = 2 * 1024 * 1024
+MAX_SEND_FRAME_BYTES = 1024 * 1024
 
 
 class TransportError(RuntimeError):
@@ -114,7 +115,7 @@ def _request_id(value: JsonValue) -> RpcId:
 
 
 def _decode_frame(raw: bytes) -> JsonObject:
-    if not raw.endswith(b"\n") or len(raw) > MAX_FRAME_BYTES:
+    if not raw.endswith(b"\n") or len(raw) > MAX_RECEIVE_FRAME_BYTES:
         message = "Invalid RPC frame"
         raise TransportError(message)
     return _object(_json_value(json.loads(raw.decode("utf-8"))))
@@ -125,7 +126,7 @@ class _ProcessProtocol(asyncio.SubprocessProtocol):
 
     def __init__(self) -> None:
         loop = asyncio.get_running_loop()
-        self.stdout = asyncio.StreamReader(limit=MAX_FRAME_BYTES)
+        self.stdout = asyncio.StreamReader(limit=MAX_RECEIVE_FRAME_BYTES)
         self.exited: asyncio.Future[None] = loop.create_future()
         self.closed: asyncio.Future[None] = loop.create_future()
         self._paused = False
@@ -187,8 +188,8 @@ class _ProcessProtocol(asyncio.SubprocessProtocol):
 class StdioTransport:
     """Own one app-server process and route its newline-delimited JSON frames.
 
-    All methods must run on one asyncio event loop. Sent and received frames,
-    including the trailing newline, are limited to 1 MiB. This transport does
+    All methods must run on one asyncio event loop. Including the trailing newline,
+    received frames are limited to 2 MiB and sent frames to 1 MiB. This transport does
     not interpret or approve server requests.
 
     Args:
@@ -408,7 +409,7 @@ class StdioTransport:
             data = (
                 json.dumps(_json_value(frame), ensure_ascii=False, allow_nan=False) + "\n"
             ).encode("utf-8")
-            if len(data) > MAX_FRAME_BYTES:
+            if len(data) > MAX_SEND_FRAME_BYTES:
                 message = "Outgoing RPC frame exceeds 1 MiB"
                 raise TransportError(message)
         except (ValueError, RecursionError):

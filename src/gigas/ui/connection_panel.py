@@ -192,6 +192,8 @@ class ConnectionPanel(QWidget):
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, TurnStarted):
+            if self.prompt.toPlainText() == self._submitted:
+                self.prompt.clear()
             for token, card in tuple(self.cards.items()):
                 if card.request.turn_id != event.turn_id and card.is_settled:
                     self._request_layout.removeWidget(card)
@@ -252,12 +254,6 @@ class ConnectionPanel(QWidget):
             self._notify_failure(result.error, result.failure_id, operation=result.operation)
         if result.operation == "connect" and result.error:
             self._status = SessionStatus("error", detail=result.error)
-        if (
-            result.operation == "send"
-            and not result.error
-            and self.prompt.toPlainText() == self._submitted
-        ):
-            self.prompt.clear()
         if result.operation == "disconnect" and not result.error:
             self._connected = False
             self._status = SessionStatus("closed")

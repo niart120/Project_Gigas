@@ -1,12 +1,12 @@
 """Application-facing values independent of Codex wire schemas and Qt."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gigas.runtime.codex.transport import RpcId
+    from gigas.runtime.codex.transport import JsonObject, RpcId
 
 type ConnectionPhase = Literal[
     "connecting",
@@ -28,7 +28,8 @@ class ConnectionOptions:
     """Settings for one Codex connection.
 
     Attributes:
-        cwd: Existing absolute directory for the conversation, separate from source code.
+        cwd: Existing absolute directory for the runtime process, separate from source code.
+            Also used by threads when no preparation callback supplies an archive.
         model: Catalog model name, or empty to select the catalog default.
         effort: Catalog reasoning effort, or empty to select the model default.
         auth_method: Authentication preference. Only chatgpt is currently supported.
@@ -38,6 +39,20 @@ class ConnectionOptions:
     model: str = ""
     effort: str = ""
     auth_method: str = "chatgpt"
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadConfiguration:
+    """Prepared chat location and application-owned MCP overrides.
+
+    Attributes:
+        cwd: Existing absolute archive directory, independent of the process cwd.
+        mcp_config: App-server config overrides for the application's MCP server.
+            May contain credentials; omitted from repr and never emitted as events.
+    """
+
+    cwd: "Path"
+    mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

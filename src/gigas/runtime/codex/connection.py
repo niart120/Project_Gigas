@@ -16,6 +16,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    ThreadConfiguration,
     TurnStarted,
 )
 from gigas.runtime.codex.transport import (
@@ -26,7 +27,7 @@ from gigas.runtime.codex.transport import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Mapping
+    from collections.abc import Awaitable, Callable, Coroutine, Mapping
 
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ConnectionPhase
     from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, TransportEvent
@@ -49,6 +50,10 @@ class CodexConnectionError(RuntimeError):
 
 class AnswerDeliveryError(CodexConnectionError):
     """An answer write failed without confirming whether the peer received it."""
+
+
+class _ThreadPreparationError(Exception):
+    """A host preparation failure that does not invalidate runtime authentication."""
 
 
 class RpcPeer(Protocol):
@@ -190,15 +195,28 @@ class CodexConnection:
         peer: Transport implementing the actual RPC boundary.
         options: Working directory and requested authentication/model settings.
         emit: Callback receiving typed application events, never raw RPC frames.
+        prepare_thread: Optional async host preparation before the first thread.
+            None uses options.cwd and no application MCP overrides.
+        on_thread_started: Optional async host recording of the confirmed thread ID.
+            Completion is required before accepting the thread or starting a turn.
+            Callback errors preserve authentication and permit an explicit retry.
     """
 
     def __init__(
-        self, peer: RpcPeer, options: "ConnectionOptions", emit: "Callable[[ConnectionEvent], None]"
+        self,
+        peer: RpcPeer,
+        options: "ConnectionOptions",
+        emit: "Callable[[ConnectionEvent], None]",
+        *,
+        prepare_thread: "Callable[[], Awaitable[ThreadConfiguration]] | None" = None,
+        on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
     ) -> None:
         """Store connection dependencies without performing I/O."""
         self._peer = peer
         self._options = options
         self._emit = emit
+        self._prepare_thread = prepare_thread
+        self._on_thread_started = on_thread_started
         self._pump: asyncio.Task[None] | None = None
         self._opened = False
         self._closed = False
@@ -369,6 +387,9 @@ class CodexConnection:
                 await self._interrupt()
             else:
                 self._update_waiting()
+        except _ThreadPreparationError as error:
+            failure_id = self._failure("stopped" if self._stopping else "ready", str(error))
+            raise CodexConnectionError(str(error), failure_id=failure_id) from None
         except (TransportError, CodexConnectionError, OSError, UnicodeError) as error:
             await self.close()
             if isinstance(error, CodexConnectionError) and error.failure_id is not None:
@@ -525,22 +546,58 @@ class CodexConnection:
             raise CodexConnectionError(message)
 
     async def _start_thread(self) -> None:
+        context = ThreadConfiguration(self._options.cwd)
+        if self._prepare_thread is not None:
+            try:
+                context = await self._prepare_thread()
+                valid_directory = context.cwd.is_absolute() and context.cwd.is_dir()
+            except Exception as error:
+                message = "チャットの記録先を準備できない"
+                raise _ThreadPreparationError(message) from error
+            if not valid_directory:
+                message = "チャットの記録先が無効"
+                raise _ThreadPreparationError(message)
+        if self._stopping:
+            return
         instructions = read_play_instructions()
         if not instructions.strip():
             message = "共通指示が空"
             raise CodexConnectionError(message)
+        if self._prepare_thread is not None:
+            instructions += (
+                f"\n\n観測の記録先: {context.cwd}\n"
+                "observeが返す観測IDの画像はobservations/<観測ID>.png、"
+                "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
+                "返された画像と保存画像は同じPNGです。保存は非同期なので、"
+                "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
+                "必要な過去画像は保存されている場合に参照してください。"
+            )
+        config = dict(self._mcp_config)
+        if context.cwd != self._options.cwd:
+            result = _object(
+                await self._peer.request(
+                    "config/read", {"includeLayers": False, "cwd": str(context.cwd)}
+                )
+            )
+            servers = _object(_object(result.get("config")).get("mcp_servers", {}))
+            for name in servers:
+                key = name if name.replace("_", "").isalnum() else json.dumps(name)
+                config[f"mcp_servers.{key}.enabled"] = False
+        config.update(context.mcp_config)
+        if self._stopping:
+            return
         result = _object(
             await self._peer.request(
                 "thread/start",
                 {
-                    "cwd": str(self._options.cwd),
+                    "cwd": str(context.cwd),
                     "model": self._model,
                     "developerInstructions": instructions,
-                    "ephemeral": True,
+                    "ephemeral": False,
                     "sandbox": "read-only",
                     "approvalPolicy": "on-request",
                     "approvalsReviewer": "user",
-                    "config": self._mcp_config,
+                    "config": config,
                 },
             )
         )
@@ -552,7 +609,14 @@ class CodexConnection:
         ):
             message = "Codexの実行設定が要求と不一致"
             raise CodexConnectionError(message)
-        self._thread_id = _text(_object(result.get("thread")).get("id"))
+        thread_id = _text(_object(result.get("thread")).get("id"))
+        if self._on_thread_started is not None:
+            try:
+                await self._on_thread_started(thread_id)
+            except Exception as error:
+                message = "チャットの対応記録を保存できない"
+                raise _ThreadPreparationError(message) from error
+        self._thread_id = thread_id
 
     def _failure(self, phase: "ConnectionPhase", detail: str) -> int:
         self._failure_serial += 1
@@ -706,7 +770,7 @@ class CodexConnection:
         self._turn_id = None
         self._file_details.clear()
         if turn.get("status") == "failed":
-            self._failure("error", "ターンが失敗")
+            self._failure("stopped" if self._stopping else "ready", "ターンが失敗")
         elif self._stopping or turn.get("status") == "interrupted":
             self._status("stopped")
         else:

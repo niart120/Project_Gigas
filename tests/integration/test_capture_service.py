@@ -1,14 +1,20 @@
+import asyncio
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event
 from typing import TYPE_CHECKING
 
+import cv2
+import numpy as np
 import pytest
 
 from gigas.game_io.capture import CaptureReader, CaptureService, CaptureSnapshot
 from gigas.game_io.capture._process import SharedSlot
 from gigas.game_io.capture.models import CaptureOptions, DeviceInfo
+from gigas.services.observation import ObservationService
+from gigas.storage import project
+from gigas.storage.project import ProjectWriter
 from tests.integration.peers.capture_peer import PeerBackend
 
 if TYPE_CHECKING:
@@ -196,50 +202,61 @@ def test_reader_has_no_ownership_commands_and_observes_state_without_starting() 
     assert reader.snapshot().phase == "stopping"
 
 
-def test_slow_reader_holds_image_without_stalling_shared_capture_or_preview(
-    capture: tuple[CaptureService, Path],
+def test_observation_save_does_not_stall_capture_preview_or_stop(
+    capture: tuple[CaptureService, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service, marker = capture
     preview = service.reader()
-    observation = service.reader()
     assert service.connect(CaptureOptions("path-b", 16, 16, 60))
-    wait_for(preview, lambda state: state.frame is not None)
-    holding = Event()
-    resume = Event()
-    observed: list[CaptureSnapshot] = []
+    first = wait_for(preview, lambda state: state.frame is not None).frame
+    assert first is not None
+    holding, resume = Event(), Event()
+    publish = project._publish_image
 
-    def retain_image() -> None:
-        observed.append(observation.snapshot())
+    def delayed_publish(path: Path, data: bytes) -> None:
         holding.set()
-        resume.wait()
-        observed.append(observation.snapshot())
+        if not resume.wait(timeout=10):
+            message = "test release deadline"
+            raise OSError(message)
+        publish(path, data)
 
-    reader_thread = Thread(target=retain_image, daemon=True)
-    reader_thread.start()
+    monkeypatch.setattr(project, "_publish_image", delayed_publish)
+    writer = ProjectWriter.create(tmp_path / "observation")
+
+    async def scenario() -> None:
+        observer = ObservationService(service.reader(), writer)
+        request = asyncio.create_task(observer.observe())
+        try:
+            assert await asyncio.to_thread(holding.wait, 3)
+            progressed = await asyncio.to_thread(
+                wait_for,
+                preview,
+                lambda state: (
+                    state.frame is not None and state.frame.sequence >= first.sequence + 5
+                ),
+            )
+            assert progressed.frame is not None
+            assert progressed.frame.generation == first.generation
+            observed = await asyncio.wait_for(request, 3)
+            assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
+            service.disconnect()
+            assert preview.snapshot().frame is None
+            stopped = await asyncio.to_thread(
+                wait_for, service, lambda state: state.phase == "idle"
+            )
+            assert stopped.cleanup == "graceful"
+            assert marker.read_text(encoding="utf-8") == "released\n"
+        finally:
+            resume.set()
+            observed = await request
+            await observer.drain()
+        decoded = cv2.imdecode(np.frombuffer(observed.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert decoded is not None
+        assert decoded.tobytes() == bytes([observed.source_frame.sequence % 256]) * (16 * 16 * 3)
+        assert (writer.path / observed.image_path).read_bytes() == observed.png_bytes
+
     try:
-        assert holding.wait(timeout=2)
-        retained = observed[0].frame
-        assert retained is not None
-        pixels = bytes([retained.sequence % 256]) * (16 * 16 * 3)
-        progressed = wait_for(
-            preview,
-            lambda state: state.frame is not None and state.frame.sequence >= retained.sequence + 5,
-        )
-        assert reader_thread.is_alive()
-        assert progressed.frame is not None
-        assert progressed.frame.generation == retained.generation
-        assert progressed.frame.bgr == bytes([progressed.frame.sequence % 256]) * (16 * 16 * 3)
-        assert retained.bgr == pixels
-        assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
-        service.disconnect()
-        assert preview.snapshot().frame is None
-        assert observation.snapshot().frame is None
-        assert wait_for(service, lambda state: state.phase == "idle").cleanup == "graceful"
-        assert marker.read_text(encoding="utf-8") == "released\n"
-        assert retained.bgr == pixels
+        asyncio.run(scenario())
     finally:
         resume.set()
-        reader_thread.join(2)
-        assert not reader_thread.is_alive()
-    assert len(observed) == 2
-    assert observed[1].frame is None
+        writer.close()

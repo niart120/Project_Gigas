@@ -55,6 +55,7 @@ def test_save_error_details_remain_accessible_from_settings(
     io.fail = True
     io.release.set()
     dialog.model.setText("edited")
+    dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert dialog.error_details_button.isVisible()
@@ -66,6 +67,8 @@ def test_save_error_details_remain_accessible_from_settings(
     assert details.isModal()
     assert details.details.toPlainText() == shell.error
     assert dialog.model.text() == "edited"
+    assert dialog.observation_resolution.currentData() == "hd"
+    assert shell.baseline.observation_resolution == "full_hd"
 
 
 def test_form_details_keep_current_error_after_another_settings_failure(

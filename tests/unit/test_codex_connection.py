@@ -18,6 +18,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
+    ThreadConfiguration,
     TurnStarted,
 )
 from gigas.runtime.codex.transport import (
@@ -186,7 +187,7 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
         assert start["sandbox"] == "read-only"
         assert start["approvalsReviewer"] == "user"
         assert start["approvalPolicy"] == "on-request"
-        assert start["ephemeral"] is True
+        assert start["ephemeral"] is False
         assert start["config"] == {"mcp_servers.existing.enabled": False}
         turn = next(params for method, params in peer.calls if method == "turn/start")
         assert turn == {
@@ -959,8 +960,9 @@ def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Pa
 
 
 @pytest.mark.parametrize("status", ["failed", "interrupted"])
+@pytest.mark.parametrize("stopping", [False, True])
 def test_terminal_status_and_late_text_do_not_masquerade_as_success(
-    tmp_path: Path, status: str
+    tmp_path: Path, status: str, *, stopping: bool
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -968,6 +970,8 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
+        if stopping:
+            await connection.stop()
         peer.events.put_nowait(_terminal(status))
         peer.events.put_nowait(
             RpcNotification(
@@ -978,7 +982,18 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         await _events_processed()
         assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
         assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == ("error" if status == "failed" else "stopped")
+        assert events[-1].phase == ("stopped" if stopping or status == "interrupted" else "ready")
+        if status == "failed":
+            assert events[-1].failure_id is not None
+            assert events[-1].detail == "ターンが失敗"
+        assert not peer.closed
+        assert len([call for call in peer.calls if call[0] == "turn/start"]) == 1
+        peer.responses["turn/start"] = {
+            "turn": {"id": "turn-2", "status": "inProgress", "items": []}
+        }
+        await connection.send("次の明示送信")
+        assert len([call for call in peer.calls if call[0] == "turn/start"]) == 2
+        assert TurnStarted("turn-2") in events
         await connection.close()
 
     _run(scenario())
@@ -1194,6 +1209,131 @@ def test_cancel_decision_disables_other_answers_before_write_and_terminal(tmp_pa
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "stopped"
         assert peer.replies == [("approval", {"decision": "cancel"})]
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("stage", ["prepare", "record"])
+def test_chat_preparation_failure_keeps_login_and_requires_explicit_retry(
+    tmp_path: Path, stage: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        fail = True
+        prepared: list[str] = []
+
+        async def prepare() -> ThreadConfiguration:
+            if fail and stage == "prepare":
+                raise OSError("PRIVATE-STORAGE-DETAIL")
+            return ThreadConfiguration(tmp_path)
+
+        async def record(thread_id: str) -> None:
+            prepared.append(thread_id)
+            if fail and stage == "record":
+                raise OSError("PRIVATE-STORAGE-DETAIL")
+
+        connection = CodexConnection(
+            peer,
+            ConnectionOptions(tmp_path),
+            events.append,
+            prepare_thread=prepare,
+            on_thread_started=record,
+        )
+        await connection.open()
+        assert prepared == []
+        with pytest.raises(CodexConnectionError) as rejected:
+            await connection.send("first")
+        assert "PRIVATE" not in str(rejected.value)
+        assert rejected.value.failure_id is not None
+        assert not peer.closed
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        status = events[-1]
+        assert isinstance(status, SessionStatus)
+        assert status.phase == "ready"
+        assert status.authenticated
+        assert status.failure_id == rejected.value.failure_id
+        assert len([m for m, _ in peer.calls if m == "thread/start"]) == int(stage == "record")
+        fail = False
+        await connection.send("explicit retry")
+        assert len([m for m, _ in peer.calls if m == "thread/start"]) == 1 + int(stage == "record")
+        assert len([m for m, _ in peer.calls if m == "turn/start"]) == 1
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("stopping", [False, True])
+@pytest.mark.parametrize("stage", ["prepare", "record"])
+def test_thread_preparation_and_recording_precede_turn_and_allow_stop(
+    tmp_path: Path, stage: str, *, stopping: bool
+) -> None:
+    async def scenario() -> None:
+        archive = tmp_path / "chat"
+        archive.mkdir()
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        entered, release = asyncio.Event(), asyncio.Event()
+        recorded: list[str] = []
+        config = ThreadConfiguration(
+            archive,
+            {
+                "mcp_servers.gigas": {
+                    "url": "http://127.0.0.1:12345/mcp",
+                    "bearer_token_env_var": "TEST_TOKEN",
+                }
+            },
+        )
+
+        async def prepare() -> ThreadConfiguration:
+            if stage == "prepare":
+                entered.set()
+                await release.wait()
+            return config
+
+        async def record(thread_id: str) -> None:
+            if stage == "record":
+                entered.set()
+                await release.wait()
+            recorded.append(thread_id)
+
+        connection = CodexConnection(
+            peer,
+            ConnectionOptions(tmp_path),
+            events.append,
+            prepare_thread=prepare,
+            on_thread_started=record,
+        )
+        await connection.open()
+        assert not entered.is_set()
+        peer.responses["config/read"] = {
+            "config": {"mcp_servers": {"archive_external": {"enabled": True}}}
+        }
+        sending = asyncio.create_task(connection.send("start"))
+        await entered.wait()
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        if stopping:
+            await connection.stop()
+        release.set()
+        await sending
+        if stopping:
+            assert not any(method == "turn/start" for method, _ in peer.calls)
+            assert isinstance(events[-1], SessionStatus)
+            assert events[-1].phase == "stopped"
+        if stage == "record" or not stopping:
+            start = next(params for method, params in peer.calls if method == "thread/start")
+            assert start is not None
+            assert start["cwd"] == str(archive)
+            assert start["ephemeral"] is False
+            assert start["config"] == {
+                "mcp_servers.existing.enabled": False,
+                "mcp_servers.archive_external.enabled": False,
+                **config.mcp_config,
+            }
+            assert recorded == ["thread-1"]
+        if not stopping:
+            assert any(method == "turn/start" for method, _ in peer.calls)
         await connection.close()
 
     _run(scenario())

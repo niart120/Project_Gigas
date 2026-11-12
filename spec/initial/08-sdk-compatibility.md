@@ -10,13 +10,46 @@
 
 Windows x64/Python 3.13.5の隔離環境で、固定runtimeのinitialize、未認証account/read、model/list、close呼出しと調査Pythonの正常終了を確認しました。これは認証・モデル利用・通常ターン・異常時の全資源終了の保証ではありません。closeはkill後のwaitや内部スレッド生存の確認結果を公開しないため、終了契約も別途解決が必要です。
 
-詳細な配布物hash、API一覧、再現コード、GUI・サービス所有設計は[M0子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)にあります。2026-11-11にユーザーが公開app-server直接接続を承認しました。[M1](../complete/unit_017/CODEX_DIRECT_CONNECTION.md)で単一stdio接続を実装し、既存ChatGPT認証で通常応答、質問への回答・中断、command承認の取消し、file承認の拒否を確認しました。SDKは製品依存に追加していません。後続のGoal・MCP・旧書込終了は入口の存在確認に留まり、第7節の担当工程で実行確認します。
+詳細な配布物hash、API一覧、再現コード、GUI・サービス所有設計は[M0子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)にあります。2026-11-11にユーザーが公開app-server直接接続を承認しました。[M1](../complete/unit_017/CODEX_DIRECT_CONNECTION.md)で単一stdio接続を実装し、既存ChatGPT認証で通常応答、質問への回答・中断、command承認の取消し、file承認の拒否を確認しました。SDKは製品依存に追加していません。U02完了時のGoal・MCP・旧書込終了は入口の存在確認に留まりました。その後の観測MCPは下記のU04 M2で実モデルまで確認し、Goal・旧書込終了は第7節の担当工程で確認します。
 
 採用版のGUI結合・全体品質ゲートは[U02親仕様](../complete/unit_007/CODEX_CONNECTION.md)に記録します。新規ブラウザ認証、APIキー、承認accept後の実行、別版・別環境は、上記の受入結果に含みません。
 
+## U04 M0のMCP公開経路（2026-11-12）
+
+[M0子仕様](../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)で、同梱runtime `0.167.0`の公開schemaを生成し、公開tag `rust-v0.167.0`（`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`）の設定・通知処理を読んだ。以下の表はM0時点の調査記録であり、その時点では製品MCP、認証付きHTTP、画像の実モデル配送は実行していない。現在の実装・実行結果は次節で区別する。
+
+| 根拠 | 確認した事実・設計への適用 |
+|---|---|
+| 同梱実行ファイルの`app-server generate-json-schema --experimental` | `ThreadStartParams.config`、`mcpServerStatus/list`のthreadId/serverName、`mcpServer/tool/call`のthreadId/server/tool/argumentsを確認。後二つは限定接続検証に利用できるが、専用の製品操作経路は作らない |
+| [採用tagの設定schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json#L4208)・[公式MCP設定](https://learn.chatgpt.com/docs/extend/mcp) | URL、http_headers、enabled_tools、required、startup_timeout_sec、tool_timeout_secが公開されている。現製品の外部MCP無効化とthread/start.configへ、アプリ専有サーバを追加する方針 |
+| [MCPのimage content](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) | 同じPNG bytesをbase64のimage contentで返し、観測ID・取得UTCを短いJSON textで返せる。structuredContentとの二重配送を必須にしない |
+| [採用tagのモデル配送と通知](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs#L695) | 通知用には切詰め結果、モデル側には元の結果を渡す。Gigasの保存PNGとMCP応答の同一性を、モデル内部の画像前処理まで拡張しない |
+| [通知結果上限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/pty/src/lib.rs#L25)・[切詰め処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/utils/output-truncation/src/lib.rs#L69) | 結果全体を最大1 MiBのpreviewへ制限する。外側JSONが加わるためM0当時のGigas受信1 MiBでは不足し得る。M2で2 MiBの有界受信と実通知サイズを確認する |
+| [通知画像省略feature](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/features/src/lib.rs#L1922) | 開発中・既定false。切詰め後のtextに残る画像断片を消す保証もないため、U04の必須設定にしない |
+| [公式Python MCP SDK v2.3.0](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.3.0)・[ASGI組込み](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/run/asgi.md)・[実行設定](https://github.com/modelcontextprotocol/python-sdk/blob/v2.3.0/docs/run/index.md) | Python >=3.10。`MCPServer.streamable_http_app(json_response=True, stateless_http=True)`を既存サービス用ループ上でホストする候補。lifespanによるsession manager起動・終了が必要。依存導入・Windows実行は未実施 |
+| [Streamable HTTPの寿命](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) | 接続／session IDを操作許可と同一視しない。U04はサーバ寿命に固定したAuthorization値を使い、切断後は再利用しない。入力世代との対応はU05で設計 |
+
+## U04 M2の製品経路と実行結果（2026-11-12）
+
+**実装済みの経路**: Python MCP SDK 2.3.0の`MCPServer.streamable_http_app(json_response=True, stateless_http=True)`を、既存CodexServiceThreadのasyncioループでホストする。初回送信時に記録先とサーバを準備し、127.0.0.1のOS割当ポート・接続ごとのMCP名・不透明なBearer値を`thread/start.config`へ渡す。アプリ専有サーバだけを有効にし、`enabled_tools=["observe"]`、`required=true`、起動期限10秒・ツール期限30秒を指定する。ハンドラは観測サービスを借用し、readerとwriterはアプリの観測・保存側が所有する。加工・符号化済みObservationを同じ画像のMCP応答と非同期保存へ渡し、設定ファイル書換え・token履歴表・別のstdio受信者を作らない。`read-only`・`on-request`・`user`を維持した永続threadを使い、記録先と実thread IDの対応保存後にターンを開始する。
+
+`observe`は`destructiveHint=false`・`openWorldHint=false`を公開する。初回の実モデル試験では、この注釈がないツール呼出しが`user rejected MCP tool call`で失敗した。公開`mcpServer/tool/call`だけでは成功しており、直接呼出しをモデル経由の承認経路の証明にできなかった。採用tagの承認判定と実際のツール作用に合わせて非破壊・閉じた対象であることを明示し、再試験でモデル経由の観測に成功した。原記録の追加があるためreadOnlyHintをtrueとせず、承認方針全体を無効化して回避していない。
+
+**実モデルで確認済み**: Windows、採用runtime 0.167.0、既存ChatGPT認証、`gpt-6.1-sol`・low、製品サービスの既定factoryを使った。プロンプトに正解を含めない4K固定FrameをFullHDへ縮小し、3,796,983 bytesのPNGを返した。ランダム英数字・四隅の色・観測IDの回答、保存PNGとの一致、通常終了でのサービス回収を確認した。同接続の次ターンでは観測を再実行せず、保存先のPNGを`imageView`で開き直して英数字・IDを回答した。新しいapp-serverプロセスの公開`thread/read(includeTurns=true)`で、両ターンと画像参照を取得できた。アプリの会話再開UIや再起動後の攻略復帰の確認ではない。
+
+通知は1,049,142 bytesとなり、旧1 MiB受信枠を超えたが現行の2 MiB枠で受信できた。送信は1 MiBを維持する。通知の結果は切り詰めtextであり、後日の`thread/read`でも画像全体を復元する原典には使わない。保存は通知のbase64復元ではなく、MCPへ渡す同じObservationのPNGから行う。モデル内部の画像前処理まで保存PNGとの同一性を保証しない。
+
+MCPのBearerはモデル向け指示やアプリ原記録へ保存しない。実モデル試験で作ったrollout 1件とアプリ生成ファイル7件を完全bytes・JSONエスケープ形で調べ、一致0件を確認した。既定HOME全体や設定DB・認証ファイルは読んでおらず、そこでの残存なしを保証する結果ではない。隔離HOMEの非モデル試験による設定残存確認は別の根拠とする。
+
+**実機・実画面で確認済み**: 保存済みの機器識別子と再列挙したUSB Video Deviceの一致を確かめ、FullHD・60 fps設定の実映像を未選択チャットから観測した。実モデルの画面説明・タイトル文字・観測ID、MCP応答と保存PNG・付随情報の一致を確認した。実保存中のプレビュー描画、回答生成中のメニュー表示、映像取得中の設定開閉、Codex切断後の取得継続、通常終了と別writerでの再読込も確認した。ネイティブ画面での新規作成・読込、前回選択の再起動後復元、観測解像度HDの適用・保存は別の試験で確認済みである。他機器・長時間運転、R02/R04の障害条件を実runtimeで発生させる試験は未実施であり、後続工程の権限更新・会話再開まで確認した結果ではない。全体の工程受入と計測条件・コマンド・根拠は[M2子仕様](../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に記録する。
+
+依存導入は新規の検証用環境で`uv sync --dev`に成功し、同環境の全unit/integration試験465件が成功した。利用中の既存`.venv`がロックされ再同期できない件とは分ける。
+
+U05の停止・次実行では旧tokenの失効と新tokenの公開が必要。保持threadへの設定反映／MCP再読込またはthread・接続再作成の効果は未検証で、物理入力公開前に確認する。新threadへの設定注入を確認したことは、U06の同一セッションGoal再開を確認したことではない。
+
 # 1. この文書の位置づけ
 
-**公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。製品経路の必要APIの実行確認はM1/M2で行います。
+**公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。通常ターンはU02、観測MCPと保存画像の後参照はU04 M2で実行確認しました。Goalや入力制御は各担当工程で確認します。
 
 通信の管理主体は一つのCodex接続部に保ちます。asyncio subprocessのreaderで受信を振り分け、回答待ちはreaderの外で扱います。SDK改修・非公開API差替え・二重受信は行いません。以下のSDK調査記述は不採用判断の根拠であり、製品方式の現行契約ではありません。
 
@@ -40,7 +73,7 @@ Windows x64/Python 3.13.5の隔離環境で、固定runtimeのinitialize、未�
 
 実行世代を MCP の接続コンテキストに紐付け、停止後の再開では旧世代の呼び出しを拒否する設計です。SDK からその接続設定を渡せるか、再開時に更新・再接続できるかは未検証です。採用版で必要な更新ができない場合の接続再作成も、このCodex接続部内で確認します。
 
-Windows のネイティブ実行は公式に案内されています。ただし、本構成の子プロセス起動、ローカル HTTP 接続、プロジェクトへの書き込み、GUI との並行動作を Windows で確認済みとはしません。
+2026-11-10の資料調査時点では、Windowsのネイティブ実行に関する公式案内だけで、本構成の子プロセス起動、ローカルHTTP接続、プロジェクトへの書き込み、GUIとの並行動作を確認済みとはしませんでした。その後のU02・U04で確認した製品接続・HTTP・保存・ネイティブUIとUSB Video Deviceの実映像との結合は、本書冒頭の実行結果に記載しています。この構成での実績を他機器・長時間運転の確認へ広げません。
 
 # 3. 通常ターンと Goal の継続
 
@@ -126,7 +159,7 @@ U02の冒頭で採用版候補を選び、以下の公開経路と未成立時�
 | 起動・版・通常ターン | SDKとランタイムの組合せ、Windows配布物、公開API、受信と子プロセス終了の所有者 | U02完了まで。版を固定し、通常ターンの開始・応答・中断・終了をWindowsで確認 |
 | 質問・承認 | 第4節の標準ハンドラの懸念が採用版にあるか、公開経路で保留・回答・失効を扱えるか | U02完了まで。単一接続で回答待ち中も受信・停止し、失効後の回答を破棄する。黙って許可しない |
 | 認証・モデル | ChatGPT/APIキーの経路、資格情報の保管責任、利用可能モデルと設定値の検証 | U02はChatGPTで最小接続を確認。APIキーを含む初期版の認証範囲はU06完了までに確認。設定文字列の保存で代用しない |
-| MCPと画像 | U02で設定経路を調査し、U04冒頭でサーバと画像応答形式を決定 | U04完了まで。画像をモデルが受け取り、保存した画像・観測IDと対応することを確認 |
+| MCPと画像 | U02で設定経路を調査し、U04冒頭でサーバと画像応答形式を決定 | U04 M2で固定Frame・USB Video Deviceの実映像の実モデル受信、保存画像・観測IDとの対応と実画面の応答性を確認。固定Frameの同接続で次ターンの保存PNG参照、再起動後の会話読込も確認 |
 | MCP接続と実行世代 | U02〜U04で公開された設定・更新または接続再作成を選定 | U05の製品経路で実機入力を許可する前。停止後の旧接続・遅延要求を拒否できることを確認 |
 | Goalの継続 | U02で公開経路と制約を調べ、U06冒頭で採用版による複数ターンの通知・休止・完了を確認 | U06の継続制御実装へ進む前に接続方式の成立を判断し、完了までに実行フローを検証 |
 | 追加指示・計画・制限 | U06 M0で配送、公開表示と完了の競合、利用枠情報を設計 | 公開表示と通常ターンの共通入力はM1、Goalとの結合はM2、利用制限・全体の結合はM3。未配送指示を新Goalへ転用せず、受付不明を再送しない |
@@ -191,3 +224,18 @@ U02の冒頭で採用版候補を選び、以下の公開経路と未成立時�
 
 - [Python パッケージ定義](https://github.com/openai/codex/blob/27fcd7cbedd7efd63fd704bd01a0cfe1d7b85a26/sdk/python/pyproject.toml)
 
+
+## U04 M2前の追加調査: 永続チャットと完全出力
+
+2026-11-12の[仕様改訂](../complete/unit_034/CHAT_OBSERVATION_PERSISTENCE.md)で、未選択チャットの観測・記録とephemeral撤去を採用方針にした。以下は改訂時点の調査と確認計画であり、その時点では製品実装・本MCPの実接続は未実施だった。現行実装と実モデルの観測・保存PNG後参照・再起動後のthread読込は、本書冒頭のU04 M2実行結果を参照する。
+
+| 根拠・事項 | 確認済みと未確認 |
+|---|---|
+| 同梱codex-cli 0.167.0のgenerate-json-schema --experimental | ThreadStartParamsにephemeral/cwd/config、ThreadResumeParamsにthreadId/config/cwd、ThreadReadParamsにthreadId/includeTurnsがある。隔離CODEX_HOMEで生成成功。認証・実ターンなし |
+| [公式App Server](https://learn.chatgpt.com/docs/app-server) | 保存会話をread/resumeする公開経路を確認。現行docsの説明を採用版の保存・終了後の読込成功と同一視しない |
+| 永続化の副作用 | 会話・指示・ツール結果の保存量、flush時点、MCP configと短命Bearerの残存はM2実接続前に隔離環境で確認。既存認証のHOMEをチャットごとに分割しない |
+| 完全出力 | SDKへ包装する前の加工済みObservationをアプリの保存処理へ渡す。MCP側で再加工せず同じPNG/ID/時刻となることをM2で確認。middlewareは前提にしない。Codex通知の切詰め結果を原画像の正本にしない |
+| 保存完了を待たない応答 | 本MCPで保存を止めても画像応答が成立し、後続保存が同一であることをM2で確認。応答成功は保存・配送先での解釈成功を保証しない |
+| 再接続・再開 | 永続化と同一thread再開は別。新しい認証値の適用と旧値失効はU05/U08の入力公開・再開前に確認する |
+
+未成立なら依存する結合方式を見直し、認証値の秘密保持や再開成功を推測で確定しない。

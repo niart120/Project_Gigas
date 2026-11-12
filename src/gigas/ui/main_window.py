@@ -96,6 +96,8 @@ class MainWindow(QMainWindow):
     """Present shared menus, video, conversation, and current status."""
 
     settings_requested = Signal()
+    new_project_requested = Signal()
+    open_project_requested = Signal()
     close_requested = Signal()
     window_size_requested = Signal(str)
     video_menu_opened = Signal()
@@ -120,6 +122,11 @@ class MainWindow(QMainWindow):
         self.file_menu.addSeparator()
         self.exit_action = self.file_menu.addAction("終了")
         self.exit_action.triggered.connect(self.close)
+        self.project_menu = self.menuBar().addMenu("プロジェクト")
+        self.new_project_action = self.project_menu.addAction("新規作成")
+        self.new_project_action.triggered.connect(self.new_project_requested)
+        self.open_project_action = self.project_menu.addAction("開く")
+        self.open_project_action.triggered.connect(self.open_project_requested)
         self.connection_menu = self.menuBar().addMenu("接続")
         self.video_menu = self.connection_menu.addMenu("映像")
         self.video_menu.setToolTipsVisible(True)

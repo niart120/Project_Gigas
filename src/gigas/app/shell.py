@@ -1,16 +1,17 @@
 """Coordinate the application views and settings operations."""
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.app.video import VideoController
 from gigas.runtime.codex.models import ConnectionOptions
-from gigas.services.codex import CodexServiceThread
+from gigas.services.codex import CodexServiceThread, ProjectResult
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
@@ -20,8 +21,6 @@ from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.settings_dialog import SettingsDialog
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from gigas.app.video import CapturePort
 
 
@@ -68,6 +67,7 @@ class ApplicationShell(QObject):
         self.dialog: SettingsDialog | None = None
         self.baseline = Settings()
         self._io_request: _SettingsRequest | None = None
+        self._project_pending = False
         self.ready = False
         self._settings_error_notice: Notice | None = None
         self._exit_requested = False
@@ -76,8 +76,12 @@ class ApplicationShell(QObject):
         self._worker_released = False
         self._service_unavailable = False
         self._shutdown_failure = ""
-        self.service = CodexServiceThread() if service is None else service
         self.video = VideoController(self.window.video, capture_service, self)
+        self.service = (
+            CodexServiceThread(path.parent, self.video.service.reader())
+            if service is None
+            else service
+        )
         self.video.changed.connect(self._video_changed)
         self.video.failed.connect(self.window.notifications.publish)
         self.confirmation: QMessageBox | None = None
@@ -96,6 +100,8 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
+        self.window.new_project_requested.connect(self._new_project)
+        self.window.open_project_requested.connect(self._open_project)
         self.window.video_menu_opened.connect(self.refresh_video_devices)
         self.window.capture_device_requested.connect(self._select_video_device)
         self.window.window_size_requested.connect(self.change_window_size)
@@ -109,6 +115,10 @@ class ApplicationShell(QObject):
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
+        self.service.received.connect(self._render)
+        self.service.completed.connect(self._render)
+        self.service.project_completed.connect(self._project_complete)
+        self.service.recording_failed.connect(self._recording_failed)
         self.service.finished.connect(self._service_finished)
 
     def start(self) -> None:
@@ -148,6 +158,7 @@ class ApplicationShell(QObject):
         return (
             self.ready
             and self._io_request is None
+            and not self._project_pending
             and not self._exit_requested
             and not self.committed
             and self.confirmation is None
@@ -191,7 +202,7 @@ class ApplicationShell(QObject):
 
     def connect_codex(self) -> None:
         """Connect using the last successfully loaded or saved settings snapshot."""
-        if not self.ready or self.committed or self._exit_requested:
+        if not self.ready or self.committed or self._exit_requested or self._project_pending:
             return
         options = ConnectionOptions(
             (self.path.parent / "runtime").resolve(),
@@ -200,6 +211,74 @@ class ApplicationShell(QObject):
             self.baseline.auth_method,
         )
         self.window.connection.activate(self.service.connect_runtime(options))
+        self._render()
+
+    @Slot()
+    def _new_project(self) -> None:
+        if not self.window.project_menu.isEnabled():
+            return
+        dialog = QFileDialog(self.window, "プロジェクトを新規作成", str(self.path.parent))
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setLabelText(QFileDialog.DialogLabel.Accept, "作成")
+        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        dialog.setOption(QFileDialog.Option.DontConfirmOverwrite)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._select_project(Path(dialog.selectedFiles()[0]), create=True)
+        dialog.deleteLater()
+
+    @Slot()
+    def _open_project(self) -> None:
+        if not self.window.project_menu.isEnabled():
+            return
+        selected = QFileDialog.getExistingDirectory(
+            self.window, "プロジェクトを開く", str(self.path.parent)
+        )
+        if selected:
+            self._select_project(Path(selected))
+
+    def _select_project(self, path: Path, *, create: bool = False) -> None:
+        self._project_pending = True
+        self._render()
+        if create:
+            self.service.create_project(path)
+        else:
+            self.service.open_project(path)
+
+    @Slot(object)
+    def _project_complete(self, result: object) -> None:
+        if not isinstance(result, ProjectResult):
+            return
+        self._project_pending = False
+        if result.error:
+            self.window.notifications.publish(
+                Notice(
+                    "settings",
+                    "プロジェクト選択失敗",
+                    "プロジェクトを選択できませんでした。保存先と詳細を確認して、"
+                    "「プロジェクト」から選び直してください。",
+                    f"{result.path}\n{result.error}",
+                )
+            )
+        else:
+            self.window.setWindowTitle(f"GIGAS · {result.path}")
+            if str(result.path) != self.baseline.last_project_path:
+                self._request(
+                    _SettingsRequest(replace(self.baseline, last_project_path=str(result.path)))
+                )
+        if self._exit_requested and self._io_request is None:
+            self._resolve_close()
+        self._render()
+
+    @Slot(str, str, str)
+    def _recording_failed(self, identifier: str, path: str, reason: str) -> None:
+        self.window.notifications.publish(
+            Notice(
+                "recording",
+                "記録失敗",
+                "記録処理に失敗しました。保存先と詳細を確認してください。",
+                f"{identifier}\n{path}\n{reason}",
+            )
+        )
 
     @Slot(object)
     def _answer_codex(self, submission: object) -> None:
@@ -210,7 +289,12 @@ class ApplicationShell(QObject):
 
     def open_settings(self) -> None:
         """Open one modal editor from the saved snapshot when I/O is idle."""
-        if self.committed or self._exit_requested or self._io_request is not None:
+        if (
+            self.committed
+            or self._exit_requested
+            or self._io_request is not None
+            or self._project_pending
+        ):
             return
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
@@ -281,7 +365,12 @@ class ApplicationShell(QObject):
                 else self.baseline
             )
         )
-        request = _SettingsRequest(target, capture=True, close_dialog=close_after)
+        observation_only = (
+            target != self.baseline
+            and replace(target, observation_resolution=self.baseline.observation_resolution)
+            == self.baseline
+        )
+        request = _SettingsRequest(target, capture=not observation_only, close_dialog=close_after)
         self._settings_error_notice = None
         if target != self.baseline or not self.path.exists():
             self._request(request)
@@ -312,6 +401,7 @@ class ApplicationShell(QObject):
         if self.dialog is not None and self.dialog.isVisible():
             self.dialog.set_values(settings)
         self.video.set_preview_fps(settings.preview_fps)
+        self.service.set_observation_resolution(settings.observation_resolution)
         self.window.video.view.set_letterbox(settings.preview_letterbox)
         if self.window.current_window_size_preset != settings.window_size_preset:
             self.window.apply_window_size_preset(settings.window_size_preset)
@@ -320,6 +410,13 @@ class ApplicationShell(QObject):
         if request.close_dialog and self.dialog is not None:
             self.window.notifications.close_details()
             self.dialog.hide()
+        if (
+            request.snapshot is None
+            and settings.last_project_path
+            and not self._exit_requested
+            and not self.committed
+        ):
+            self._select_project(Path(settings.last_project_path))
         self._render()
 
     @Slot(object)
@@ -338,7 +435,10 @@ class ApplicationShell(QObject):
                 )
             else:
                 explanation = (
-                    "設定を保存できず、適用しませんでした。編集内容と詳細を確認してください。"
+                    "プロジェクトは選択済みですが、次回起動時の復元先を保存できませんでした。"
+                    "設定ファイルと詳細を確認してから、プロジェクトを選び直してください。"
+                    if request.snapshot.last_project_path != self.baseline.last_project_path
+                    else "設定を保存できず、適用しませんでした。編集内容と詳細を確認してください。"
                 )
                 if request.capture and not request.snapshot.capture_device:
                     explanation += "映像取得は停止していません。"
@@ -347,10 +447,11 @@ class ApplicationShell(QObject):
                 self.wait_expired = False
             self._settings_error_notice = Notice("settings", title, explanation, result.error)
             self.window.notifications.publish(self._settings_error_notice)
-        if self._exit_requested:
+        if self._exit_requested and not self._project_pending:
             self._resolve_close()
         self._render()
 
+    @Slot()
     def _render(self) -> None:
         closing = self._exit_requested or self.committed
         state = "終了待ち" if closing else ""
@@ -368,7 +469,9 @@ class ApplicationShell(QObject):
             state = " · ".join([state, *targets])
         self.window.status.setText(state)
         self.window.refresh_close_progress()
-        self.window.settings_action.setEnabled(not closing and self._io_request is None)
+        self.window.settings_action.setEnabled(
+            not closing and self._io_request is None and not self._project_pending
+        )
         self.window.exit_action.setEnabled(not self.committed)
         self.window.set_window_size_state(
             self.baseline.window_size_preset,
@@ -376,7 +479,12 @@ class ApplicationShell(QObject):
         )
         self.window.connection.set_available(
             not closing and not self._service_unavailable,
-            settings_ready=self.ready and not closing,
+            settings_ready=self.ready and not closing and not self._project_pending,
+        )
+        self.window.project_menu.setEnabled(
+            self._can_edit
+            and self.window.connection.connect_action.isEnabled()
+            and (self.dialog is None or not self.dialog.isVisible())
         )
         self.video.set_available(not closing)
         self._render_capture_menu()
@@ -408,7 +516,7 @@ class ApplicationShell(QObject):
         self.window.connection.interrupt()
         self.video.cancel_pending()
         self._exit_requested = True
-        if self._io_request is None:
+        if self._io_request is None and not self._project_pending:
             self._resolve_close()
         else:
             self.wait_timer.start()

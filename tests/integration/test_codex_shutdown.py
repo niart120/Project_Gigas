@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from threading import Event
 
@@ -10,7 +10,13 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
-from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, SessionStatus
+from gigas.game_io.capture import CaptureReader, CaptureSnapshot
+from gigas.runtime.codex.models import (
+    ConnectionEvent,
+    ConnectionOptions,
+    SessionStatus,
+    ThreadConfiguration,
+)
 from gigas.services.codex import CodexServiceThread
 from gigas.storage.settings import Settings, SettingsError, load_settings
 
@@ -64,13 +70,20 @@ def _start(
     connections: list[LifetimeConnection] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None]
+        _options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        _prepare_thread: Callable[[], Awaitable[ThreadConfiguration]],
+        _on_thread_started: Callable[[str], Awaitable[None]],
     ) -> LifetimeConnection:
         connection = LifetimeConnection(emit)
         connections.append(connection)
         return connection
 
-    shell = ApplicationShell(tmp_path / "settings.toml", io, service=CodexServiceThread(factory))
+    shell = ApplicationShell(
+        tmp_path / "settings.toml",
+        io,
+        service=CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory),
+    )
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)
     panel = shell.window.connection

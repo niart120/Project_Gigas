@@ -13,6 +13,8 @@ from tomlkit.exceptions import ParseError, TOMLKitError
 if TYPE_CHECKING:
     from tomlkit.toml_document import TOMLDocument
 
+    from gigas.game_io.observation import ObservationResolution
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -29,8 +31,11 @@ class Settings:
         window_size_preset: Display size key: hd, full_hd, wqhd, or four_k.
         capture_resolution: Capture size request: auto, hd, full_hd, wqhd, or four_k.
             The auto value leaves the device dimensions unchanged.
+        observation_resolution: Agent image size: original, full_hd, or hd.
+            Independent of capture resolution and preview display.
         preview_letterbox: Preserve the preview aspect ratio with black padding when
             true; stretch to the preview area when false. Capture pixels are unchanged.
+        last_project_path: Last successfully selected project directory, or empty.
     """
 
     capture_device: str = ""
@@ -43,6 +48,8 @@ class Settings:
     window_size_preset: str = "full_hd"
     capture_resolution: str = "full_hd"
     preview_letterbox: bool = True
+    observation_resolution: "ObservationResolution" = "full_hd"
+    last_project_path: str = ""
 
 
 class SettingsError(ValueError):
@@ -104,6 +111,8 @@ def _read_document(path: "Path") -> "TOMLDocument":
 
 def _settings_from_document(document: MutableMapping[str, object], path: "Path") -> Settings:
     capture = _table(document, "capture", path)
+    observation = _table(document, "observation", path)
+    project = _table(document, "project", path)
     serial = _table(_table(document, "controller", path), "serial", path)
     agent = _table(document, "agent", path)
     gui = _table(document, "gui", path)
@@ -123,6 +132,10 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         window_size_preset=_window_size_preset(gui.get("window_size_preset", "full_hd"), path),
         capture_resolution=_capture_resolution(capture.get("resolution", "full_hd"), path),
         preview_letterbox=_preview_letterbox(gui.get("preview_letterbox", True), path),
+        observation_resolution=_observation_resolution(
+            observation.get("resolution", "full_hd"), path
+        ),
+        last_project_path=_text(project, "last_path", path),
     )
 
 
@@ -140,6 +153,8 @@ def save_settings(path: "Path", settings: Settings) -> None:
     _settings_from_document(document, path)
 
     capture = _ensure_table(document, "capture", path)
+    observation = _ensure_table(document, "observation", path)
+    project = _ensure_table(document, "project", path)
     controller = _ensure_table(document, "controller", path)
     serial = _ensure_table(controller, "serial", path)
     agent = _ensure_table(document, "agent", path)
@@ -149,6 +164,10 @@ def save_settings(path: "Path", settings: Settings) -> None:
     if gui.get("preview_letterbox") != letterbox:
         gui["preview_letterbox"] = letterbox
     _set_text(capture, "resolution", _capture_resolution(settings.capture_resolution, path))
+    _set_text(
+        observation, "resolution", _observation_resolution(settings.observation_resolution, path)
+    )
+    _set_text(project, "last_path", settings.last_project_path)
     _set_text(capture, "device", settings.capture_device)
     for key, value in (
         ("fps", settings.capture_fps),
@@ -246,6 +265,19 @@ def _capture_resolution(value: object, path: Path) -> str:
         msg = f"{path}: capture.resolution must be auto, hd, full_hd, wqhd or four_k"
         raise SettingsError(msg)
     return str(value)
+
+
+def _observation_resolution(value: object, path: Path) -> "ObservationResolution":
+    match value:
+        case "original":
+            return "original"
+        case "full_hd":
+            return "full_hd"
+        case "hd":
+            return "hd"
+        case _:
+            msg = f"{path}: observation.resolution must be original, full_hd or hd"
+            raise SettingsError(msg)
 
 
 def _preview_letterbox(value: object, path: Path) -> bool:

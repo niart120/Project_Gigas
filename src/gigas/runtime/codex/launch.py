@@ -9,10 +9,10 @@ from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.transport import StdioTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
+    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ThreadConfiguration
 
 
 def create_connection(
@@ -20,13 +20,17 @@ def create_connection(
     emit: "Callable[[ConnectionEvent], None]",
     *,
     codex_home: "Path | None" = None,
+    prepare_thread: "Callable[[], Awaitable[ThreadConfiguration]] | None" = None,
+    on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> CodexConnection:
     """Create a connection without starting the bundled runtime.
 
     Args:
-        options: Conversation directory and model/authentication preferences.
+        options: Runtime working directory and model/authentication preferences.
         emit: Fast synchronous callback receiving typed connection events.
         codex_home: Optional isolated runtime home. None preserves the runtime default.
+        prepare_thread: Optional host archive/MCP preparation before thread creation.
+        on_thread_started: Optional host recording awaited before the first turn.
 
     Returns:
         A connection whose open method launches the pinned app-server.
@@ -57,4 +61,10 @@ def create_connection(
     if path_dir is not None:
         path_key = next((key for key in os.environ if key.upper() == "PATH"), "PATH")
         env[path_key] = str(path_dir) + os.pathsep + os.environ.get(path_key, "")
-    return CodexConnection(StdioTransport(command, options.cwd, env), options, emit)
+    return CodexConnection(
+        StdioTransport(command, options.cwd, env),
+        options,
+        emit,
+        prepare_thread=prepare_thread,
+        on_thread_started=on_thread_started,
+    )
