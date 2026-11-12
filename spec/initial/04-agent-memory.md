@@ -58,7 +58,7 @@ project/
 | 追加する機能 | 設計・実装する工程 | 最初に確認する契約 |
 | --- | --- | --- |
 | 最小プロジェクトと観測記録 | [U04](../complete/unit_009/RECORDED_OBSERVATION.md) | 保存先・ID・管理情報の作成と読込、画像とイベントの対応、既存データの保全、部分失敗 |
-| 依頼・実行と操作記録 | [U05](../wip/unit_010/INPUT_AND_STOP.md) | 操作に必要な識別子、入力前の開始記録、完了・中断・失敗・結果不明の区別 |
+| 依頼・実行と操作記録 | [U05](../complete/unit_010/INPUT_AND_STOP.md) | 操作に必要な識別子、入力前の開始記録、完了・中断・失敗・結果不明の区別 |
 | Goal・スレッド参照、記憶の入口 | [U06](../planned/unit_011/GOAL_EXECUTION.md) | 継続する依頼との対応、追加指示・公開応答、同一セッション再開の記録、既存記憶を保持した案内と読込 |
 | 終了作業の記録・保存参照からの復帰 | [U07](../planned/unit_012/PLANNED_STOP.md)・[U08](../planned/unit_013/RESUME.md) | 元依頼と公開された作業報告の区別、未完記録とランタイム参照の読込。U06の再開経路を共用し、過去操作を再送しないこと |
 | 整理の退避・復元と未完状態 | [U09](../planned/unit_014/MEMORY_MAINTENANCE.md) | 書き込みの排他・終了確認、追加・削除・改名を含む復元、再起動後の未完整理 |
@@ -109,7 +109,7 @@ M2では加工・符号化済みObservationをアプリへ渡した後、保存�
 | `project_id` | 原記録先の`project.json`と同じID。未選択チャットにも存在する |
 | `payload` | 下記のthread対応、または観測・画像・元Frameの対応 |
 
-`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはM1で、加工後の画像情報とthread対応はM2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録が成功するまで最初のターンを始めません。Goal・操作・公開会話のイベントは後続工程で追加します。
+`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはU04 M1で、加工後の画像情報とthread対応はU04 M2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録は非同期投入し、保存成功を最初のターンの開始条件にしません。操作イベントはU05 M1で追加しました。Goal・公開会話のイベントは後続工程で追加します。
 
 観測payloadは`observation_id`、`captured_at`、`image_path`、`image`、`source_frame`とし、チャットからの観測には実`thread_id`も記録します。単独APIからの観測に架空のthreadを作りません。`observation_id`は`obs-`にUUIDを続けた永続識別子、`captured_at`は元FrameのUTC、`image_path`は`observations/<observation_id>.png`形式の記録先相対パスです。`image`には`mime_type: "image/png"`と出力`width`・`height`、`source_frame`には元Frameの`generation`・`sequence`・`width`・`height`を保存します。取得世代と連番はサービス寿命内の補助情報であり、アプリ再起動後も一意なFrame識別子としては扱いません。
 
@@ -138,9 +138,11 @@ M2では加工・符号化済みObservationをアプリへ渡した後、保存�
 
 停止・失敗の記録は、それを発生させる各工程で追加します。U05の入力停止を、U07の計画的終了やU09の復元結果の記録が完成するまで待たせません。
 
-U05 M0では通常送信にrequest_id、その実行にrun_id、ツール要求にoperation_idをアプリが発行する設計としました。Goalのtask_idは生成しません。追加予定のイベントはinput.run_started / input.operation_started / input.operation_finished / input.run_finishedです。開始行は入力前に保存成功を必要とし、操作結果行は終了処理で解除結果が判明した後に非同期保存し、解除失敗も記録します。結果行に確定したobservation_idを持たせてU04の観測イベント・PNGへ結び付け、Observation本体へ操作状態を複製しません。開始行だけがある操作は結果不明であり、入力済みとも未入力とも断定せず再送しません。詳細は[U05 M0](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)を正本とし、M1で型・writerと既存試験へ反映します。
+U05の入力サービスは依頼にrequest_id、その実行にrun_id、受け付けた操作列にoperation_idを発行します。Goalのtask_idは生成しません。イベントはinput.run_started / input.operation_started / input.operation_finished / input.run_finishedです。run・操作の開始と終端は同じ記録窓口へ順に非同期投入する。保存完了を入力開始の前提にせず、保存失敗でも入力を止めない。記録が欠けたまま操作される場合を許容し、失敗は診断へ残す。操作記録のresultは入力列の実行結果を示す。入力完了後の観測失敗・応答取消しでもcompletedを維持し、phase=observeと理由を添える。要求全体のcodeとは区別し、正常に返せた画像だけobservation_idを対応付ける。操作内容・実行結果・観測IDを中心に記録し、port・baud・protocolは通常イベントへ含めません。結果行に確定したobservation_idを持たせてU04の観測イベント・PNGへ結び付け、Observation本体へ操作状態を複製しません。開始行だけがある操作は結果不明であり、入力済みとも未入力とも断定せず再送しません。[U05 M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)で型・writer・入力サービスを実装し、保存と再読込を模擬入力で確認しました。通常送信・MCPへの配線はM2です。
 
-同じwriterへの観測・操作・run記録は、一つの記録窓口で順序化します。既存の非同期保存を拡張し、入力列・Frame待機・符号化を保存の排他区間へ含めません。開始記録待ちでも入力停止は直ちに権限を閉じ、実行中の操作を取り消します。開始済みの保存は回収し、取り消した操作から入力へ進みません。画像・結果記録の失敗は既済みの観測成功を取り消しませんが、新たな物理入力は止めます。単独observeを利用できるU04の契約は維持し、終了・保存先変更は引受け済み保存のdrain後とします。これらはU05の設計であり未実装です。
+同じwriterへの記録は共通窓口で順序化します。入力は保存の排他区間へ含めません。run・操作の開始と終端は同じ記録窓口へ順に非同期投入する。保存完了を入力開始の前提にせず、保存失敗でも入力を止めない。記録が欠けたまま操作される場合を許容し、失敗は診断へ残す。通常終了・保存先変更は引受け済み保存のdrain後とします。
+
+保存済み入力列は共通入力の形式・値域だけを検査し、現在対応するprotocolの能力では再検査しません。実行受付では選択したprotocolの能力を検査します。開始済みwriteが全byte成功した場合は、press・neutralとも停止後の結果回収で送出済みと記録します。実turn IDはrun開始後に判明した時点で対応付け、以後の操作開始・run終端記録へ使います。古いrunの通知で現在の文脈や操作権を変更しません。
 
 観測の原画像・ID・取得時刻は、加工・符号化済みObservationから非同期保存します。ここで原画像はagentへ渡す画像の原本であり、元解像度画像の別保存は対象外です。保存完了をMCP応答の前提にせず、Codexの解釈も待ちません。Codexが解釈した公開応答・対話履歴は、実際に受信した内容をアプリが後から別記録として保存し、必要な観測IDや会話参照との対応はU06で定めます。Codexの解釈完了まで原観測の保存を保留したり、原観測を解釈結果で更新したりしません。対話記録も同じアプリ所有のwriterを使い、共有JSONLの採番・追記の整合性を守り、観測のBUSYを履歴の破棄条件にしません。通知順・失敗・終了との結合はU06で確定し、今回そのためだけのキューや汎用イベントAPIを先行実装しません。現在のCodex接続はread-onlyであり、memoryの実書込権限はU06の確認事項です。
 

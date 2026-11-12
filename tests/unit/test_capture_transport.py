@@ -7,7 +7,8 @@ from threading import Event, Thread
 import pytest
 
 from gigas.game_io.capture._process import SharedSlot
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, Frame
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, Frame
 
 
 def image(width: int, height: int, sequence: int) -> Frame:

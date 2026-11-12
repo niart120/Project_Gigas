@@ -1,7 +1,6 @@
-"""Latest-frame observations with independently owned background persistence."""
+"""Latest and post-operation observations with shared background persistence."""
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
 
 from gigas.game_io.observation import Observation, ObservationError
@@ -12,23 +11,21 @@ if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.capture.models import Frame
     from gigas.game_io.observation import ObservationResolution
-    from gigas.storage.project import ProjectWriter
-
-logger = logging.getLogger(__name__)
+    from gigas.services.recording import RecordingService
 
 
 class ObservationService:
     """Return encoded snapshots and save the same values without delaying observations.
 
     All async methods and setting changes belong to a single event loop. The
-    application owns the writer; stop new requests and await drain() before
-    closing it or the event loop. Storage tasks do not occupy the encoding slot.
+    application owns persistence; stop new requests, await drain(), then drain
+    recording before closing the writer or loop. Saves do not occupy the encoding slot.
 
     Args:
         reader: Read-only access to the existing capture service.
-        writer: Application-owned archive writer borrowed by this service.
+        recording: Application-owned persistence service shared with input and chat.
         resolution: Image size used by the next observation; defaults to FullHD.
-        thread_id: Real runtime conversation, or None for standalone observations.
+        thread_id: Conversation for latest-frame observations, or None when standalone.
         on_save_error: Optional callback receiving the observation and storage
             exception on this event loop. It must return promptly. Without a
             callback, failures are logged with the observation ID and archive path.
@@ -36,14 +33,15 @@ class ObservationService:
     Attributes:
         resolution: Applied size for subsequent observations. Each observe call
             snapshots it once, so an in-progress image is unaffected by changes.
-        thread_id: Chat context for subsequent observations. Later changes do not
-            change the context of already submitted encoding or persistence.
+        thread_id: Chat context for subsequent observe() calls. Post-operation
+            observations receive their fixed context explicitly. Later changes do
+            not change the context of submitted encoding or persistence.
     """
 
     def __init__(
         self,
         reader: "CaptureReader",
-        writer: "ProjectWriter",
+        recording: "RecordingService",
         *,
         resolution: "ObservationResolution" = "full_hd",
         thread_id: str | None = None,
@@ -52,15 +50,16 @@ class ObservationService:
         """Keep existing owners without starting a device or event loop."""
         self.resolution = resolution
         self.thread_id = thread_id
+        self._recording = recording
         self._reader = reader
-        self._writer = writer
         self._on_save_error = on_save_error
         self._worker: asyncio.Task[Observation] | None = None
-        self._saves: set[asyncio.Task[None]] = set()
-        self._save_lock = asyncio.Lock()
 
-    async def observe(self) -> "Observation":
+    async def observe(self, *, thread_id: str | None = None) -> "Observation":
         """Encode the latest streaming frame without waiting for persistence.
+
+        Args:
+            thread_id: Explicit conversation context; defaults to the service context.
 
         Returns:
             Final PNG bytes, observation ID, and source metadata. The matching
@@ -80,66 +79,39 @@ class ObservationService:
         if snapshot.phase != "streaming" or snapshot.frame is None:
             message = "観測できる映像がありません"
             raise ObservationError("DEVICE_UNAVAILABLE", message)
-        self._worker = asyncio.create_task(
-            self._encode(snapshot.frame, self.resolution, self.thread_id)
+        return await asyncio.shield(
+            self._start_encoding(snapshot.frame, self.thread_id if thread_id is None else thread_id)
         )
+
+    def _start_encoding(self, frame: "Frame", thread_id: str | None) -> "asyncio.Task[Observation]":
+        if self._worker is not None and not self._worker.done():
+            message = "観測画像の符号化中です"
+            raise ObservationError("BUSY", message)
+        self._worker = asyncio.create_task(self._encode(frame, self.resolution, thread_id))
         self._worker.add_done_callback(_retrieve_exception)
-        return await asyncio.shield(self._worker)
+        return self._worker
 
     async def _encode(
         self, frame: "Frame", resolution: "ObservationResolution", thread_id: str | None
     ) -> Observation:
         observation = await asyncio.to_thread(Observation.from_frame, frame, resolution=resolution)
-        task = asyncio.create_task(self._save(observation, thread_id))
-        self._saves.add(task)
-        task.add_done_callback(self._save_finished)
+        self._recording.submit_observation(
+            observation, thread_id=thread_id, on_error=self._on_save_error
+        )
         return observation
 
-    async def _save(self, observation: Observation, thread_id: str | None) -> None:
-        try:
-            # Reuse the current synchronous writer safely. This lock only orders
-            # storage operations; image encoding and delivery never acquire it.
-            async with self._save_lock:
-                await asyncio.to_thread(self._writer.record, observation, thread_id=thread_id)
-        except Exception as error:
-            # Background I/O and executor submission failures belong to recording,
-            # including unexpected exceptions; they cannot retroactively fail observe.
-            if self._on_save_error is None:
-                logger.exception(
-                    "Observation save failed: %s (%s)",
-                    observation.observation_id,
-                    self._writer.path,
-                )
-            else:
-                self._on_save_error(observation, error)
-
-    def _save_finished(self, task: "asyncio.Task[None]") -> None:
-        self._saves.discard(task)
-        if not task.cancelled() and task.exception() is not None:
-            logger.error("Observation save callback failed", exc_info=task.exception())
-
     async def drain(self) -> None:
-        """Wait for submitted encoding and all saves, including after cancellation.
+        """Wait for submitted encoding, including after cancellation.
 
-        The owner must stop new requests before calling this for shutdown.
-        Cancelling this wait leaves workers owned; call drain() again to finish.
-        Save failures are reported separately through on_save_error or logging;
-        a completed drain means processing ended, not that every save succeeded.
+        Stop new requests before calling this. Cancelling the wait leaves encoding
+        owned; call again to finish. The application must separately drain recording,
+        even if this method raises, before closing the writer or event loop.
 
         Raises:
-            ObservationError: The last observation failed to encode. Already
-                submitted saves are still drained before this error is raised.
+            ObservationError: The last observation failed to encode.
         """
-        encoding_error: Exception | None = None
         if self._worker is not None:
-            try:
-                await asyncio.shield(self._worker)
-            except Exception as error:  # noqa: BLE001 - re-raised after existing saves finish.
-                encoding_error = error
-        if self._saves:
-            await asyncio.shield(asyncio.gather(*self._saves, return_exceptions=True))
-        if encoding_error is not None:
-            raise encoding_error
+            await asyncio.shield(self._worker)
 
 
 def _retrieve_exception(task: "asyncio.Task[Observation]") -> None:

@@ -9,7 +9,7 @@ import pytest
 from gigas.game_io.capture import CaptureService, CaptureTimeouts
 from gigas.game_io.capture import service as module
 from gigas.game_io.capture._process import SharedSlot
-from gigas.game_io.capture.models import CaptureOptions
+from gigas.game_io.capture.config import CaptureOptions
 from tests.integration.peers.fallback_capture import FallbackBackend, wait_after_release_worker
 from tests.integration.test_capture_service import wait_for
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from multiprocessing.synchronize import Lock
 
     from gigas.game_io.capture.backend import CaptureBackend
-    from gigas.game_io.capture.models import CaptureOptions
+    from gigas.game_io.capture.config import CaptureOptions
 
 _HEADER = Struct("<QQqII")
 _MAX_PIXELS = 3840 * 2160 * 3

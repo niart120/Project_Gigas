@@ -9,6 +9,32 @@ import pytest
 from gigas.storage import settings
 
 
+@pytest.mark.parametrize(
+    ("protocol", "baud"), [("ch552", None), ("pokecon", 38400), ("3ds", 57600)]
+)
+def test_serial_settings_round_trip_and_omitted_baud(
+    tmp_path: Path, protocol: str, baud: int | None
+) -> None:
+    path = tmp_path / "settings.toml"
+    chosen = settings.Settings(serial_port="COM7", serial_protocol=protocol, serial_baudrate=baud)
+    settings.save_settings(path, chosen)
+    assert settings.load_settings(path) == chosen
+    settings.save_settings(path, replace(chosen, serial_baudrate=None))
+    assert settings.load_settings(path).serial_baudrate is None
+    assert "baudrate" not in path.read_text()
+
+
+def test_invalid_serial_settings_cannot_replace_saved_file(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    settings.save_settings(path, settings.Settings())
+    original = path.read_bytes()
+    with pytest.raises(settings.SettingsError, match=r"controller\.serial"):
+        settings.save_settings(
+            path, settings.Settings(serial_protocol="ch552", serial_baudrate=57600)
+        )
+    assert path.read_bytes() == original
+
+
 def test_settings_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "設定 ファイル" / "settings.toml"
     chosen = settings.Settings(

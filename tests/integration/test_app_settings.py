@@ -4,18 +4,23 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QWidget
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture.models import DeviceInfo
+from gigas.game_io.input.serial import SerialPort
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.ui.settings_dialog import SettingsDialog
 
 
 @pytest.fixture
 def shell(
-    qtbot: QtBot, tmp_path: Path, request: pytest.FixtureRequest
+    qtbot: QtBot,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[ApplicationShell]:
     initial = getattr(request, "param", None)
     if isinstance(initial, Settings):
@@ -23,6 +28,7 @@ def shell(
     elif isinstance(initial, str):
         (tmp_path / "settings.toml").write_text(initial, encoding="utf-8")
     application = ApplicationShell(tmp_path / "settings.toml")
+    monkeypatch.setattr(application.service, "apply_input", lambda _config: None)
     application.start()
     qtbot.waitUntil(lambda: application.operation is None)
     yield application
@@ -59,20 +65,31 @@ def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: 
     shell.window.settings_action.trigger()
     dialog.save_button.click()
     qtbot.waitUntil(shell.path.exists)
-    assert load_settings(shell.path) == Settings()
+    assert load_settings(shell.path) == Settings(serial_baudrate=9600)
 
 
 def test_all_settings_round_trip_and_offline_clears_device(
-    shell: ApplicationShell, qtbot: QtBot
+    shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
     dialog.set_values(Settings(auth_method="api_key"))
-    values = Settings(" 映像\n入力 ", " COM3 ", "unknown-model", "custom-effort", "api_key")
+    values = Settings(
+        " 映像\n入力 ",
+        " COM3 ",
+        "unknown-model",
+        "custom-effort",
+        "api_key",
+        serial_protocol="pokecon",
+        serial_baudrate=57600,
+    )
     dialog.set_capture_devices((DeviceInfo("Camera", values.capture_device),))
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData(values.capture_device))
-    dialog.serial_port.setText(values.serial_port)
+    dialog.set_serial_ports((SerialPort(values.serial_port, "Controller"),))
+    dialog.serial_port.setCurrentIndex(dialog.serial_port.findData(values.serial_port))
+    dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData(values.serial_protocol))
+    dialog.serial_baudrate.setCurrentIndex(dialog.serial_baudrate.findData(values.serial_baudrate))
     dialog.model.setText(values.model)
     dialog.effort.setText(values.effort)
     dialog.save_button.click()
@@ -82,6 +99,7 @@ def test_all_settings_round_trip_and_offline_clears_device(
     qtbot.waitUntil(lambda: not shell.window.isVisible())
 
     other = ApplicationShell(shell.path)
+    monkeypatch.setattr(other.service, "apply_input", lambda _config: None)
     other.start()
     try:
         qtbot.waitUntil(lambda: other.operation is None)
@@ -93,12 +111,14 @@ def test_all_settings_round_trip_and_offline_clears_device(
         assert other.dialog.model.text() == values.model
         assert other.dialog.auth_method.currentData() == "api_key"
         other.dialog.capture_choices.setCurrentIndex(0)
-        other.dialog.serial_port.clear()
+        other.dialog.serial_port.setCurrentIndex(0)
         other.dialog.model.clear()
         other.dialog.effort.clear()
         other.dialog.save_button.click()
         qtbot.waitUntil(lambda: other.operation is None)
-        assert load_settings(shell.path) == Settings(auth_method="api_key")
+        assert load_settings(shell.path) == Settings(
+            auth_method="api_key", serial_protocol="pokecon", serial_baudrate=57600
+        )
     finally:
         other.window.close()
         qtbot.waitUntil(lambda: not other.window.isVisible())
@@ -297,3 +317,43 @@ def test_windows_fit_screen_and_long_error_keeps_actions_reachable(
     finally:
         application.window.close()
         qtbot.waitUntil(lambda: not application.window.isVisible())
+
+
+@pytest.mark.parametrize(
+    ("protocol", "rate"), [("ch552", 9600), ("pokecon", 9600), ("3ds", 115200)]
+)
+def test_serial_editor_keeps_draft_and_resolves_protocol_defaults(
+    qtbot: QtBot, tmp_path: Path, protocol: str, rate: int
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    dialog = SettingsDialog(tmp_path / "settings.toml", parent)
+    original = Settings(serial_port="COM7", serial_protocol=protocol)
+    dialog.set_values(original)
+    assert not dialog.serial_port.isEditable()
+    assert dialog.serial_port.currentData() == "COM7"
+    assert dialog.values().serial_baudrate == rate
+    dialog.set_serial_ports((SerialPort("COM3", "Controller"),))
+    assert dialog.serial_port.currentData() == "COM7"
+    dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM3"))
+    dialog.set_serial_ports((), searching=True)
+    dialog.set_serial_ports((), error="enumeration failed")
+    assert dialog.serial_port.currentData() == "COM3"
+    dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("3ds"))
+    assert dialog.values().serial_baudrate == 115200
+    dialog.serial_baudrate.setCurrentIndex(dialog.serial_baudrate.findData(57600))
+    values = dialog.values()
+    dialog.set_values(values)
+    assert dialog.values() == values
+    dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("ch552"))
+    assert dialog.serial_baudrate.count() == 1
+    assert dialog.values().serial_baudrate == 9600
+    refreshed = []
+    dialog.serial_refresh_requested.connect(lambda: refreshed.append(True))
+    dialog.serial_refresh_button.click()
+    dialog.set_editable(False)
+    assert not dialog.serial_port.isEnabled()
+    assert not dialog.serial_protocol.isEnabled()
+    assert not dialog.serial_baudrate.isEnabled()
+    assert not dialog.serial_refresh_button.isEnabled()
+    assert refreshed == [True]

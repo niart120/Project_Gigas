@@ -83,7 +83,7 @@ import sys
 import time
 
 from gigas.game_io.capture import CaptureService
-from gigas.game_io.capture.models import CaptureOptions
+from gigas.game_io.capture.config import CaptureOptions
 
 if __name__ == "__main__":
     service = CaptureService()

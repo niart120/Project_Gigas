@@ -1,1 +1,1 @@
-"""Application-owned MCP endpoints for game observations."""
+"""Application-owned MCP endpoints for game input and observations."""

@@ -1,6 +1,6 @@
 """Coordinate the application views and settings operations."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,8 +10,10 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.app.video import VideoController
+from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
+from gigas.game_io.input.serial import SerialPort
 from gigas.runtime.codex.models import ConnectionOptions
-from gigas.services.codex import CodexServiceThread, ProjectResult
+from gigas.services.codex import CodexServiceThread, InputConnectionResult, ProjectResult
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
@@ -31,11 +33,13 @@ class _SettingsRequest:
     Attributes:
         snapshot: Settings to save, or None for the initial load.
         capture: Apply the saved capture configuration after successful saving.
+        input_apply: Apply saved input settings unless explicitly stopped before completion.
         close_dialog: Close a still-visible editor after successful saving.
     """
 
     snapshot: Settings | None = None
     capture: bool = False
+    input_apply: bool = False
     close_dialog: bool = False
 
 
@@ -65,6 +69,9 @@ class ApplicationShell(QObject):
         self.path = path
         self.window = MainWindow()
         self.dialog: SettingsDialog | None = None
+        self._serial_ports: tuple[SerialPort, ...] = ()
+        self._serial_searching = False
+        self._serial_discovery_error = ""
         self.baseline = Settings()
         self._io_request: _SettingsRequest | None = None
         self._project_pending = False
@@ -102,6 +109,9 @@ class ApplicationShell(QObject):
         self.window.settings_requested.connect(self.open_settings)
         self.window.new_project_requested.connect(self._new_project)
         self.window.open_project_requested.connect(self._open_project)
+        self.window.input_menu.aboutToShow.connect(self.refresh_input_ports)
+        self.window.input_port_requested.connect(self._select_input_port)
+        self.window.input_protocol_requested.connect(self._select_input_protocol)
         self.window.video_menu_opened.connect(self.refresh_video_devices)
         self.window.capture_device_requested.connect(self._select_video_device)
         self.window.window_size_requested.connect(self.change_window_size)
@@ -111,7 +121,7 @@ class ApplicationShell(QObject):
         panel.disconnect_requested.connect(self.service.disconnect_runtime)
         panel.login_requested.connect(self.service.login)
         panel.send_requested.connect(self.service.send)
-        panel.interrupt_requested.connect(self.service.interrupt)
+        panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
@@ -119,6 +129,8 @@ class ApplicationShell(QObject):
         self.service.completed.connect(self._render)
         self.service.project_completed.connect(self._project_complete)
         self.service.recording_failed.connect(self._recording_failed)
+        self.service.input_ports.connect(self._input_ports_received)
+        self.service.input_changed.connect(self._input_changed)
         self.service.finished.connect(self._service_finished)
 
     def start(self) -> None:
@@ -150,7 +162,7 @@ class ApplicationShell(QObject):
         return (
             self.dialog is not None
             and self.dialog.isVisible()
-            and self.dialog.values() != self.baseline
+            and _effective_settings(self.dialog.values()) != _effective_settings(self.baseline)
         )
 
     @property
@@ -164,6 +176,77 @@ class ApplicationShell(QObject):
             and self.confirmation is None
         )
 
+    def interrupt(self) -> None:
+        """Interrupt execution without cancelling submitted settings application."""
+        self.service.interrupt()
+
+    def refresh_input_ports(self) -> None:
+        """Discover serial identifiers without opening them."""
+        if self._can_edit and not self._serial_searching:
+            self._serial_searching = True
+            self._serial_discovery_error = ""
+            self._update_serial_ports()
+            self.service.refresh_input_ports()
+
+    def _update_serial_ports(self) -> None:
+        if self.dialog is not None:
+            self.dialog.set_serial_ports(
+                self._serial_ports,
+                searching=self._serial_searching,
+                error=self._serial_discovery_error,
+            )
+
+    @Slot(object, str)
+    def _input_ports_received(self, ports: object, error: str) -> None:
+        self._serial_searching = False
+        self._serial_discovery_error = error
+        if not error and isinstance(ports, tuple):
+            self._serial_ports = tuple(port for port in ports if isinstance(port, SerialPort))
+        if error:
+            self.window.notifications.publish(
+                Notice(
+                    "input",
+                    "列挙失敗",
+                    "入力ポートを取得できませんでした。一覧更新で再試行してください。",
+                    error,
+                )
+            )
+        self._update_serial_ports()
+        self._render()
+
+    @Slot(object)
+    def _input_changed(self, result: InputConnectionResult) -> None:
+        if result.error:
+            self.window.notifications.publish(
+                Notice(
+                    "input",
+                    "接続失敗",
+                    "入力接続を変更できませんでした。設定を確認して再度適用してください。",
+                    result.error,
+                )
+            )
+        self._render()
+
+    def _select_input_port(self, port: str) -> None:
+        self.apply_settings(
+            replace(self.baseline, serial_port=port), capture=False, input_apply=True
+        )
+
+    def _select_input_protocol(self, protocol: str) -> None:
+        self.apply_settings(
+            replace(
+                self.baseline,
+                serial_protocol=protocol,
+                serial_baudrate=(
+                    self.baseline.serial_baudrate
+                    if protocol == self.baseline.serial_protocol
+                    else get_protocol(protocol).default_baudrate
+                ),
+            ),
+            capture=False,
+            input_apply=True,
+        )
+
     def refresh_video_devices(self) -> None:
         """Discover now if possible, without reserving a later refresh."""
         if self._can_edit:
@@ -172,7 +255,9 @@ class ApplicationShell(QObject):
     @Slot(str)
     def _select_video_device(self, path: str) -> None:
         if self.dialog is None or not self.dialog.isVisible():
-            self.apply_settings(replace(self.baseline, capture_device=path))
+            self.apply_settings(
+                replace(self.baseline, capture_device=path), capture=True, input_apply=False
+            )
         self._render()
 
     @Slot()
@@ -303,6 +388,7 @@ class ApplicationShell(QObject):
             self.dialog.changed.connect(self._render)
             self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
+            self.dialog.serial_refresh_requested.connect(self.refresh_input_ports)
             self.dialog.error_details_button.clicked.connect(self._show_settings_error)
             self.dialog.open_folder_button.clicked.connect(self._open_settings_location)
         if self.dialog.isVisible():
@@ -312,11 +398,13 @@ class ApplicationShell(QObject):
         self.dialog.set_values(self.baseline)
         self.dialog.show()
         self._update_capture_devices()
+        self._update_serial_ports()
         self._render()
         fit_to_screen(self.dialog)
         self.dialog.raise_()
         self.dialog.activateWindow()
         self.refresh_video_devices()
+        self.refresh_input_ports()
 
     def _open_settings_location(self) -> None:
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent))):
@@ -330,9 +418,10 @@ class ApplicationShell(QObject):
             self.window.notifications.show_snapshot(notice, parent=self.dialog)
 
     def _show_settings_error(self) -> None:
-        notice = self._settings_error_notice or self.window.notifications.notices.get("video")
-        if notice is not None:
-            self.window.notifications.show_snapshot(notice, parent=self.dialog)
+        if self._settings_error_notice is not None:
+            self.window.notifications.show_snapshot(self._settings_error_notice, parent=self.dialog)
+        else:
+            self.window.notifications.show_details(parent=self.dialog)
 
     def _cancel_settings(self) -> None:
         if self.dialog is not None and not self.committed and not self._exit_requested:
@@ -342,11 +431,18 @@ class ApplicationShell(QObject):
             self._render()
 
     def apply_settings(
-        self, settings: Settings | None = None, *, close_after: bool = False
+        self,
+        settings: Settings | None = None,
+        *,
+        close_after: bool = False,
+        capture: bool | None = None,
+        input_apply: bool | None = None,
     ) -> bool:
         """Save and apply one snapshot without waiting for capture success.
 
         Args:
+            capture: Override capture application for a device-menu selection.
+            input_apply: Override input application for a device-menu selection.
             settings: Explicit snapshot, or None for the visible editor's values.
             close_after: Close the visible editor after saving succeeds, including
                 when capture subsequently fails. Saving failure keeps edits visible.
@@ -365,12 +461,23 @@ class ApplicationShell(QObject):
                 else self.baseline
             )
         )
-        observation_only = (
-            target != self.baseline
-            and replace(target, observation_resolution=self.baseline.observation_resolution)
-            == self.baseline
+        before, after = _effective_settings(self.baseline), _effective_settings(target)
+        changed = {
+            field.name
+            for field in fields(Settings)
+            if getattr(after, field.name) != getattr(before, field.name)
+        }
+        serial_fields = {"serial_port", "serial_protocol", "serial_baudrate"}
+        request = _SettingsRequest(
+            target,
+            capture=(not changed or bool(changed - serial_fields - {"observation_resolution"}))
+            if capture is None
+            else capture,
+            input_apply=(not changed or bool(changed & serial_fields))
+            if input_apply is None
+            else input_apply,
+            close_dialog=close_after,
         )
-        request = _SettingsRequest(target, capture=not observation_only, close_dialog=close_after)
         self._settings_error_notice = None
         if target != self.baseline or not self.path.exists():
             self._request(request)
@@ -407,6 +514,11 @@ class ApplicationShell(QObject):
             self.window.apply_window_size_preset(settings.window_size_preset)
         if request.capture and not self._exit_requested and not self.committed:
             self.video.apply_capture(settings)
+        if request.input_apply and not self._exit_requested and not self.committed:
+            config = resolve_serial_config(
+                settings.serial_port, settings.serial_protocol, settings.serial_baudrate
+            )
+            self.service.apply_input(config)
         if request.close_dialog and self.dialog is not None:
             self.window.notifications.close_details()
             self.dialog.hide()
@@ -488,6 +600,12 @@ class ApplicationShell(QObject):
         )
         self.video.set_available(not closing)
         self._render_capture_menu()
+        self.window.set_input_choices(
+            self._serial_ports,
+            self.baseline.serial_port,
+            self.baseline.serial_protocol,
+            enabled=self._can_edit and (self.dialog is None or not self.dialog.isVisible()),
+        )
         if self.dialog is not None and self.dialog.isVisible():
             message = (
                 self._settings_error_notice.title
@@ -504,7 +622,12 @@ class ApplicationShell(QObject):
             self.dialog.ok_button.setEnabled(self._can_edit)
             self.dialog.close_button.setEnabled(not closing)
             self.dialog.error_details_button.setVisible(
-                bool(self.error or self.video.discovery_error)
+                bool(
+                    self.error
+                    or self.video.discovery_error
+                    or self._serial_discovery_error
+                    or "input" in self.window.notifications.notices
+                )
                 or self.video.apply_state == "failed"
                 or self.video.cleanup_unconfirmed
             )
@@ -513,7 +636,7 @@ class ApplicationShell(QObject):
         """Interrupt Codex and wait for submitted I/O before confirming shutdown."""
         if self.committed or self._exit_requested:
             return
-        self.window.connection.interrupt()
+        self.interrupt()
         self.video.cancel_pending()
         self._exit_requested = True
         if self._io_request is None and not self._project_pending:
@@ -620,3 +743,12 @@ class ApplicationShell(QObject):
         self.window.allow_close = True
         self.window.close()
         self.stopped.emit()
+
+
+def _effective_settings(settings: Settings) -> Settings:
+    return replace(
+        settings,
+        serial_baudrate=resolve_baudrate(
+            get_protocol(settings.serial_protocol), settings.serial_baudrate
+        ),
+    )

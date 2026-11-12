@@ -8,11 +8,20 @@ from uuid import uuid4
 
 from PySide6.QtCore import QThread, Signal
 
-from gigas.mcp.observation import ObservationMcpServer
+from gigas.game_io.input.serial import SerialInput, list_serial_ports
+from gigas.mcp.game_io import TOOL_TIMEOUT_SECONDS, GameIoMcpServer
 from gigas.runtime.codex.connection import AnswerDeliveryError, CodexConnectionError
 from gigas.runtime.codex.launch import create_connection
-from gigas.runtime.codex.models import SessionStatus, ThreadConfiguration
+from gigas.runtime.codex.models import (
+    HumanRequest,
+    RequestResolved,
+    SessionStatus,
+    ThreadConfiguration,
+    TurnStarted,
+)
+from gigas.services.input import InputService
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage.project import ProjectError, ProjectWriter
 
 if TYPE_CHECKING:
@@ -20,12 +29,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from gigas.game_io.capture import CaptureReader
+    from gigas.game_io.input.config import SerialConfig
     from gigas.game_io.observation import ObservationResolution
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
+    from gigas.services.input import InputDevice, InputGrant
 
 type ServiceOperation = Literal["connect", "login", "send", "answer", "stop", "disconnect"]
 type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
-type _Operation = ServiceOperation | Literal["project_create", "project_open", "resolution"]
+type _Operation = (
+    ServiceOperation
+    | Literal["project_create", "project_open", "resolution", "input_apply", "input_ports"]
+)
 
 
 class ServiceConnection(Protocol):
@@ -68,7 +82,7 @@ type ConnectionFactory = Callable[
     [
         ConnectionOptions,
         Callable[[ConnectionEvent], None],
-        Callable[[], Awaitable[ThreadConfiguration]],
+        Callable[[str, str | None], Awaitable[ThreadConfiguration]],
         Callable[[str], Awaitable[None]],
     ],
     ServiceConnection,
@@ -78,10 +92,19 @@ type ConnectionFactory = Callable[
 def _create_connection(
     options: "ConnectionOptions",
     emit: "Callable[[ConnectionEvent], None]",
-    prepare: "Callable[[], Awaitable[ThreadConfiguration]]",
+    prepare: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
     started: "Callable[[str], Awaitable[None]]",
 ) -> ServiceConnection:
-    return create_connection(options, emit, prepare_thread=prepare, on_thread_started=started)
+    return create_connection(options, emit, prepare_turn=prepare, on_thread_started=started)
+
+
+@dataclass(frozen=True, slots=True)
+class InputConnectionResult:
+    """Applied serial configuration and connection outcome for the GUI."""
+
+    config: "SerialConfig | None"
+    connected: bool
+    error: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +173,7 @@ class _Command:
     answers: "Mapping[str, str] | None" = None
     path: "Path | None" = None
     resolution: "ObservationResolution | None" = None
+    input_config: "SerialConfig | None" = None
 
 
 class CodexServiceThread(QThread):
@@ -163,7 +187,9 @@ class CodexServiceThread(QThread):
     Args:
         data_root: Persistent application data directory; unselected chats use chats/.
         reader: Shared read-only view of the existing capture service.
-        factory: Called on the service loop after creating the conversation directory.
+        input_factory: Creates an input device on the service loop from resolved settings.
+        factory: Creates the runtime on the service loop when connecting.
+            The conversation directory is prepared on the first send.
             Receives options, event callback, chat preparation, and thread binding.
             The default creates the bundled runtime connection.
     """
@@ -172,22 +198,40 @@ class CodexServiceThread(QThread):
     completed = Signal(object)
     project_completed = Signal(object)
     recording_failed = Signal(str, str, str)
+    input_changed = Signal(object)
+    input_ports = Signal(object, str)
 
     def __init__(
         self,
         data_root: "Path",
         reader: "CaptureReader",
         factory: ConnectionFactory = _create_connection,
+        *,
+        input_factory: "Callable[[SerialConfig], InputDevice]" = SerialInput,
     ) -> None:
         """Prepare command routing without creating a loop or connection."""
         super().__init__()
         self._factory = factory
+        self._input_factory = input_factory
+        self._input = InputService()
+        self._input_config: SerialConfig | None = None
+        self._input_target: SerialConfig | None = None
+        self._input_pending = False
+        self._input_apply_task: asyncio.Task[None] | None = None
         self._data_root = data_root.resolve()
         self._reader = reader
         self._project_selected = False
         self._writer: ProjectWriter | None = None
         self._observations: ObservationService | None = None
-        self._mcp: ObservationMcpServer | None = None
+        self._recording: RecordingService | None = None
+        self._mcp: GameIoMcpServer | None = None
+        self._grant: InputGrant | None = None
+        self._run_input_allowed = False
+        self._run_message = ""
+        self._run_end_task: asyncio.Task[None] | None = None
+        self._waiting_answers: set[str] = set()
+        self._sending_answers: set[str] = set()
+        self._turn_running = False
         self._resolution: ObservationResolution = "full_hd"
         self._resources_lock = asyncio.Lock()
         self._lock = Lock()
@@ -201,6 +245,14 @@ class CodexServiceThread(QThread):
         self._tasks: set[asyncio.Task[None]] = set()
         self._done: asyncio.Event | None = None
         self.shutdown_error = ""
+
+    def apply_input(self, config: "SerialConfig | None") -> None:
+        """Apply resolved saved input settings; None explicitly disconnects."""
+        self._submit(_Command(self._generation, "input_apply", input_config=config))
+
+    def refresh_input_ports(self) -> None:
+        """Enumerate serial ports without opening a connection."""
+        self._submit(_Command(self._generation, "input_ports"))
 
     def create_project(self, path: "Path") -> None:
         """Queue exclusive creation of a new project while disconnected.
@@ -328,21 +380,24 @@ class CodexServiceThread(QThread):
             self._dispatch(command)
         await self._done.wait()
         try:
-            if self._connection is not None:
-                try:
-                    await self._connection.stop()
-                except Exception as error:  # noqa: BLE001 -- still close after interruption failure
-                    failure_id = (
-                        error.failure_id if isinstance(error, CodexConnectionError) else None
-                    )
-                    self.completed.emit(
-                        ServiceResult(
-                            self._active_generation, "stop", "中断に失敗", failure_id=failure_id
+            try:
+                await self._input.close()
+            finally:
+                if self._connection is not None:
+                    try:
+                        await self._connection.stop()
+                    except Exception as error:  # noqa: BLE001 -- still close after interruption failure
+                        failure_id = (
+                            error.failure_id if isinstance(error, CodexConnectionError) else None
                         )
-                    )
-                await self._close_connection()
-            elif self._closing is not None:
-                await asyncio.shield(self._closing)
+                        self.completed.emit(
+                            ServiceResult(
+                                self._active_generation, "stop", "中断に失敗", failure_id=failure_id
+                            )
+                        )
+                    await self._close_connection()
+                elif self._closing is not None:
+                    await asyncio.shield(self._closing)
         finally:
             pending = list(self._tasks)
             for task in pending:
@@ -357,12 +412,32 @@ class CodexServiceThread(QThread):
                         self._writer = None
 
     def _signal_shutdown(self) -> None:
+        self._input_pending = False
+        self._stop_input()
         if self._done is not None:
             self._done.set()
+
+    def _stop_input(self) -> None:
+        self._run_input_allowed = False
+        self._input.stop()
 
     def _dispatch(self, command: _Command) -> None:
         if self._ending:
             self._reject_answer(command)
+            return
+        if command.operation in {"stop", "disconnect"}:
+            self._stop_input()
+        if command.operation == "input_apply":
+            self._input_target = command.input_config
+            self._input_pending = True
+            if self._input_apply_task is not None and not self._input_apply_task.done():
+                self._stop_input()
+                return
+            self._input_apply_task = asyncio.create_task(self._apply_input())
+            self._tasks.add(self._input_apply_task)
+            self._input_apply_task.add_done_callback(
+                lambda task: self._task_finished(task, command)
+            )
             return
         if command.operation == "resolution":
             if command.resolution is not None:
@@ -393,12 +468,33 @@ class CodexServiceThread(QThread):
         outcome: AnswerOutcome,
         failure_id: int | None = None,
     ) -> None:
-        if command.operation in {"project_create", "project_open", "resolution"}:
+        if command.operation in {
+            "project_create",
+            "project_open",
+            "resolution",
+            "input_apply",
+            "input_ports",
+        }:
             return
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
         self.completed.emit(
             ServiceResult(command.generation, command.operation, error, answer, failure_id)
         )
+
+    async def _apply_input(self) -> None:
+        while self._input_pending:
+            config = self._input_target
+            self._input_pending = False
+            error = ""
+            try:
+                if config is None or config != self._input_config or not self._input.connected:
+                    device = None if config is None else self._input_factory(config)
+                    self._run_input_allowed = False
+                    await self._input.connect(device)
+                self._input_config = config
+            except Exception as failure:  # noqa: BLE001 -- preserve a displayable input diagnostic.
+                error = str(failure)
+            self.input_changed.emit(InputConnectionResult(config, self._input.connected, error))
 
     async def _execute(self, command: _Command) -> None:
         if command.operation in {"project_create", "project_open"}:
@@ -427,6 +523,14 @@ class CodexServiceThread(QThread):
         self._complete(command, error, outcome, failure_id)
 
     async def _perform(self, command: _Command) -> None:
+        if command.operation == "input_ports":
+            try:
+                ports = await asyncio.to_thread(list_serial_ports)
+            except Exception as error:  # noqa: BLE001 -- discovery failure must reach the GUI.
+                self.input_ports.emit((), str(error))
+            else:
+                self.input_ports.emit(ports, "")
+            return
         if command.operation == "connect":
             async with self._resources_lock:
                 if self._connection is not None or command.options is None:
@@ -438,7 +542,7 @@ class CodexServiceThread(QThread):
                 self._connection = self._factory(
                     command.options,
                     lambda event: self._receive(command.generation, event),
-                    self._prepare_thread,
+                    self._prepare_turn,
                     self._thread_started,
                 )
             await self._connection.open()
@@ -455,15 +559,45 @@ class CodexServiceThread(QThread):
             case "send":
                 await connection.send(command.text)
             case "answer":
-                await connection.answer(
-                    command.token, decision=command.decision, answers=command.answers
-                )
+                self._sending_answers.add(command.token)
+                try:
+                    await connection.answer(
+                        command.token, decision=command.decision, answers=command.answers
+                    )
+                except AnswerDeliveryError:
+                    raise
+                except CodexConnectionError:
+                    self._sending_answers.discard(command.token)
+                    self._resume_input()
+                    raise
+                self._sending_answers.discard(command.token)
+                self._waiting_answers.discard(command.token)
+                self._resume_input()
             case "stop":
                 await connection.stop()
             case "disconnect":
                 await self._close_connection()
 
     def _receive(self, generation: int, event: "ConnectionEvent") -> None:
+        if generation == self._active_generation:
+            if isinstance(event, TurnStarted) and self._grant is not None:
+                self._input.bind_turn(self._grant, event.turn_id)
+            elif isinstance(event, HumanRequest):
+                self._waiting_answers.add(event.token)
+                self._input.suspend()
+            elif isinstance(event, RequestResolved):
+                self._waiting_answers.discard(event.token)
+                self._resume_input()
+            elif isinstance(event, SessionStatus):
+                self._turn_running = event.phase == "running"
+                if event.phase == "waiting":
+                    self._input.suspend()
+                elif event.phase == "stopping":
+                    self._stop_input()
+                elif event.phase == "running":
+                    self._resume_input()
+                elif event.phase in {"ready", "stopped", "error", "closed"}:
+                    self._end_run("completed" if event.phase == "ready" else event.phase)
         self.received.emit(ServiceEvent(generation, event))
         if (
             isinstance(event, SessionStatus)
@@ -473,6 +607,29 @@ class CodexServiceThread(QThread):
         ):
             # Runtime failures use the same cleanup as an explicit disconnect.
             self._dispatch(_Command(generation, "disconnect"))
+
+    def _resume_input(self) -> None:
+        if self._turn_running and not self._waiting_answers and not self._sending_answers:
+            self._input.resume()
+
+    def _end_run(self, reason: str) -> None:
+        if self._grant is None:
+            return
+        self._input.stop(reason)
+        self._grant = None
+        self._waiting_answers.clear()
+        self._sending_answers.clear()
+        self._run_end_task = asyncio.create_task(self._input.finish_run(reason))
+        self._tasks.add(self._run_end_task)
+        self._run_end_task.add_done_callback(self._run_finished)
+
+    def _run_finished(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                path = str(self._writer.path) if self._writer is not None else ""
+                self.recording_failed.emit("", path, _recording_reason(error))
 
     async def _change_project(self, command: _Command) -> None:
         path = command.path
@@ -507,33 +664,49 @@ class CodexServiceThread(QThread):
                 self._writer = candidate
             self._project_selected = True
 
-    async def _prepare_thread(self) -> ThreadConfiguration:
+    async def _prepare_turn(self, message: str, thread_id: str | None) -> ThreadConfiguration:
         # Cancellation must recover synchronous I/O and its newly acquired writer.
-        return await _finish_io(self._prepare_recording())
+        self._run_input_allowed = True
+        return await _finish_io(self._prepare_recording(message, thread_id))
 
-    async def _prepare_recording(self) -> ThreadConfiguration:
+    async def _prepare_recording(self, message: str, thread_id: str | None) -> ThreadConfiguration:
+        self._end_run("replaced")
+        if self._run_end_task is not None:
+            await asyncio.shield(self._run_end_task)
         async with self._resources_lock:
             try:
+                if self._mcp is not None:
+                    await self._mcp.close()
+                    self._mcp = None
+                self._run_message = message
                 if self._writer is None:
                     self._writer = await asyncio.to_thread(self._create_chat_archive)
                 writer = self._writer
+                if self._recording is None:
+                    self._recording = RecordingService(writer)
+                    self._recording.on_failure = lambda error: self.recording_failed.emit(
+                        "", str(writer.path), _recording_reason(error)
+                    )
                 if self._observations is None:
                     self._observations = ObservationService(
                         self._reader,
-                        writer,
+                        self._recording,
                         resolution=self._resolution,
-                        on_save_error=lambda observation, error: self.recording_failed.emit(
-                            observation.observation_id, str(writer.path), _recording_reason(error)
-                        ),
                     )
-                if self._mcp is None:
-                    self._mcp = ObservationMcpServer(self._observations)
-                    try:
-                        await self._mcp.start()
-                    except BaseException:
-                        await self._mcp.close()
-                        self._mcp = None
-                        raise
+                protocol = (
+                    self._input_config.protocol
+                    if self._input_config is not None and self._input.connected
+                    else None
+                )
+                self._mcp = GameIoMcpServer(self._observations, self._input, protocol)
+                try:
+                    await self._mcp.start()
+                except BaseException:
+                    await self._mcp.close()
+                    self._mcp = None
+                    raise
+                if thread_id is not None:
+                    await self._begin_run(thread_id)
                 prefix = f"mcp_servers.{self._mcp.server_name}."
                 endpoint = self._mcp.config
                 return ThreadConfiguration(
@@ -542,10 +715,11 @@ class CodexServiceThread(QThread):
                         prefix + "url": endpoint["url"],
                         prefix + "http_headers": dict(endpoint["http_headers"]),
                         prefix + "enabled": True,
-                        prefix + "enabled_tools": ["observe"],
+                        prefix + "enabled_tools": ["observe", "act_and_observe"],
                         prefix + "required": True,
                         prefix + "startup_timeout_sec": 10,
-                        prefix + "tool_timeout_sec": 30,
+                        prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
+                        prefix + "tools.act_and_observe.approval_mode": "approve",
                     },
                 )
             except Exception as error:
@@ -560,18 +734,28 @@ class CodexServiceThread(QThread):
 
     async def _thread_started(self, thread_id: str) -> None:
         await _finish_io(self._record_thread(thread_id))
+        await self._begin_run(thread_id)
+
+    async def _begin_run(self, thread_id: str) -> None:
+        if self._observations is None or self._recording is None or self._mcp is None:
+            message = "入力実行の記録先が準備されていません"
+            raise ProjectError(message)
+        self._grant = await self._input.begin_run(
+            self._run_message, thread_id, self._observations, self._recording
+        )
+        self._mcp.bind_grant(self._grant)
+        if not self._run_input_allowed:
+            self._input.stop("実行準備中に停止または入力接続の変更がありました")
+        self._waiting_answers.clear()
+        self._sending_answers.clear()
 
     async def _record_thread(self, thread_id: str) -> None:
         async with self._resources_lock:
             writer, observations = self._writer, self._observations
-            if writer is None or observations is None:
+            if writer is None or observations is None or self._recording is None:
                 message = "チャットの記録先が準備されていません"
                 raise ProjectError(message)
-            try:
-                await asyncio.to_thread(writer.record_thread, thread_id)
-            except Exception as error:
-                self.recording_failed.emit(thread_id, str(writer.path), _recording_reason(error))
-                raise
+            self._recording.submit_thread(thread_id)
             observations.thread_id = thread_id
 
     async def _close_connection(self) -> None:
@@ -587,6 +771,9 @@ class CodexServiceThread(QThread):
     async def _release_connection(self, connection: ServiceConnection) -> None:
         # Revoke HTTP intake while joining the runtime, and still drain saving
         # after either cleanup reports a failure.
+        self._end_run("disconnected")
+        if self._run_end_task is not None:
+            await asyncio.shield(self._run_end_task)
         closing = [connection.close()]
         if self._mcp is not None:
             closing.append(self._mcp.close())
@@ -619,10 +806,13 @@ class CodexServiceThread(QThread):
             if self._observations is not None:
                 try:
                     await self._observations.drain()
-                except Exception as error:  # noqa: BLE001 -- encoding ended; saving was drained
+                except Exception as error:  # noqa: BLE001 -- report encoding failure, then drain saves
                     path = str(self._writer.path) if self._writer is not None else ""
                     self.recording_failed.emit("", path, _recording_reason(error))
                 self._observations = None
+            if self._recording is not None:
+                await self._recording.drain()
+                self._recording = None
 
 
 async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:
@@ -634,7 +824,7 @@ async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:
         raise
 
 
-def _recording_reason(error: Exception) -> str:
+def _recording_reason(error: BaseException) -> str:
     if isinstance(error, ProjectError | OSError):
         return str(error)
     return f"記録処理に失敗しました ({type(error).__name__})"

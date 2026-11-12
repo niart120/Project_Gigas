@@ -8,7 +8,8 @@ import pytest
 
 from gigas.game_io.capture import backend as capture_backend
 from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend, acquire_frames
-from gigas.game_io.capture.models import CaptureError, CaptureOptions, DeviceInfo
+from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.models import CaptureError, DeviceInfo
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
@@ -68,9 +69,21 @@ class Backend:
         return self.camera
 
 
-def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata() -> None:
+def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pixels = np.arange(16 * 16 * 3, dtype=np.uint8).reshape((16, 16, 3))
     camera = Camera([pixels])
+    tick = 10
+    read = camera.read
+
+    def timed_read() -> tuple[bool, object]:
+        nonlocal tick
+        tick = 20
+        return read()
+
+    monkeypatch.setattr(camera, "read", timed_read)
+    monkeypatch.setattr(capture_backend, "monotonic_ns", lambda: tick)
     backend = Backend(camera)
     frames: list[Frame] = []
     listed: list[tuple[DeviceInfo, ...]] = []
@@ -94,7 +107,7 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata()
     pixels[:] = 0
     assert any(frames[0].bgr)
     assert (frames[0].generation, frames[0].sequence) == (7, 1)
-    assert frames[0].monotonic_ns > 0
+    assert frames[0].monotonic_ns == 20
     assert camera.released
 
 

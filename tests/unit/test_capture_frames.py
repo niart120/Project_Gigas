@@ -11,7 +11,7 @@ def frame(generation: int = 1, sequence: int = 1, value: int = 2) -> Frame:
     return Frame(bytes([value]) * 6, 2, 1, generation, sequence, datetime.now(UTC), sequence)
 
 
-@pytest.mark.parametrize("attribute", ["sequence", "bgr"])
+@pytest.mark.parametrize("attribute", ["sequence", "bgr", "monotonic_ns"])
 def test_latest_frame_is_immutable_and_keeps_its_original_clock(attribute: str) -> None:
     store = FrameStore()
     store.begin(1)
@@ -60,3 +60,8 @@ def test_frame_rejects_malformed_pixels_and_naive_time() -> None:
         Frame(b"short", 2, 1, 1, 1, datetime.now(UTC), 1)
     with pytest.raises(CaptureError):
         Frame(bytes(6), 2, 1, 1, 1, datetime(2026, 1, 1), 1)  # noqa: DTZ001
+
+
+def test_frame_rejects_negative_acquisition_clock() -> None:
+    with pytest.raises(CaptureError):
+        Frame(bytes(6), 2, 1, 1, 1, datetime.now(UTC), -1)

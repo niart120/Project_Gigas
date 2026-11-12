@@ -119,7 +119,7 @@ Windows x64、Python 3.12.10、PySide6/Qt 6.12.0、runtime 0.167.0。実モデ�
 |---|---|---|
 | SDK方式の不成立と接続方式変更 | U02、M1の具体化前 | 2026-11-11に直接接続を採用する明示承認を受領。単一受信、非公開差替え禁止、独自攻略ループなしは維持 |
 | APIキー方式の実装・接続確認 | U02内の別子仕様、または[U06](../../planned/unit_011/GOAL_EXECUTION.md)完了まで | 認証経路と資格情報の管理はM0で調べる。ChatGPTだけの成功で全認証方式を確認済みにしない |
-| MCP画像・接続世代 | [U04](../../complete/unit_009/RECORDED_OBSERVATION.md)で画像接続、[U05](../../wip/unit_010/INPUT_AND_STOP.md)の入力許可前に世代失効を確認 | 公開設定・更新または接続再作成の方式。成立しなければ依存するゲーム接続を進めない |
+| MCP画像・接続世代 | [U04](../../complete/unit_009/RECORDED_OBSERVATION.md)で画像接続、[U05](../../complete/unit_010/INPUT_AND_STOP.md)の入力許可前に世代失効を確認 | 公開設定・更新または接続再作成の方式。成立しなければ依存するゲーム接続を進めない |
 | Goalと終了・再開 | Goal継続はU06、通常ターン切替は[U07](../../planned/unit_012/PLANNED_STOP.md)、再開は[U08](../../planned/unit_013/RESUME.md)の該当実装前 | M0で公開経路を調べ、動作の保証は各工程の接続試験で得る |
 
 ## 11. 完了チェックリスト

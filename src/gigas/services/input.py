@@ -1,0 +1,467 @@
+"""One input connection, run permission and interruptible recorded operation."""
+
+import asyncio
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Literal, Protocol
+from uuid import uuid4
+
+from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
+from gigas.game_io.observation import ObservationError
+from gigas.storage.input_events import OperationFinished, OperationStarted, RunFinished, RunStarted
+
+if TYPE_CHECKING:
+    from gigas.game_io.input.config import InputProtocol
+    from gigas.game_io.observation import Observation
+    from gigas.services.observation import ObservationService
+    from gigas.services.recording import RecordingService
+
+
+class InputDevice(Protocol):
+    """State-level input transport; opening establishes neutral before returning."""
+
+    @property
+    def protocol(self) -> "InputProtocol":
+        """Return this connection's fixed input capabilities."""
+        ...
+
+    async def open(self) -> None:
+        """Open and establish neutral; retain submitted I/O after cancellation."""
+        ...
+
+    async def send(self, state: InputState) -> None:
+        """Send a complete state, raising OSError for uncertain delivery."""
+        ...
+
+    async def close(self) -> None:
+        """Close after submitted I/O settles, retaining ownership on failure."""
+        ...
+
+
+class InputServiceError(RuntimeError):
+    """Run or connection setup failed, with a machine-readable code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """Keep the setup failure's category and explanation."""
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class InputGrant:
+    """Identity-bound run context issued by begin_run, never accepted by value.
+
+    A returned grant can remain disabled when the run began without a connection,
+    and stop never revives old grants. Observation and persistence services are
+    fixed for this run; switching archives does not change an existing grant.
+    """
+
+    request_id: str
+    run_id: str
+    thread_id: str
+    observations: "ObservationService" = field(repr=False)
+    recording: "RecordingService" = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class OperationResult:
+    """Input outcome; code OK denotes completion, not physical device acceptance.
+
+    An observe-phase failure leaves completed input facts unchanged. The stored
+    operation result describes input execution; code describes the whole request.
+    input_sent=unknown and neutral=unconfirmed never mean verified delivery.
+    """
+
+    code: str
+    phase: str = "accept"
+    operation_id: str | None = None
+    completed_steps: int = 0
+    input_sent: Literal["none", "sent", "unknown"] = "none"
+    neutral: Literal["not_needed", "sent", "unconfirmed"] = "not_needed"
+    observation: "Observation | None" = None
+    message: str = ""
+
+
+class InputService:
+    """Own input on one asyncio loop, independently of observation and persistence.
+
+    Start and finish runs explicitly. One input sequence is admitted at a time, with
+    no queue. stop() revokes permission immediately; await drain_input() to join
+    input cleanup. close() closes the device but does not drain image/record saves.
+    The application drains observations, then recording, before closing its writer or loop.
+    """
+
+    def __init__(self) -> None:
+        """Prepare the input owner without connecting or creating a chat archive."""
+        self._device: InputDevice | None = None
+        self._available = False
+        self._run: InputGrant | None = None
+        self._turn_id: str | None = None
+        self._grant: InputGrant | None = None
+        self._suspended = False
+        self._operation: asyncio.Task[OperationResult] | None = None
+        self._observing: set[asyncio.Task[OperationResult]] = set()
+        self._finishing = False
+        self._connecting = False
+        self._connection_task: asyncio.Task[None] | None = None
+        self._connect_cancelled = False
+        self._stop_code = "INTERRUPTED"
+        self._stop_reason = "操作が停止されました"
+
+    @property
+    def connected(self) -> bool:
+        """Return whether opening and initial neutral succeeded and no I/O failed."""
+        return self._available
+
+    async def connect(self, device: InputDevice | None) -> None:
+        """Stop, close the old owner, then open the new device, or disconnect.
+
+        Connection changes never issue a new grant. Execution stop leaves this
+        transition running; close suppresses or closes the candidate.
+
+        Raises:
+            InputServiceError: Switching is busy, or open/close fails. A failed
+                close retains its owner and prevents opening the next device.
+        """
+        if self._connecting:
+            message = "入力接続の切替中です"
+            raise InputServiceError("BUSY", message)
+        self.stop("入力接続を変更しました")
+        self._connecting = True
+        self._connect_cancelled = False
+        task = asyncio.create_task(self._connect(device))
+        self._connection_task = task
+        task.add_done_callback(_retrieve_exception)
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            self._connect_cancelled = True
+            self.stop()
+            raise
+
+    async def _connect(self, device: InputDevice | None) -> None:
+        try:
+            await self.drain_input()
+            await self._close_device()
+            if device is None or self._connect_cancelled:
+                return
+            self._device = device
+            try:
+                await device.open()
+            except BaseException:
+                await self._close_device()
+                raise
+            if self._connect_cancelled:
+                await self._close_device()
+            else:
+                self._available = True
+        except OSError as error:
+            raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
+        finally:
+            self._connecting = False
+
+    async def begin_run(
+        self,
+        message: str,
+        thread_id: str,
+        observations: "ObservationService",
+        recording: "RecordingService",
+    ) -> InputGrant:
+        """Issue a run context and submit its start record without waiting for storage.
+
+        A run beginning without input remains disabled.
+        Call finish_run() before beginning another run. Run termination leaves
+        the input connection open; close() also closes the input device.
+
+        Args:
+            message: Explicit user request recorded for this run.
+            thread_id: Actual runtime conversation ID.
+            observations: Observation service fixed for this run's archive.
+            recording: Shared persistence owner used by observations and this run.
+                Save errors do not stop input.
+
+        Returns:
+            A fixed run context accepted by identity until stopped or finished.
+
+        Raises:
+            InputServiceError: A run or connection transition is active.
+        """
+        if self._run is not None or self._connecting:
+            message_text = "前の実行または入力接続の切替が終了していません"
+            raise InputServiceError("BUSY", message_text)
+        grant = InputGrant(
+            f"request-{uuid4()}", f"run-{uuid4()}", thread_id, observations, recording
+        )
+        self._run = grant
+        self._turn_id = None
+        self._suspended = False
+        self._stop_code = "INTERRUPTED"
+        self._stop_reason = "操作が停止されました"
+        grant.recording.submit_input(RunStarted(grant.request_id, grant.run_id, thread_id, message))
+        self._grant = grant if self._available else None
+        return grant
+
+    def bind_turn(self, grant: InputGrant, turn_id: str) -> bool:
+        """Attach a known runtime turn to the current run without granting input.
+
+        Returns:
+            False for a finished or different run; otherwise records its turn ID
+            for subsequent operation and run-finished events. A stopped current
+            run can still receive its ID, but its input permission stays revoked.
+        """
+        if grant is not self._run:
+            return False
+        self._turn_id = turn_id
+        return True
+
+    def stop(self, reason: str = "操作が停止されました", *, code: str = "INTERRUPTED") -> None:
+        """Revoke permission and cancel the current operation once, without awaiting I/O."""
+        self._grant = None
+        self._stop_code = code
+        self._stop_reason = reason
+        self._cancel_operation()
+
+    def suspend(self) -> None:
+        """Temporarily reject input and cancel this sequence while preserving the run."""
+        self._suspended = True
+        self._cancel_operation()
+
+    def resume(self) -> None:
+        """Lift temporary suspension without restoring a revoked grant or old sequence."""
+        self._suspended = False
+
+    def _cancel_operation(self) -> None:
+        for observing in self._observing:
+            if not observing.cancelling():
+                observing.cancel()
+        task = self._operation
+        if task is not None and not task.done() and not self._finishing and not task.cancelling():
+            task.cancel()
+
+    async def drain_input(self) -> None:
+        """Join input and observation requests, not background encoding or saves.
+
+        Cancelling this wait does not abandon the operation; call again to join it.
+        """
+        tasks = list(self._observing)
+        if self._operation is not None:
+            tasks.append(self._operation)
+        if tasks:
+            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
+
+    async def finish_run(self, reason: str) -> None:
+        """Revoke, join input cleanup, then queue the run's terminal record."""
+        self.stop(reason)
+        await self.drain_input()
+        grant = self._run
+        if grant is not None:
+            grant.recording.submit_input(
+                RunFinished(grant.request_id, grant.run_id, reason, self._turn_id)
+            )
+            self._run = None
+
+    async def close(self) -> None:
+        """Stop and close input; observation/record persistence is drained separately.
+
+        Raises:
+            InputServiceError: Closing fails; the connection owner is retained.
+        """
+        self._connect_cancelled = True
+        await self.finish_run("closed")
+        if self._connection_task is not None:
+            await asyncio.shield(asyncio.gather(self._connection_task, return_exceptions=True))
+        try:
+            await self._close_device()
+        except OSError as error:
+            raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
+
+    async def _close_device(self) -> None:
+        self._available = False
+        if self._device is not None:
+            await self._device.close()
+            self._device = None
+
+    async def act(self, grant: InputGrant, sequence: tuple[InputStep, ...]) -> OperationResult:
+        """Admit, record and execute a finite sequence through post-action encoding.
+
+        External cancellation during input stops the run. During observation it
+        cancels only this response, preserving the grant and any later input.
+        Cleanup remains owned by the service for drain_input().
+
+        Returns:
+            An explicit success or failure outcome. Admission rejection sends no
+            input and has no operation_id. Input errors are never retried.
+
+        Raises:
+            asyncio.CancelledError: The caller cancelled this request.
+        """
+        device = self._device
+        if (
+            self._grant is None
+            or grant is not self._grant
+            or self._suspended
+            or not self._available
+            or device is None
+        ):
+            return OperationResult("INPUT_DISABLED", message="この実行では入力できません")
+        if self._operation is not None and not self._operation.done():
+            return OperationResult("BUSY", message="入力操作を実行中です")
+        if not isinstance(sequence, tuple) or not sequence:
+            return OperationResult("INVALID_SEQUENCE", message="1要素以上の入力タプルが必要です")
+        if any(not isinstance(step, InputStep) for step in sequence):
+            return OperationResult("INVALID_SEQUENCE", message="検証済みの入力要素が必要です")
+        try:
+            for step in sequence:
+                validate_state(step.state, device.protocol)
+        except InvalidSequenceError as error:
+            return OperationResult("INVALID_SEQUENCE", message=str(error))
+        operation_id = f"operation-{uuid4()}"
+        self._finishing = False
+        task = asyncio.create_task(self._execute(grant, sequence, device, operation_id))
+        self._operation = task
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if task.cancelled() and current is not None and not current.cancelling():
+                return OperationResult(
+                    self._stop_code, operation_id=operation_id, message=self._stop_reason
+                )
+            if self._operation is task:
+                self.stop()
+            elif task in self._observing:
+                task.cancel()
+            raise
+
+    async def _execute(
+        self,
+        grant: InputGrant,
+        sequence: tuple[InputStep, ...],
+        device: InputDevice,
+        operation_id: str,
+    ) -> OperationResult:
+        result = OperationResult("OK", "input", operation_id)
+        neutral_attempted = False
+        transport_failed = False
+        try:
+            grant.recording.submit_input(
+                OperationStarted(
+                    grant.request_id, grant.run_id, operation_id, sequence, self._turn_id
+                )
+            )
+            for step in sequence:
+                result = replace(result, phase="input")
+                if step.kind == "press":
+                    neutral_attempted = False
+                    result = replace(result, input_sent="unknown", neutral="unconfirmed")
+                    cancelled = await _send(device, step.state)
+                    result = replace(result, input_sent="sent")
+                    if cancelled:
+                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
+                    await _wait(step.duration_ms)
+                    neutral_attempted = True
+                    cancelled = await _send(device, InputState())
+                    result = replace(result, neutral="sent")
+                    if cancelled:
+                        result = replace(result, completed_steps=result.completed_steps + 1)
+                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
+                else:
+                    await _wait(step.duration_ms)
+                result = replace(result, completed_steps=result.completed_steps + 1)
+            result = replace(result, phase="")
+        except asyncio.CancelledError:
+            result = replace(result, code=self._stop_code, message=self._stop_reason)
+        except Exception as error:  # noqa: BLE001 - release input before reporting failure.
+            transport_failed = True
+            result = replace(result, code="DEVICE_UNAVAILABLE", message=str(error))
+        self._finishing = True
+        if result.neutral == "unconfirmed" and not neutral_attempted:
+            try:
+                await device.send(InputState())
+                result = replace(result, neutral="sent")
+            except OSError as error:
+                result = replace(
+                    result, code="DEVICE_UNAVAILABLE", phase="neutral", message=str(error)
+                )
+                transport_failed = True
+        if result.neutral == "unconfirmed":
+            transport_failed = True
+        if transport_failed:
+            self.stop(result.message, code="DEVICE_UNAVAILABLE")
+            try:
+                await self._close_device()
+            except OSError as error:
+                result = replace(result, message=f"{result.message}; 接続終了失敗: {error}")
+        input_result = (
+            "completed"
+            if result.code == "OK"
+            else "interrupted"
+            if result.code == "INTERRUPTED"
+            else "failed"
+        )
+        task = self._operation
+        self._operation = None
+        if result.code == "OK" and task is not None:
+            self._observing.add(task)
+            try:
+                # observe selects its snapshot before its first await, so the next
+                # input can start during encoding without changing this image.
+                observation = await grant.observations.observe(thread_id=grant.thread_id)
+                result = replace(result, observation=observation)
+            except asyncio.CancelledError:
+                result = replace(
+                    result,
+                    code="INTERRUPTED",
+                    phase="observe",
+                    message="観測応答が取り消されました",
+                )
+            except ObservationError as error:
+                result = replace(result, code=error.code, phase="observe", message=str(error))
+            except Exception as error:  # noqa: BLE001 - input already completed.
+                result = replace(
+                    result, code="OBSERVATION_ENCODING_ERROR", phase="observe", message=str(error)
+                )
+            finally:
+                self._observing.discard(task)
+        grant.recording.submit_input(
+            OperationFinished(
+                grant.run_id,
+                operation_id,
+                input_result,
+                result.completed_steps,
+                observation_id=result.observation.observation_id
+                if result.observation is not None
+                else None,
+                phase=result.phase,
+                reason=result.message,
+                input_sent=result.input_sent,
+                neutral=result.neutral,
+            )
+        )
+        return result
+
+
+async def _send(device: InputDevice, state: InputState) -> bool:
+    # Keep the transport result separate from cancellation of the operation.
+    task = asyncio.create_task(device.send(state))
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.shield(task)
+        return True
+    return False
+
+
+async def _wait(duration_ms: int) -> None:
+    # Bounded conversions keep arbitrary finite integer durations representable;
+    # each await remains interruptible. This is not an operation-time limit.
+    remaining = duration_ms
+    while remaining:
+        chunk = min(remaining, 3_600_000)
+        await asyncio.sleep(chunk / 1000)
+        remaining -= chunk
+
+
+def _retrieve_exception(task: asyncio.Task[None]) -> None:
+    # A cancelled connect requester leaves the transition owned until close joins it.
+    if not task.cancelled():
+        task.exception()
