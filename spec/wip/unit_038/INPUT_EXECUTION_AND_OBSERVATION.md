@@ -46,8 +46,8 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 | refactor-skipped | T05 run/操作と観測を共通窓口で順序保存し、取消し後も回収する | new | integration | 未実装importでred→関連95件成功。記録失敗callback、JSONL不確定追記、Codexと共通保存窓口も確認。1a2b09a |
 | refactor-skipped | T04R 繰り返し取消されても進行中writeを回収してから解除できる | regression | unit | 2回目のcancelで期待失敗1件→7件成功。取消しを記憶してI/O完了回収後に伝える。6c85654 |
 | refactor-skipped | T04P pySerialが列挙するOS別native portをそのまま使う | regression | unit | Linux/macOS識別子の模擬列挙で拒否2件→10件成功。OS拒否を削除。4ae5e41。実機未検証 |
-| todo | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 長い待機、保存待ち、通信失敗、古いGrantを含む |
-| green | T07 操作後のFrameを選び、同じObservationを返却・非同期保存へ渡す | new | integration | 未実装importでred→観測/MCP/保存82件成功。境界を跨ぐread・同時刻read拒否、取得変更・期限・符号化競合・取消し回収と画像ID。入力結果との対応はT06の結合で確認 |
+| green | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 未実装importと回帰のred→19件成功。長い待機、保存待ち、通信/解除失敗、旧Grant、画像ID、open中終了、neutral中停止。実SerialInput＋模擬portから実事後選定・保存まで結合 |
+| refactor-skipped | T07 操作後のFrameを選び、同じObservationを返却・非同期保存へ渡す | new | integration | 未実装importでred→観測/MCP/保存82件成功。境界を跨ぐread・同時刻read拒否、取得変更・期限・符号化競合・取消し回収と画像ID。2f37090 |
 
 ## 7. 設計メモ
 
