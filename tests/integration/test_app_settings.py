@@ -348,15 +348,12 @@ def test_serial_editor_keeps_draft_and_resolves_protocol_defaults(
     dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("ch552"))
     assert dialog.serial_baudrate.count() == 1
     assert dialog.values().serial_baudrate == 9600
-    refreshed, stopped = [], []
+    refreshed = []
     dialog.serial_refresh_requested.connect(lambda: refreshed.append(True))
-    dialog.stop_requested.connect(lambda: stopped.append(True))
     dialog.serial_refresh_button.click()
     dialog.set_editable(False)
     assert not dialog.serial_port.isEnabled()
     assert not dialog.serial_protocol.isEnabled()
     assert not dialog.serial_baudrate.isEnabled()
     assert not dialog.serial_refresh_button.isEnabled()
-    dialog.stop_button.click()
     assert refreshed == [True]
-    assert stopped == [True]

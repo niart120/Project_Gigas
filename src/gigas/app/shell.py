@@ -131,7 +131,6 @@ class ApplicationShell(QObject):
         self.service.recording_failed.connect(self._recording_failed)
         self.service.input_ports.connect(self._input_ports_received)
         self.service.input_changed.connect(self._input_changed)
-        self.window.notifications.stop_requested.connect(self.interrupt)
         self.service.finished.connect(self._service_finished)
 
     def start(self) -> None:
@@ -178,9 +177,7 @@ class ApplicationShell(QObject):
         )
 
     def interrupt(self) -> None:
-        """Stop input even without Codex and cancel post-save connection effects."""
-        if self._io_request is not None:
-            self._io_request = replace(self._io_request, input_apply=False)
+        """Interrupt execution without cancelling submitted settings application."""
         self.service.interrupt()
 
     def refresh_input_ports(self) -> None:
@@ -228,8 +225,6 @@ class ApplicationShell(QObject):
                     result.error,
                 )
             )
-        if self.dialog is not None:
-            self.dialog.stop_button.setEnabled(not self.committed)
         self._render()
 
     def _select_input_port(self, port: str) -> None:
@@ -394,7 +389,6 @@ class ApplicationShell(QObject):
             self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
             self.dialog.serial_refresh_requested.connect(self.refresh_input_ports)
-            self.dialog.stop_requested.connect(self.interrupt)
             self.dialog.error_details_button.clicked.connect(self._show_settings_error)
             self.dialog.open_folder_button.clicked.connect(self._open_settings_location)
         if self.dialog.isVisible():

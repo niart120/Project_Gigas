@@ -426,7 +426,6 @@ class CodexServiceThread(QThread):
             self._reject_answer(command)
             return
         if command.operation in {"stop", "disconnect"}:
-            self._input_pending = False
             self._stop_input()
         if command.operation == "input_apply":
             self._input_target = command.input_config

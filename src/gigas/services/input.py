@@ -115,8 +115,8 @@ class InputService:
     async def connect(self, device: InputDevice | None) -> None:
         """Stop, close the old owner, then open the new device, or disconnect.
 
-        Connection changes never issue a new grant. A stop during this transition
-        suppresses a not-yet-started open, or closes the candidate after open settles.
+        Connection changes never issue a new grant. Execution stop leaves this
+        transition running; close suppresses or closes the candidate.
 
         Raises:
             InputServiceError: Switching is busy, or open/close fails. A failed
@@ -134,6 +134,7 @@ class InputService:
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
+            self._connect_cancelled = True
             self.stop()
             raise
 
@@ -215,7 +216,6 @@ class InputService:
     def stop(self, reason: str = "操作が停止されました", *, code: str = "INTERRUPTED") -> None:
         """Revoke permission and cancel the current operation once, without awaiting I/O."""
         self._grant = None
-        self._connect_cancelled = True
         self._stop_code = code
         self._stop_reason = reason
         self._cancel_operation()
@@ -265,6 +265,7 @@ class InputService:
         Raises:
             InputServiceError: Closing fails; the connection owner is retained.
         """
+        self._connect_cancelled = True
         await self.finish_run("closed")
         if self._connection_task is not None:
             await asyncio.shield(asyncio.gather(self._connection_task, return_exceptions=True))

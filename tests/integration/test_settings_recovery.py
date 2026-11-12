@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QTextCursor
-from PySide6.QtWidgets import QPushButton
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
 
 
-def test_stop_during_save_does_not_reconnect_after_late_success(
+def test_stop_during_save_preserves_submitted_application(
     controlled: tuple[ApplicationShell, ControlledIO],
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
@@ -45,18 +44,16 @@ def test_stop_during_save_does_not_reconnect_after_late_success(
     dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     assert not dialog.save_button.isEnabled()
-    assert dialog.stop_button.isEnabled()
+    assert dialog.close_button.isEnabled()
 
-    dialog.stop_button.click()
+    dialog.close_button.click()
+    shell.interrupt()
 
     assert stopped == [True]
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).serial_port == "COM3"
     assert shell.baseline.serial_port == "COM3"
-    assert applied == []
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
     assert applied == [resolve_serial_config("COM3", "pokecon", 9600)]
 
 
@@ -116,10 +113,11 @@ def test_save_error_details_remain_accessible_from_settings(
     stopped: list[bool] = []
     monkeypatch.setattr(shell.service, "interrupt", lambda: stopped.append(True))
     assert not shell.window.connection.disconnect_action.isEnabled()
-    stop = next(button for button in details.findChildren(QPushButton) if button.text() == "停止")
-    stop.click()
+    details.close()
+    dialog.close_button.click()
+    shell.interrupt()
     assert stopped == [True]
-    assert details.isVisible()
+    assert not details.isVisible()
 
 
 def test_form_details_keep_current_error_after_another_settings_failure(

@@ -1135,7 +1135,7 @@ def test_offline_apply_retries_close_after_initial_open_cleanup_fails(
 
 
 @pytest.mark.parametrize("stop", [False, True])
-def test_input_switch_keeps_only_latest_target_or_explicit_stop(
+def test_input_switch_keeps_latest_target_even_after_stop(
     qtbot: QtBot, tmp_path: Path, *, stop: bool
 ) -> None:
     entered, release = Event(), Event()
@@ -1165,12 +1165,11 @@ def test_input_switch_keeps_only_latest_target_or_explicit_stop(
         if stop:
             service.interrupt()
         release.set()
-        qtbot.waitUntil(lambda: len(applied) == (1 if stop else 2))
+        qtbot.waitUntil(lambda: len(applied) == 2)
         assert devices[0].calls == ["open", "close"]
-        assert len(devices) == (1 if stop else 2)
-        if not stop:
-            assert applied[-1].config.port == "COM3"
-            assert applied[-1].connected
+        assert len(devices) == 2
+        assert applied[-1].config.port == "COM3"
+        assert applied[-1].connected
     finally:
         release.set()
         service.shutdown()

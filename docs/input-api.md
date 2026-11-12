@@ -61,7 +61,7 @@ await observations.drain()
 await recording.drain()
 ```
 
-`connect(device)`は旧列を停止して旧接続を閉じ、その後に新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。接続中の停止は未開始のopenを取り消し、開始済みopenは収束してから閉じます。接続だけでは操作権を発行しません。
+`connect(device)`は旧列を停止して旧接続を閉じ、その後に新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。操作停止は接続処理を取り消しません。closeは未開始のopenを抑止し、開始済みopenは収束してから閉じます。接続だけでは操作権を発行しません。
 
 `begin_run(message, thread_id, observations, recording)`は観測・記録サービスをそのrunのInputGrantへ固定し、開始記録を非同期投入して返します。保存成功を待ちません。入力未接続のrunは入力不可で、停止済みGrantは復活しません。前runのfinish_run後に次のrunを開始します。run終了だけでは入力接続を閉じません。チャット切断や記録先変更でも同じ入力所有者を使い、旧runの観測・記録をdrainしてから旧writerを閉じます。
 

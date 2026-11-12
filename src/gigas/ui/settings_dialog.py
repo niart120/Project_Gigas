@@ -44,7 +44,6 @@ class SettingsDialog(QDialog):
     changed = Signal()
     capture_refresh_requested = Signal()
     serial_refresh_requested = Signal()
-    stop_requested = Signal()
     close_requested = Signal()
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
@@ -170,9 +169,6 @@ class SettingsDialog(QDialog):
         error_row.addWidget(self.error_details_button)
         layout.addLayout(error_row)
         actions = QDialogButtonBox(self)
-        self.stop_button = actions.addButton("停止", QDialogButtonBox.ButtonRole.ActionRole)
-        self.stop_button.setAutoDefault(False)
-        self.stop_button.clicked.connect(self.stop_requested)
         self.ok_button = actions.addButton(QDialogButtonBox.StandardButton.Ok)
         self.close_button = actions.addButton(QDialogButtonBox.StandardButton.Cancel)
         self.save_button = actions.addButton(QDialogButtonBox.StandardButton.Apply)
