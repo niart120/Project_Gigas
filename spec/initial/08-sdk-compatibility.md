@@ -45,7 +45,15 @@ MCPのBearerはモデル向け指示やアプリ原記録へ保存しない。�
 
 依存導入は新規の検証用環境で`uv sync --dev`に成功し、同環境の全unit/integration試験465件が成功した。利用中の既存`.venv`がロックされ再同期できない件とは分ける。
 
-U05の停止・次実行では旧tokenの失効と新tokenの公開が必要。保持threadへの設定反映／MCP再読込またはthread・接続再作成の効果は未検証で、物理入力公開前に確認する。新threadへの設定注入を確認したことは、U06の同一セッションGoal再開を確認したことではない。
+## U05 M0の操作権更新・模擬入力の実接続（2026-11-12）
+
+[M0子仕様](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で同じ採用runtime 0.167.0とMCP 2.3.0を使い、実行ごとの新endpoint公開を確認した。loaded状態の同threadへのresume(config=新MCP)はRPC成功でも新serverを使えなかった。公開thread/unsubscribeのunsubscribedを確認してから同IDへthread/resume(config=新MCP)すると、既存2ターンを保持して新toolを検出・呼出しできた。旧server名はunknown、旧Bearerによる新endpointは401。旧Grantの模擬呼出しが物理書込なしで拒否されることを確認した。これは製品の操作取消し処理の検証ではない。
+
+続いて既存ChatGPT認証、gpt-6.1-sol/lowで実モデルを使い、同threadの2ターンで模擬act_and_observeを各1回呼んだ。正しい副作用注釈（readOnly=false/destructive=true/idempotent=false/openWorld=true）と、当該固有serverの当該toolだけのapproval_mode=approveを使い、全体のon-request/userを維持した。両ターンともcompleted、指定A100msとneutralの模擬記録、64×64 PNGの色と各観測IDの回答が一致した。間で旧Grant失効→unsubscribe→同ID resumeを行い、新Grantへの呼出しを確認した。承認要求・他ツール実行・実機書込は0。runtime exit 0とHTTP終了を確認した。
+
+設計は停止だけでなく通常turn終端でもGrantを不可逆に失効し、次の明示送信で新Grantへ替える。MCP handlerはendpointに結び付いたGrantを入力サービスへ渡し、サービスの要求受付で判定する。現在のGrantへ読み替えず、受付済みの操作は停止時に取り消す。空threadのrollout未作成ではresumeできなかったため、自動で新会話へ置換せず送信失敗として扱う。存在しない旧一時serverのenabled=falseだけを新configへ残すとinvalid transportになったため、新configから旧名を除く。
+
+根拠は `tmp/u05-mcp-generation-probe.py` / `tmp/u05-mcp-generation-bljcvlpg/results.json` と `tmp/u05-mcp-model-probe.py` / `tmp/u05-mcp-model-n0rrwo9a/results.json`。公開schemaと[採用tagの設定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json)、[承認処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)、[公式資料](https://learn.chatgpt.com/docs/app-server)も照合した。製品コード・シリアル・GUI停止・実機画像の事後条件は未実装/未検証。通常会話の保持をU06の保持Goal再開の受入へ拡張しない。
 
 # 1. この文書の位置づけ
 
