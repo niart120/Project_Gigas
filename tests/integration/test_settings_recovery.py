@@ -1,11 +1,16 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QTextCursor
+from PySide6.QtWidgets import QPushButton
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
+from gigas.game_io.input.config import resolve_serial_config
+from gigas.game_io.input.serial import SerialPort
+from gigas.storage.settings import load_settings
 from gigas.ui.main_window import MainWindow
 from gigas.ui.notifications import Notice
 from tests.integration.peers.controlled_capture import ControlledCapture
@@ -16,6 +21,43 @@ from tests.integration.test_app_lifetime import (
 from tests.integration.test_settings_apply_contract import (
     app as app,  # noqa: PLC0414 -- shared isolated application fixture
 )
+
+if TYPE_CHECKING:
+    from gigas.game_io.input.config import SerialConfig
+
+
+def test_stop_during_save_does_not_reconnect_after_late_success(
+    controlled: tuple[ApplicationShell, ControlledIO],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell, io = controlled
+    dialog = shell.dialog
+    assert dialog is not None
+    applied: list[SerialConfig | None] = []
+    stopped: list[bool] = []
+    monkeypatch.setattr(shell.service, "apply_input", applied.append)
+    monkeypatch.setattr(shell.service, "interrupt", lambda: stopped.append(True))
+    assert not shell.window.connection.disconnect_action.isEnabled()
+    dialog.set_serial_ports((SerialPort("COM3", "Controller"),))
+    dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM3"))
+    dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("pokecon"))
+    dialog.save_button.click()
+    qtbot.waitUntil(io.entered.is_set)
+    assert not dialog.save_button.isEnabled()
+    assert dialog.stop_button.isEnabled()
+
+    dialog.stop_button.click()
+
+    assert stopped == [True]
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert load_settings(shell.path).serial_port == "COM3"
+    assert shell.baseline.serial_port == "COM3"
+    assert applied == []
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert applied == [resolve_serial_config("COM3", "pokecon", 9600)]
 
 
 @pytest.mark.parametrize("succeeds", [False, True])
@@ -46,7 +88,9 @@ def test_settings_location_opens_own_directory_and_reports_failure(
 
 
 def test_save_error_details_remain_accessible_from_settings(
-    controlled: tuple[ApplicationShell, ControlledIO], qtbot: QtBot
+    controlled: tuple[ApplicationShell, ControlledIO],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shell, io = controlled
     dialog = shell.dialog
@@ -69,6 +113,13 @@ def test_save_error_details_remain_accessible_from_settings(
     assert dialog.model.text() == "edited"
     assert dialog.observation_resolution.currentData() == "hd"
     assert shell.baseline.observation_resolution == "full_hd"
+    stopped: list[bool] = []
+    monkeypatch.setattr(shell.service, "interrupt", lambda: stopped.append(True))
+    assert not shell.window.connection.disconnect_action.isEnabled()
+    stop = next(button for button in details.findChildren(QPushButton) if button.text() == "停止")
+    stop.click()
+    assert stopped == [True]
+    assert details.isVisible()
 
 
 def test_form_details_keep_current_error_after_another_settings_failure(

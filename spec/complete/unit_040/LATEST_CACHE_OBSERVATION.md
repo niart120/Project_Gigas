@@ -6,7 +6,7 @@
 
 ## 対象範囲・関連文書
 
-[U05親](../../wip/unit_010/INPUT_AND_STOP.md)、[ゲームI/O](../../initial/03-game-io.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)に従う。既存M1実装と試験を改訂する。
+[U05親](../../complete/unit_010/INPUT_AND_STOP.md)、[ゲームI/O](../../initial/03-game-io.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)に従う。既存M1実装と試験を改訂する。
 
 ## 対象外
 

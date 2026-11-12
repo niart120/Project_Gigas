@@ -44,12 +44,14 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
         reader = CaptureReader(snapshot)
         recording = RecordingService(writer)
         observations = ObservationService(reader, recording)
-        service = InputService(observations, recording)
+        service = InputService()
         config = resolve_serial_config("COM3", "ch552", None)
         assert config is not None
         try:
             await service.connect(SerialInput(config, open_port=lambda _config: port))
-            grant = await service.begin_run("Aを短く押して待つ", "real-thread-id")
+            grant = await service.begin_run(
+                "Aを短く押して待つ", "real-thread-id", observations, recording
+            )
             sequence = parse_sequence(
                 [
                     {"kind": "press", "buttons": ["A"], "duration_ms": 1},

@@ -21,11 +21,12 @@ from PySide6.QtWidgets import (
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.geometry import fit_to_screen
 
-type NoticeSource = Literal["settings", "video", "codex", "recording", "shutdown"]
+type NoticeSource = Literal["settings", "video", "input", "codex", "recording", "shutdown"]
 
 _SOURCES: dict[NoticeSource, str] = {
     "settings": "設定",
     "video": "映像",
+    "input": "入力",
     "codex": "Codex",
     "recording": "記録",
     "shutdown": "終了",
@@ -52,6 +53,8 @@ class Notice:
 class NoticeDialog(QDialog):
     """Show a frozen, copyable failure until an explicit selection refreshes it."""
 
+    stop_requested = Signal()
+
     def __init__(self, parent: QWidget) -> None:
         """Create a modeless detail view without opening it."""
         super().__init__(parent)
@@ -71,6 +74,10 @@ class NoticeDialog(QDialog):
         self.details.setReadOnly(True)
         layout.addWidget(self.details, 1)
         actions = QHBoxLayout()
+        stop = QPushButton("停止", self)
+        stop.setAutoDefault(False)
+        stop.clicked.connect(self.stop_requested)
+        actions.addWidget(stop)
         actions.addStretch()
         close = QPushButton("閉じる", self)
         close.setAutoDefault(False)
@@ -99,6 +106,7 @@ class NotificationCenter(QObject):
     """
 
     published = Signal(object)
+    stop_requested = Signal()
 
     def __init__(self, parent: QWidget) -> None:
         """Prepare hidden presentation widgets without connecting service actions."""
@@ -160,6 +168,7 @@ class NotificationCenter(QObject):
         """
         if self.dialog is None:
             self.dialog = NoticeDialog(self._owner)
+            self.dialog.stop_requested.connect(self.stop_requested)
             self.dialog.sources.activated.connect(self._select_source)
         owner = self._owner if parent is None else parent
         if self.dialog.parentWidget() is not owner:

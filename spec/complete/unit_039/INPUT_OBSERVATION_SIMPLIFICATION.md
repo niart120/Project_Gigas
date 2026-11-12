@@ -14,7 +14,7 @@ M2のGUI・MCP入力公開、実機受入、Bluetooth、追加の管理クラス
 
 ## 4. 前提と関連文書
 
-[初期実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[記録](../../initial/04-agent-memory.md)、[U05親](../../wip/unit_010/INPUT_AND_STOP.md)、[M0](../unit_036/INPUT_AND_STOP_DESIGN.md)に従う。基準となる既存試験602件、静的検査とビルドは成功済み。
+[初期実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[記録](../../initial/04-agent-memory.md)、[U05親](../../complete/unit_010/INPUT_AND_STOP.md)、[M0](../unit_036/INPUT_AND_STOP_DESIGN.md)に従う。基準となる既存試験602件、静的検査とビルドは成功済み。
 
 ## 5. 振る舞い仕様
 

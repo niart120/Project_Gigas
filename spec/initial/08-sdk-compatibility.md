@@ -47,19 +47,27 @@ MCPのBearerはモデル向け指示やアプリ原記録へ保存しない。�
 
 ## U05 M0の操作権更新・模擬入力の実接続（2026-11-12）
 
-[M0子仕様](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で同じ採用runtime 0.167.0とMCP 2.3.0を使い、実行ごとの新endpoint公開を確認した。loaded状態の同threadへのresume(config=新MCP)はRPC成功でも新serverを使えなかった。公開thread/unsubscribeのunsubscribedを確認してから同IDへthread/resume(config=新MCP)すると、既存2ターンを保持して新toolを検出・呼出しできた。旧server名はunknown、旧Bearerによる新endpointは401。旧Grantの模擬呼出しが物理書込なしで拒否されることを確認した。これは製品の操作取消し処理の検証ではない。
+[M0子仕様](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で採用runtime 0.167.0とMCP 2.3.0を使い、公開thread/unsubscribe後の同ID thread/resumeで、既存2ターンを保持して新MCPの検出・呼出しが成立することを確認した。loaded状態のresumeだけでは設定は更新されない。旧server名・旧Bearer・旧Grantで新runへ入力できないことも確認した。製品の操作取消しや実機入力の検証ではない。
 
-続いて既存ChatGPT認証、gpt-6.1-sol/lowで実モデルを使い、同threadの2ターンで模擬act_and_observeを各1回呼んだ。正しい副作用注釈（readOnly=false/destructive=true/idempotent=false/openWorld=true）と、当該固有serverの当該toolだけのapproval_mode=approveを使い、全体のon-request/userを維持した。両ターンともcompleted、指定A100msとneutralの模擬記録、64×64 PNGの色と各観測IDの回答が一致した。間で旧Grant失効→unsubscribe→同ID resumeを行い、新Grantへの呼出しを確認した。承認要求・他ツール実行・実機書込は0。runtime exit 0とHTTP終了を確認した。
+既存ChatGPT認証、gpt-6.1-sol/lowの実モデルでも、同threadの2ターンで模擬act_and_observeが各1回成功した。副作用注釈（readOnly=false/destructive=true/idempotent=false/openWorld=true）と当該toolのapproval_mode=approveを使い、全体のon-request/userを維持した。指定A100ms・neutralの模擬記録、64×64 PNG・観測ID、runtimeとHTTPの正常終了を確認した。実機書込はない。
 
-設計は停止だけでなく通常turn終端でもGrantを不可逆に失効し、次の明示送信で新Grantへ替える。MCP handlerはendpointに結び付いたGrantを入力サービスへ渡し、サービスの要求受付で判定する。現在のGrantへ読み替えず、受付済みの操作は停止時に取り消す。空threadのrollout未作成ではresumeできなかったため、自動で新会話へ置換せず送信失敗として扱う。存在しない旧一時serverのenabled=falseだけを新configへ残すとinvalid transportになったため、新configから旧名を除く。
+停止・通常turn終端でGrantを失効し、次の明示送信では新Grantへ替える。MCP handlerはendpointに固定したGrantを渡し、入力サービスの要求受付で判定する。resume失敗時は送信失敗とし、新会話へ自動置換しない。新configには新serverの完全設定を渡し、旧一時serverの無効化設定だけを残さない。
 
-根拠は `tmp/u05-mcp-generation-probe.py` / `tmp/u05-mcp-generation-bljcvlpg/results.json` と `tmp/u05-mcp-model-probe.py` / `tmp/u05-mcp-model-n0rrwo9a/results.json`。公開schemaと[採用tagの設定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json)、[承認処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)、[公式資料](https://learn.chatgpt.com/docs/app-server)も照合した。製品コード・シリアル・GUI停止・実機画像の事後条件は未実装/未検証。通常会話の保持をU06の保持Goal再開の受入へ拡張しない。
+根拠は `tmp/u05-mcp-generation-probe.py` / `tmp/u05-mcp-generation-bljcvlpg/results.json` と `tmp/u05-mcp-model-probe.py` / `tmp/u05-mcp-model-n0rrwo9a/results.json`。公開schemaと[採用tagの設定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json)、[承認処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)、[公式資料](https://learn.chatgpt.com/docs/app-server)も照合した。製品の結合・実機受入はM2で扱い、通常会話の保持をU06の保持Goal再開の受入へ拡張しない。
 
-## U05 M1の長時間要求に関する確認（2026-11-12）
+## U05 M2の公開方式と要求期限
 
-採用runtime 0.167.0の[期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)では、`tool_timeout_sec`省略時も300秒の既定期限を使います。0は期限無効化ではなくゼロ秒です。[要求実行の経過時間制限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)はprogress通知でも延長されません。これは採用版ソースの確認結果であり、長時間HTTP・実モデル試験は未実施です。
+採用runtime 0.167.0の[期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)では、`tool_timeout_sec`省略時も300秒の既定期限を使います。設定で変更できる値であり、300秒が固定の最大値ではありません。0は期限無効化ではなくゼロ秒です。[要求実行の経過時間制限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)はprogress通知でも延長されません。これは採用版ソースの確認結果です。
 
-[U05 M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)の内部実行APIには入力時間・要素数・合計時間の固定上限を設けていません。長い有限列を一要求で事後画像まで返す公開契約は、現在のruntime設定だけでは成立を確認できていません。M2の公開前にruntime・公開方式を再検討し、契約変更が必要なら仕様へ戻って判断します。大きい固定期限への置換や入力の暗黙の分割で解決済みとはしません。60秒超の成功だけでは、この制約の解消を検証したことになりません。
+[U05 M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)は同期MCPを採用し、Codexのtool_timeout_secとGigasのact_and_observeの待機期限を300秒に設定します。数秒〜1分中心の用途に対する設計判断であり、MCP共通の最大値ではありません。[U05 M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)の内部APIには入力時間・要素数・合計時間の固定上限を設けません。dynamic tool、非同期タスク受付・ポーリング、入力の暗黙分割は採用しません。
+
+GameIoMcpServer(observations, inputs, protocol)がobserveとact_and_observeを公開します。prepare_turn(prompt, thread_id)を通常送信ごとに呼び、適用中プロトコルを説明へ反映した新endpointとrunを対応付けます。初回はthread/start、次回からはthread/unsubscribe→同ID thread/resumeで設定を読み込ませます。bind_grantは各endpointへ一度だけ行い、停止・turn終端後の旧要求は入力不可とします。
+
+要求の期限・取消しは、入力実行中なら共通停止と開始済みwrite後の解除、観測中なら当該応答の取消しに分けます。観測中の取消しは次の入力や操作権を失効させません。開始済み符号化・保存は独立して回収します。GUI停止・run終了は両方を止めます。クライアントとサーバーは別々に計時し、期限内の結果配送・物理解除を保証しません。結果不明の列は自動再送しません。HTTP切断やcancel通知の到達を停止条件にせず、アプリの入力所有者へ停止を届けます。
+
+**模擬機器で確認済み**: 採用実app-serverとlocalhostのResponses mock、製品MCP・入力・観測・保存を通し、300秒設定で65秒wait完了、途中停止、同threadの3DS能力再読込とtouchを確認しました。試験プロセス内だけGigas側0.25秒・Codex側1秒へ短縮し、TOOL_TIMEOUTとneutralを確認しました。300秒経過の試験ではありません。根拠は`tmp/mcp-input-investigation/RESULT.md`と`complete-runtime-probe/report.json`です。
+
+**製品GUI・実モデル・実機で確認済み**: Windows、USB Video Device、COM8・CH552・9600 baud、採用0.167.0と既存ChatGPT認証、gpt-6.1-sol/lowで3runを実行しました。短い左右入力、設定モーダルからのB長押し停止（interrupted/neutral sent）、左移動後に止まる映像、同thread・ID・保存PNG、正常終了を確認しました。詳細は[U05 M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)に置きます。B解除ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過は未検証で、[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)へ引き継ぎます。
 
 # 1. この文書の位置づけ
 

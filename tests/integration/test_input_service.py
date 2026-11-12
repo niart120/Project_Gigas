@@ -75,7 +75,7 @@ class Harness:
         self.reader = CaptureReader(self.read_snapshot)
         self.recording = RecordingService(writer)
         self.observations = ObservationService(self.reader, self.recording)
-        self.service = InputService(self.observations, self.recording)
+        self.service = InputService()
         self.failures: list[Exception] = []
         self.recording.on_failure = self.failures.append
         self.device = Device()
@@ -116,7 +116,9 @@ def press(button: str = "A", duration: int = 1) -> InputStep:
 def test_sequence_records_content_results_and_observation(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A、待機、B", "thread")
+        grant = await harness.service.begin_run(
+            "A、待機、B", "thread", harness.observations, harness.recording
+        )
         assert harness.service.bind_turn(grant, "turn")
         result = await harness.service.act(grant, (press(), InputStep("wait", 1), press("B")))
         assert result.code == "OK"
@@ -160,7 +162,9 @@ def test_sequence_records_content_results_and_observation(harness: Harness) -> N
 def test_long_press_stops_once_releases_and_rejects_old_grant(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("長いA", "thread")
+        grant = await harness.service.begin_run(
+            "長いA", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(
             harness.service.act(grant, (press(duration=10**100), press("B")))
         )
@@ -177,7 +181,9 @@ def test_long_press_stops_once_releases_and_rejects_old_grant(harness: Harness) 
         assert harness.device.calls == ["open", InputState(buttons=("A",)), InputState()]
         assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
         await harness.service.finish_run("stopped")
-        new_grant = await harness.service.begin_run("B", "thread")
+        new_grant = await harness.service.begin_run(
+            "B", "thread", harness.observations, harness.recording
+        )
         assert harness.service.bind_turn(new_grant, "new-turn")
         assert not harness.service.bind_turn(grant, "old-turn")
         assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
@@ -196,11 +202,15 @@ def test_long_press_stops_once_releases_and_rejects_old_grant(harness: Harness) 
 
 def test_unconnected_run_and_invalid_sequence_never_send(harness: Harness) -> None:
     async def scenario() -> None:
-        disabled = await harness.service.begin_run("未接続", "thread")
+        disabled = await harness.service.begin_run(
+            "未接続", "thread", harness.observations, harness.recording
+        )
         assert (await harness.service.act(disabled, (press(),))).code == "INPUT_DISABLED"
         await harness.service.finish_run("completed")
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("入力", "thread")
+        grant = await harness.service.begin_run(
+            "入力", "thread", harness.observations, harness.recording
+        )
         invalid = await harness.service.act(grant, (press(), press("START")))
         assert invalid.code == "INVALID_SEQUENCE"
         assert invalid.input_sent == "none"
@@ -216,7 +226,9 @@ def test_unconnected_run_and_invalid_sequence_never_send(harness: Harness) -> No
 def test_suspend_cancels_current_input_without_reviving_it(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(
             harness.service.act(grant, (press(duration=100000), press("B")))
         )
@@ -254,7 +266,9 @@ def test_slow_start_save_does_not_delay_input_or_stop(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(harness.service.act(grant, (press(duration=100000),)))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
@@ -288,7 +302,9 @@ def test_start_record_failure_is_reported_without_disabling_input(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         assert (await harness.service.act(grant, (press(),))).code == "OK"
         await harness.recording.drain()
         assert harness.failures
@@ -302,7 +318,9 @@ def test_start_record_failure_is_reported_without_disabling_input(
 def test_send_or_release_failure_closes_without_retry(harness: Harness, failure: str) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         harness.device.fail_send = failure == "send"
         harness.device.fail_neutral = failure == "neutral"
         result = await harness.service.act(grant, (press(), press("B")))
@@ -319,7 +337,9 @@ def test_send_or_release_failure_closes_without_retry(harness: Harness, failure:
 def test_external_act_cancellation_retains_cleanup_for_drain(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         request = asyncio.create_task(
             harness.service.act(grant, (press(duration=100000), press("B")))
         )
@@ -349,7 +369,9 @@ def test_observation_failure_keeps_the_executed_input_result(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(harness.service.act(grant, (press(),)))
         await harness.device.pressed.wait()
         if failure == "missing":
@@ -378,19 +400,73 @@ def test_observation_failure_keeps_the_executed_input_result(
     asyncio.run(scenario())
 
 
-def test_failed_close_retains_old_owner_and_prevents_new_open(harness: Harness) -> None:
+def test_failed_close_retains_old_owner_and_prevents_new_open() -> None:
     async def scenario() -> None:
-        await harness.service.connect(harness.device)
-        new_device = Device()
-        harness.device.fail_close = True
+        service = InputService()
+        device, new_device = Device(), Device()
+        await service.connect(device)
+        assert service.connected
+        device.fail_close = True
         with pytest.raises(InputServiceError):
-            await harness.service.connect(new_device)
+            await service.connect(new_device)
         assert new_device.calls == []
-        harness.device.fail_close = False
-        await harness.service.connect(new_device)
-        assert harness.device.calls.count("close") == 2
+        device.fail_close = False
+        await service.connect(new_device)
+        assert device.calls.count("close") == 2
         assert new_device.calls == ["open"]
-        await harness.close()
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_connection_survives_run_archive_change(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service, device = InputService(), Device()
+        await service.connect(device)
+        previous = None
+        frame = sample_frame()
+        try:
+            for name in ("first", "second"):
+                writer = ProjectWriter.create(tmp_path / name)
+                recording = RecordingService(writer)
+                observations = ObservationService(
+                    CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
+                    recording,
+                )
+                try:
+                    grant = await service.begin_run(name, name, observations, recording)
+                    if previous is not None:
+                        assert (await service.act(previous, (press(),))).code == "INPUT_DISABLED"
+                    result = await service.act(grant, (press(),))
+                    assert result.code == "OK"
+                    assert result.observation is not None
+                    await service.finish_run("completed")
+                    assert service.connected
+                    await observations.drain()
+                    await recording.drain()
+                    records = [
+                        json.loads(line)
+                        for line in (writer.path / "events.jsonl").read_bytes().splitlines()
+                    ]
+                    assert records[0]["payload"]["thread_id"] == name
+                    assert records[2]["payload"]["thread_id"] == name
+                    assert (
+                        records[3]["payload"]["observation_id"] == result.observation.observation_id
+                    )
+                    assert all(
+                        row["payload"].get("run_id", grant.run_id) == grant.run_id
+                        for row in records
+                    )
+                    previous = grant
+                finally:
+                    await observations.drain()
+                    await recording.drain()
+                    writer.close()
+            assert device.calls.count("open") == 1
+            assert "close" not in device.calls
+        finally:
+            await service.close()
+        assert device.calls.count("close") == 1
 
     asyncio.run(scenario())
 
@@ -409,7 +485,9 @@ def test_wait_only_sequence_is_interruptible_without_input(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("待機", "thread")
+        grant = await harness.service.begin_run(
+            "待機", "thread", harness.observations, harness.recording
+        )
         request = asyncio.create_task(
             harness.service.act(grant, (InputStep("wait", 10**100), press()))
         )
@@ -450,7 +528,9 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(harness.service.act(grant, (press(),)))
         try:
             assert await asyncio.to_thread(encoding.wait, 3)
@@ -463,6 +543,7 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
         try:
             assert result.code == "INTERRUPTED"
             assert result.phase == "observe"
+            await harness.observations.drain()
             harness.service.resume()
             following = await harness.service.act(grant, (press("B"),))
             assert following.code == ("INPUT_DISABLED" if stopped else "OK")
@@ -472,8 +553,9 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("cancellation", ["observation", "stop", "finish_run"])
 def test_encoding_does_not_hold_input_or_delay_stop(
-    harness: Harness, monkeypatch: pytest.MonkeyPatch
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, cancellation: str
 ) -> None:
     entered, release = Event(), Event()
     original = Observation.from_frame
@@ -489,31 +571,65 @@ def test_encoding_does_not_hold_input_or_delay_stop(
     monkeypatch.setattr(Observation, "from_frame", classmethod(blocked_encode))
 
     async def scenario() -> None:
+        input_waiting, release_input = asyncio.Event(), asyncio.Event()
+
+        async def controlled_wait(duration_ms: int) -> None:
+            if duration_ms == 2:
+                input_waiting.set()
+                await release_input.wait()
+
+        monkeypatch.setattr(input_module, "_wait", controlled_wait)
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(harness.service.act(grant, (press(),)))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
-            following = await asyncio.wait_for(harness.service.act(grant, (press("B"),)), 2)
-            assert following.code == "BUSY"
-            assert following.phase == "observe"
-            assert following.completed_steps == 1
+            following = asyncio.create_task(harness.service.act(grant, (press("B", 2),)))
+            await asyncio.wait_for(input_waiting.wait(), 2)
+            if cancellation == "observation":
+                operation.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await operation
+                assert (await harness.service.act(grant, (press("X"),))).code == "BUSY"
+                release_input.set()
+                result = await asyncio.wait_for(following, 2)
+                assert result.code == "BUSY"
+                assert result.phase == "observe"
+                assert result.completed_steps == 1
+            else:
+                if cancellation == "finish_run":
+                    await asyncio.wait_for(harness.service.finish_run("stopped"), 2)
+                else:
+                    harness.service.stop()
+                result = await asyncio.wait_for(operation, 2)
+                assert result.code == "INTERRUPTED"
+                assert result.phase == "observe"
+                assert result.completed_steps == 1
+                assert result.observation is None
+                result = await asyncio.wait_for(following, 2)
+                assert result.code == "INTERRUPTED"
+                assert result.phase == "input"
+                assert result.completed_steps == 0
+                assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
             assert harness.device.calls[-2:] == [InputState(buttons=("B",)), InputState()]
-            harness.service.stop()
-            result = await asyncio.wait_for(operation, 2)
             await asyncio.wait_for(harness.service.finish_run("stopped"), 2)
-            assert result.code == "INTERRUPTED"
-            assert result.phase == "observe"
-            assert result.completed_steps == 1
-            assert result.observation is None
         finally:
+            release_input.set()
             release.set()
-        await harness.close()
+            await harness.close()
         rows = [
             row["payload"] for row in harness.records() if row["type"] == "input.operation_finished"
         ]
         assert len(rows) == 2
-        assert all(isinstance(row, dict) and row["result"] == "completed" for row in rows)
+        assert isinstance(rows[0], dict)
+        assert rows[0]["result"] == "completed"
+        assert rows[0]["phase"] == "observe"
+        assert isinstance(rows[1], dict)
+        assert rows[1]["result"] == (
+            "completed" if cancellation == "observation" else "interrupted"
+        )
         assert all(isinstance(row, dict) and "observation_id" not in row for row in rows)
 
     asyncio.run(scenario())
@@ -535,7 +651,9 @@ def test_background_save_failure_preserves_result_and_input(
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         try:
             result = await asyncio.wait_for(harness.service.act(grant, (press(),)), 3)
             assert result.code == "OK"
@@ -624,7 +742,9 @@ def test_stop_during_completed_write_preserves_delivery_and_connection(
         assert config is not None
         device = SerialInput(config, open_port=lambda _config: port)
         await harness.service.connect(device)
-        grant = await harness.service.begin_run("A", "thread")
+        grant = await harness.service.begin_run(
+            "A", "thread", harness.observations, harness.recording
+        )
         operation = asyncio.create_task(harness.service.act(grant, (press(), press("B"))))
         try:
             assert await asyncio.to_thread(entered.wait, 3)

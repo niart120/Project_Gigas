@@ -6,7 +6,7 @@
 
 ## 対象範囲と前提
 
-[U05親](../../wip/unit_010/INPUT_AND_STOP.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)、[初期I/O](../../initial/03-game-io.md)、[記録](../../initial/04-agent-memory.md)、[最新キャッシュ観測](../../complete/unit_040/LATEST_CACHE_OBSERVATION.md)を改訂する。既存M1とその回帰試験を使用する。
+[U05親](../../complete/unit_010/INPUT_AND_STOP.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)、[初期I/O](../../initial/03-game-io.md)、[記録](../../initial/04-agent-memory.md)、[最新キャッシュ観測](../../complete/unit_040/LATEST_CACHE_OBSERVATION.md)を改訂する。既存M1とその回帰試験を使用する。
 
 ## 対象外
 

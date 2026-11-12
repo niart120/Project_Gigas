@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.input.config import PROTOCOLS, get_protocol, resolve_baudrate
 from gigas.storage.settings import Settings
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.layout import WINDOW_SIZE_PRESETS
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from gigas.game_io.capture.models import DeviceInfo
+    from gigas.game_io.input.serial import SerialPort
 
 
 class SettingsDialog(QDialog):
@@ -41,6 +43,8 @@ class SettingsDialog(QDialog):
 
     changed = Signal()
     capture_refresh_requested = Signal()
+    serial_refresh_requested = Signal()
+    stop_requested = Signal()
     close_requested = Signal()
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
@@ -49,6 +53,7 @@ class SettingsDialog(QDialog):
         self._snapshot = Settings()
         self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
         self._devices: tuple[DeviceInfo, ...] = ()
+        self._serial_ports: tuple[SerialPort, ...] = ()
         self.setModal(True)
         self.setWindowTitle("設定")
         self.resize(620, 440)
@@ -118,8 +123,29 @@ class SettingsDialog(QDialog):
         self.observation_resolution.currentIndexChanged.connect(self.changed)
         capture_form.addRow("観測解像度", self.observation_resolution)
         controller_form = self._group(io_form, "コントローラー")
-        self.serial_port = self._text_field()
-        controller_form.addRow("シリアルポート", self.serial_port)
+        self.serial_port = QComboBox(self)
+        self.serial_port.addItem("未接続", "")
+        self.serial_port.currentIndexChanged.connect(self.changed)
+        self.serial_refresh_button = QPushButton("一覧更新", self)
+        self.serial_refresh_button.setAutoDefault(False)
+        self.serial_refresh_button.clicked.connect(self.serial_refresh_requested)
+        serial_selection = QHBoxLayout()
+        serial_selection.addWidget(self.serial_port, 1)
+        serial_selection.addWidget(self.serial_refresh_button)
+        self.serial_discovery_status = QLabel(self)
+        self.serial_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.serial_discovery_status.hide()
+        serial_selection.addWidget(self.serial_discovery_status)
+        controller_form.addRow("シリアルポート", serial_selection)
+        self.serial_protocol = QComboBox(self)
+        for protocol in PROTOCOLS:
+            self.serial_protocol.addItem(protocol.label, protocol.key)
+        self.serial_baudrate = QComboBox(self)
+        self._set_serial_baudrate(None)
+        self.serial_protocol.currentIndexChanged.connect(self._serial_protocol_changed)
+        self.serial_baudrate.currentIndexChanged.connect(self.changed)
+        controller_form.addRow("プロトコル", self.serial_protocol)
+        controller_form.addRow("通信速度", self.serial_baudrate)
         agent_form = self._tab("Codex")
         self.model = self._text_field()
         self.effort = self._text_field()
@@ -144,6 +170,9 @@ class SettingsDialog(QDialog):
         error_row.addWidget(self.error_details_button)
         layout.addLayout(error_row)
         actions = QDialogButtonBox(self)
+        self.stop_button = actions.addButton("停止", QDialogButtonBox.ButtonRole.ActionRole)
+        self.stop_button.setAutoDefault(False)
+        self.stop_button.clicked.connect(self.stop_requested)
         self.ok_button = actions.addButton(QDialogButtonBox.StandardButton.Ok)
         self.close_button = actions.addButton(QDialogButtonBox.StandardButton.Cancel)
         self.save_button = actions.addButton(QDialogButtonBox.StandardButton.Apply)
@@ -249,6 +278,54 @@ class SettingsDialog(QDialog):
                 self.capture_choices.addItem(selected, selected)
             self.capture_choices.setCurrentIndex(self.capture_choices.findData(selected))
 
+    def set_serial_ports(
+        self,
+        ports: "tuple[SerialPort, ...]",
+        *,
+        searching: bool = False,
+        error: str = "",
+    ) -> None:
+        """Update port candidates while retaining the edited native identifier.
+
+        Args:
+            ports: Latest successful catalog; enumeration does not open ports.
+            searching: Whether enumeration is in progress.
+            error: Enumeration failure available through notification details.
+        """
+        state = "列挙失敗" if error else "検索中" if searching else ""
+        self.serial_discovery_status.setText(state)
+        self.serial_discovery_status.setVisible(bool(state))
+        self._serial_ports = tuple(port for port in ports if port.identifier)
+        self._sync_serial_choice(str(self.serial_port.currentData() or ""))
+
+    def _sync_serial_choice(self, selected: str) -> None:
+        with QSignalBlocker(self.serial_port):
+            self.serial_port.clear()
+            self.serial_port.addItem("未接続", "")
+            for port in self._serial_ports:
+                label = (
+                    f"{port.identifier} · {port.description}"
+                    if port.description
+                    else port.identifier
+                )
+                self.serial_port.addItem(label, port.identifier)
+            if self.serial_port.findData(selected) < 0:
+                self.serial_port.addItem(selected, selected)
+            self.serial_port.setCurrentIndex(self.serial_port.findData(selected))
+
+    def _set_serial_baudrate(self, value: int | None) -> None:
+        protocol = get_protocol(self.serial_protocol.currentData())
+        rate = resolve_baudrate(protocol, value)
+        with QSignalBlocker(self.serial_baudrate):
+            self.serial_baudrate.clear()
+            for choice in protocol.baudrates:
+                self.serial_baudrate.addItem(str(choice), choice)
+            self.serial_baudrate.setCurrentIndex(self.serial_baudrate.findData(rate))
+
+    def _serial_protocol_changed(self) -> None:
+        self._set_serial_baudrate(None)
+        self.changed.emit()
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
         """Request closure without discarding edits."""
         event.ignore()
@@ -263,7 +340,9 @@ class SettingsDialog(QDialog):
         return replace(
             self._snapshot,
             capture_device=str(self.capture_choices.currentData() or ""),
-            serial_port=self._text_value(self.serial_port),
+            serial_port=str(self.serial_port.currentData() or ""),
+            serial_protocol=str(self.serial_protocol.currentData()),
+            serial_baudrate=int(self.serial_baudrate.currentData()),
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),
             auth_method=str(self.auth_method.currentData()),
@@ -280,12 +359,17 @@ class SettingsDialog(QDialog):
         self._snapshot = values
         with QSignalBlocker(self):
             for field, value in (
-                (self.serial_port, values.serial_port),
                 (self.model, values.model),
                 (self.effort, values.effort),
             ):
                 field.setText(value)
                 self._loaded_text[field] = (value, field.text())
+            self._sync_serial_choice(values.serial_port)
+            with QSignalBlocker(self.serial_protocol):
+                self.serial_protocol.setCurrentIndex(
+                    self.serial_protocol.findData(values.serial_protocol)
+                )
+            self._set_serial_baudrate(values.serial_baudrate)
             self._set_auth_method(values.auth_method)
             for field, value in (
                 (self.capture_fps, values.capture_fps),
@@ -311,10 +395,14 @@ class SettingsDialog(QDialog):
 
     def set_editable(self, enabled: bool) -> None:
         """Control editing during I/O while retaining copying and dialog closure."""
-        for field in (self.serial_port, self.model, self.effort):
+        for field in (self.model, self.effort):
             field.setReadOnly(not enabled)
         self.auth_method.setEnabled(enabled)
         for field in (
+            self.serial_port,
+            self.serial_protocol,
+            self.serial_baudrate,
+            self.serial_refresh_button,
             self.capture_choices,
             self.capture_fps,
             self.preview_fps,

@@ -72,7 +72,7 @@ def _start(
     def factory(
         _options: ConnectionOptions,
         emit: Callable[[ConnectionEvent], None],
-        _prepare_thread: Callable[[], Awaitable[ThreadConfiguration]],
+        _prepare_turn: Callable[[str, str | None], Awaitable[ThreadConfiguration]],
         _on_thread_started: Callable[[str], Awaitable[None]],
     ) -> LifetimeConnection:
         connection = LifetimeConnection(emit)

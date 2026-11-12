@@ -8,19 +8,21 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 ## Python API
 
-`gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None, prepare_thread=None, on_thread_started=None)` は接続を作成します。`options` は `models.ConnectionOptions`、`emit` は `models.ConnectionEvent` を受け取る短い同期コールバックです。作成時にプロセスは起動しません。
+`gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None, prepare_turn=None, on_thread_started=None)` は接続を作成します。`options` は `models.ConnectionOptions`、`emit` は `models.ConnectionEvent` を受け取る短い同期コールバックです。作成時にプロセスは起動しません。
 
 同じasyncioループで `open()`、必要なら明示的に `login()`、認証後に `send(prompt)` を呼びます。`open()` は初期化・認証状態・モデル一覧を確認します。未認証時の `LoginEvent.url` は `login()` の開始後にだけ届き、ブラウザを開く操作は利用側で行います。`account/login/completed` とアカウントの再取得によって認証結果を確認します。
 
 `send()` は配布物内の `play.md` を開発者指示として配送し、読み取り専用・人間による承認・永続スレッドで通常ターンを開始します。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。モデルから届く本文以外に、生のプロトコル応答やstderrを表示イベントへ流しません。
 
-`prepare_thread`は初回の`send()`で呼ぶasyncコールバックです。`models.ThreadConfiguration(cwd, mcp_config)`を返し、`cwd`には準備済みの絶対パスを指定します。ランタイム起動用の`ConnectionOptions.cwd`と、会話・原記録のフォルダーを分離できます。省略時は起動用cwdを使います。接続・ログイン時にはこのコールバックを呼ばないため、保存先の準備失敗で認証は失われません。
+`prepare_turn(prompt, thread_id)`は通常の`send()`ごとに呼ぶasyncコールバックです。`prompt`は送信する依頼、`thread_id`は初回に`None`、以後は採用済みの実thread IDです。`models.ThreadConfiguration(cwd, mcp_config)`を返し、`cwd`には準備済みの絶対パスを指定します。ランタイム起動用の`ConnectionOptions.cwd`と、会話・原記録のフォルダーを分離できます。省略時は起動用cwdを使います。接続・ログイン時にはこのコールバックを呼ばないため、保存先の準備失敗で認証は失われません。
 
-`on_thread_started(thread_id)`もasyncコールバックで、ランタイムが返したthread IDをアプリが記録する境界です。完了するまで`turn/start`を送りません。準備または対応記録の失敗は`CodexConnectionError`とfailure_id付き状態で報告し、接続・認証を保持します。詳細な保存先・thread IDなどはコールバックの所有者が記録してください。失敗したthreadは採用せず、次の明示送信で準備し直します。自動再送はしません。
+コールバックから得た設定は、初回には`thread/start`へ渡します。次の送信では`thread/unsubscribe`の完了後に同じIDを`thread/resume`し、その設定を読み込みます。返されたID・モデル・承認設定・sandboxを確認してから`turn/start`へ進みます。アプリはこの経路で[ゲームI/O MCP](observation-mcp.md)の公開情報を更新し、プロトコル切替後も同じ会話を維持します。コールバック省略時は、初回に作ったthreadをそのまま使います。
+
+`on_thread_started(thread_id)`もasyncコールバックで、初回にランタイムが返したthread IDをアプリが記録する境界です。完了するまで`turn/start`を送りません。再開時には呼びません。準備または対応記録の失敗は`CodexConnectionError`とfailure_id付き状態で報告し、接続・認証を保持します。詳細な保存先・thread IDなどはコールバックの所有者が記録してください。初回の対応記録に失敗したthreadは採用せず、次の明示送信で準備し直します。自動再送はしません。
 
 アプリが記録先を準備する場合、開発者指示には`observations/<観測ID>.png`と`events.jsonl`の参照方法を追加します。画像保存は非同期なので、応答直後にファイルが存在することや、障害時に全画像が残ることは保証しません。MCPのURL・認証値は表示イベントやこの案内へ含めません。
 
-`send()`の正常終了だけではターンの受理を保証しません。初回thread作成中に中断された場合はturnを開始せず戻ります。受理は`TurnStarted`で確認します。ターン失敗の終端では失敗理由と`failure_id`を通知し、接続が継続していれば次の明示送信を許可します。
+`send()`の正常終了だけではターンの受理を保証しません。threadの準備・再開中に中断された場合はturnを開始せず戻ります。受理は`TurnStarted`で確認します。ターン失敗の終端では失敗理由と`failure_id`を通知し、接続が継続していれば次の明示送信を許可します。
 
 `CodexConnectionError` は表示可能な短い理由を持ちます。通信で受付を確認できなかった要求を自動再送しません。最後に `close()` を待ち、所有するapp-serverとイベント受信処理を終了してからasyncioループを停止してください。
 
@@ -34,7 +36,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `stop()` は質問の回答受付を閉じ、実行中ターンへ中断を要求します。`stop()` が戻った時点と `SessionStatus.phase == "stopped"` は別です。ランタイムからターンの終端を確認するまで停止完了として表示しません。停止時に空回答を送る処理はありません。
 
-開始処理中の停止も保持します。まだthreadを開始している段階ならturnを送らず、turnの受付待ちならIDが届いた時点で中断します。この場合、先に戻る `stop()` は中断RPCの完了を表しません。`send()` の取消しや受付不明の通信失敗では接続を閉じ、自動再送しません。
+開始処理中の停止も保持します。まだthreadの準備・再開中ならturnを送らず、turnの受付待ちならIDが届いた時点で中断します。この場合、先に戻る `stop()` は中断RPCの完了を表しません。`send()` の取消しや受付不明の通信失敗では接続を閉じ、自動再送しません。
 
 `TextEvent` は `item_id` ごとに扱います。`replace=False` は本文への追記、`replace=True` は確定本文への置換です。開始応答より先に届く質問・本文・ターン終端も処理します。`LoginEvent` のURLは `SessionStatus.phase` が `authenticating` でなくなった時点で破棄してください。
 
@@ -44,6 +46,6 @@ EOFでは要求を失効させ、接続を閉じて短いエラー状態を通�
 
 `codex_home` を指定すると認証・履歴の保存先を分離できます。既存の資格情報をこのディレクトリへコピーする処理はありません。作業ディレクトリは絶対パスの既存フォルダーとし、開発リポジトリと分けてください。
 
-この接続はゲーム機器の制御、Goalsによる継続攻略、APIキー認証には対応していません。
+ゲーム機器の制御はアプリが公開するMCPツールを通じて行います。Goalsによる継続攻略、APIキー認証には対応していません。
 
 標準入出力のJSON一行は末尾改行を含めて受信2 MiB、送信1 MiBまでです。受信枠はMCP結果通知のpreviewと外側JSON用であり、元画像全体を通知から復元するための枠ではありません。モデルへ渡す画像はMCPのHTTP応答で配送します。

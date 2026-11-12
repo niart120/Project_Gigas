@@ -73,11 +73,22 @@ def test_connection_failure_keeps_saved_choice_and_apply_retry_open(
     assert dialog.isVisible()
 
 
-def test_ok_without_changes_starts_selected_device_without_resaving(
-    app: tuple[ApplicationShell, ControlledCapture],
+def test_ok_normalizes_default_baud_once_then_applies_without_resaving(
+    app: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
+    assert load_settings(shell.path).serial_baudrate is None
+    assert dialog.values().serial_baudrate == 9600
+    assert not shell.dirty
+    dialog.ok_button.click()
+    qtbot.waitUntil(lambda: not dialog.isVisible())
+    assert shell.operation is None
+    assert load_settings(shell.path).serial_baudrate == 9600
+    assert len(capture.connections) == 1
+
+    dialog = open_editor(shell, capture)
+    assert dialog.values() == shell.baseline
     original = shell.path.stat().st_mtime_ns
     dialog.ok_button.click()
     assert not dialog.isVisible()

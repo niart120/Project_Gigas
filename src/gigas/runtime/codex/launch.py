@@ -20,7 +20,7 @@ def create_connection(
     emit: "Callable[[ConnectionEvent], None]",
     *,
     codex_home: "Path | None" = None,
-    prepare_thread: "Callable[[], Awaitable[ThreadConfiguration]] | None" = None,
+    prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]] | None" = None,
     on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> CodexConnection:
     """Create a connection without starting the bundled runtime.
@@ -29,7 +29,8 @@ def create_connection(
         options: Runtime working directory and model/authentication preferences.
         emit: Fast synchronous callback receiving typed connection events.
         codex_home: Optional isolated runtime home. None preserves the runtime default.
-        prepare_thread: Optional host archive/MCP preparation before thread creation.
+        prepare_turn: Optional host archive/MCP preparation for each prompt and
+            its existing thread ID, or None before the first thread.
         on_thread_started: Optional host recording awaited before the first turn.
 
     Returns:
@@ -65,6 +66,6 @@ def create_connection(
         StdioTransport(command, options.cwd, env),
         options,
         emit,
-        prepare_thread=prepare_thread,
+        prepare_turn=prepare_turn,
         on_thread_started=on_thread_started,
     )

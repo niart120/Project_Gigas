@@ -14,7 +14,7 @@
 
 ## 3. 関連仕様・調査対象
 
-- [U05親仕様](../../wip/unit_010/INPUT_AND_STOP.md)
+- [U05親仕様](../../complete/unit_010/INPUT_AND_STOP.md)
 - [U05 M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)
 - [ゲームI/O設計](../../initial/03-game-io.md)
 

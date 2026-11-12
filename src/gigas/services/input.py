@@ -1,7 +1,7 @@
 """One input connection, run permission and interruptible recorded operation."""
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
@@ -51,12 +51,15 @@ class InputGrant:
     """Identity-bound run context issued by begin_run, never accepted by value.
 
     A returned grant can remain disabled when the run began without a connection,
-    and stop never revives old grants.
+    and stop never revives old grants. Observation and persistence services are
+    fixed for this run; switching archives does not change an existing grant.
     """
 
     request_id: str
     run_id: str
     thread_id: str
+    observations: "ObservationService" = field(repr=False)
+    recording: "RecordingService" = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,24 +84,14 @@ class OperationResult:
 class InputService:
     """Own input on one asyncio loop, independently of observation and persistence.
 
-    Args:
-        observations: Existing frame selection and encoding service.
-        recording: Shared persistence owner. Save errors do not stop input.
-
     Start and finish runs explicitly. One input sequence is admitted at a time, with
     no queue. stop() revokes permission immediately; await drain_input() to join
     input cleanup. close() closes the device but does not drain image/record saves.
     The application drains observations, then recording, before closing its writer or loop.
     """
 
-    def __init__(
-        self,
-        observations: "ObservationService",
-        recording: "RecordingService",
-    ) -> None:
-        """Borrow observation and persistence services without connecting anything."""
-        self._observations = observations
-        self._recording = recording
+    def __init__(self) -> None:
+        """Prepare the input owner without connecting or creating a chat archive."""
         self._device: InputDevice | None = None
         self._available = False
         self._run: InputGrant | None = None
@@ -165,11 +158,28 @@ class InputService:
         finally:
             self._connecting = False
 
-    async def begin_run(self, message: str, thread_id: str) -> InputGrant:
+    async def begin_run(
+        self,
+        message: str,
+        thread_id: str,
+        observations: "ObservationService",
+        recording: "RecordingService",
+    ) -> InputGrant:
         """Issue a run context and submit its start record without waiting for storage.
 
         A run beginning without input remains disabled.
-        Call finish_run() before beginning another run.
+        Call finish_run() before beginning another run. Run termination leaves
+        the input connection open; close() also closes the input device.
+
+        Args:
+            message: Explicit user request recorded for this run.
+            thread_id: Actual runtime conversation ID.
+            observations: Observation service fixed for this run's archive.
+            recording: Shared persistence owner used by observations and this run.
+                Save errors do not stop input.
+
+        Returns:
+            A fixed run context accepted by identity until stopped or finished.
 
         Raises:
             InputServiceError: A run or connection transition is active.
@@ -177,13 +187,15 @@ class InputService:
         if self._run is not None or self._connecting:
             message_text = "前の実行または入力接続の切替が終了していません"
             raise InputServiceError("BUSY", message_text)
-        grant = InputGrant(f"request-{uuid4()}", f"run-{uuid4()}", thread_id)
+        grant = InputGrant(
+            f"request-{uuid4()}", f"run-{uuid4()}", thread_id, observations, recording
+        )
         self._run = grant
         self._turn_id = None
         self._suspended = False
         self._stop_code = "INTERRUPTED"
         self._stop_reason = "操作が停止されました"
-        self._recording.submit_input(RunStarted(grant.request_id, grant.run_id, thread_id, message))
+        grant.recording.submit_input(RunStarted(grant.request_id, grant.run_id, thread_id, message))
         self._grant = grant if self._available else None
         return grant
 
@@ -242,7 +254,7 @@ class InputService:
         await self.drain_input()
         grant = self._run
         if grant is not None:
-            self._recording.submit_input(
+            grant.recording.submit_input(
                 RunFinished(grant.request_id, grant.run_id, reason, self._turn_id)
             )
             self._run = None
@@ -270,12 +282,16 @@ class InputService:
     async def act(self, grant: InputGrant, sequence: tuple[InputStep, ...]) -> OperationResult:
         """Admit, record and execute a finite sequence through post-action encoding.
 
+        External cancellation during input stops the run. During observation it
+        cancels only this response, preserving the grant and any later input.
+        Cleanup remains owned by the service for drain_input().
+
         Returns:
             An explicit success or failure outcome. Admission rejection sends no
             input and has no operation_id. Input errors are never retried.
 
-        External cancellation calls the common stop path, raises CancelledError,
-        and leaves cleanup owned for drain_input().
+        Raises:
+            asyncio.CancelledError: The caller cancelled this request.
         """
         device = self._device
         if (
@@ -309,7 +325,7 @@ class InputService:
                 return OperationResult(
                     self._stop_code, operation_id=operation_id, message=self._stop_reason
                 )
-            if self._run is grant:
+            if self._operation is task:
                 self.stop()
             elif task in self._observing:
                 task.cancel()
@@ -326,7 +342,7 @@ class InputService:
         neutral_attempted = False
         transport_failed = False
         try:
-            self._recording.submit_input(
+            grant.recording.submit_input(
                 OperationStarted(
                     grant.request_id, grant.run_id, operation_id, sequence, self._turn_id
                 )
@@ -388,7 +404,7 @@ class InputService:
             try:
                 # observe selects its snapshot before its first await, so the next
                 # input can start during encoding without changing this image.
-                observation = await self._observations.observe(thread_id=grant.thread_id)
+                observation = await grant.observations.observe(thread_id=grant.thread_id)
                 result = replace(result, observation=observation)
             except asyncio.CancelledError:
                 result = replace(
@@ -405,7 +421,7 @@ class InputService:
                 )
             finally:
                 self._observing.discard(task)
-        self._recording.submit_input(
+        grant.recording.submit_input(
             OperationFinished(
                 grant.run_id,
                 operation_id,

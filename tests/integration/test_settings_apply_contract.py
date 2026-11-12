@@ -1,24 +1,35 @@
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture.models import DeviceInfo
+from gigas.game_io.input.config import resolve_serial_config
+from gigas.game_io.input.serial import SerialPort
 from gigas.storage.settings import Settings, load_settings, save_settings
 from gigas.ui.main_window import MainWindow
 from gigas.ui.settings_dialog import SettingsDialog
 from tests.integration.peers.controlled_capture import ControlledCapture
 
+if TYPE_CHECKING:
+    from gigas.game_io.input.config import SerialConfig
+
 
 @pytest.fixture
-def app(qtbot: QtBot, tmp_path: Path) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
+def app(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-a"))
+    save_settings(
+        path, Settings(capture_device="path-a", serial_port="COM3", serial_protocol="pokecon")
+    )
     capture = ControlledCapture()
     shell = ApplicationShell(path, capture_service=capture)
+    monkeypatch.setattr(shell.service, "apply_input", lambda _config: None)
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)
     capture.state = replace(
@@ -66,7 +77,7 @@ def test_editor_keeps_project_path_when_editing_visible_settings(
     dialog.set_values(original)
     dialog.model.setText("changed")
 
-    assert dialog.values() == replace(original, model="changed")
+    assert dialog.values() == replace(original, model="changed", serial_baudrate=9600)
 
 
 def test_explicit_offline_apply_clears_saved_device_after_same_device_can_start(
@@ -105,44 +116,89 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
 
 
 @pytest.mark.parametrize("running", [False, True])
-@pytest.mark.parametrize("observation_only", [False, True])
-def test_apply_capture_effect_depends_on_changed_settings(
+@pytest.mark.parametrize(
+    ("changed", "capture_applied", "input_applied"),
+    [
+        (("port",), False, True),
+        (("protocol",), False, True),
+        (("baud",), False, True),
+        (("capture",), True, False),
+        (("observation",), False, False),
+        (("general",), True, False),
+        ((), True, True),
+        (("port", "observation"), False, True),
+        (("capture", "observation"), True, False),
+        (("port", "capture"), True, True),
+        (("port", "capture", "observation"), True, True),
+        (("general", "observation"), True, False),
+        (("general", "port"), True, True),
+    ],
+)
+def test_apply_effect_depends_on_changed_settings(
     app: tuple[ApplicationShell, ControlledCapture],
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
+    changed: tuple[str, ...],
     *,
     running: bool,
-    observation_only: bool,
+    capture_applied: bool,
+    input_applied: bool,
 ) -> None:
     shell, capture = app
     dialog = open_editor(shell, capture)
     codex_connects: list[object] = []
     applied_resolutions: list[str] = []
+    input_configs: list[SerialConfig | None] = []
     monkeypatch.setattr(shell.service, "connect_runtime", codex_connects.append)
     monkeypatch.setattr(shell.service, "set_observation_resolution", applied_resolutions.append)
+    monkeypatch.setattr(shell.service, "apply_input", input_configs.append)
+    assert shell.baseline.serial_baudrate is None
+    assert dialog.values().serial_baudrate == 9600
+    assert not shell.dirty
     if running:
         dialog.save_button.click()
         qtbot.waitUntil(lambda: len(capture.connections) == 1)
         capture.stream()
         qtbot.waitUntil(lambda: not shell.video.applying)
+    input_configs.clear()
     frame = capture.snapshot().frame
-    if observation_only:
-        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
-    else:
-        dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+    for change in changed:
+        if change == "port":
+            dialog.set_serial_ports((SerialPort("COM7", "Controller"),))
+            dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM7"))
+        elif change == "protocol":
+            dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("3ds"))
+        elif change == "baud":
+            dialog.serial_baudrate.setCurrentIndex(dialog.serial_baudrate.findData(57600))
+        elif change == "capture":
+            dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
+        elif change == "observation":
+            dialog.observation_resolution.setCurrentIndex(
+                dialog.observation_resolution.findData("hd")
+            )
+        elif change == "general":
+            dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+    assert shell.dirty == bool(changed)
+    target = dialog.values()
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    if observation_only:
-        assert shell.baseline.observation_resolution == "hd"
-        assert load_settings(shell.path).observation_resolution == "hd"
+    expected_connections = int(running) + int(
+        capture_applied and (not running or "capture" in changed)
+    )
+    qtbot.waitUntil(lambda: len(capture.connections) == expected_connections)
+    assert capture.disconnects == int(running and "capture" in changed)
+    if not capture_applied:
         assert capture.snapshot().frame is frame
-    else:
-        assert not shell.baseline.preview_letterbox
-    assert dialog.capture_choices.currentData() == "path-a"
-    assert len(capture.connections) == int(running or not observation_only)
-    assert capture.disconnects == 0
+    assert input_configs == (
+        [resolve_serial_config(target.serial_port, target.serial_protocol, target.serial_baudrate)]
+        if input_applied
+        else []
+    )
+    assert load_settings(shell.path) == target
+    assert shell.baseline == target
+    assert not shell.dirty
     assert codex_connects == []
-    assert applied_resolutions[-1] == shell.baseline.observation_resolution
+    assert applied_resolutions[-1] == target.observation_resolution
     assert dialog.save_button.isEnabled()
 
 

@@ -195,8 +195,10 @@ class CodexConnection:
         peer: Transport implementing the actual RPC boundary.
         options: Working directory and requested authentication/model settings.
         emit: Callback receiving typed application events, never raw RPC frames.
-        prepare_thread: Optional async host preparation before the first thread.
-            None uses options.cwd and no application MCP overrides.
+        prepare_turn: Optional async host preparation for each ordinary send,
+            receiving its prompt and the confirmed thread ID, or None initially.
+            Its configuration starts or resumes the thread before the turn.
+            None uses options.cwd and leaves an existing thread subscribed.
         on_thread_started: Optional async host recording of the confirmed thread ID.
             Completion is required before accepting the thread or starting a turn.
             Callback errors preserve authentication and permit an explicit retry.
@@ -208,14 +210,14 @@ class CodexConnection:
         options: "ConnectionOptions",
         emit: "Callable[[ConnectionEvent], None]",
         *,
-        prepare_thread: "Callable[[], Awaitable[ThreadConfiguration]] | None" = None,
+        prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]] | None" = None,
         on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
     ) -> None:
         """Store connection dependencies without performing I/O."""
         self._peer = peer
         self._options = options
         self._emit = emit
-        self._prepare_thread = prepare_thread
+        self._prepare_turn = prepare_turn
         self._on_thread_started = on_thread_started
         self._pump: asyncio.Task[None] | None = None
         self._opened = False
@@ -336,7 +338,7 @@ class CodexConnection:
             self._login_completions.clear()
 
     async def send(self, prompt: str) -> None:
-        """Start one ordinary turn after delivering the packaged developer instructions.
+        """Prepare the thread's current configuration and start one ordinary turn.
 
         Args:
             prompt: Nonempty user text. Calls are not retried after unknown acceptance.
@@ -361,8 +363,8 @@ class CodexConnection:
         self._stopping = False
         self._sending = True
         try:
-            if self._thread_id is None:
-                await self._start_thread()
+            if self._thread_id is None or self._prepare_turn is not None:
+                await self._configure_thread(prompt)
             if self._stopping:
                 self._status("stopped")
                 return
@@ -545,14 +547,14 @@ class CodexConnection:
             message = "作業フォルダーが無効"
             raise CodexConnectionError(message)
 
-    async def _start_thread(self) -> None:
+    async def _configure_thread(self, prompt: str) -> None:
         context = ThreadConfiguration(self._options.cwd)
-        if self._prepare_thread is not None:
+        if self._prepare_turn is not None:
             try:
-                context = await self._prepare_thread()
+                context = await self._prepare_turn(prompt, self._thread_id)
                 valid_directory = context.cwd.is_absolute() and context.cwd.is_dir()
             except Exception as error:
-                message = "チャットの記録先を準備できない"
+                message = "チャットの実行準備に失敗"
                 raise _ThreadPreparationError(message) from error
             if not valid_directory:
                 message = "チャットの記録先が無効"
@@ -563,7 +565,7 @@ class CodexConnection:
         if not instructions.strip():
             message = "共通指示が空"
             raise CodexConnectionError(message)
-        if self._prepare_thread is not None:
+        if self._prepare_turn is not None:
             instructions += (
                 f"\n\n観測の記録先: {context.cwd}\n"
                 "observeが返す観測IDの画像はobservations/<観測ID>.png、"
@@ -586,21 +588,31 @@ class CodexConnection:
         config.update(context.mcp_config)
         if self._stopping:
             return
-        result = _object(
-            await self._peer.request(
-                "thread/start",
-                {
-                    "cwd": str(context.cwd),
-                    "model": self._model,
-                    "developerInstructions": instructions,
-                    "ephemeral": False,
-                    "sandbox": "read-only",
-                    "approvalPolicy": "on-request",
-                    "approvalsReviewer": "user",
-                    "config": config,
-                },
+        params: JsonObject = {
+            "cwd": str(context.cwd),
+            "model": self._model,
+            "developerInstructions": instructions,
+            "sandbox": "read-only",
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "user",
+            "config": config,
+        }
+        if self._thread_id is None:
+            params["ephemeral"] = False
+            method = "thread/start"
+        else:
+            result = _object(
+                await self._peer.request("thread/unsubscribe", {"threadId": self._thread_id})
             )
-        )
+            if result.get("status") not in ("unsubscribed", "notSubscribed", "notLoaded"):
+                message = "Codexのチャット購読解除を確認できない"
+                raise CodexConnectionError(message)
+            if self._stopping:
+                return
+            params["threadId"] = self._thread_id
+            params["excludeTurns"] = True
+            method = "thread/resume"
+        result = _object(await self._peer.request(method, params))
         if (
             result.get("approvalPolicy") != "on-request"
             or result.get("approvalsReviewer") != "user"
@@ -610,7 +622,10 @@ class CodexConnection:
             message = "Codexの実行設定が要求と不一致"
             raise CodexConnectionError(message)
         thread_id = _text(_object(result.get("thread")).get("id"))
-        if self._on_thread_started is not None:
+        if self._thread_id is not None and thread_id != self._thread_id:
+            message = "CodexのチャットIDが要求と不一致"
+            raise CodexConnectionError(message)
+        if self._thread_id is None and self._on_thread_started is not None:
             try:
                 await self._on_thread_started(thread_id)
             except Exception as error:

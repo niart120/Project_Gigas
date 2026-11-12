@@ -57,7 +57,11 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     qtbot.waitUntil(lambda: not shell.video.discovering)
     assert dialog.capture_discovery_status.isHidden()
     assert dialog.values() == replace(
-        shell.baseline, capture_device="path-a", capture_fps=30, model="unsaved model"
+        shell.baseline,
+        capture_device="path-a",
+        capture_fps=30,
+        model="unsaved model",
+        serial_baudrate=9600,
     )
     assert not capture.connections
     assert load_settings(shell.path) == shell.baseline

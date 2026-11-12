@@ -34,7 +34,7 @@ neutral = encode_state(InputState(), protocol)
 
 `resolve_serial_config(port, protocol, baudrate)`は設定を接続用の値へ解決します。空portなら`None`、baudrateが`None`ならプロトコルの既定値になります。候補と検証は`PROTOCOLS`を共用し、対応しない値は`ValueError`になります。
 
-`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。シリアル入力の実接続・実機動作は各OSとも未検証です。
+`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。WindowsのCH552・9600 baudで短い操作・解除送出・画面変化を確認済みです。PokeCon・3DSの実機、他OS、通信断・長時間運転は未検証です。
 
 `SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`は完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
@@ -44,14 +44,14 @@ neutral = encode_state(InputState(), protocol)
 
 ## 記録付き実行API
 
-`gigas.services.input.InputService(observations, recording)`は、一つの入力接続・操作権・実行中の列を所有します。組立側が一つの`RecordingService(writer)`を生成し、観測と入力へ渡します。保存失敗のcallbackは診断通知に使い、入力サービスの構築では他サービスのcallbackや会話IDを変更しません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として受け取り、`SerialInput`をそのまま渡せます。
+`gigas.services.input.InputService()`は、一つの入力接続・操作権・実行中の列を所有します。チャットや記録先を作らずに入力接続を開けます。組立側はrun開始時に、その記録先の`ObservationService`と共通の`RecordingService`を渡します。保存失敗のcallbackは診断通知に使い、入力サービスの構築では他サービスのcallbackや会話IDを変更しません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として受け取り、`SerialInput`をそのまま渡せます。
 
 ```python
+service = InputService()
+await service.connect(SerialInput(config))
 recording = RecordingService(writer)
 observations = ObservationService(reader, recording)
-service = InputService(observations, recording)
-await service.connect(SerialInput(config))
-grant = await service.begin_run("Aを押して画面を確認", thread_id)
+grant = await service.begin_run("Aを押して画面を確認", thread_id, observations, recording)
 # runtimeから実turn IDを取得した時点で関連付ける。
 service.bind_turn(grant, turn_id)
 result = await service.act(grant, parse_sequence(sequence, config.protocol))
@@ -63,7 +63,7 @@ await recording.drain()
 
 `connect(device)`は旧列を停止して旧接続を閉じ、その後に新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。接続中の停止は未開始のopenを取り消し、開始済みopenは収束してから閉じます。接続だけでは操作権を発行しません。
 
-`begin_run`は開始記録を非同期投入してInputGrantを返します。保存成功を待ちません。入力未接続のrunは入力不可で、停止済みGrantは復活しません。前runのfinish_run後に次のrunを開始します。
+`begin_run(message, thread_id, observations, recording)`は観測・記録サービスをそのrunのInputGrantへ固定し、開始記録を非同期投入して返します。保存成功を待ちません。入力未接続のrunは入力不可で、停止済みGrantは復活しません。前runのfinish_run後に次のrunを開始します。run終了だけでは入力接続を閉じません。チャット切断や記録先変更でも同じ入力所有者を使い、旧runの観測・記録をdrainしてから旧writerを閉じます。
 
 `bind_turn(grant, turn_id)`は現在のrunへ実turn IDを対応付け、以後の操作開始・run終端記録へ使います。終了済み・別runのGrantにはFalseを返します。停止中のrunへの対応付けでも操作権は復活しません。
 
@@ -73,7 +73,9 @@ await recording.drain()
 
 `stop()`は同期で権限を失効させ、実行中の列を一度だけ取り消します。`await drain_input()`で操作列の送信・解除と取消した観測要求の収束を待ちます。接続処理の収束は`close()`が待ちます。正常な停止は接続を維持し、送信・解除失敗では接続を閉じて明示的な再適用を待ちます。`suspend()`は同runの一時保留で、実行中の列を取り消し、新規入力を拒否します。`resume()`は保留を解除しますが、停止済みGrantや取消した列を復活させません。
 
-呼出し側が`act`を取り消した場合も共通停止を行い、呼出し側には`CancelledError`を返します。内部の終了処理はサービスが保持するので、`drain_input`で回収してください。入力枠は列と解除の終了時に解放し、直後に最新Frameを選ぶ。符号化中は次の入力を許可する。停止は観測応答を取り消し、開始済みの符号化・保存は観測側で継続する。停止時に観測IDの完成を待たず、後から操作記録へ追記しない。run・操作の開始と終端は同じ記録窓口へ順に非同期投入する。保存完了を入力開始の前提にせず、保存失敗でも入力を止めない。記録が欠けたまま操作される場合を許容し、失敗は診断へ残す。
+呼出し側による`act`の取消しは、入力実行中なら共通停止を行い、入力完了後の観測待ちならその要求の観測応答だけを取り消します。観測待ちの取消しでは、操作権や後続の入力を維持します。どちらも呼出し側には`CancelledError`を返します。内部の終了処理はサービスが保持するので、`drain_input`で回収してください。
+
+run・操作の開始と終端は同じ記録窓口へ順に非同期投入します。保存完了を入力開始の前提にせず、保存失敗でも入力を止めません。記録が欠けたまま操作される場合を許容し、失敗は診断へ残します。
 
 `finish_run(reason)`は先に失効させ、入力終了後にrun終了記録を依頼します。`close()`は進行中の接続処理も回収して機器を閉じます。保存は別の所有者が保持するため、終了時は続けて`observations.drain()`で符号化を回収し、`recording.drain()`で保存を回収してからwriterとイベントループを閉じてください。符号化失敗時も保存の回収は必要です。これらの内部APIはGUI・MCPへの配線や実機受入を含みません。
 
