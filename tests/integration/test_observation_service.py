@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
@@ -9,7 +10,9 @@ import pytest
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
-from gigas.services.observation import ObservationService
+from gigas.services import input_observation
+from gigas.services.input_observation import observe_after
+from gigas.services.observation import ObservationInterrupted, ObservationService
 from gigas.storage import project
 from gigas.storage.input_events import RunFinished, RunStarted
 from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
@@ -17,6 +20,148 @@ from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
+
+
+@pytest.mark.parametrize("started", [90, 100])
+def test_post_input_observation_waits_for_read_started_after_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    started: int,
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    crossing = replace(sample_frame(), read_started_ns=started, monotonic_ns=110)
+    fresh = replace(crossing, sequence=8, read_started_ns=102, monotonic_ns=120)
+    reads = 0
+
+    def snapshot() -> CaptureSnapshot:
+        nonlocal reads
+        reads += 1
+        return CaptureSnapshot(
+            phase="streaming", generation=2, frame=crossing if reads == 1 else fresh
+        )
+
+    reader = CaptureReader(snapshot)
+    monkeypatch.setattr(input_observation, "monotonic_ns", lambda: 130)
+
+    async def scenario() -> None:
+        # Its latest cache deliberately differs from the selected post-input frame.
+        service = ObservationService(
+            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=crossing)),
+            writer,
+        )
+        after = await observe_after(reader, service, 2, 100)
+        assert reads == 2
+        assert after.source_frame.sequence == 8
+        latest = await service.observe()
+        assert latest.source_frame.sequence == 7
+        await service.drain()
+        assert (writer.path / after.image_path).read_bytes() == after.png_bytes
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize(
+    ("phase", "generation", "now", "code"),
+    [
+        ("stopping", 2, 101, "DEVICE_UNAVAILABLE"),
+        ("streaming", 3, 101, "DEVICE_UNAVAILABLE"),
+        ("streaming", 2, 5_000_000_101, "OBSERVATION_TIMEOUT"),
+    ],
+)
+def test_post_input_observation_rejects_loss_change_or_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    generation: int,
+    now: int,
+    code: str,
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    snapshot = CaptureSnapshot(
+        phase="stopping" if phase == "stopping" else "streaming",
+        generation=generation,
+        frame=sample_frame(),
+    )
+    reader = CaptureReader(lambda: snapshot)
+    monkeypatch.setattr(input_observation, "monotonic_ns", lambda: now)
+
+    async def scenario() -> None:
+        service = ObservationService(reader, writer)
+        with pytest.raises(ObservationError) as failure:
+            await observe_after(reader, service, 2, 100)
+        assert failure.value.code == code
+        await service.drain()
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        writer.close()
+
+
+def test_post_input_cancel_recovers_encoding_without_waiting_for_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    encoding, release_encoding, saving, release_save = Event(), Event(), Event(), Event()
+    encode, publish = Observation.from_frame, project._publish_image
+    frame = sample_frame()
+    reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", generation=2, frame=frame))
+
+    def delayed_encode(
+        _cls: type[Observation],
+        source: "Frame",
+        *,
+        resolution: ObservationResolution = "full_hd",
+    ) -> Observation:
+        encoding.set()
+        if not release_encoding.wait(5):
+            raise TimeoutError
+        return encode(source, resolution=resolution)
+
+    def delayed_save(path: Path, data: bytes) -> None:
+        saving.set()
+        if not release_save.wait(5):
+            raise TimeoutError
+        publish(path, data)
+
+    monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
+    monkeypatch.setattr(project, "_publish_image", delayed_save)
+
+    async def scenario() -> None:
+        service = ObservationService(reader, writer)
+        task = asyncio.create_task(service.observe_frame(frame))
+        try:
+            assert await asyncio.to_thread(encoding.wait, 2)
+            for _ in range(2):
+                task.cancel()
+                await asyncio.sleep(0)
+                assert not task.done()
+            with pytest.raises(ObservationError) as busy:
+                await service.observe()
+            assert busy.value.code == "BUSY"
+            release_encoding.set()
+            with pytest.raises(ObservationInterrupted) as interrupted:
+                await asyncio.wait_for(task, 2)
+            assert await asyncio.to_thread(saving.wait, 2)
+            assert not list((writer.path / "observations").glob("*.png"))
+        finally:
+            release_encoding.set()
+            release_save.set()
+            await service.drain()
+        observation = interrupted.value.observation
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release_encoding.set()
+        release_save.set()
+        writer.close()
 
 
 def test_cancelled_start_keeps_storage_order_and_drain_ownership(

@@ -15,6 +15,20 @@ if TYPE_CHECKING:
     from gigas.storage.project import ProjectWriter
 
 
+class ObservationInterrupted(asyncio.CancelledError):
+    """Cancelled image delivery with a finished observation still owned by saving.
+
+    Attributes:
+        observation: Completed PNG and ID for the interrupted operation's record.
+            Its availability does not turn the cancelled operation into success.
+    """
+
+    def __init__(self, observation: Observation) -> None:
+        """Retain the already generated result without encoding it again."""
+        super().__init__()
+        self.observation = observation
+
+
 class ObservationService:
     """Return encoded snapshots and save the same values without delaying observations.
 
@@ -78,11 +92,45 @@ class ObservationService:
         if snapshot.phase != "streaming" or snapshot.frame is None:
             message = "観測できる映像がありません"
             raise ObservationError("DEVICE_UNAVAILABLE", message)
-        self._worker = asyncio.create_task(
-            self._encode(snapshot.frame, self.resolution, self.thread_id)
-        )
+        return await asyncio.shield(self._start_encoding(snapshot.frame))
+
+    async def observe_frame(self, frame: "Frame") -> "Observation":
+        """Encode an already selected frame without replacing it with the cache.
+
+        Args:
+            frame: Immutable image selected by the caller's freshness contract.
+
+        Returns:
+            The same complete Observation submitted for asynchronous saving.
+
+        Raises:
+            ObservationError: Another image is encoding, or encoding fails.
+
+        This entry retains its encoding until completion even after cancellation,
+        so an input owner can hold its operation slot until the image is settled.
+        Persistence is independent and is not awaited. Cancellation suppresses
+        successful delivery and raises ObservationInterrupted carrying the finished
+        observation for recording. Use drain() at shutdown to recover submitted saves.
+        """
+        worker = self._start_encoding(frame)
+        cancelled = False
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                cancelled = True
+        observation = worker.result()
+        if cancelled:
+            raise ObservationInterrupted(observation)
+        return observation
+
+    def _start_encoding(self, frame: "Frame") -> "asyncio.Task[Observation]":
+        if self._worker is not None and not self._worker.done():
+            message = "観測画像の符号化中です"
+            raise ObservationError("BUSY", message)
+        self._worker = asyncio.create_task(self._encode(frame, self.resolution, self.thread_id))
         self._worker.add_done_callback(_retrieve_exception)
-        return await asyncio.shield(self._worker)
+        return self._worker
 
     async def _encode(
         self, frame: "Frame", resolution: "ObservationResolution", thread_id: str | None

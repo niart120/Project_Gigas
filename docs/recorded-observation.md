@@ -94,6 +94,14 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 `drain()`自体も取り消された場合、保存完了はまだ確認できていません。この例でもwriterを閉じず、呼出側に残した同じサービスで改めて`drain()`を待ってください。最後の加工・符号化の`ObservationError`が返った場合は、それ以前の保存も終了しているため、失敗を報告したうえでwriterを閉じられます。保存失敗は`drain()`から送出せず、前述のコールバックまたはログで別途確認します。実処理の終了前にイベントループを閉じたり、保存先を切り替えたりしないでください。
 
+## 操作後の画像
+
+`gigas.services.input_observation.observe_after(reader, service, generation, boundary_ns)`は、最後の入力解除・待機完了の単調時計より後にreadを開始したFrameを選びます。同じ取得世代の画像を境界時刻から5秒以内に得られなければ`OBSERVATION_TIMEOUT`、取得停止や世代変更なら`DEVICE_UNAVAILABLE`です。PC上のread順序を確認するAPIであり、ゲームの描画完了や機器内部の遅延を保証しません。
+
+選んだFrameは`ObservationService.observe_frame(frame)`で符号化します。キャッシュの取り直しは行わず、通常の`observe()`と同じ符号化枠・解像度設定・保存窓口を使います。通常の`observe()`は引き続き最新キャッシュを一度取得し、操作後の新フレームを待ちません。
+
+事後Frame待ちは取消しで直ちに終了します。`observe_frame`で符号化を開始した後は、その処理を回収してから取消しを返します。画像が完成した場合は`ObservationInterrupted`（`asyncio.CancelledError`の派生型）の`observation`属性で確定した画像とIDを得られ、中断の記録へ対応付けられます。操作成功や応答配送の成功を示す結果ではありません。保存は独立して進み、ここでは完了を待ちません。
+
 ## 保存形式と読込
 
 プロジェクトには`project.json`、`events.jsonl`、`observations/`、OSロック用の`.gigas.lock`を置きます。管理情報はスキーマ版、プロジェクトID、作成UTC時刻です。ログの共通項目はスキーマ版、イベントID、追記順、記録UTC時刻、イベント種別、プロジェクトID、payloadです。
