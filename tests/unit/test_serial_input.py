@@ -73,7 +73,8 @@ def test_open_sends_neutral_and_io_stays_on_one_worker() -> None:
     assert port.calls[0][1] != get_ident()
 
 
-def test_cancelled_write_is_recovered_before_neutral_or_close() -> None:
+@pytest.mark.parametrize("cancel_count", [1, 2])
+def test_cancelled_write_is_recovered_before_neutral_or_close(cancel_count: int) -> None:
     port = Port()
 
     async def scenario() -> None:
@@ -84,8 +85,9 @@ def test_cancelled_write_is_recovered_before_neutral_or_close() -> None:
         task = asyncio.create_task(device.send(InputState(buttons=("A",))))
         try:
             assert await asyncio.to_thread(port.entered.wait, 2)
-            task.cancel()
-            await asyncio.sleep(0)
+            for _ in range(cancel_count):
+                task.cancel()
+                await asyncio.sleep(0)
             assert not task.done()
             with pytest.raises(SerialInputError):
                 await device.send(InputState(buttons=("B",)))

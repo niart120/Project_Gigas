@@ -164,15 +164,19 @@ class SerialInput:
             raise SerialInputError(message)
         future = asyncio.get_running_loop().run_in_executor(self._executor, operation)
         self._pending = future
+        cancelled = False
         try:
-            try:
-                await asyncio.shield(future)
-            except asyncio.CancelledError:
-                await asyncio.shield(future)
-                raise
+            while not future.done():
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    cancelled = True
+            future.result()
         except OSError as error:
             message = f"シリアル通信に失敗しました: {error}"
             raise SerialInputError(message) from error
+        if cancelled:
+            raise asyncio.CancelledError
 
     def _open(self) -> None:
         if self._connection is not None:

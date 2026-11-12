@@ -42,8 +42,9 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 | refactor-skipped | T01 protocol別の既定・baud検証と設定往復・接続用値の解決 | new | unit/integration | 既存settings試験を拡張。14件の期待失敗→36件成功。09c8c21 |
 | refactor-skipped | T02 有限列の全体検査と3形式の完全状態・neutralのbyte列 | new | unit | 未実装importによるred→69件成功。代表byte列・全体拒否・巨大な有限値・不変性。b71a3b1 |
 | refactor-skipped | T03 read開始時計が取得・共有領域・readerを通って保持される | new | unit/integration | 既存capture試験の18件期待失敗→37件成功。取得/観測/保存/video結合83件成功。型・lint成功。bf02e63 |
-| green | T04 単一serial workerで開閉・送信を扱い、取消し後も進行中writeを回収する | new | unit/integration | 未実装importでred→6件成功。部分write・例外・設定・worker所有・取消し回収。構造整理不要 |
+| refactor-skipped | T04 単一serial workerで開閉・送信を扱い、取消し後も進行中writeを回収する | new | unit/integration | 未実装importでred→6件成功。部分write・例外・設定・worker所有・取消し回収。0aced30 |
 | todo | T05 run/操作と観測を共通窓口で順序保存し、取消し後も回収する | new | integration | 既存保存・観測試験へ統合 |
+| green | T04R 繰り返し取消されても進行中writeを回収してから解除できる | regression | unit | 2回目のcancelで期待失敗1件→7件成功。取消しを記憶してI/O完了回収後に伝える。構造整理不要 |
 | todo | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 長い待機、保存待ち、通信失敗、古いGrantを含む |
 | todo | T07 操作後のFrameを選び、結果・観測ID・非同期保存を結び付ける | new | integration | 最新cache observe維持、取得変更・期限・符号化競合・停止 |
 
