@@ -584,7 +584,6 @@ class ApplicationShell(QObject):
         self.window.settings_action.setEnabled(
             not closing and self._io_request is None and not self._project_pending
         )
-        self.window.exit_action.setEnabled(not self.committed)
         self.window.set_window_size_state(
             self.baseline.window_size_preset,
             enabled=self._can_edit and (self.dialog is None or not self.dialog.isVisible()),

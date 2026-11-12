@@ -50,6 +50,7 @@ closed = False
 def close_window():
     for window in QApplication.topLevelWidgets():
         if isinstance(window, QMainWindow) and window.isVisible():
+            assert not window.settings_button.icon().isNull(), "settings icon missing"
             shown.append(window)
             window.close()
             break
