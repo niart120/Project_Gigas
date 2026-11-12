@@ -32,8 +32,8 @@ M2のGUI・MCP入力公開、実機受入、Bluetooth、追加の管理クラス
 |---|---|---|---|---|
 | refactor-done | R01 保存した入力列は現在のprotocol候補に依存せず検査・読込できる | regression | unit/integration | 期待失敗2件→関連131件成功。既存保存試験で能力変更後の再読込を確認。a974947 |
 | todo | R02 最新・事後観測と操作は共通保存を明示的に共有し、停止と保存の寿命を維持する | characterization | integration | 実事後観測を通るfixtureへ改訂 |
-| green | R03 press送信中の停止でも回収済み成功を結果と記録に残す | regression | integration | 既存neutral停止試験をpressにも拡張。期待失敗1件→2件成功 |
-| todo | R04 run開始後に判明したturn IDを記録し、旧runの通知を拒否する | regression | integration | 操作記録試験を改訂 |
+| refactor-done | R03 press送信中の停止でも回収済み成功を結果と記録に残す | regression | integration | 既存neutral停止試験をpressにも拡張。期待失敗1件→2件成功。49351c3 |
+| green | R04 run開始後に判明したturn IDを記録し、旧runの通知を拒否する | regression | integration | 既存操作記録・旧Grant試験を改訂。期待失敗2件→関連23件成功 |
 
 ## 7. 設計メモ
 

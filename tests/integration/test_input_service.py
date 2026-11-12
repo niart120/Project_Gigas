@@ -115,7 +115,8 @@ def press(button: str = "A", duration: int = 1) -> InputStep:
 def test_sequence_records_content_results_and_observation(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
-        grant = await harness.service.begin_run("A、待機、B", "thread", turn_id="turn")
+        grant = await harness.service.begin_run("A、待機、B", "thread")
+        assert harness.service.bind_turn(grant, "turn")
         result = await harness.service.act(grant, (press(), InputStep("wait", 1), press("B")))
         assert result.code == "OK"
         assert result.completed_steps == 3
@@ -133,6 +134,11 @@ def test_sequence_records_content_results_and_observation(harness: Harness) -> N
             "input.run_finished",
         ]
         payload = rows[-2]["payload"]
+        started, ended = rows[1]["payload"], rows[-1]["payload"]
+        assert isinstance(started, dict)
+        assert isinstance(ended, dict)
+        assert started["turn_id"] == "turn"
+        assert ended["turn_id"] == "turn"
         assert isinstance(payload, dict)
         assert payload["operation_id"] == result.operation_id
         assert payload["observation_id"] == result.observation.observation_id
@@ -169,9 +175,18 @@ def test_long_press_stops_once_releases_and_rejects_old_grant(harness: Harness) 
         assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
         await harness.service.finish_run("stopped")
         new_grant = await harness.service.begin_run("B", "thread")
+        assert harness.service.bind_turn(new_grant, "new-turn")
+        assert not harness.service.bind_turn(grant, "old-turn")
         assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
         assert (await harness.service.act(new_grant, (press("B"),))).code == "OK"
+        harness.service.stop()
+        assert harness.service.bind_turn(new_grant, "new-turn")
+        assert (await harness.service.act(new_grant, (press(),))).code == "INPUT_DISABLED"
         await harness.close()
+        rows = harness.records()
+        ended = rows[-1]["payload"]
+        assert isinstance(ended, dict)
+        assert ended["turn_id"] == "new-turn"
 
     asyncio.run(scenario())
 

@@ -60,7 +60,6 @@ class InputGrant:
     request_id: str
     run_id: str
     thread_id: str
-    turn_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +104,7 @@ class InputService:
         self._device: InputDevice | None = None
         self._available = False
         self._run: InputGrant | None = None
+        self._turn_id: str | None = None
         self._grant: InputGrant | None = None
         self._revoked = True
         self._suspended = False
@@ -167,9 +167,7 @@ class InputService:
         finally:
             self._connecting = False
 
-    async def begin_run(
-        self, message: str, thread_id: str, *, turn_id: str | None = None
-    ) -> InputGrant:
+    async def begin_run(self, message: str, thread_id: str) -> InputGrant:
         """Persist an explicit request, then issue its identity-bound run context.
 
         A run beginning without input remains disabled. Stop during the save also
@@ -181,8 +179,9 @@ class InputService:
         if self._run is not None or self._connecting:
             message_text = "前の実行または入力接続の切替が終了していません"
             raise InputServiceError("BUSY", message_text)
-        grant = InputGrant(f"request-{uuid4()}", f"run-{uuid4()}", thread_id, turn_id)
+        grant = InputGrant(f"request-{uuid4()}", f"run-{uuid4()}", thread_id)
         self._run = grant
+        self._turn_id = None
         self._revoked = False
         self._suspended = False
         self._stop_code = "INTERRUPTED"
@@ -203,6 +202,19 @@ class InputService:
         if self._run is grant:
             self._observations.thread_id = thread_id
         return grant
+
+    def bind_turn(self, grant: InputGrant, turn_id: str) -> bool:
+        """Attach a known runtime turn to the current run without granting input.
+
+        Returns:
+            False for a finished or different run; otherwise records its turn ID
+            for subsequent operation and run-finished events. A stopped current
+            run can still receive its ID, but its input permission stays revoked.
+        """
+        if grant is not self._run:
+            return False
+        self._turn_id = turn_id
+        return True
 
     def stop(self, reason: str = "操作が停止されました", *, code: str = "INTERRUPTED") -> None:
         """Revoke permission and cancel the current operation once, without awaiting I/O."""
@@ -246,7 +258,7 @@ class InputService:
         grant = self._run
         if grant is not None:
             self._recording.submit_input(
-                RunFinished(grant.request_id, grant.run_id, reason, grant.turn_id)
+                RunFinished(grant.request_id, grant.run_id, reason, self._turn_id)
             )
             self._run = None
 
@@ -334,7 +346,7 @@ class InputService:
         try:
             await self._recording.record_input(
                 OperationStarted(
-                    grant.request_id, grant.run_id, operation_id, sequence, grant.turn_id
+                    grant.request_id, grant.run_id, operation_id, sequence, self._turn_id
                 )
             )
             for step in sequence:
