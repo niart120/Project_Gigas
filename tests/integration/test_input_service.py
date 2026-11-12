@@ -398,6 +398,72 @@ def test_wait_only_sequence_is_interruptible_without_input(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("boundary", ["frame", "encoding"])
+@pytest.mark.parametrize("stopped", [False, True])
+def test_suspend_during_observation_preserves_grant_unless_stopped(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    *,
+    stopped: bool,
+) -> None:
+    frame_waiting, release_frame = asyncio.Event(), asyncio.Event()
+    encoding, release_encoding = Event(), Event()
+    encode = Observation.from_frame
+
+    def delayed_encode(
+        _cls: type[Observation],
+        source: "Frame",
+        *,
+        resolution: "ObservationResolution" = "full_hd",
+    ) -> Observation:
+        encoding.set()
+        if not release_encoding.wait(5):
+            raise TimeoutError
+        return encode(source, resolution=resolution)
+
+    async def observed(
+        _reader: CaptureReader,
+        service: ObservationService,
+        _generation: int,
+        _boundary_ns: int,
+    ) -> Observation:
+        if boundary == "frame":
+            frame_waiting.set()
+            await release_frame.wait()
+        return await service.observe_frame(harness.frame)
+
+    monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
+    monkeypatch.setattr(input_module, "observe_after", observed)
+
+    async def scenario() -> None:
+        await harness.service.connect(harness.device)
+        grant = await harness.service.begin_run("A", "thread")
+        operation = asyncio.create_task(harness.service.act(grant, (press(),)))
+        try:
+            if boundary == "frame":
+                await asyncio.wait_for(frame_waiting.wait(), 3)
+            else:
+                assert await asyncio.to_thread(encoding.wait, 3)
+            harness.service.suspend()
+            if stopped:
+                harness.service.stop()
+        finally:
+            release_frame.set()
+            release_encoding.set()
+        result = await operation
+        try:
+            assert result.code == "INTERRUPTED"
+            assert result.phase == "observe"
+            harness.service.resume()
+            following = await harness.service.act(grant, (press("B"),))
+            assert following.code == ("INPUT_DISABLED" if stopped else "OK")
+        finally:
+            await harness.close()
+
+    asyncio.run(scenario())
+
+
 def test_stop_during_encoding_keeps_the_completed_observation_id(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

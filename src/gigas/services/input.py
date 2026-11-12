@@ -387,7 +387,7 @@ class InputService:
             }[result.phase]
             result = replace(result, code=code, message=str(error))
         self._finishing = True
-        if result.code != "OK" and result.phase == "observe":
+        if result.code not in ("OK", "INTERRUPTED") and result.phase == "observe":
             self.stop(result.message, code=result.code)
         if result.neutral == "unconfirmed" and not neutral_attempted:
             try:
