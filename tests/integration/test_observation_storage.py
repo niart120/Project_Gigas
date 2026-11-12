@@ -15,17 +15,23 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
-from gigas.game_io.input.models import InputState, InputStep
+from gigas.game_io.input.config import InputProtocol, get_protocol
+from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, parse_sequence
 from gigas.game_io.observation import Observation
 from gigas.storage import project
 from gigas.storage.input_events import OperationFinished, OperationStarted, RunFinished, RunStarted
 from gigas.storage.project import ProjectError, ProjectWriter
 
 
-def test_input_records_keep_sequence_results_and_observation_reference(tmp_path: Path) -> None:
+def test_input_records_keep_sequence_results_and_observation_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     observation = Observation.from_frame(sample_frame())
-    sequence = (InputStep("press", 100, InputState(buttons=("A",))), InputStep("wait", 50))
+    sequence = (
+        InputStep("press", 100, InputState(buttons=("A",), touch=(30, 20))),
+        InputStep("wait", 50),
+    )
     try:
         writer.record_thread("runtime-thread")
         writer.record_input(RunStarted("request-1", "run-1", "runtime-thread", "Aを押す"))
@@ -45,8 +51,13 @@ def test_input_records_keep_sequence_results_and_observation_reference(tmp_path:
         writer.record_input(RunFinished("request-1", "run-1", "completed", turn_id="turn-1"))
     finally:
         writer.close()
-    reopened = ProjectWriter.open(writer.path)
-    reopened.close()
+    # A later capability change must affect new input, not existing archive rows.
+    with monkeypatch.context() as patch:
+        patch.setattr(InputProtocol, "touch", False)
+        with pytest.raises(InvalidSequenceError):
+            parse_sequence([step.to_json() for step in sequence], get_protocol("3ds"))
+        reopened = ProjectWriter.open(writer.path)
+        reopened.close()
     records = [json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()]
     assert [row["sequence"] for row in records] == list(range(1, 7))
     assert [row["type"] for row in records] == [

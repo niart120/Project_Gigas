@@ -151,7 +151,7 @@ def _buttons(value: object) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _step(value: object, protocol: "InputProtocol") -> InputStep:
+def _step(value: object, protocol: "InputProtocol | None") -> InputStep:
     if not isinstance(value, dict):
         message = "sequence: 各要素にはオブジェクトが必要です"
         raise InvalidSequenceError(message)
@@ -183,20 +183,24 @@ def _step(value: object, protocol: "InputProtocol") -> InputStep:
             else None
         ),
     )
-    validate_state(state, protocol)
+    if protocol is not None:
+        validate_state(state, protocol)
     return InputStep("press", duration, state)
 
 
-def parse_sequence(value: object, protocol: "InputProtocol") -> tuple[InputStep, ...]:
+def parse_sequence(value: object, protocol: "InputProtocol | None" = None) -> tuple[InputStep, ...]:
     """Validate an entire JSON sequence and return detached immutable steps.
 
     Args:
         value: Nonempty JSON array of press/wait objects. Generators, tuples,
             loops, unknown keys and implicit numeric conversions are rejected.
-        protocol: Selected device capabilities, applied to every state.
+        protocol: Selected device capabilities, applied to every state when given.
+            None checks the input format without requiring a supported device,
+            for example when reading an archived sequence.
 
     Returns:
-        Fully validated finite steps. Durations, count and sum have no fixed limit.
+        Structurally valid finite steps, checked against protocol when given.
+        Durations, count and sum have no fixed limit.
 
     Raises:
         InvalidSequenceError: Any part of the sequence is invalid or unsupported.

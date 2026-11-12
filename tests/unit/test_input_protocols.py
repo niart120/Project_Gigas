@@ -129,6 +129,17 @@ def test_sequence_is_detached_immutable_and_serializable() -> None:
     ]
 
 
+def test_sequence_structure_is_independent_of_selected_capabilities() -> None:
+    payload = [{"kind": "press", "buttons": ["START"], "duration_ms": 100}]
+    steps = parse_sequence(payload)
+    assert steps[0].state.buttons == ("START",)
+    assert parse_sequence(payload, get_protocol("3ds")) == steps
+    with pytest.raises(InvalidSequenceError):
+        parse_sequence(payload, get_protocol("ch552"))
+    with pytest.raises(InvalidSequenceError):
+        parse_sequence([{"kind": "press", "duration_ms": 100}])
+
+
 def test_long_finite_sequence_and_durations_have_no_fixed_limits() -> None:
     raw = [{"kind": "wait", "duration_ms": 10**100}] * 10001
     steps = parse_sequence(raw, get_protocol("ch552"))

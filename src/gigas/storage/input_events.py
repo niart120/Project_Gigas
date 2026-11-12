@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from gigas.game_io.input.config import PROTOCOLS
-from gigas.game_io.input.models import InvalidSequenceError, parse_sequence
+from gigas.game_io.input.models import parse_sequence
 
 if TYPE_CHECKING:
     from gigas.game_io.input.models import InputStep
@@ -144,17 +143,7 @@ def validate_input_payload(kind: str, value: object) -> None:
         _text(value.get("message"))
     elif kind == "input.operation_started":
         _text(value.get("operation_id"))
-        # The record omits connection details. Reuse the existing parser to verify
-        # that one supported device could accept the complete recorded sequence.
-        for protocol in PROTOCOLS:
-            try:
-                parse_sequence(value.get("sequence"), protocol)
-            except InvalidSequenceError:
-                continue
-            break
-        else:
-            message = "記録された入力列が不正です"
-            raise ValueError(message)
+        parse_sequence(value.get("sequence"))
     elif kind == "input.operation_finished":
         _text(value.get("operation_id"))
         completed = value.get("completed_steps")
