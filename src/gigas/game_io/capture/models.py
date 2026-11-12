@@ -20,8 +20,6 @@ class Frame:
         sequence: Successful acquisition number within that generation.
         captured_at: UTC time immediately after acquisition, not device exposure time.
         monotonic_ns: Monotonic time immediately after acquisition within this host.
-        read_started_ns: Monotonic time immediately before the device read, from zero
-            through monotonic_ns. It does not describe device exposure time.
 
     Raises:
         CaptureError: Pixels, dimensions, identifiers, or the clock are invalid.
@@ -34,7 +32,6 @@ class Frame:
     sequence: int
     captured_at: datetime
     monotonic_ns: int
-    read_started_ns: int
 
     def __post_init__(self) -> None:
         """Reject images that cannot be safely shared with multiple readers."""
@@ -45,7 +42,7 @@ class Frame:
             or len(self.bgr) != self.width * self.height * 3
             or self.generation <= 0
             or self.sequence <= 0
-            or not 0 <= self.read_started_ns <= self.monotonic_ns
+            or self.monotonic_ns < 0
             or self.captured_at.utcoffset() != timedelta(0)
         ):
             message = "取得フレームの形式が不正"

@@ -107,7 +107,7 @@ def test_requests_mode_and_publishes_original_pixels_with_acquisition_metadata(
     pixels[:] = 0
     assert any(frames[0].bgr)
     assert (frames[0].generation, frames[0].sequence) == (7, 1)
-    assert (frames[0].read_started_ns, frames[0].monotonic_ns) == (10, 20)
+    assert frames[0].monotonic_ns == 20
     assert camera.released
 
 

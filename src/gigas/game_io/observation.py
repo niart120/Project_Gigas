@@ -22,9 +22,7 @@ class ObservationError(ValueError):
 
     def __init__(
         self,
-        code: Literal[
-            "DEVICE_UNAVAILABLE", "BUSY", "OBSERVATION_ENCODING_ERROR", "OBSERVATION_TIMEOUT"
-        ],
+        code: Literal["DEVICE_UNAVAILABLE", "BUSY", "OBSERVATION_ENCODING_ERROR"],
         message: str,
     ) -> None:
         """Attach the reason code without translating it into UI or MCP types."""

@@ -8,10 +8,10 @@ from gigas.game_io.capture.models import CaptureError, Frame
 
 
 def frame(generation: int = 1, sequence: int = 1, value: int = 2) -> Frame:
-    return Frame(bytes([value]) * 6, 2, 1, generation, sequence, datetime.now(UTC), sequence, 0)
+    return Frame(bytes([value]) * 6, 2, 1, generation, sequence, datetime.now(UTC), sequence)
 
 
-@pytest.mark.parametrize("attribute", ["sequence", "bgr", "read_started_ns"])
+@pytest.mark.parametrize("attribute", ["sequence", "bgr", "monotonic_ns"])
 def test_latest_frame_is_immutable_and_keeps_its_original_clock(attribute: str) -> None:
     store = FrameStore()
     store.begin(1)
@@ -27,7 +27,6 @@ def test_latest_frame_is_immutable_and_keeps_its_original_clock(attribute: str) 
     assert store.latest() is snapshot
     assert snapshot.captured_at.tzinfo == UTC
     assert snapshot.monotonic_ns == 1
-    assert snapshot.read_started_ns == 0
 
 
 def test_slow_reader_receives_only_latest_frame_and_old_frames_cannot_replace_it() -> None:
@@ -58,19 +57,11 @@ def test_stopped_and_old_connections_cannot_publish_fresh_images() -> None:
 
 def test_frame_rejects_malformed_pixels_and_naive_time() -> None:
     with pytest.raises(CaptureError):
-        Frame(b"short", 2, 1, 1, 1, datetime.now(UTC), 1, 0)
+        Frame(b"short", 2, 1, 1, 1, datetime.now(UTC), 1)
     with pytest.raises(CaptureError):
-        Frame(bytes(6), 2, 1, 1, 1, datetime(2026, 1, 1), 1, 0)  # noqa: DTZ001
+        Frame(bytes(6), 2, 1, 1, 1, datetime(2026, 1, 1), 1)  # noqa: DTZ001
 
 
-@pytest.mark.parametrize(("started", "completed"), [(-1, 1), (2, 1), (0, -1)])
-def test_frame_rejects_negative_or_reversed_acquisition_clocks(
-    started: int, completed: int
-) -> None:
+def test_frame_rejects_negative_acquisition_clock() -> None:
     with pytest.raises(CaptureError):
-        Frame(bytes(6), 2, 1, 1, 1, datetime.now(UTC), completed, started)
-
-
-def test_frame_accepts_equal_acquisition_clocks() -> None:
-    image = Frame(bytes(6), 2, 1, 1, 1, datetime.now(UTC), 1, 1)
-    assert image.read_started_ns == image.monotonic_ns == 1
+        Frame(bytes(6), 2, 1, 1, 1, datetime.now(UTC), -1)

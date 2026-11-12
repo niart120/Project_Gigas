@@ -23,8 +23,8 @@ class RecordingService:
 
     Attributes:
         on_failure: Optional callback for every save failure, called on this loop.
-            An input owner can revoke permission and stop input here. The callback
-            must return promptly; awaited writes still raise their storage error.
+            Used for persistent diagnostics, independently of input permission.
+            The callback must return promptly; awaited writes still raise errors.
     """
 
     def __init__(self, writer: "ProjectWriter") -> None:
@@ -44,19 +44,8 @@ class RecordingService:
             self._submit(partial(self._writer.record_thread, thread_id), thread_id)
         )
 
-    async def record_input(self, event: "InputEvent") -> None:
-        """Wait for an input start or outcome to persist before continuing.
-
-        Cancellation returns immediately while the submitted save retains its lock
-        and ownership. It never grants permission to proceed with physical input.
-
-        Raises:
-            ProjectError: The input record is invalid or persistence fails.
-        """
-        await asyncio.shield(self._submit(partial(self._writer.record_input, event), event.run_id))
-
     def submit_input(self, event: "InputEvent") -> None:
-        """Submit a result without waiting; report failures through on_failure/logging."""
+        """Submit an input event without waiting; report failures through callbacks/logging."""
         self._submit(partial(self._writer.record_input, event), event.run_id)
 
     def submit_observation(
@@ -98,8 +87,7 @@ class RecordingService:
             async with self._lock:
                 await asyncio.to_thread(operation)
         except Exception as error:
-            # Includes executor submission and storage failures. Never turn failed
-            # start records into successful permission to send physical input.
+            # Persistence failure is reported independently of input execution.
             if on_error is None:
                 logger.exception("Recording failed: %s (%s)", reference, self._writer.path)
             for callback in (self.on_failure, on_error):

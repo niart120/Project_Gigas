@@ -31,7 +31,6 @@ frame = Frame(
     sequence=1,
     captured_at=datetime.now(UTC),
     monotonic_ns=0,
-    read_started_ns=0,
 )
 
 with TemporaryDirectory(dir=Path.cwd()) as temporary:
@@ -99,11 +98,9 @@ async def close_project(
 
 ## 操作後の画像
 
-`service.observe_after(generation, boundary_ns, thread_id=None)`は、最後の入力解除・待機完了の単調時計より後にreadを開始したFrameを選びます。同じ取得世代の画像を境界時刻から5秒以内に得られなければ`OBSERVATION_TIMEOUT`、取得停止や世代変更なら`DEVICE_UNAVAILABLE`です。PC上のread順序を確認するAPIであり、ゲームの描画完了や機器内部の遅延を保証しません。
+操作列の最後の解除・末尾waitが完了した後に、単独observeと同じ処理で最新キャッシュを一度取得する。新しいFrameを待たず、操作前や前回観測と同じFrameも許容する。画像取得時刻やゲームへの入力反映は保証しない。
 
-選んだFrameは同じサービス内で符号化します。キャッシュの取り直しは行わず、通常の`observe()`と同じ符号化枠・解像度設定・保存窓口を使います。通常の`observe()`は引き続き最新キャッシュを一度取得し、操作後の新フレームを待ちません。
-
-事後Frame待ちは取消しで直ちに終了します。事後観測の符号化を開始した後は、その処理を回収してから取消しを返します。画像が完成した場合は`ObservationInterrupted`（`asyncio.CancelledError`の派生型）の`observation`属性で確定した画像とIDを得られ、中断の記録へ対応付けられます。操作成功や応答配送の成功を示す結果ではありません。保存は独立して進み、ここでは完了を待ちません。
+`service.observe(thread_id=...)`で操作の会話IDを明示できます。省略時はサービスの会話IDを使います。入力枠は列と解除の終了時に解放し、直後に最新Frameを選ぶ。符号化中は次の入力を許可する。停止は観測応答を取り消し、開始済みの符号化・保存は観測側で継続する。停止時に観測IDの完成を待たず、後から操作記録へ追記しない。観測サービス自体の取消しは応答だけを取り消し、開始済み符号化と保存は継続します。生成したPNGは応答と非同期保存で共用します。
 
 ## 保存形式と読込
 

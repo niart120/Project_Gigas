@@ -97,7 +97,7 @@ def test_spawn_capture_exposes_latest_image_and_reconnects_after_release(
     )
     frame = snapshot.frame
     assert frame is not None
-    assert 0 < frame.read_started_ns <= frame.monotonic_ns
+    assert frame.monotonic_ns > 0
     assert snapshot.phase == "streaming"
     assert frame.bgr == bytes([frame.sequence % 256]) * (16 * 16 * 3)
     # The sequence counts device acquisitions, not samples already read by the host.

@@ -233,7 +233,6 @@ def acquire_frames(
         sequence = 0
         dimensions: tuple[int, int] | None = None
         while not stopped():
-            read_started_ns = monotonic_ns()
             success, pixels = camera.read()
             tick = monotonic_ns()
             captured_at = datetime.now(UTC)
@@ -267,7 +266,6 @@ def acquire_frames(
                     sequence,
                     captured_at,
                     tick,
-                    read_started_ns,
                 )
             )
     finally:

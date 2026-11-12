@@ -1,8 +1,6 @@
 import asyncio
 import json
-from dataclasses import replace
 from pathlib import Path
-from time import monotonic_ns
 
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import resolve_serial_config
@@ -33,34 +31,20 @@ class Port:
         self.closed = True
 
 
-def test_serial_sequence_and_fresh_observation_share_recorded_outcome(tmp_path: Path) -> None:
+def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path: Path) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     port = Port()
     original = sample_frame()
-    reads = 0
 
     def snapshot() -> CaptureSnapshot:
-        nonlocal reads
-        reads += 1
-        tick = monotonic_ns()
-        frame = (
-            original
-            if reads == 1
-            else replace(
-                original,
-                sequence=8,
-                read_started_ns=tick,
-                monotonic_ns=tick,
-            )
-        )
-        return CaptureSnapshot(phase="streaming", generation=2, frame=frame)
+        assert len(port.writes) == 3  # Initial neutral, press, final neutral.
+        return CaptureSnapshot(phase="streaming", generation=original.generation, frame=original)
 
     async def scenario() -> None:
         reader = CaptureReader(snapshot)
         recording = RecordingService(writer)
         observations = ObservationService(reader, recording)
-        service = InputService(reader, observations, recording)
-        recording.on_failure = lambda error: service.stop(str(error), code="STORAGE_ERROR")
+        service = InputService(observations, recording)
         config = resolve_serial_config("COM3", "ch552", None)
         assert config is not None
         try:
@@ -78,7 +62,8 @@ def test_serial_sequence_and_fresh_observation_share_recorded_outcome(tmp_path: 
             assert result.completed_steps == 2
             assert result.neutral == "sent"
             assert result.observation is not None
-            assert result.observation.source_frame.sequence == 8
+            assert result.observation.source_frame.sequence == original.sequence
+            assert result.observation.source_frame.generation == original.generation
             await service.finish_run("completed")
         finally:
             await service.close()

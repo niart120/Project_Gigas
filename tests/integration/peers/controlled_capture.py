@@ -124,6 +124,5 @@ class ControlledCapture:
             sequence,
             datetime.now(UTC),
             sequence,
-            sequence,
         )
         self.state = replace(self.state, phase="streaming", frame=frame)

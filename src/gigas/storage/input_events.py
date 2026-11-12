@@ -41,10 +41,10 @@ class OperationFinished:
     Attributes:
         run_id: Run that owned the operation.
         operation_id: Corresponding operation start.
-        result: completed, interrupted, or failed.
+        result: Input execution result: completed, interrupted, or failed.
         completed_steps: Steps finished through neutral delivery or wait completion.
         observation_id: Finalized observation ID, even when its PNG save later fails.
-        phase: Stage of interruption or failure; empty for ordinary completion.
+        phase: Failed or cancelled stage, including observe after completed input.
         reason: Cause of interruption or failure; empty for ordinary completion.
         input_sent: none, sent, or unknown for attempted state delivery.
         neutral: not_needed, sent, or unconfirmed; sent is not physical verification.
