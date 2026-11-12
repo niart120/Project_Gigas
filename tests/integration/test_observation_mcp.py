@@ -15,6 +15,7 @@ from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.observation import Observation, ObservationResolution
 from gigas.mcp.observation import ObservationMcpServer
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_observation_storage import sample_frame
@@ -86,8 +87,9 @@ def test_http_observations_return_same_images_before_saving(
     monkeypatch.setattr(project, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
+        recording = RecordingService(writer)
         service = ObservationService(
-            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), writer
+            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), recording
         )
         server = ObservationMcpServer(service)
         await server.start()
@@ -109,6 +111,7 @@ def test_http_observations_return_same_images_before_saving(
                 assert (writer.path / "events.jsonl").read_bytes() == b""
                 release.set()
                 await service.drain()
+                await recording.drain()
                 rows = [
                     json.loads(row)
                     for row in (writer.path / "events.jsonl").read_text().splitlines()
@@ -130,6 +133,7 @@ def test_http_observations_return_same_images_before_saving(
             release.set()
             await server.close()
             await service.drain()
+            await recording.drain()
 
     try:
         asyncio.run(scenario())
@@ -141,7 +145,8 @@ def test_http_authentication_host_origin_and_old_connection(tmp_path: Path) -> N
     writer = ProjectWriter.create(tmp_path / "project")
 
     async def scenario() -> None:
-        service = ObservationService(CaptureReader(CaptureSnapshot), writer)
+        recording = RecordingService(writer)
+        service = ObservationService(CaptureReader(CaptureSnapshot), recording)
         old = ObservationMcpServer(service)
         await old.start()
         old_headers = old.config["http_headers"]
@@ -168,6 +173,7 @@ def test_http_authentication_host_origin_and_old_connection(tmp_path: Path) -> N
         finally:
             await current.close()
             await service.drain()
+            await recording.drain()
 
     try:
         asyncio.run(scenario())
@@ -191,12 +197,14 @@ def test_failed_lifespan_is_an_error_without_exiting_process(
     writer = ProjectWriter.create(tmp_path / "project")
 
     async def scenario() -> None:
-        service = ObservationService(CaptureReader(CaptureSnapshot), writer)
+        recording = RecordingService(writer)
+        service = ObservationService(CaptureReader(CaptureSnapshot), recording)
         server = ObservationMcpServer(service)
         with pytest.raises(RuntimeError, match="MCP"):
             await server.start()
         await server.close()
         await service.drain()
+        await recording.drain()
 
     try:
         asyncio.run(scenario())
@@ -224,8 +232,9 @@ def test_cancelled_close_keeps_http_and_observation_work_owned(
     monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
 
     async def scenario() -> None:
+        recording = RecordingService(writer)
         service = ObservationService(
-            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), writer
+            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), recording
         )
         server = ObservationMcpServer(service)
         await server.start()
@@ -253,6 +262,7 @@ def test_cancelled_close_keeps_http_and_observation_work_owned(
                 assert not result["isError"]
                 await asyncio.wait_for(server.close(), 3)
                 await service.drain()
+                await recording.drain()
                 records = (writer.path / "events.jsonl").read_text().splitlines()
                 assert len(records) == 1
                 payload = json.loads(records[0])["payload"]
@@ -261,6 +271,7 @@ def test_cancelled_close_keeps_http_and_observation_work_owned(
             release.set()
             await server.close()
             await service.drain()
+            await recording.drain()
 
     try:
         asyncio.run(scenario())

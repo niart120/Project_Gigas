@@ -44,21 +44,29 @@ neutral = encode_state(InputState(), protocol)
 
 ## 記録付き実行API
 
-`gigas.services.input.InputService(reader, observations)`は、一つの入力接続・操作権・実行中の列を所有します。既存の`CaptureReader`と`ObservationService`を渡し、同じ`observations.recording`で操作記録と画像保存を順序化します。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として受け取り、`SerialInput`をそのまま渡せます。
+`gigas.services.input.InputService(reader, observations, recording)`は、一つの入力接続・操作権・実行中の列を所有します。組立側が一つの`RecordingService(writer)`を生成し、観測と入力へ渡します。保存失敗から停止への接続も組立側で明示し、入力サービスの構築では他サービスのcallbackや会話IDを変更しません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として受け取り、`SerialInput`をそのまま渡せます。
 
 ```python
-service = InputService(reader, observations)
+recording = RecordingService(writer)
+observations = ObservationService(reader, recording)
+service = InputService(reader, observations, recording)
+recording.on_failure = lambda error: service.stop(str(error), code="STORAGE_ERROR")
 await service.connect(SerialInput(config))
-grant = await service.begin_run("Aを押して画面を確認", thread_id, turn_id=turn_id)
+grant = await service.begin_run("Aを押して画面を確認", thread_id)
+# runtimeから実turn IDを取得した時点で関連付ける。
+service.bind_turn(grant, turn_id)
 result = await service.act(grant, parse_sequence(sequence, config.protocol))
 await service.finish_run("completed")
 await service.close()
 await observations.drain()
+await recording.drain()
 ```
 
 `connect(device)`は旧列を停止して旧接続を閉じ、その後に新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。接続中の停止は未開始のopenを取り消し、開始済みopenは収束してから閉じます。接続だけでは操作権を発行しません。
 
 `begin_run`は依頼・run開始の保存成功後に`InputGrant`を返します。開始時に未接続なら、そのrunは入力不可のままです。Grantは同じオブジェクトの対応で確認し、IDをコピーして新しいGrantを作っても使えません。前runの`finish_run`後に次のrunを開始します。開始保存の失敗は`InputServiceError`の`code="STORAGE_ERROR"`です。
+
+`bind_turn(grant, turn_id)`は現在のrunへ実turn IDを対応付け、以後の操作開始・run終端記録へ使います。終了済み・別runのGrantにはFalseを返します。停止中のrunへの対応付けでも操作権は復活しません。
 
 `act`は受付時に操作権・接続・映像・列全体を検査します。実行中の別列には`BUSY`を返し、待ち列へ入れません。開始記録の保存後、pressの状態送信・待機・解除とwaitを順番に実行します。各待機は途中停止でき、最後の解除・待機完了後のFrameを共通観測処理へ渡します。符号化までは実行枠を保持し、画像・結果記録の保存完了は待ちません。
 
@@ -68,4 +76,6 @@ await observations.drain()
 
 呼出し側が`act`を取り消した場合も共通停止を行い、呼出し側には`CancelledError`を返します。内部の終了処理はサービスが保持するので、`drain_input`で回収してください。符号化中の停止では完成した画像のIDを中断結果にも記録します。返却後の画像・結果保存失敗は返却済み結果を書き換えず、新しい入力を停止します。
 
-`finish_run(reason)`は先に失効させ、入力終了後にrun終了記録を依頼します。`close()`は進行中の接続処理も回収して機器を閉じます。保存は別の所有者が保持するため、終了時は続けて`observations.drain()`を待ってからwriterとイベントループを閉じてください。これらの内部APIはGUI・MCPへの配線や実機受入を含みません。
+`finish_run(reason)`は先に失効させ、入力終了後にrun終了記録を依頼します。`close()`は進行中の接続処理も回収して機器を閉じます。保存は別の所有者が保持するため、終了時は続けて`observations.drain()`で符号化を回収し、`recording.drain()`で保存を回収してからwriterとイベントループを閉じてください。符号化失敗時も保存の回収は必要です。これらの内部APIはGUI・MCPへの配線や実機受入を含みません。
+
+保存済み入力列には`parse_sequence(value)`で共通の形式・値域だけを検査できます。実行受付ではprotocolを指定して対応能力も検査します。停止時も開始済みpress・neutralの送信結果を回収し、全byte成功は送出済みとして記録します。

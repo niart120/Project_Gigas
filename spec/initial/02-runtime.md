@@ -63,6 +63,8 @@ U03の映像取得では、列挙とDirectShowのopen/read/releaseをspawnした
 
 [U05 M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)で、サービスループ上の入力実行部と、同期シリアル呼出しを直列に行う単一workerを実装しました。操作権は入力サービスの要求受付で判定し、受付済みの操作は停止時に取り消します。各write前の権限照合は行いません。解除は実行部の終了処理にまとめ、開始済みwriteの完了を回収してからneutralを送ります。保存やCodex中断の応答は待ちません。一時保留は同runの新規入力を保留し、保留解除で取消し済み列を再開しません。質問・承認待ち、GUI停止、通常ターンとの配線はM2で行います。Goal状態の複製や自動復旧は追加しません。
 
+共通のRecordingServiceは組立箇所で一度生成し、観測と入力へ渡します。保存失敗から入力停止への接続も組立側が担当し、入力サービスの構築で他サービスのcallbackや会話IDを書き換えません。終了時は入力・符号化の終了後に共通保存をdrainし、writerを解放します。
+
 GUIへの更新はQtのqueued signal等で返し、ワーカーからウィジェットへ触れません。GUIスレッドでランタイムの応答や長いjoinを同期的に待ちません。以上を同居の前提とし、実装時にライブラリの制約が判明した場合は、この境界内で配置を修正します。
 
 U01の設定I/Oは、appが所有するQtワーカーからUI非依存の同期storage処理を呼ぶ実装です。[U02](../complete/unit_007/CODEX_CONNECTION.md)でCodexServiceThread内にasyncioループを追加し、stdio受信・要求応答・GUI通知・終了を結合しました。設定I/Oは既存Qtワーカーを維持し、同じ設定ファイルの書き込み主体を増やしていません。終了時もI/Oとワーカーの終了を通知で確認し、長い同期待ちや強制的なスレッド破棄を行いません。U01の根拠と検証範囲は[構成・依存選定](../complete/unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)を参照します。

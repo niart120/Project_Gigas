@@ -10,9 +10,9 @@ import pytest
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
-from gigas.services import input_observation
-from gigas.services.input_observation import observe_after
+from gigas.services import observation as service_module
 from gigas.services.observation import ObservationInterrupted, ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage import project
 from gigas.storage.input_events import RunFinished, RunStarted
 from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
@@ -29,6 +29,7 @@ def test_post_input_observation_waits_for_read_started_after_boundary(
     started: int,
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     crossing = replace(sample_frame(), read_started_ns=started, monotonic_ns=110)
     fresh = replace(crossing, sequence=8, read_started_ns=102, monotonic_ns=120)
     reads = 0
@@ -37,24 +38,21 @@ def test_post_input_observation_waits_for_read_started_after_boundary(
         nonlocal reads
         reads += 1
         return CaptureSnapshot(
-            phase="streaming", generation=2, frame=crossing if reads == 1 else fresh
+            phase="streaming", generation=2, frame=crossing if reads <= 2 else fresh
         )
 
     reader = CaptureReader(snapshot)
-    monkeypatch.setattr(input_observation, "monotonic_ns", lambda: 130)
+    monkeypatch.setattr(service_module, "monotonic_ns", lambda: 130)
 
     async def scenario() -> None:
-        # Its latest cache deliberately differs from the selected post-input frame.
-        service = ObservationService(
-            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=crossing)),
-            writer,
-        )
-        after = await observe_after(reader, service, 2, 100)
-        assert reads == 2
-        assert after.source_frame.sequence == 8
+        service = ObservationService(reader, recording)
         latest = await service.observe()
         assert latest.source_frame.sequence == 7
+        after = await service.observe_after(2, 100)
+        assert reads == 3
+        assert after.source_frame.sequence == 8
         await service.drain()
+        await recording.drain()
         assert (writer.path / after.image_path).read_bytes() == after.png_bytes
 
     try:
@@ -80,20 +78,22 @@ def test_post_input_observation_rejects_loss_change_or_deadline(
     code: str,
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     snapshot = CaptureSnapshot(
         phase="stopping" if phase == "stopping" else "streaming",
         generation=generation,
         frame=sample_frame(),
     )
     reader = CaptureReader(lambda: snapshot)
-    monkeypatch.setattr(input_observation, "monotonic_ns", lambda: now)
+    monkeypatch.setattr(service_module, "monotonic_ns", lambda: now)
 
     async def scenario() -> None:
-        service = ObservationService(reader, writer)
+        service = ObservationService(reader, recording)
         with pytest.raises(ObservationError) as failure:
-            await observe_after(reader, service, 2, 100)
+            await service.observe_after(2, 100)
         assert failure.value.code == code
         await service.drain()
+        await recording.drain()
         assert (writer.path / "events.jsonl").read_bytes() == b""
 
     try:
@@ -107,10 +107,12 @@ def test_post_input_cancel_recovers_encoding_without_waiting_for_save(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     encoding, release_encoding, saving, release_save = Event(), Event(), Event(), Event()
     encode, publish = Observation.from_frame, project._publish_image
     frame = sample_frame()
     reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", generation=2, frame=frame))
+    monkeypatch.setattr(service_module, "monotonic_ns", lambda: frame.monotonic_ns)
 
     def delayed_encode(
         _cls: type[Observation],
@@ -133,8 +135,8 @@ def test_post_input_cancel_recovers_encoding_without_waiting_for_save(
     monkeypatch.setattr(project, "_publish_image", delayed_save)
 
     async def scenario() -> None:
-        service = ObservationService(reader, writer)
-        task = asyncio.create_task(service.observe_frame(frame))
+        service = ObservationService(reader, recording)
+        task = asyncio.create_task(service.observe_after(2, frame.read_started_ns - 1))
         try:
             assert await asyncio.to_thread(encoding.wait, 2)
             for _ in range(2):
@@ -153,6 +155,7 @@ def test_post_input_cancel_recovers_encoding_without_waiting_for_save(
             release_encoding.set()
             release_save.set()
             await service.drain()
+            await recording.drain()
         observation = interrupted.value.observation
         assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
 
@@ -168,6 +171,7 @@ def test_cancelled_start_keeps_storage_order_and_drain_ownership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     entered, release = Event(), Event()
     append = project._append_row
 
@@ -182,10 +186,6 @@ def test_cancelled_start_keeps_storage_order_and_drain_ownership(
     monkeypatch.setattr(project, "_append_row", delayed_append)
 
     async def scenario() -> None:
-        service = ObservationService(
-            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=sample_frame())), writer
-        )
-        recording = service.recording
         request = asyncio.create_task(
             recording.record_input(RunStarted("req", "run", "thread", "A"))
         )
@@ -194,17 +194,18 @@ def test_cancelled_start_keeps_storage_order_and_drain_ownership(
             request.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(request, 3)
-            observation = await asyncio.wait_for(service.observe(), 3)
+            observation = Observation.from_frame(sample_frame())
+            recording.submit_observation(observation)
             recording.submit_input(RunFinished("req", "run", "stopped"))
             with pytest.raises(ProjectBusyError):
                 writer.close()
             assert not (writer.path / observation.image_path).exists()
-            waiting = asyncio.create_task(service.drain())
+            waiting = asyncio.create_task(recording.drain())
             await asyncio.sleep(0)
             assert not waiting.done()
         finally:
             release.set()
-            await service.drain()
+            await recording.drain()
         await waiting
         records = [
             json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()
@@ -227,6 +228,7 @@ def test_record_failure_reaches_waiter_and_shared_failure_callback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     failures: list[Exception] = []
 
     def fail_append(_path: Path, _row: bytes) -> None:
@@ -236,12 +238,11 @@ def test_record_failure_reaches_waiter_and_shared_failure_callback(
     monkeypatch.setattr(project, "_append_row", fail_append)
 
     async def scenario() -> None:
-        service = ObservationService(CaptureReader(CaptureSnapshot), writer)
-        service.recording.on_failure = failures.append
+        recording.on_failure = failures.append
         with pytest.raises(ProjectError, match="injected recording failure"):
-            await service.recording.record_input(RunStarted("req", "run", "thread", "A"))
-        service.recording.submit_input(RunFinished("req", "run", "start_failed"))
-        await service.drain()
+            await recording.record_input(RunStarted("req", "run", "thread", "A"))
+        recording.submit_input(RunFinished("req", "run", "start_failed"))
+        await recording.drain()
         assert len(failures) == 2
 
     try:
@@ -256,9 +257,10 @@ def test_observe_uses_cached_frame_and_retains_its_time(
     frame = sample_frame()
     reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame))
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
 
     async def scenario() -> None:
-        service = ObservationService(reader, writer)
+        service = ObservationService(reader, recording)
         with monkeypatch.context() as patch:
             patch.setattr(observation_module, "MAX_PNG_BYTES", 1)
             with pytest.raises(ObservationError) as failed:
@@ -272,6 +274,7 @@ def test_observe_uses_cached_frame_and_retains_its_time(
         assert first.captured_at == second.captured_at == frame.captured_at
         assert first.observation_id != second.observation_id
         await service.drain()
+        await recording.drain()
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
 
     try:
@@ -287,6 +290,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, *, save_fails: bool
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     snapshot = CaptureSnapshot(phase="streaming", frame=sample_frame())
     entered, release = Event(), Event()
     publish = project._publish_image
@@ -318,11 +322,11 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
     async def scenario() -> None:
         service = ObservationService(
             CaptureReader(lambda: snapshot),
-            writer,
+            recording,
             on_save_error=lambda observation, error: failures.append((observation, error)),
             thread_id="thread-1",
         )
-        service.recording.on_failure = shared_failures.append
+        recording.on_failure = shared_failures.append
         request = asyncio.create_task(service.observe())
         try:
             assert await asyncio.to_thread(entered.wait, 3)
@@ -348,7 +352,9 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
                     writer.reload()
             with pytest.raises(ProjectError):
                 ProjectWriter.open(writer.path).close()
-            waiting = asyncio.create_task(service.drain())
+            waiting = asyncio.create_task(
+                service.drain() if boundary == "encode" else recording.drain()
+            )
             await asyncio.sleep(0)
             assert not waiting.done()
             waiting.cancel()
@@ -359,6 +365,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
             if not request.done():
                 await request
             await service.drain()
+            await recording.drain()
         if save_fails:
             assert len(failures) == 2
             assert shared_failures == [error for _, error in failures]
@@ -402,7 +409,8 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
 )
 def test_unavailable_snapshot_does_not_save(tmp_path: Path, snapshot: CaptureSnapshot) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
-    service = ObservationService(CaptureReader(lambda: snapshot), writer)
+    recording = RecordingService(writer)
+    service = ObservationService(CaptureReader(lambda: snapshot), recording)
     try:
         with pytest.raises(ObservationError) as caught:
             asyncio.run(service.observe())
@@ -412,10 +420,11 @@ def test_unavailable_snapshot_does_not_save(tmp_path: Path, snapshot: CaptureSna
         writer.close()
 
 
-def test_drain_waits_for_existing_save_after_later_encoding_failure(
+def test_encoding_drain_failure_leaves_existing_save_owned_by_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
+    recording = RecordingService(writer)
     snapshot = CaptureSnapshot(phase="streaming", frame=sample_frame())
     entered, release = Event(), Event()
     publish = project._publish_image
@@ -430,22 +439,23 @@ def test_drain_waits_for_existing_save_after_later_encoding_failure(
     monkeypatch.setattr(project, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
-        service = ObservationService(CaptureReader(lambda: snapshot), writer)
+        service = ObservationService(CaptureReader(lambda: snapshot), recording)
         observation = await asyncio.wait_for(service.observe(), 3)
         assert await asyncio.to_thread(entered.wait, 3)
         with monkeypatch.context() as patch:
             patch.setattr(observation_module, "MAX_PNG_BYTES", 1)
             with pytest.raises(ObservationError):
                 await service.observe()
-        waiting = asyncio.create_task(service.drain())
+        with pytest.raises(ObservationError):
+            await service.drain()
+        waiting = asyncio.create_task(recording.drain())
         try:
             await asyncio.sleep(0)
             assert not waiting.done()
             assert not (writer.path / observation.image_path).exists()
         finally:
             release.set()
-            with pytest.raises(ObservationError):
-                await waiting
+            await waiting
         assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
 
     try:

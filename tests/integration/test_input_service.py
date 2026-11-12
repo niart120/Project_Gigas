@@ -1,7 +1,9 @@
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
+from time import monotonic_ns
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,10 +12,11 @@ from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import get_protocol, resolve_serial_config
 from gigas.game_io.input.models import InputState, InputStep
 from gigas.game_io.input.serial import SerialInput
-from gigas.game_io.observation import Observation, ObservationError
+from gigas.game_io.observation import Observation
 from gigas.services import input as input_module
 from gigas.services.input import InputService, InputServiceError
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage import project
 from gigas.storage.input_events import OperationStarted, RunStarted
 from gigas.storage.project import ProjectWriter
@@ -70,10 +73,30 @@ class Harness:
         self.snapshot = CaptureSnapshot(
             phase="streaming", frame=self.frame, generation=self.frame.generation
         )
-        self.reader = CaptureReader(lambda: self.snapshot)
-        self.observations = ObservationService(self.reader, writer)
-        self.service = InputService(self.reader, self.observations)
+        self.fresh_frames = True
+        self.read_count = 0
+        self.frame_requested = asyncio.Event()
+        self.reader = CaptureReader(self.read_snapshot)
+        self.recording = RecordingService(writer)
+        self.observations = ObservationService(self.reader, self.recording)
+        self.service = InputService(self.reader, self.observations, self.recording)
+        self.recording.on_failure = lambda error: self.service.stop(
+            str(error), code="STORAGE_ERROR"
+        )
         self.device = Device()
+
+    def read_snapshot(self) -> CaptureSnapshot:
+        """Return controlled capture state, advancing image times when enabled."""
+        self.read_count += 1
+        if self.read_count > 1:
+            self.frame_requested.set()
+        frame = self.snapshot.frame
+        if self.fresh_frames and frame is not None:
+            tick = monotonic_ns()
+            frame = replace(
+                frame, read_started_ns=tick, monotonic_ns=tick, sequence=self.read_count
+            )
+        return replace(self.snapshot, frame=frame)
 
     def records(self) -> list[dict[str, object]]:
         """Read persisted records after recording has drained."""
@@ -86,22 +109,14 @@ class Harness:
         """Close inputs, then drain independently owned persistence."""
         await self.service.close()
         await self.observations.drain()
+        await self.recording.drain()
 
 
 @pytest.fixture
-def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Iterator[Harness]":
+def harness(tmp_path: Path) -> "Iterator[Harness]":
     writer = ProjectWriter.create(tmp_path / "game")
     value = Harness(writer)
 
-    async def observed(
-        _reader: CaptureReader, service: ObservationService, generation: int, boundary_ns: int
-    ) -> Observation:
-        # Frame freshness belongs to T07; this test observes the execution boundary.
-        assert generation == value.frame.generation
-        assert boundary_ns > 0
-        return await service.observe()
-
-    monkeypatch.setattr(input_module, "observe_after", observed)
     try:
         yield value
     finally:
@@ -341,20 +356,15 @@ def test_external_act_cancellation_retains_cleanup_for_drain(harness: Harness) -
     asyncio.run(scenario())
 
 
-def test_observation_failure_keeps_the_executed_input_result(
-    harness: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def failed(*_args: object) -> Observation:
-        message = "post-action frame timeout"
-        raise ObservationError("OBSERVATION_TIMEOUT", message)
-
-    monkeypatch.setattr(input_module, "observe_after", failed)
-
+def test_observation_failure_keeps_the_executed_input_result(harness: Harness) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
         grant = await harness.service.begin_run("A", "thread")
-        result = await harness.service.act(grant, (press(),))
-        assert result.code == "OBSERVATION_TIMEOUT"
+        operation = asyncio.create_task(harness.service.act(grant, (press(),)))
+        await harness.device.pressed.wait()
+        harness.snapshot = CaptureSnapshot()
+        result = await operation
+        assert result.code == "DEVICE_UNAVAILABLE"
         assert result.completed_steps == 1
         assert result.input_sent == "sent"
         assert result.neutral == "sent"
@@ -422,7 +432,6 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
     *,
     stopped: bool,
 ) -> None:
-    frame_waiting, release_frame = asyncio.Event(), asyncio.Event()
     encoding, release_encoding = Event(), Event()
     encode = Observation.from_frame
 
@@ -437,19 +446,8 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
             raise TimeoutError
         return encode(source, resolution=resolution)
 
-    async def observed(
-        _reader: CaptureReader,
-        service: ObservationService,
-        _generation: int,
-        _boundary_ns: int,
-    ) -> Observation:
-        if boundary == "frame":
-            frame_waiting.set()
-            await release_frame.wait()
-        return await service.observe_frame(harness.frame)
-
     monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
-    monkeypatch.setattr(input_module, "observe_after", observed)
+    harness.fresh_frames = boundary != "frame"
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
@@ -457,14 +455,14 @@ def test_suspend_during_observation_preserves_grant_unless_stopped(
         operation = asyncio.create_task(harness.service.act(grant, (press(),)))
         try:
             if boundary == "frame":
-                await asyncio.wait_for(frame_waiting.wait(), 3)
+                await asyncio.wait_for(harness.frame_requested.wait(), 3)
             else:
                 assert await asyncio.to_thread(encoding.wait, 3)
             harness.service.suspend()
             if stopped:
                 harness.service.stop()
         finally:
-            release_frame.set()
+            harness.fresh_frames = True
             release_encoding.set()
         result = await operation
         try:
@@ -493,13 +491,7 @@ def test_stop_during_encoding_keeps_the_completed_observation_id(
             raise TimeoutError
         return original(frame, resolution=resolution)
 
-    async def observed(
-        _reader: CaptureReader, service: ObservationService, _generation: int, _boundary_ns: int
-    ) -> Observation:
-        return await service.observe_frame(harness.frame)
-
     monkeypatch.setattr(Observation, "from_frame", classmethod(blocked_encode))
-    monkeypatch.setattr(input_module, "observe_after", observed)
 
     async def scenario() -> None:
         await harness.service.connect(harness.device)
@@ -551,6 +543,7 @@ def test_background_save_failure_preserves_returned_result_and_disables_input(
         finally:
             release.set()
         await harness.observations.drain()
+        await harness.recording.drain()
         assert result.code == "OK"
         assert (await harness.service.act(grant, (press(),))).code == "INPUT_DISABLED"
         await harness.close()
@@ -589,6 +582,7 @@ def test_close_waits_for_open_before_closing_candidate(harness: Harness) -> None
             await connecting
             await closing
             await harness.observations.drain()
+            await harness.recording.drain()
         assert device.calls == ["opening", "opened", "close"]
         assert not harness.service.connected
 

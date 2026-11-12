@@ -14,6 +14,7 @@ from gigas.game_io.capture._process import SharedSlot
 from gigas.game_io.capture.config import CaptureOptions
 from gigas.game_io.capture.models import DeviceInfo
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.peers.capture_peer import PeerBackend
@@ -226,7 +227,8 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
     writer = ProjectWriter.create(tmp_path / "observation")
 
     async def scenario() -> None:
-        observer = ObservationService(service.reader(), writer)
+        recording = RecordingService(writer)
+        observer = ObservationService(service.reader(), recording)
         request = asyncio.create_task(observer.observe())
         try:
             assert await asyncio.to_thread(holding.wait, 3)
@@ -252,6 +254,7 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
             resume.set()
             observed = await request
             await observer.drain()
+            await recording.drain()
         decoded = cv2.imdecode(np.frombuffer(observed.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         assert decoded is not None
         assert decoded.tobytes() == bytes([observed.source_frame.sequence % 256]) * (16 * 16 * 3)

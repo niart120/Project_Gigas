@@ -13,6 +13,7 @@ from gigas.runtime.codex.connection import AnswerDeliveryError, CodexConnectionE
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.models import SessionStatus, ThreadConfiguration
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage.project import ProjectError, ProjectWriter
 
 if TYPE_CHECKING:
@@ -187,6 +188,7 @@ class CodexServiceThread(QThread):
         self._project_selected = False
         self._writer: ProjectWriter | None = None
         self._observations: ObservationService | None = None
+        self._recording: RecordingService | None = None
         self._mcp: ObservationMcpServer | None = None
         self._resolution: ObservationResolution = "full_hd"
         self._resources_lock = asyncio.Lock()
@@ -517,10 +519,12 @@ class CodexServiceThread(QThread):
                 if self._writer is None:
                     self._writer = await asyncio.to_thread(self._create_chat_archive)
                 writer = self._writer
+                if self._recording is None:
+                    self._recording = RecordingService(writer)
                 if self._observations is None:
                     self._observations = ObservationService(
                         self._reader,
-                        writer,
+                        self._recording,
                         resolution=self._resolution,
                         on_save_error=lambda observation, error: self.recording_failed.emit(
                             observation.observation_id, str(writer.path), _recording_reason(error)
@@ -564,11 +568,11 @@ class CodexServiceThread(QThread):
     async def _record_thread(self, thread_id: str) -> None:
         async with self._resources_lock:
             writer, observations = self._writer, self._observations
-            if writer is None or observations is None:
+            if writer is None or observations is None or self._recording is None:
                 message = "チャットの記録先が準備されていません"
                 raise ProjectError(message)
             try:
-                await observations.recording.record_thread(thread_id)
+                await self._recording.record_thread(thread_id)
             except Exception as error:
                 self.recording_failed.emit(thread_id, str(writer.path), _recording_reason(error))
                 raise
@@ -619,10 +623,13 @@ class CodexServiceThread(QThread):
             if self._observations is not None:
                 try:
                     await self._observations.drain()
-                except Exception as error:  # noqa: BLE001 -- encoding ended; saving was drained
+                except Exception as error:  # noqa: BLE001 -- report encoding failure, then drain saves
                     path = str(self._writer.path) if self._writer is not None else ""
                     self.recording_failed.emit("", path, _recording_reason(error))
                 self._observations = None
+            if self._recording is not None:
+                await self._recording.drain()
+                self._recording = None
 
 
 async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:

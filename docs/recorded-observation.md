@@ -54,7 +54,7 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 ## 最新画像を非同期で観測する
 
-`ObservationService(reader, writer, resolution="full_hd", thread_id=None, on_save_error=...)`には、既存の`CaptureService.reader()`とアプリが所有するwriterを渡します。サービスが機器を開始・再接続したり、writerを開き直したりすることはありません。
+`ObservationService(reader, recording, resolution="full_hd", thread_id=None, on_save_error=...)`には、既存の`CaptureService.reader()`と、組立側が生成した共通の`RecordingService(writer)`を渡します。サービスが機器を開始・再接続したり、writerを開き直したりすることはありません。
 
 `await service.observe()`はsnapshotを一度読み、`phase == "streaming"`で画像がある場合に採用します。呼出しより前に取得した最新キャッシュを使い、新しいフレームを待ちません。採用前の取得停止・エラーでは失敗し、採用後に取得が停止しても、その画像の保存を続けます。`captured_at`は元Frameの時刻を保持します。撮像時刻、機器内部の遅延、操作後の画面であることは保証しません。
 
@@ -62,45 +62,48 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 `thread_id`を指定すると、その実会話IDを観測記録へ関連付けます。観測開始時にIDを確定し、符号化・保存中に属性を変更しても先行観測のIDを差し替えません。単独Python観測では`None`として会話参照を省略できます。
 
-`service.recording`は、このwriterを使う共通の`RecordingService`です。観測・会話・入力の記録をこの一つの窓口へ渡し、保存処理だけを`asyncio.Lock`で直列化します。このロックを画像の加工・返却では待ちません。同じwriter用に別の記録サービスを作らないでください。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
+`recording`は組立側が所有する共通の保存窓口です。観測・会話・入力の記録をこの一つの窓口へ渡し、保存処理だけを`asyncio.Lock`で直列化します。このロックを画像の加工・返却では待ちません。同じwriter用に別の記録サービスを作らないでください。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
 
 保存失敗は`on_save_error(observation, error)`へ通知し、観測成功を取り消しません。コールバックは同じイベントループで呼ばれるため、速やかに戻してください。省略時は観測IDと保存先をログへ記録します。`observe()`の成功直後にファイルが存在する保証はなく、障害時に未保存画像が失われる場合があります。
 
 ### 取消しと終了
 
-`observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。アプリはサービスとwriterの参照を保持し、`await service.drain()`で進行中の符号化とすべての保存の終了を確認します。待機の取消しでは保存を取り消しません。保存エラーは別途通知するため、`drain()`完了は全画像の保存成功を意味しません。最後の符号化が失敗した場合も、それ以前の保存を回収してからその例外を返します。保存済みの観測は、要求が取り消されても削除しません。
+`observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。新規要求を止めた後、`await service.drain()`で符号化を回収し、`await recording.drain()`で保存を回収します。観測サービスは共有保存の寿命を所有しません。最後の符号化が失敗しても保存を回収してからwriterを閉じてください。
 
-接続を切る場合は新しい観測要求を閉じて`drain()`を待ちます。プロジェクト未選択のチャットは切断時にwriterを閉じ、記録自体は残します。明示選択したプロジェクトのwriterは切断後も保持し、保存先の切替やアプリ終了で`writer.close()`を呼びます。
-
-次の関数は、プロジェクト終了時のアプリ所有者が使う例です。呼び出す前に、このwriterを使う新しい要求を止めてください。MCPの各ツール要求から呼ぶ終了処理ではありません。
+保存エラーはcallbackまたはログで別途通知し、`recording.drain()`の完了は保存成功を意味しません。待機自体の取消しでは資源を解放せず、同じ所有者で回収をやり直します。要求取消しによって保存済み画像を削除しません。
 
 ```python
 import asyncio
 
 from gigas.game_io.observation import ObservationError
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage.project import ProjectWriter
 
 
-async def close_project(service: ObservationService, writer: ProjectWriter) -> None:
+async def close_project(
+    service: ObservationService, recording: RecordingService, writer: ProjectWriter
+) -> None:
+    encoding_error = None
     try:
         await service.drain()
-    except ObservationError:
-        await asyncio.to_thread(writer.close)
-        raise
-    else:
-        await asyncio.to_thread(writer.close)
+    except ObservationError as error:
+        encoding_error = error
+    await recording.drain()
+    await asyncio.to_thread(writer.close)
+    if encoding_error is not None:
+        raise encoding_error
 ```
 
-`drain()`自体も取り消された場合、保存完了はまだ確認できていません。この例でもwriterを閉じず、呼出側に残した同じサービスで改めて`drain()`を待ってください。最後の加工・符号化の`ObservationError`が返った場合は、それ以前の保存も終了しているため、失敗を報告したうえでwriterを閉じられます。保存失敗は`drain()`から送出せず、前述のコールバックまたはログで別途確認します。実処理の終了前にイベントループを閉じたり、保存先を切り替えたりしないでください。
+プロジェクト未選択のチャットは切断時にwriterを閉じ、記録自体は残します。明示選択したプロジェクトのwriterは切断後も保持し、保存先の切替やアプリ終了で閉じます。
 
 ## 操作後の画像
 
-`gigas.services.input_observation.observe_after(reader, service, generation, boundary_ns)`は、最後の入力解除・待機完了の単調時計より後にreadを開始したFrameを選びます。同じ取得世代の画像を境界時刻から5秒以内に得られなければ`OBSERVATION_TIMEOUT`、取得停止や世代変更なら`DEVICE_UNAVAILABLE`です。PC上のread順序を確認するAPIであり、ゲームの描画完了や機器内部の遅延を保証しません。
+`service.observe_after(generation, boundary_ns, thread_id=None)`は、最後の入力解除・待機完了の単調時計より後にreadを開始したFrameを選びます。同じ取得世代の画像を境界時刻から5秒以内に得られなければ`OBSERVATION_TIMEOUT`、取得停止や世代変更なら`DEVICE_UNAVAILABLE`です。PC上のread順序を確認するAPIであり、ゲームの描画完了や機器内部の遅延を保証しません。
 
-選んだFrameは`ObservationService.observe_frame(frame)`で符号化します。キャッシュの取り直しは行わず、通常の`observe()`と同じ符号化枠・解像度設定・保存窓口を使います。通常の`observe()`は引き続き最新キャッシュを一度取得し、操作後の新フレームを待ちません。
+選んだFrameは同じサービス内で符号化します。キャッシュの取り直しは行わず、通常の`observe()`と同じ符号化枠・解像度設定・保存窓口を使います。通常の`observe()`は引き続き最新キャッシュを一度取得し、操作後の新フレームを待ちません。
 
-事後Frame待ちは取消しで直ちに終了します。`observe_frame`で符号化を開始した後は、その処理を回収してから取消しを返します。画像が完成した場合は`ObservationInterrupted`（`asyncio.CancelledError`の派生型）の`observation`属性で確定した画像とIDを得られ、中断の記録へ対応付けられます。操作成功や応答配送の成功を示す結果ではありません。保存は独立して進み、ここでは完了を待ちません。
+事後Frame待ちは取消しで直ちに終了します。事後観測の符号化を開始した後は、その処理を回収してから取消しを返します。画像が完成した場合は`ObservationInterrupted`（`asyncio.CancelledError`の派生型）の`observation`属性で確定した画像とIDを得られ、中断の記録へ対応付けられます。操作成功や応答配送の成功を示す結果ではありません。保存は独立して進み、ここでは完了を待ちません。
 
 ## 保存形式と読込
 
@@ -116,7 +119,7 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 ## 会話と観測の対応
 
-`writer.record_thread(thread_id)`は、実際のCodex会話IDを`thread.started`行のpayloadへ`runtime: "codex"`とともに記録します。非同期の利用者は`await service.recording.record_thread(thread_id)`を使います。アプリはthread/startからIDを取得した後、最初のturn/start前にこの保存を完了させます。失敗した場合はターンを投入せず、対応保存の失敗を扱います。
+`writer.record_thread(thread_id)`は、実際のCodex会話IDを`thread.started`行のpayloadへ`runtime: "codex"`とともに記録します。非同期の利用者は`await recording.record_thread(thread_id)`を使います。アプリはthread/startからIDを取得した後、最初のturn/start前にこの保存を完了させます。失敗した場合はターンを投入せず、対応保存の失敗を扱います。
 
 `writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
 
@@ -133,7 +136,7 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 `OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。`turn_id`は実値が判明している場合だけ指定します。port・baud・protocolは入力イベントへ含めません。
 
-非同期の入力所有者は観測と同じ`service.recording`を使います。開始記録には`await recording.record_input(event)`を使い、保存成功後だけ入力へ進みます。取消しは呼出側へ直ちに伝わり、受付済み保存は窓口が所有して完了させます。取消し後に保存が成功しても、入力を始める許可にはなりません。結果記録は`recording.submit_input(event)`で投入し、保存の完了を待たず停止・解除を続けられます。
+非同期の入力所有者は観測と同じ`recording`を組立側から受け取ります。開始記録には`await recording.record_input(event)`を使い、保存成功後だけ入力へ進みます。取消しは呼出側へ直ちに伝わり、受付済み保存は窓口が所有して完了させます。取消し後に保存が成功しても、入力を始める許可にはなりません。結果記録は`recording.submit_input(event)`で投入し、保存の完了を待たず停止・解除を続けられます。
 
 `recording.on_failure`へ設定した関数は、会話・入力・画像のすべての保存失敗を`Exception`として受け取ります。入力所有者はこの通知を停止へ結び付けられます。観測固有の`on_save_error`も引き続き通知されます。コールバックは同じイベントループで速やかに戻してください。開始記録をawaitしている呼出側には元の保存例外が返り、コールバックの有無で成功扱いにはなりません。
 
@@ -155,3 +158,5 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 このロックは、画像・ログの読取や別ファイルの`memory/`編集を禁止するものではありません。後続の対話記録も同じアプリ所有writerを使い、MCPや通知処理がそれぞれ別writerを開く構成にはしません。現在のCodex接続はread-onlyのため、Codex自身による`memory/`書込権限は別途確認が必要です。
 
 画像は同じディレクトリの一時ファイルへ書き込み、flush・fsync後、既存画像を上書きせず確定します。その後にJSONLへ追記・flush・fsyncします。電源断時にも画像とログが必ず一括で更新される保証はありません。
+
+事後観測の`thread_id`には受付済みrunの会話IDを渡します。単独観測用の`service.thread_id`を書き換えず、操作に対応する記録文脈を保持します。入力記録の再読込は共通入力形式を検査し、現在の通信機器で実行できるかは検査しません。

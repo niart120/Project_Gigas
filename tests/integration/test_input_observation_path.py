@@ -10,6 +10,7 @@ from gigas.game_io.input.models import parse_sequence
 from gigas.game_io.input.serial import SerialInput
 from gigas.services.input import InputService
 from gigas.services.observation import ObservationService
+from gigas.services.recording import RecordingService
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_observation_storage import sample_frame
 
@@ -56,8 +57,10 @@ def test_serial_sequence_and_fresh_observation_share_recorded_outcome(tmp_path: 
 
     async def scenario() -> None:
         reader = CaptureReader(snapshot)
-        observations = ObservationService(reader, writer)
-        service = InputService(reader, observations)
+        recording = RecordingService(writer)
+        observations = ObservationService(reader, recording)
+        service = InputService(reader, observations, recording)
+        recording.on_failure = lambda error: service.stop(str(error), code="STORAGE_ERROR")
         config = resolve_serial_config("COM3", "ch552", None)
         assert config is not None
         try:
@@ -80,6 +83,7 @@ def test_serial_sequence_and_fresh_observation_share_recorded_outcome(tmp_path: 
         finally:
             await service.close()
             await observations.drain()
+            await recording.drain()
         rows = [json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()]
         assert [row["type"] for row in rows] == [
             "input.run_started",

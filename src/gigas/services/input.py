@@ -8,7 +8,6 @@ from uuid import uuid4
 
 from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
 from gigas.game_io.observation import ObservationError
-from gigas.services.input_observation import observe_after
 from gigas.services.observation import ObservationInterrupted
 from gigas.storage.input_events import OperationFinished, OperationStarted, RunFinished, RunStarted
 
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
     from gigas.game_io.input.config import InputProtocol
     from gigas.game_io.observation import Observation
     from gigas.services.observation import ObservationService
+    from gigas.services.recording import RecordingService
 
 
 class InputDevice(Protocol):
@@ -85,22 +85,27 @@ class InputService:
     """Own input on one asyncio loop, borrowing capture and observation services.
 
     Args:
-        reader: Capture state used for admission and post-action frame selection.
-        observations: Existing encoder and shared recording owner. Its recording
-            failure callback is assigned to this service's common stop path.
+        reader: Capture state used for operation admission.
+        observations: Existing frame selection and encoding service.
+        recording: Shared persistence owner, also passed to observations. The
+            application connects its failure callback to stop().
 
     Start and finish runs explicitly. One operation is admitted at a time, with
     no queue. stop() revokes permission immediately; await drain_input() to join
     input cleanup. close() closes the device but does not drain image/record saves.
-    The application must drain observations before closing its writer or loop.
+    The application drains observations, then recording, before closing its writer or loop.
     """
 
-    def __init__(self, reader: "CaptureReader", observations: "ObservationService") -> None:
+    def __init__(
+        self,
+        reader: "CaptureReader",
+        observations: "ObservationService",
+        recording: "RecordingService",
+    ) -> None:
         """Borrow existing capture and persistence without connecting anything."""
         self._reader = reader
         self._observations = observations
-        self._recording = observations.recording
-        self._recording.on_failure = self._recording_failed
+        self._recording = recording
         self._device: InputDevice | None = None
         self._available = False
         self._run: InputGrant | None = None
@@ -199,8 +204,6 @@ class InputService:
             raise InputServiceError("STORAGE_ERROR", str(error)) from error
         if not self._revoked and self._run is grant and enabled:
             self._grant = grant
-        if self._run is grant:
-            self._observations.thread_id = thread_id
         return grant
 
     def bind_turn(self, grant: InputGrant, turn_id: str) -> bool:
@@ -239,9 +242,6 @@ class InputService:
         task = self._operation
         if task is not None and not task.done() and not self._finishing and not task.cancelling():
             task.cancel()
-
-    def _recording_failed(self, error: Exception) -> None:
-        self.stop(str(error), code="STORAGE_ERROR")
 
     async def drain_input(self) -> None:
         """Wait for the owned operation's input and encoding cleanup, not saves.
@@ -370,8 +370,8 @@ class InputService:
                 result = replace(result, completed_steps=result.completed_steps + 1)
             boundary_ns = time.monotonic_ns()
             result = replace(result, phase="observe")
-            observation = await observe_after(
-                self._reader, self._observations, generation, boundary_ns
+            observation = await self._observations.observe_after(
+                generation, boundary_ns, thread_id=grant.thread_id
             )
             result = replace(result, phase="", observation=observation)
         except asyncio.CancelledError as error:
