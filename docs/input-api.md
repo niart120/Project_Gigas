@@ -8,10 +8,13 @@ from gigas.game_io.input.models import InputState, parse_sequence
 from gigas.game_io.input.protocol import encode_state
 
 protocol = get_protocol("ch552")
-steps = parse_sequence([
-    {"kind": "press", "buttons": ["A"], "duration_ms": 100},
-    {"kind": "wait", "duration_ms": 250},
-], protocol)
+steps = parse_sequence(
+    [
+        {"kind": "press", "buttons": ["A"], "duration_ms": 100},
+        {"kind": "wait", "duration_ms": 250},
+    ],
+    protocol,
+)
 pressed = encode_state(steps[0].state, protocol)
 neutral = encode_state(InputState(), protocol)
 ```
@@ -31,7 +34,7 @@ neutral = encode_state(InputState(), protocol)
 
 `resolve_serial_config(port, protocol, baudrate)`は設定を接続用の値へ解決します。空portなら`None`、baudrateが`None`ならプロトコルの既定値になります。候補と検証は`PROTOCOLS`を共用し、対応しない値は`ValueError`になります。
 
-`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。Linux/macOSの実接続・実機動作は未検証です。
+`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。シリアル入力の実接続・実機動作は各OSとも未検証です。
 
 `SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`は完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
@@ -61,7 +64,7 @@ await observations.drain()
 
 `OperationResult.code`が`"OK"`なら列と事後観測が完了しています。失敗はcodeとphaseを持ち、operation_id、完了要素数、入力送出状況、解除状況、確定したObservationを返します。受付拒否はoperation_idなし・入力送出なしです。操作後の画像取得失敗でも、実行済みの入力を取り消した扱いにはしません。事後観測失敗はそのrunの操作権を失効させ、正常な入力接続は維持します。
 
-`stop()`は同期で権限を失効させ、実行中の列を一度だけ取り消します。`await drain_input()`で解除と入力I/O・符号化の収束を待ちます。正常な停止は接続を維持し、送信・解除失敗では接続を閉じて明示的な再適用を待ちます。`suspend()`は同runの一時保留で、実行中の列を取り消し、新規入力を拒否します。`resume()`は保留を解除しますが、停止済みGrantや取消した列を復活させません。
+`stop()`は同期で権限を失効させ、実行中の列を一度だけ取り消します。`await drain_input()`で操作列の送信・解除・符号化の収束を待ちます。接続処理の収束は`close()`が待ちます。正常な停止は接続を維持し、送信・解除失敗では接続を閉じて明示的な再適用を待ちます。`suspend()`は同runの一時保留で、実行中の列を取り消し、新規入力を拒否します。`resume()`は保留を解除しますが、停止済みGrantや取消した列を復活させません。
 
 呼出し側が`act`を取り消した場合も共通停止を行い、呼出し側には`CancelledError`を返します。内部の終了処理はサービスが保持するので、`drain_input`で回収してください。符号化中の停止では完成した画像のIDを中断結果にも記録します。返却後の画像・結果保存失敗は返却済み結果を書き換えず、新しい入力を停止します。
 

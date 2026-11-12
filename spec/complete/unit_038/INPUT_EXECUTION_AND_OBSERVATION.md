@@ -2,9 +2,9 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip**。M0で定めたシリアル入力・有限列・停止・操作記録・事後観測を、GUIやCodexから独立した内部APIとして実装する。
+状態: **complete（内部API実装・模擬境界の検証完了）**。M0で定めたシリアル入力・有限列・停止・操作記録・事後観測を、GUIやCodexから独立した内部APIとして実装した。実機受入とGUI/MCPへの結合は含まない。
 
-起点は2026-11-12のM1着手依頼、[U05親](../unit_010/INPUT_AND_STOP.md)、[M0設計](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)。開始時点は `918ba9f`、mainの作業ツリーに変更なし。U04の最新キャッシュ観測・PNG生成・非同期保存を利用する。
+起点は2026-11-12のM1着手依頼、[U05親](../../wip/unit_010/INPUT_AND_STOP.md)、[M0設計](../unit_036/INPUT_AND_STOP_DESIGN.md)。開始時点は `918ba9f`、mainの作業ツリーに変更なし。U04の最新キャッシュ観測・PNG生成・非同期保存を利用する。
 
 利用場面: アプリが保存済み設定を接続へ適用し、通常依頼を記録して操作権を渡す。受け付けた有限列を一つずつ実行し、解除後に取得した画像を返す。停止では残りの列を破棄し、記録完了を待たず解除する。
 
@@ -20,7 +20,7 @@ CH552・PokeCon・3DS S2/T3 New Firmwareの設定解決・完全入力状態の�
 
 [02 実行管理](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 記録](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[U04 M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に従う。
 
-M0と現在のコード・依存・試験を照合して着手した。入力機器は未接続・実機未検証。serial停止方式はpySerial 3.5のWindows実装を確認してから確定する。MCP公開境界は本子では実装しないため、長い要求の公開設定・実測はM2着手時の条件として引き継ぐ。
+M0と現在のコード・依存・試験を照合して着手した。入力機器は未接続・実機未検証。serial停止方式はpySerial 3.5のWindows実装を確認し、7節の方式を採用した。MCP公開境界は本子では実装せず、長い要求の方式判断と実測をM2の公開前条件として引き継ぐ。
 
 ## 5. 振る舞い仕様
 
@@ -47,7 +47,7 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 | refactor-skipped | T04R 繰り返し取消されても進行中writeを回収してから解除できる | regression | unit | 2回目のcancelで期待失敗1件→7件成功。取消しを記憶してI/O完了回収後に伝える。6c85654 |
 | refactor-skipped | T04P pySerialが列挙するOS別native portをそのまま使う | regression | unit | Linux/macOS識別子の模擬列挙で拒否2件→10件成功。OS拒否を削除。4ae5e41。実機未検証 |
 | refactor-skipped | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 未実装importと回帰のred→19件成功。長い待機、保存待ち、通信/解除失敗、旧Grant、画像ID、open中終了、neutral中停止。実SerialInput＋模擬portから実事後選定・保存まで結合。6d717ec |
-| refactor-skipped | T06R 事後観測中の一時保留は同runへ戻せるが、停止済みGrantは復活しない | regression | integration | Frame待機・符号化の2件で期待失敗→関連40件成功。中断を観測失敗と区別し、停止併用も確認 |
+| refactor-skipped | T06R 事後観測中の一時保留は同runへ戻せるが、停止済みGrantは復活しない | regression | integration | Frame待機・符号化の2件で期待失敗→関連40件成功。中断を観測失敗と区別し、停止併用も確認。1429e2c |
 | refactor-skipped | T07 操作後のFrameを選び、同じObservationを返却・非同期保存へ渡す | new | integration | 未実装importでred→観測/MCP/保存82件成功。境界を跨ぐread・同時刻read拒否、取得変更・期限・符号化競合・取消し回収と画像ID。2f37090 |
 
 ## 7. 設計メモ
@@ -74,17 +74,33 @@ M1の内部APIはこの期限に依存しない。M2では公開前に、時間�
 
 ## 9. 検証
 
-計画: 各itemのred/greenを確認後にコミットする。最終gateは `uv sync --dev`、`uv lock --check`、`uv run ruff format --check .`、`uv run ruff check .`、`uv run ty check --no-progress`、`uv run pytest tests/unit`、`uv run pytest tests/integration`、`uv build`、`git diff --check`。公開APIの型・docstring・docsと仕様リンクも読む。
+2026-11-12、Windows/Python 3.12.10の作業環境で実施した。TDDの期待失敗・成功範囲とコミットは6節に記載する。
 
-実行結果: 開始時の `uv run pytest tests/unit tests/integration -q` は465件成功。T01の `uv run pytest tests/unit/test_settings.py tests/integration/test_settings_io.py -q --basetemp=tmp/pytest-t01` は追加14件の期待失敗を確認後、36件成功。型検査成功。実接続・実機・GUI/MCP結合は本子の対象外であり、模擬境界の成功を実機受入に読み替えない。
+| command / 確認 | 結果と検査対象 |
+|---|---|
+| `uv sync --dev` / `uv lock --check` | pass。pySerial 3.5を含む依存環境とlockの整合 |
+| `uv run ruff format --check .` / `uv run ruff check .` | pass。190ファイルの書式、lint・docstring |
+| `uv run ty check --no-progress` | pass。Frameの必須時刻、入力状態、デバイス境界、サービス・記録の型 |
+| `uv run pytest tests/unit tests/integration -q` | 602 passed。既存の取得・設定・保存・MCP試験と、入力・停止・事後観測の模擬試験 |
+| `uv build` | pass。sdistとwheel生成 |
+| `git diff --check` | pass。差分の空白エラーなし |
+| `uv run python -X utf8 tmp/validate-u05-m1-docs.py` | pass。変更文書12件・ローカル参照163件、unit 38件の一意性と配置、コードフェンス、仮テキストを検査。文意と外部仕様の確認は別に行う |
+
+`test_input_observation_path.py`では実SerialInputへ模擬portを渡し、実InputService・事後Frame選定・Observation・記録窓口を結合した。neutral/A/neutralの送出、境界後Frameの採用、応答と保存PNG・操作結果の同じ観測ID、終了時closeを確認した。既存の設定・取得・保存試験を拡張し、専用の文言一致テストは追加していない。
+
+型・docstring・公開docsとM0契約を照合した。独立レビューで確認した繰り返し取消しのI/O回収、neutral送信中停止の送出判定、一時保留中の事後観測とGrantの区別を回帰試験付きで修正した。不要な構造変更は行わず、追加指摘は残っていない。
+
+シリアル実接続・実機、GUI/MCPへの入力結合、長時間HTTP要求は **not run**。M1の対象外であり、M2で実施する。Bluetooth・Goal・手動入力は **not applicable**。模擬境界の成功を実機受入に読み替えない。
 
 ## 10. 先送り事項
 
-M2: OK／適用からの接続・切替、停止と質問/承認待ちの配線、MCP公開能力と再読込、60秒超の公開要求の完了・途中停止、対象機器のファーム/baud/reset/解除/事後映像を確認する。BTは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
+M2は本子の内部APIとU02/U04を使う。公開境界の実装前に、7節のruntime期限を踏まえて長い有限列の公開方式を確定する。OK／適用からの接続・切替、停止と質問/承認待ち、取得終了・障害、MCP公開能力と次送信時の再読込を配線し、旧Grantの呼出し拒否とGUI即時停止を確認する。
+
+実機受入前に対象機器・ファーム・baudを特定し、open時reset、write中停止、実neutral、通信断時の保持、操作後映像の反映を確認する。シリアルは各OSとも実機未検証であり、Linux/macOSのアプリ全体への対応は本子の完了に含めない。BTは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
 
 ## 11. チェックリスト
 
 - [x] M0と現在の実装を照合し、対象範囲と対象外を定めた
-- [ ] TDD Test Listを検証・コミット付きで完了した
-- [ ] 公開API・依存・docsと必要なgateを確認した
-- [ ] 未検証事項とM2の着手条件を親へ反映した
+- [x] TDD Test Listを検証・コミット付きで完了した
+- [x] 公開API・依存・docsと必要なgateを確認した
+- [x] 未検証事項とM2の着手条件を親へ反映した

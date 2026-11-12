@@ -55,6 +55,12 @@ MCPのBearerはモデル向け指示やアプリ原記録へ保存しない。�
 
 根拠は `tmp/u05-mcp-generation-probe.py` / `tmp/u05-mcp-generation-bljcvlpg/results.json` と `tmp/u05-mcp-model-probe.py` / `tmp/u05-mcp-model-n0rrwo9a/results.json`。公開schemaと[採用tagの設定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/config.schema.json)、[承認処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)、[公式資料](https://learn.chatgpt.com/docs/app-server)も照合した。製品コード・シリアル・GUI停止・実機画像の事後条件は未実装/未検証。通常会話の保持をU06の保持Goal再開の受入へ拡張しない。
 
+## U05 M1の長時間要求に関する確認（2026-11-12）
+
+採用runtime 0.167.0の[期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)では、`tool_timeout_sec`省略時も300秒の既定期限を使います。0は期限無効化ではなくゼロ秒です。[要求実行の経過時間制限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)はprogress通知でも延長されません。これは採用版ソースの確認結果であり、長時間HTTP・実モデル試験は未実施です。
+
+[U05 M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)の内部実行APIには入力時間・要素数・合計時間の固定上限を設けていません。長い有限列を一要求で事後画像まで返す公開契約は、現在のruntime設定だけでは成立を確認できていません。M2の公開前にruntime・公開方式を再検討し、契約変更が必要なら仕様へ戻って判断します。大きい固定期限への置換や入力の暗黙の分割で解決済みとはしません。60秒超の成功だけでは、この制約の解消を検証したことになりません。
+
 # 1. この文書の位置づけ
 
 **公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。通常ターンはU02、観測MCPと保存画像の後参照はU04 M2で実行確認しました。Goalや入力制御は各担当工程で確認します。
