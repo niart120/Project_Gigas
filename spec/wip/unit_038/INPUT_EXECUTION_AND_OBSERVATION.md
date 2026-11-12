@@ -44,13 +44,16 @@ M0と現在のコード・依存・試験を照合して着手した。入力機
 | refactor-skipped | T03 read開始時計が取得・共有領域・readerを通って保持される | new | unit/integration | 既存capture試験の18件期待失敗→37件成功。取得/観測/保存/video結合83件成功。型・lint成功。bf02e63 |
 | refactor-skipped | T04 単一serial workerで開閉・送信を扱い、取消し後も進行中writeを回収する | new | unit/integration | 未実装importでred→6件成功。部分write・例外・設定・worker所有・取消し回収。0aced30 |
 | todo | T05 run/操作と観測を共通窓口で順序保存し、取消し後も回収する | new | integration | 既存保存・観測試験へ統合 |
-| green | T04R 繰り返し取消されても進行中writeを回収してから解除できる | regression | unit | 2回目のcancelで期待失敗1件→7件成功。取消しを記憶してI/O完了回収後に伝える。構造整理不要 |
+| refactor-skipped | T04R 繰り返し取消されても進行中writeを回収してから解除できる | regression | unit | 2回目のcancelで期待失敗1件→7件成功。取消しを記憶してI/O完了回収後に伝える。6c85654 |
+| green | T04P pySerialが列挙するOS別native portをそのまま使う | regression | unit | Linux/macOS識別子の模擬列挙で拒否2件→10件成功。OS拒否を削除。実機未検証 |
 | todo | T06 権限・排他・開始記録を満たす列だけを実行し、途中停止で解除する | new | integration | 長い待機、保存待ち、通信失敗、古いGrantを含む |
 | todo | T07 操作後のFrameを選び、結果・観測ID・非同期保存を結び付ける | new | integration | 最新cache observe維持、取得変更・期限・符号化競合・停止 |
 
 ## 7. 設計メモ
 
 共通実行部は完全入力状態と送出結果を扱い、port・baud・bytesはserial adapterに閉じ込める。未実装BT用の選択肢や追加の状態管理は作らない。受付済み操作はasyncioの取消しで止め、開始済み同期I/Oと保存は所有者が回収する。
+
+シリアル入力部のOS分岐はpySerialへ委ね、各OSのnative portを扱う。M1で確認したpySerial 3.5の`serial/__init__.py`と`serial/tools/list_ports.py`はWindows/POSIXの実装を選択する。Gigas側にWindows専用の拒否条件は置かない。Linux/macOSの列挙・接続・停止・実機は未検証であり、保存・GUIを含むアプリ全体の移植を完了した意味ではない。
 
 ### シリアル停止の採用方式
 

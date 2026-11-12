@@ -97,7 +97,7 @@ MCPは `sequence` だけを受け取る。ポート、baud、raw bytes、権限t
 
 ### 3.3 通信条件と時間の意味
 
-設計としてpySerial 3.5をM1で追加する。Windows native portだけを扱い、URL transportやnetwork serialは受け付けない。8 data bits、parity none、1 stop bit、xonxoff/rtscts/dsrdtrはfalse、read timeoutは0（ACK読取なし）、write_timeoutはpySerial既定のNoneとし、完了時間の性能要求は置かない。DTR/RTSはpySerial既定のtrueを明示し、開閉時のresetと起動待ちの要否をM2で対象機器ごとに確認する。
+設計としてpySerial 3.5をM1で追加する。pySerialが扱う各OSのnative portを利用し、アプリ独自のOS拒否は設けない。URL transportやnetwork serialは受け付けない。8 data bits、parity none、1 stop bit、xonxoff/rtscts/dsrdtrはfalse、read timeoutは0（ACK読取なし）、write_timeoutはpySerial既定のNoneとし、完了時間の性能要求は置かない。DTR/RTSはpySerial既定のtrueを明示し、開閉時のresetと起動待ちの要否をM2で対象機器ごとに確認する。OS別の実接続・実機確認は実装対応と区別する。
 
 一つのwriteが全byte数を返した場合だけ「送出済み」とする。部分write・例外は送出結果不明。flushは別の無期限待ちを増やすため通常送信に挟まず、ACK・ゲーム受理・物理解除を成功条件と呼ばない。[pySerial API](https://pyserial.readthedocs.io/en/latest/pyserial_api.html)と[Windows実装v3.5](https://github.com/pyserial/pyserial/blob/v3.5/serial/serialwin32.py)のwrite/flush/timeoutを確認した。ドライバー不具合まで期限内に終わる保証ではない。
 

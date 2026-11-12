@@ -31,7 +31,7 @@ neutral = encode_state(InputState(), protocol)
 
 `resolve_serial_config(port, protocol, baudrate)`は設定を接続用の値へ解決します。空portなら`None`、baudrateが`None`ならプロトコルの既定値になります。候補と検証は`PROTOCOLS`を共用し、対応しない値は`ValueError`になります。
 
-`gigas.game_io.input.serial.list_serial_ports()`はWindowsのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。
+`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。Linux/macOSの実接続・実機動作は未検証です。
 
 `SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`は完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 

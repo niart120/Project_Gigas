@@ -1,5 +1,7 @@
 import asyncio
+import sys
 from threading import Event, get_ident
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,6 +13,22 @@ from gigas.game_io.input.serial import SerialInput, SerialInputError, SerialPort
 
 if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
+
+
+@pytest.mark.parametrize(
+    ("platform", "identifier"),
+    [("win32", "COM3"), ("linux", "/dev/ttyACM0"), ("darwin", "/dev/cu.usbmodem1")],
+)
+def test_port_listing_uses_pyserial_native_identifiers(
+    monkeypatch: pytest.MonkeyPatch, platform: str, identifier: str
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(
+        module.list_ports,
+        "comports",
+        lambda: [SimpleNamespace(device=identifier, description="controller")],
+    )
+    assert module.list_serial_ports() == (SerialPort(identifier, "controller"),)
 
 
 class Port:

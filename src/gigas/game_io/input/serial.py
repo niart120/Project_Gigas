@@ -1,7 +1,6 @@
 """Single-worker native serial input with owned completion after cancellation."""
 
 import asyncio
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -44,17 +43,14 @@ class SerialPort:
 
 
 def list_serial_ports() -> tuple[SerialPort, ...]:
-    """List Windows native ports without opening a serial connection.
+    """List pySerial native ports without opening a serial connection.
 
     Call outside the GUI/event loop. The saved identifier must match exactly;
     descriptions and list positions are not connection identifiers.
 
     Raises:
-        SerialInputError: The platform is not Windows or enumeration fails.
+        SerialInputError: Native port enumeration fails.
     """
-    if sys.platform != "win32":
-        message = "シリアル入力はWindowsのネイティブポートに対応しています"
-        raise SerialInputError(message)
     try:
         return tuple(SerialPort(port.device, port.description) for port in list_ports.comports())
     except OSError as error:
