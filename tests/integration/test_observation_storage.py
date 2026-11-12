@@ -15,9 +15,107 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
+from gigas.game_io.input.models import InputState, InputStep
 from gigas.game_io.observation import Observation
 from gigas.storage import project
+from gigas.storage.input_events import OperationFinished, OperationStarted, RunFinished, RunStarted
 from gigas.storage.project import ProjectError, ProjectWriter
+
+
+def test_input_records_keep_sequence_results_and_observation_reference(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    observation = Observation.from_frame(sample_frame())
+    sequence = (InputStep("press", 100, InputState(buttons=("A",))), InputStep("wait", 50))
+    try:
+        writer.record_thread("runtime-thread")
+        writer.record_input(RunStarted("request-1", "run-1", "runtime-thread", "Aを押す"))
+        writer.record_input(OperationStarted("request-1", "run-1", "operation-1", sequence))
+        writer.record(observation, thread_id="runtime-thread")
+        writer.record_input(
+            OperationFinished(
+                "run-1",
+                "operation-1",
+                "completed",
+                2,
+                observation_id=observation.observation_id,
+                input_sent="sent",
+                neutral="sent",
+            )
+        )
+        writer.record_input(RunFinished("request-1", "run-1", "completed", turn_id="turn-1"))
+    finally:
+        writer.close()
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
+    records = [json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()]
+    assert [row["sequence"] for row in records] == list(range(1, 7))
+    assert [row["type"] for row in records] == [
+        "thread.started",
+        "input.run_started",
+        "input.operation_started",
+        "observation.recorded",
+        "input.operation_finished",
+        "input.run_finished",
+    ]
+    assert records[2]["payload"]["sequence"] == [step.to_json() for step in sequence]
+    assert "turn_id" not in records[2]["payload"]
+    assert records[4]["payload"]["observation_id"] == observation.observation_id
+    assert records[4]["payload"]["completed_steps"] == 2
+    assert records[5]["payload"]["turn_id"] == "turn-1"
+    assert all(
+        not {"port", "baud", "baudrate", "protocol"} & row["payload"].keys() for row in records
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload"),
+    [
+        (
+            "input.run_started",
+            {"request_id": "r", "run_id": "run", "thread_id": "", "message": "x"},
+        ),
+        (
+            "input.operation_started",
+            {"request_id": "r", "run_id": "run", "operation_id": "op", "sequence": []},
+        ),
+        (
+            "input.operation_finished",
+            {
+                "run_id": "run",
+                "operation_id": "op",
+                "result": "completed",
+                "completed_steps": -1,
+                "input_sent": "none",
+                "neutral": "not_needed",
+            },
+        ),
+        ("input.run_finished", {"request_id": "r", "run_id": "run", "reason": ""}),
+    ],
+)
+def test_input_record_read_rejects_invalid_known_payload(
+    tmp_path: Path, kind: str, payload: dict[str, object]
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    writer.close()
+    row = event(writer.project_id)
+    row["type"], row["payload"] = kind, payload
+    log = writer.path / "events.jsonl"
+    original = (json.dumps(row) + "\n").encode()
+    log.write_bytes(original)
+    with pytest.raises(ProjectError, match="行1"):
+        ProjectWriter.open(writer.path)
+    assert log.read_bytes() == original
+
+
+def test_invalid_input_record_is_rejected_before_append(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        with pytest.raises(ProjectError):
+            writer.record_input(OperationFinished("run", "op", "failed", -1))
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+        writer.record_input(RunStarted("request", "run", "thread", "message"))
+    finally:
+        writer.close()
 
 
 def test_create_project_and_preserve_existing_directory(tmp_path: Path) -> None:
@@ -436,7 +534,7 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
 
 
 @pytest.mark.parametrize("failure", ["partial", "sync"])
-@pytest.mark.parametrize("kind", ["observation", "thread"])
+@pytest.mark.parametrize("kind", ["observation", "thread", "input"])
 def test_uncertain_log_preserves_data_and_requires_explicit_reload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, kind: str
 ) -> None:
@@ -466,11 +564,12 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
                     fsync(descriptor)
 
                 patch.setattr(project.os, "fsync", broken_log_sync)
-            append = (
-                partial(writer.record, Observation.from_frame(sample_frame()))
-                if kind == "observation"
-                else partial(writer.record_thread, "thread-1")
-            )
+            if kind == "observation":
+                append = partial(writer.record, Observation.from_frame(sample_frame()))
+            elif kind == "thread":
+                append = partial(writer.record_thread, "thread-1")
+            else:
+                append = partial(writer.record_input, RunStarted("request", "run", "thread", "A"))
             with pytest.raises(ProjectError, match="未確定"):
                 append()
         after = log.read_bytes()

@@ -568,7 +568,7 @@ class CodexServiceThread(QThread):
                 message = "チャットの記録先が準備されていません"
                 raise ProjectError(message)
             try:
-                await asyncio.to_thread(writer.record_thread, thread_id)
+                await observations.recording.record_thread(thread_id)
             except Exception as error:
                 self.recording_failed.emit(thread_id, str(writer.path), _recording_reason(error))
                 raise

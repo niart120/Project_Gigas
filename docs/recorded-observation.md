@@ -2,7 +2,7 @@
 
 Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](codex-gui.md)に結合し、MCP経由で同じ画像をCodexへ返します。
 
-入口は`gigas.storage.project.ProjectWriter`と`gigas.services.observation.ObservationService`です。元画像には[映像取得API](video-api.md)の不変な`Frame`を使います。
+入口は`gigas.storage.project.ProjectWriter`と`gigas.services.observation.ObservationService`です。共通の非同期保存は`gigas.services.recording.RecordingService`が担当します。元画像には[映像取得API](video-api.md)の不変な`Frame`を使います。
 
 `ProjectWriter`はアプリが原記録を書き込むための所有者です。アプリが現在の記録先に一つ保持し、観測サービスはその参照を借ります。プロジェクト未選択のチャットにもアプリ管理の記録先を用意します。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
 
@@ -62,7 +62,7 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 `thread_id`を指定すると、その実会話IDを観測記録へ関連付けます。観測開始時にIDを確定し、符号化・保存中に属性を変更しても先行観測のIDを差し替えません。単独Python観測では`None`として会話参照を省略できます。
 
-現在の実装は同期writerを再利用し、保存処理だけを`asyncio.Lock`で直列化します。このロックを観測の加工・返却では待ちません。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
+`service.recording`は、このwriterを使う共通の`RecordingService`です。観測・会話・入力の記録をこの一つの窓口へ渡し、保存処理だけを`asyncio.Lock`で直列化します。このロックを画像の加工・返却では待ちません。同じwriter用に別の記録サービスを作らないでください。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
 
 保存失敗は`on_save_error(observation, error)`へ通知し、観測成功を取り消しません。コールバックは同じイベントループで呼ばれるため、速やかに戻してください。省略時は観測IDと保存先をログへ記録します。`observe()`の成功直後にファイルが存在する保証はなく、障害時に未保存画像が失われる場合があります。
 
@@ -108,9 +108,28 @@ async def close_project(service: ObservationService, writer: ProjectWriter) -> N
 
 ## 会話と観測の対応
 
-`writer.record_thread(thread_id)`は、実際のCodex会話IDを`thread.started`行のpayloadへ`runtime: "codex"`とともに記録します。アプリはthread/startからIDを取得した後、最初のturn/start前にこの同期処理をGUI・イベントループ外で完了させます。失敗した場合はターンを投入せず、対応保存の失敗を扱います。
+`writer.record_thread(thread_id)`は、実際のCodex会話IDを`thread.started`行のpayloadへ`runtime: "codex"`とともに記録します。非同期の利用者は`await service.recording.record_thread(thread_id)`を使います。アプリはthread/startからIDを取得した後、最初のturn/start前にこの保存を完了させます。失敗した場合はターンを投入せず、対応保存の失敗を扱います。
 
 `writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
+
+## 入力の開始・結果を記録する
+
+`gigas.storage.input_events`の変更不能な値を`writer.record_input(event)`へ渡すと、同じJSONLへ入力イベントを追記します。
+
+| 型 | 保存する内容 |
+|---|---|
+| `RunStarted(request_id, run_id, thread_id, message)` | 通常依頼本文と実会話IDを`input.run_started`へ記録 |
+| `OperationStarted(request_id, run_id, operation_id, sequence, turn_id=None)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
+| `OperationFinished(run_id, operation_id, result, completed_steps, ...)` | 完了要素数、結果、確定した`observation_id`を`input.operation_finished`へ記録 |
+| `RunFinished(request_id, run_id, reason, turn_id=None)` | 停止・通常終端・開始失敗の理由を`input.run_finished`へ記録 |
+
+`OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。`turn_id`は実値が判明している場合だけ指定します。port・baud・protocolは入力イベントへ含めません。
+
+非同期の入力所有者は観測と同じ`service.recording`を使います。開始記録には`await recording.record_input(event)`を使い、保存成功後だけ入力へ進みます。取消しは呼出側へ直ちに伝わり、受付済み保存は窓口が所有して完了させます。取消し後に保存が成功しても、入力を始める許可にはなりません。結果記録は`recording.submit_input(event)`で投入し、保存の完了を待たず停止・解除を続けられます。
+
+`recording.on_failure`へ設定した関数は、会話・入力・画像のすべての保存失敗を`Exception`として受け取ります。入力所有者はこの通知を停止へ結び付けられます。観測固有の`on_save_error`も引き続き通知されます。コールバックは同じイベントループで速やかに戻してください。開始記録をawaitしている呼出側には元の保存例外が返り、コールバックの有無で成功扱いにはなりません。
+
+通常終了は新しい記録を止めて`await service.drain()`を呼び、符号化と共通窓口の保存を回収してからwriterを閉じます。`RecordingService`を単独で使用する場合は`await recording.drain()`で保存だけを回収します。どちらも保存失敗を再送せず、原記録を保持します。
 
 ## 保存失敗と書込所有権
 

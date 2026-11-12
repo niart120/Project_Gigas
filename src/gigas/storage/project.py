@@ -12,6 +12,8 @@ from threading import Lock
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
+from gigas.storage.input_events import input_record, validate_input_payload
+
 if sys.platform == "win32":
     import msvcrt
 
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from gigas.game_io.observation import Observation
+    from gigas.storage.input_events import InputEvent
 
 
 class ProjectError(ValueError):
@@ -164,6 +167,25 @@ class ProjectWriter:
             self._append_event(
                 "thread.started", {"runtime": "codex", "thread_id": thread_id}, sequence
             )
+
+    def record_input(self, event: "InputEvent") -> None:
+        """Append one typed run or operation event without connection metadata.
+
+        Args:
+            event: Start or final outcome. Start records must succeed before input.
+
+        Raises:
+            ProjectBusyError: Another synchronous operation owns the writer.
+            ProjectError: The payload is invalid, writing is unavailable, or append fails.
+        """
+        with self._operation():
+            sequence = self._require_writable()
+            try:
+                kind, payload = input_record(event)
+            except (ValueError, TypeError) as error:
+                message = f"入力記録が不正です。記録していません: {error}"
+                raise ProjectError(message) from error
+            self._append_event(kind, payload, sequence)
 
     def record(self, observation: "Observation", *, thread_id: str | None = None) -> None:
         """Persist the final observation image and its corresponding metadata.
@@ -406,6 +428,13 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         raise ValueError(message)
     if kind == "observation.recorded":
         _validate_observation(record["payload"])
+    elif kind in (
+        "input.run_started",
+        "input.operation_started",
+        "input.operation_finished",
+        "input.run_finished",
+    ):
+        validate_input_payload(kind, record["payload"])
     elif kind == "thread.started":
         payload = _object(record["payload"])
         _thread_id(payload.get("thread_id"))

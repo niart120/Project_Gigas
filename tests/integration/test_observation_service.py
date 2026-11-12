@@ -11,11 +11,98 @@ from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
 from gigas.services.observation import ObservationService
 from gigas.storage import project
+from gigas.storage.input_events import RunFinished, RunStarted
 from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
 from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
+
+
+def test_cancelled_start_keeps_storage_order_and_drain_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    entered, release = Event(), Event()
+    append = project._append_row
+
+    def delayed_append(path: Path, row: bytes) -> None:
+        if json.loads(row)["type"] == "input.run_started":
+            entered.set()
+            if not release.wait(10):
+                message = "test recording release"
+                raise TimeoutError(message)
+        append(path, row)
+
+    monkeypatch.setattr(project, "_append_row", delayed_append)
+
+    async def scenario() -> None:
+        service = ObservationService(
+            CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=sample_frame())), writer
+        )
+        recording = service.recording
+        request = asyncio.create_task(
+            recording.record_input(RunStarted("req", "run", "thread", "A"))
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(request, 3)
+            observation = await asyncio.wait_for(service.observe(), 3)
+            recording.submit_input(RunFinished("req", "run", "stopped"))
+            with pytest.raises(ProjectBusyError):
+                writer.close()
+            assert not (writer.path / observation.image_path).exists()
+            waiting = asyncio.create_task(service.drain())
+            await asyncio.sleep(0)
+            assert not waiting.done()
+        finally:
+            release.set()
+            await service.drain()
+        await waiting
+        records = [
+            json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()
+        ]
+        assert [row["type"] for row in records] == [
+            "input.run_started",
+            "observation.recorded",
+            "input.run_finished",
+        ]
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+        writer.close()
+
+
+def test_record_failure_reaches_waiter_and_shared_failure_callback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    failures: list[Exception] = []
+
+    def fail_append(_path: Path, _row: bytes) -> None:
+        message = "injected recording failure"
+        raise OSError(message)
+
+    monkeypatch.setattr(project, "_append_row", fail_append)
+
+    async def scenario() -> None:
+        service = ObservationService(CaptureReader(CaptureSnapshot), writer)
+        service.recording.on_failure = failures.append
+        with pytest.raises(ProjectError, match="injected recording failure"):
+            await service.recording.record_input(RunStarted("req", "run", "thread", "A"))
+        service.recording.submit_input(RunFinished("req", "run", "start_failed"))
+        await service.drain()
+        assert len(failures) == 2
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        writer.close()
 
 
 def test_observe_uses_cached_frame_and_retains_its_time(
@@ -60,6 +147,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
     publish = project._publish_image
     encode = Observation.from_frame
     failures: list[tuple[Observation, Exception]] = []
+    shared_failures: list[Exception] = []
 
     def delayed_publish(path: Path, data: bytes) -> None:
         entered.set()
@@ -89,6 +177,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
             on_save_error=lambda observation, error: failures.append((observation, error)),
             thread_id="thread-1",
         )
+        service.recording.on_failure = shared_failures.append
         request = asyncio.create_task(service.observe())
         try:
             assert await asyncio.to_thread(entered.wait, 3)
@@ -127,6 +216,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
             await service.drain()
         if save_fails:
             assert len(failures) == 2
+            assert shared_failures == [error for _, error in failures]
             assert {observation.observation_id for observation, _ in failures} == {
                 first.observation_id,
                 second.observation_id,
@@ -135,6 +225,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
             assert (writer.path / "events.jsonl").read_bytes() == b""
         else:
             assert failures == []
+            assert shared_failures == []
             records = [
                 json.loads(line)
                 for line in (writer.path / "events.jsonl").read_bytes().splitlines()

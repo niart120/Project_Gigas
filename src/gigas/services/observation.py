@@ -1,10 +1,10 @@
 """Latest-frame observations with independently owned background persistence."""
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
 
 from gigas.game_io.observation import Observation, ObservationError
+from gigas.services.recording import RecordingService
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -13,8 +13,6 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
     from gigas.game_io.observation import ObservationResolution
     from gigas.storage.project import ProjectWriter
-
-logger = logging.getLogger(__name__)
 
 
 class ObservationService:
@@ -34,6 +32,8 @@ class ObservationService:
             callback, failures are logged with the observation ID and archive path.
 
     Attributes:
+        recording: Shared persistence owner for observations, run and operation records.
+            Pass this same service to the input owner; do not create another for the writer.
         resolution: Applied size for subsequent observations. Each observe call
             snapshots it once, so an in-progress image is unaffected by changes.
         thread_id: Chat context for subsequent observations. Later changes do not
@@ -52,12 +52,10 @@ class ObservationService:
         """Keep existing owners without starting a device or event loop."""
         self.resolution = resolution
         self.thread_id = thread_id
+        self.recording = RecordingService(writer)
         self._reader = reader
-        self._writer = writer
         self._on_save_error = on_save_error
         self._worker: asyncio.Task[Observation] | None = None
-        self._saves: set[asyncio.Task[None]] = set()
-        self._save_lock = asyncio.Lock()
 
     async def observe(self) -> "Observation":
         """Encode the latest streaming frame without waiting for persistence.
@@ -90,33 +88,10 @@ class ObservationService:
         self, frame: "Frame", resolution: "ObservationResolution", thread_id: str | None
     ) -> Observation:
         observation = await asyncio.to_thread(Observation.from_frame, frame, resolution=resolution)
-        task = asyncio.create_task(self._save(observation, thread_id))
-        self._saves.add(task)
-        task.add_done_callback(self._save_finished)
+        self.recording.submit_observation(
+            observation, thread_id=thread_id, on_error=self._on_save_error
+        )
         return observation
-
-    async def _save(self, observation: Observation, thread_id: str | None) -> None:
-        try:
-            # Reuse the current synchronous writer safely. This lock only orders
-            # storage operations; image encoding and delivery never acquire it.
-            async with self._save_lock:
-                await asyncio.to_thread(self._writer.record, observation, thread_id=thread_id)
-        except Exception as error:
-            # Background I/O and executor submission failures belong to recording,
-            # including unexpected exceptions; they cannot retroactively fail observe.
-            if self._on_save_error is None:
-                logger.exception(
-                    "Observation save failed: %s (%s)",
-                    observation.observation_id,
-                    self._writer.path,
-                )
-            else:
-                self._on_save_error(observation, error)
-
-    def _save_finished(self, task: "asyncio.Task[None]") -> None:
-        self._saves.discard(task)
-        if not task.cancelled() and task.exception() is not None:
-            logger.error("Observation save callback failed", exc_info=task.exception())
 
     async def drain(self) -> None:
         """Wait for submitted encoding and all saves, including after cancellation.
@@ -136,8 +111,7 @@ class ObservationService:
                 await asyncio.shield(self._worker)
             except Exception as error:  # noqa: BLE001 - re-raised after existing saves finish.
                 encoding_error = error
-        if self._saves:
-            await asyncio.shield(asyncio.gather(*self._saves, return_exceptions=True))
+        await self.recording.drain()
         if encoding_error is not None:
             raise encoding_error
 
