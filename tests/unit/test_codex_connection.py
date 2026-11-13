@@ -16,6 +16,7 @@ from gigas.runtime.codex.connection import (
 from gigas.runtime.codex.models import (
     ActivityEvent,
     ConnectionOptions,
+    DialogueEvent,
     HumanRequest,
     LoginEvent,
     PlanEvent,
@@ -74,6 +75,7 @@ class FakePeer:
         self.close_gate: asyncio.Event | None = None
         self.close_calls = 0
         self.respond_gate: asyncio.Event | None = None
+        self.goal: JsonObject | None = None
 
     async def start(self) -> None:
         """Record process startup."""
@@ -112,8 +114,31 @@ class FakePeer:
                 "approvalsReviewer": params["approvalsReviewer"],
                 "model": params["model"],
                 "cwd": params["cwd"],
-                "sandbox": {"type": "readOnly"},
+                "sandbox": {"type": "readOnly"}
+                if params["sandbox"] == "read-only"
+                else {
+                    "type": "workspaceWrite",
+                    "writableRoots": [],
+                    "networkAccess": False,
+                    "excludeTmpdirEnvVar": True,
+                    "excludeSlashTmp": True,
+                },
             }
+        if method == "thread/goal/set":
+            assert params is not None
+            goal = dict(
+                self.goal or {"threadId": "thread-1", "tokensUsed": 0, "timeUsedSeconds": 0}
+            )
+            goal.update(
+                {key: value for key, value in params.items() if key in {"objective", "status"}}
+            )
+            self.goal = goal
+            return {"goal": goal}
+        if method == "thread/goal/get":
+            return {"goal": self.goal}
+        if method == "thread/goal/clear":
+            self.goal = None
+            return {"cleared": True}
         if method == "thread/unsubscribe":
             return {"status": "unsubscribed"}
         if method == "turn/start":
@@ -700,17 +725,44 @@ def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str
     _run(scenario())
 
 
-@pytest.mark.parametrize("terminal", ["resolved", "completed", "stop"])
+@pytest.mark.parametrize(
+    "terminal",
+    ["resolved", "completed", "stop", "complete", "blocked", "usageLimited", "budgetLimited"],
+)
+@pytest.mark.parametrize("kind", ["question", "command"])
 def test_resolved_completed_or_stopped_question_rejects_late_answers(
-    tmp_path: Path, terminal: str
+    tmp_path: Path, terminal: str, kind: str
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
-        await connection.send("開始")
-        peer.events.put_nowait(_question(blocking=False))
+        goal_terminal = terminal in {"complete", "blocked", "usageLimited", "budgetLimited"}
+        if goal_terminal:
+            await connection.set_goal("goal")
+            await connection._notification(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
+        else:
+            await connection.send("開始")
+        peer.events.put_nowait(
+            _question(blocking=False)
+            if kind == "question"
+            else ServerRequest(
+                "question-1",
+                "item/commandExecution/requestApproval",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "cmd",
+                    "startedAtMs": 10,
+                    "command": "Get-Date",
+                    "cwd": str(tmp_path),
+                    "environmentId": "local",
+                },
+            )
+        )
         await _events_processed()
         request = next(event for event in events if isinstance(event, HumanRequest))
         if terminal == "resolved":
@@ -733,15 +785,23 @@ def test_resolved_completed_or_stopped_question_rejects_late_answers(
                     },
                 )
             )
+        elif goal_terminal:
+            assert peer.goal is not None
+            peer.goal = {**peer.goal, "status": terminal}
+            await connection._notification(
+                RpcNotification("thread/goal/updated", {"threadId": "thread-1", "goal": peer.goal})
+            )
         else:
             await connection.stop()
         await _events_processed()
         with pytest.raises(CodexConnectionError):
-            await connection.answer(request.token, answers={"route": "東"})
+            await connection.answer(
+                request.token, answers={"route": "東"}
+            ) if kind == "question" else await connection.answer(request.token, decision="decline")
         assert not peer.replies
         assert not peer.rejections
         assert RequestResolved(request.token) in events
-        if terminal == "stop":
+        if terminal == "stop" or goal_terminal:
             assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}) in peer.calls
             assert isinstance(events[-1], SessionStatus)
             assert events[-1].phase == "stopping"
@@ -1224,7 +1284,7 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
         )
         notify("turn/plan/updated", {"plan": []}, turn="unknown-turn")
         await _events_processed()
-        assert events[before:] == [
+        assert [event for event in events[before:] if not isinstance(event, DialogueEvent)] == [
             PlanEvent("turn-1", (PlanStep("観測", "completed"),)),
             ReasoningEvent("turn-1", "reason-1", ()),
             ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "failed", "停止"),
@@ -1244,7 +1304,13 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
 def test_launch_enables_public_plan_tool(tmp_path: Path, monkeypatch: "MonkeyPatch") -> None:
     commands: list[list[str]] = []
 
-    def transport(command: list[str], cwd: Path, env: dict[str, str]) -> FakePeer:
+    def transport(
+        command: list[str], cwd: Path, env: dict[str, str], *, unset_env: tuple[str, ...] = ()
+    ) -> FakePeer:
+        assert unset_env == (
+            "CODEX_WINDOWS_REGISTERED_CORE",
+            "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY",
+        )
         assert cwd == tmp_path
         assert isinstance(env, dict)
         commands.append(command)
@@ -1355,14 +1421,25 @@ def test_close_cancels_login_and_never_emits_a_late_url(tmp_path: Path, pending:
     _run(scenario())
 
 
-def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "goal_status", [None, "complete", "blocked", "usageLimited", "budgetLimited"]
+)
+def test_terminal_while_answer_write_waits_does_not_restore_running(
+    tmp_path: Path, goal_status: str | None
+) -> None:
     async def scenario() -> None:
         peer = FakePeer()
         peer.respond_gate = asyncio.Event()
         events: list[ConnectionEvent] = []
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
-        await connection.send("開始")
+        if goal_status is None:
+            await connection.send("開始")
+        else:
+            await connection.set_goal("goal")
+            await connection._notification(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
         peer.events.put_nowait(_question())
         peer.events.put_nowait(_question())
         await _events_processed()
@@ -1370,7 +1447,14 @@ def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Pa
         assert len(requests) == 1
         answer = asyncio.create_task(connection.answer(requests[0].token, answers={"route": "東"}))
         await _events_processed()
-        peer.events.put_nowait(_terminal())
+        if goal_status is None:
+            peer.events.put_nowait(_terminal())
+        else:
+            assert peer.goal is not None
+            peer.goal = {**peer.goal, "status": goal_status}
+            peer.events.put_nowait(
+                RpcNotification("thread/goal/updated", {"threadId": "thread-1", "goal": peer.goal})
+            )
         peer.events.put_nowait(
             RpcNotification(
                 "serverRequest/resolved", {"threadId": "thread-1", "requestId": "question-1"}
@@ -1382,7 +1466,11 @@ def test_terminal_while_answer_write_waits_does_not_restore_running(tmp_path: Pa
         assert len(peer.replies) == 1
         assert events.count(RequestResolved(requests[0].token)) == 1
         assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "ready"
+        assert events[-1].phase == ("ready" if goal_status is None else "stopping")
+        if goal_status is not None:
+            assert peer.goal is not None
+            assert peer.goal["status"] == goal_status
+            assert sum(method == "thread/goal/set" for method, _ in peer.calls) == 1
         await connection.close()
 
     _run(scenario())
@@ -1882,3 +1970,246 @@ def test_next_turn_selection_preserves_running_turn(tmp_path: Path) -> None:
         await connection.close()
 
     asyncio.run(scenario())
+
+
+def test_goal_continues_updates_and_pauses_without_starting_extra_turn(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.goal = {
+            "threadId": "thread-1",
+            "objective": "first",
+            "status": "active",
+            "tokensUsed": 12,
+            "timeUsedSeconds": 3,
+        }
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        assert await connection.set_goal("first")
+        for turn_id in ("auto-1", "auto-2"):
+            await connection._notification(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": turn_id}})
+            )
+            assert isinstance(events[-1], SessionStatus)
+            assert events[-1].phase == "running"
+            await connection._notification(
+                RpcNotification(
+                    "turn/completed",
+                    {"threadId": "thread-1", "turn": {"id": turn_id, "status": "completed"}},
+                )
+            )
+        assert await connection.set_goal("revised")
+        sets = [params for method, params in peer.calls if method == "thread/goal/set"]
+        assert sets[-1] == {"threadId": "thread-1", "objective": "revised", "origin": "user"}
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        await connection.stop()
+        assert peer.goal["status"] == "paused"
+        assert await connection.resume_goal()
+        assert peer.goal["tokensUsed"] == 12
+        assert [method for method, _ in peer.calls].count("thread/resume") == 1
+        await connection.clear_goal()
+        assert peer.goal is None
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("fail_pause", [False, True])
+def test_goal_stop_interrupts_even_when_pause_fails_and_rejects_late_turn_input(
+    tmp_path: Path, fail_pause: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("goal")
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto-1"}})
+        )
+        if fail_pause:
+            peer.rpc_errors["thread/goal/set"] = -32600
+            with pytest.raises(CodexConnectionError):
+                await connection.stop()
+        else:
+            await connection.stop()
+        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "auto-1"}) in peer.calls
+        await connection._notification(
+            RpcNotification(
+                "turn/completed",
+                {"threadId": "thread-1", "turn": {"id": "auto-1", "status": "interrupted"}},
+            )
+        )
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
+        )
+        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+        with pytest.raises(CodexConnectionError):
+            await connection.steer("late instruction", "late")
+        assert not any(
+            isinstance(e, SessionStatus) and e.phase == "running"
+            for e in events[events.index(TurnStarted("late")) :]
+        )
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_goal_start_pause_race_is_serialized_without_duplicate_start(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["thread/goal/set"] = asyncio.Event()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        await connection.open()
+        starting = asyncio.create_task(connection.set_goal("goal"))
+        await _events_processed()
+        stopping = asyncio.create_task(connection.stop())
+        await _events_processed()
+        peer.gates["thread/goal/set"].set()
+        assert await starting
+        await stopping
+        assert peer.goal is not None
+        assert peer.goal["status"] == "paused"
+        sets = [params for method, params in peer.calls if method == "thread/goal/set"]
+        assert len(sets) == 2
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_memory_sandbox_and_goal_settings_use_current_selection(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        memory = tmp_path / "memory"
+        memory.mkdir()
+
+        async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
+            return ThreadConfiguration(tmp_path, memory_dir=memory)
+
+        peer = FakePeer()
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
+        )
+        await connection.open()
+        await connection.set_goal("goal")
+        await connection.select_model("other", "low")
+        assert peer.calls[-1] == (
+            "thread/settings/update",
+            {"threadId": "thread-1", "model": "other", "effort": "low"},
+        )
+        await connection.stop()
+        await connection.resume_goal()
+        resumed = next(params for method, params in peer.calls if method == "thread/resume")
+        assert resumed is not None
+        assert resumed["cwd"] == str(memory)
+        assert resumed["runtimeWorkspaceRoots"] == [str(memory)]
+        assert resumed["sandbox"] == "workspace-write"
+        assert resumed["model"] == "other"
+        config = resumed["config"]
+        assert isinstance(config, dict)
+        assert config["sandbox_workspace_write.writable_roots"] == []
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_dialogue_snapshots_flush_pending_text_once_on_interruption(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("start")
+        for delta in ("one", " two"):
+            await connection._notification(
+                RpcNotification(
+                    "item/agentMessage/delta",
+                    {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": "answer",
+                        "delta": delta,
+                    },
+                )
+            )
+        assert not any(isinstance(event, DialogueEvent) for event in events)
+        await connection.stop()
+        await connection._notification(_terminal(status="interrupted"))
+        await connection.close()
+        records = [event for event in events if isinstance(event, DialogueEvent)]
+        assert records == [
+            DialogueEvent(
+                "message",
+                {"item_id": "answer", "kind": "message", "text": "one two", "partial": True},
+                "turn-1",
+            )
+        ]
+
+    _run(scenario())
+
+
+def test_goal_update_rejection_preserves_active_turn_and_objective(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("original")
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto"}})
+        )
+        peer.rpc_errors["thread/goal/set"] = -32600
+        with pytest.raises(CodexConnectionError):
+            await connection.set_goal("rejected")
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "running"
+        assert peer.goal is not None
+        assert peer.goal["objective"] == "original"
+        await connection.steer("continue", "auto")
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_autonomous_turn_failure_pauses_goal_before_further_input(
+    tmp_path: Path, status: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("goal")
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto"}})
+        )
+        await connection._notification(
+            RpcNotification(
+                "turn/completed", {"threadId": "thread-1", "turn": {"id": "auto", "status": status}}
+            )
+        )
+        assert peer.goal is not None
+        assert peer.goal["status"] == "paused"
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_cleared_goal_still_interrupts_a_late_autonomous_turn(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        await connection.open()
+        await connection.set_goal("goal")
+        await connection.clear_goal()
+        assert peer.goal is None
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
+        )
+        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+        await connection.close()
+
+    _run(scenario())

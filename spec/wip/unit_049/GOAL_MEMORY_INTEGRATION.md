@@ -20,7 +20,7 @@ Goal本文・Planは各Transcript内で選択/コピー/更新中スクロール
 | 状態 | item | 検証 |
 |---|---|---|
 | refactor-skipped | D01 記憶入口・限定起動環境・対話保存 | 既存storage/recording/launch試験改訂 |
-| green | D02 公開Goal操作・自律turn・配送と停止競合 | 既存connection/transport試験改訂 |
+| refactor-skipped | D02 公開Goal操作・自律turn・配送と停止競合 | 既存connection/transport試験改訂 |
 | green | D03 Goal run/Grant/MCP・通常会話・対話記録 | 既存service/input/settings試験改訂 |
 | green | D04 Goal操作と本文保持 | 既存GUI/Plan試験改訂 |
 
@@ -77,3 +77,5 @@ Qtは固定通知で[通常画面](assets/normal-paused.png)と[800×600](assets
 相互レビューの必須指摘は修正済み: 新規Goal拒否で既存通常runを止めない、clear後の遅い自律turnも中断、失敗/外部中断終端でGoalを休止、入力設定変更はGoal停止と独立して適用を継続、Goal応答前readyでも同run保持。記録は提出本文と配送結果を同じrequest_idへ対応付け、取得時刻と保存時刻を分離。request_idは既存コマンド単位の識別であり独自Goal ID・配送キューではない。
 
 KISSレビュー: Goalとturn/操作権を巨大な状態列挙へ展開せず、既存停止/要求/通知/保存の経路を利用。自律継続はruntimeに委任し独自continue・再試行・監視・自動復旧なし。Goal本文とPlanの別標準文書境界を明示し、独自跨ぎ選択は実装しない。
+
+最後の受入監査で、Goalがcomplete/blocked/usageLimited/budgetLimitedへ変化した後も質問/承認へ回答できる8ケースを既存試験でredにした。公開停止理由を保持して要求失効・停止意思固定・turn中断する修正後は成功。提出済み回答の遅い完了でも実行状態へ戻らない。runtime114件＋service62件、合計176件成功。実runtimeプローブもrun-20261113-163521/report.jsonで再成功し、処理は終了済み。

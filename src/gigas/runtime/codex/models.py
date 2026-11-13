@@ -49,10 +49,12 @@ class ThreadConfiguration:
         cwd: Existing absolute archive directory, independent of the process cwd.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
+        memory_dir: Exclusive runtime write directory, or None for read-only operation.
     """
 
     cwd: "Path"
     mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
+    memory_dir: "Path | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,8 +272,41 @@ class ModelSelection:
     effort: str
 
 
+type GoalStatus = Literal[
+    "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class GoalState:
+    """Public Goal state and observed cumulative usage, without inferred completion."""
+
+    objective: str
+    status: GoalStatus
+    tokens_used: int = 0
+    time_used_seconds: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class GoalEvent:
+    """A confirmed Goal snapshot, or None after confirmed removal."""
+
+    goal: GoalState | None
+
+
+@dataclass(frozen=True, slots=True)
+class DialogueEvent:
+    """A public final or partial item snapshot suitable for asynchronous recording."""
+
+    kind: str
+    payload: "JsonObject"
+    turn_id: str | None = None
+
+
 type ConnectionEvent = (
-    ModelSelection
+    GoalEvent
+    | DialogueEvent
+    | ModelSelection
     | SessionStatus
     | TextEvent
     | PlanEvent
