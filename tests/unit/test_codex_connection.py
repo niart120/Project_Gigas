@@ -1852,3 +1852,33 @@ def test_each_send_refreshes_mcp_on_the_same_thread_before_starting_turn(
         await connection.close()
 
     _run(scenario())
+
+
+def test_next_turn_selection_preserves_running_turn(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        await connection.open()
+        await connection.send("first")
+        before = list(peer.calls)
+        await connection.select_model("other", "low")
+        assert peer.calls == before
+        await connection.steer("continue", "turn-1")
+        with pytest.raises(CodexConnectionError):
+            await connection.select_model("other", "invalid")
+        await connection._notification(
+            RpcNotification(
+                "turn/completed",
+                {"threadId": "thread-1", "turn": {"id": "turn-1", "status": "completed"}},
+            )
+        )
+        await connection.send("second")
+        turns = [params for method, params in peer.calls if method == "turn/start"]
+        assert turns[0] is not None
+        assert turns[1] is not None
+        assert turns[0]["model"] == "catalog-default"
+        assert turns[1]["model"] == "other"
+        assert turns[1]["effort"] == "low"
+        await connection.close()
+
+    asyncio.run(scenario())

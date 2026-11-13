@@ -46,6 +46,9 @@ class LifetimeConnection:
         self.emit(SessionStatus("running", "model", "high", True))
         return f"turn-{self.sends}"
 
+    async def select_model(self, model: str, effort: str) -> None:
+        """Accept a test selection."""
+
     async def steer(self, prompt: str, expected_turn_id: str) -> str:
         """Acknowledge an instruction for the selected turn."""
         assert prompt

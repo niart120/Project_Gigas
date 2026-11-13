@@ -62,8 +62,8 @@ class SessionStatus:
     Attributes:
         phase: Connection or turn phase. Stopped means no pending start or active turn;
             interrupt receipt alone does not establish it.
-        model: Validated model name, empty before catalog validation.
-        effort: Validated reasoning effort, empty before catalog validation.
+        model: Selected model for future ordinary turns, empty before catalog validation.
+        effort: Selected reasoning level for future ordinary turns, empty before validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
         detail: A short application-owned reason safe for display.
         failure_id: Connection-local failure identity shared with an operation result;
@@ -252,8 +252,27 @@ class TurnStarted:
     turn_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ModelChoice:
+    """A catalog model and its supported reasoning levels."""
+
+    model: str
+    efforts: tuple[str, ...]
+    default_effort: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSelection:
+    """Validated choices and selection for the next ordinary turn."""
+
+    choices: tuple[ModelChoice, ...]
+    model: str
+    effort: str
+
+
 type ConnectionEvent = (
-    SessionStatus
+    ModelSelection
+    | SessionStatus
     | TextEvent
     | PlanEvent
     | ReasoningEvent

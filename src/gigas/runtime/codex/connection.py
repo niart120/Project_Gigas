@@ -12,6 +12,8 @@ from gigas.runtime.codex.models import (
     ActivityEvent,
     HumanRequest,
     LoginEvent,
+    ModelChoice,
+    ModelSelection,
     PlanEvent,
     PlanStep,
     Question,
@@ -236,6 +238,7 @@ class CodexConnection:
         self._authenticated = False
         self._model = ""
         self._effort = ""
+        self._choices: tuple[ModelChoice, ...] = ()
         self._phase: ConnectionPhase = "connecting"
         self._thread_id: str | None = None
         self._turn_id: str | None = None
@@ -763,6 +766,18 @@ class CodexConnection:
                 message = "モデル一覧のページが重複"
                 raise CodexConnectionError(message)
             visited.add(cursor)
+        choices = []
+        for model in models:
+            levels = model.get("supportedReasoningEfforts")
+            if isinstance(levels, list):
+                choices.append(
+                    ModelChoice(
+                        _text(model.get("model")),
+                        tuple(_text(_object(level).get("reasoningEffort")) for level in levels),
+                        _text(model.get("defaultReasoningEffort")),
+                    )
+                )
+        self._choices = tuple(choices)
         selected = next(
             (
                 model
@@ -785,8 +800,32 @@ class CodexConnection:
             isinstance(option, dict) and option.get("reasoningEffort") == self._effort
             for option in efforts
         ):
-            message = "指定エフォートを利用できない"
+            message = "指定推論レベルを利用できない"
             raise CodexConnectionError(message)
+
+        self._emit(ModelSelection(self._choices, self._model, self._effort))
+
+    async def select_model(self, model: str, effort: str) -> None:
+        """Select validated values for future ordinary turns without changing an active turn.
+
+        Args:
+            model: Model from this connection's catalog.
+            effort: Reasoning level supported by that model.
+
+        Raises:
+            CodexConnectionError: Selection is unavailable or not in the catalog.
+        """
+        self._require_open()
+        if (
+            self._sending
+            or not self._authenticated
+            or not any(
+                choice.model == model and effort in choice.efforts for choice in self._choices
+            )
+        ):
+            raise CodexConnectionError("モデル・推論レベルを選択できない状態")
+        self._model, self._effort = model, effort
+        self._emit(ModelSelection(self._choices, model, effort))
 
     async def _consume_events(self) -> None:
         try:

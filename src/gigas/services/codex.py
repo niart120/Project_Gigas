@@ -38,7 +38,9 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
     from gigas.services.input import InputDevice, InputGrant
 
-type ServiceOperation = Literal["connect", "login", "send", "steer", "answer", "stop", "disconnect"]
+type ServiceOperation = Literal[
+    "connect", "login", "send", "steer", "answer", "stop", "disconnect", "select_model"
+]
 type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
 type _Operation = (
     ServiceOperation
@@ -51,6 +53,10 @@ class ServiceConnection(Protocol):
 
     async def open(self) -> None:
         """Open the connection and report authentication state."""
+        ...
+
+    async def select_model(self, model: str, effort: str) -> None:
+        """Select catalog values for the next ordinary turn."""
         ...
 
     async def login(self) -> None:
@@ -201,6 +207,8 @@ class _Command:
     resolution: "ObservationResolution | None" = None
     input_config: "SerialConfig | None" = None
     expected_turn_id: str = ""
+    model: str = ""
+    effort: str = ""
 
 
 class CodexServiceThread(QThread):
@@ -317,6 +325,10 @@ class CodexServiceThread(QThread):
         self._generation += 1
         self._submit(_Command(self._generation, "connect", options=options))
         return self._generation
+
+    def select_model(self, model: str, effort: str) -> None:
+        """Queue a next-turn selection without writing persistent settings."""
+        self._submit(_Command(self._generation, "select_model", model=model, effort=effort))
 
     def login(self) -> None:
         """Queue an explicit ChatGPT login request."""
@@ -499,7 +511,7 @@ class CodexServiceThread(QThread):
             self._reject_submission(command)
 
     def _reject_submission(self, command: _Command) -> None:
-        if command.operation in {"answer", "send", "steer"}:
+        if command.operation in {"answer", "send", "steer", "select_model"}:
             self._complete(command, "送信されていない", "not_sent")
 
     def _complete(
@@ -559,7 +571,7 @@ class CodexServiceThread(QThread):
         try:
             turn_id = await self._perform(command)
         except asyncio.CancelledError:
-            if command.operation in {"answer", "send", "steer"}:
+            if command.operation in {"answer", "send", "steer", "select_model"}:
                 self._complete(command, "送信結果を確認できない", "unknown")
             return
         except (AnswerDeliveryError, MessageDeliveryError) as failure:
@@ -602,11 +614,13 @@ class CodexServiceThread(QThread):
             return None
         connection = self._connection
         if connection is None or command.generation != self._active_generation:
-            if command.operation in {"answer", "send", "steer"}:
+            if command.operation in {"answer", "send", "steer", "select_model"}:
                 message = "この接続では送信を受け付けない"
                 raise CodexConnectionError(message)
             return None
         match command.operation:
+            case "select_model":
+                await connection.select_model(command.model, command.effort)
             case "login":
                 await connection.login()
             case "send":

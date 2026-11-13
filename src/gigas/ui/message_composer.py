@@ -3,9 +3,11 @@
 from math import ceil
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetricsF, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QPushButton,
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.runtime.codex.models import ModelSelection
 from gigas.ui.prompt_edit import PromptEdit
 
 if TYPE_CHECKING:
@@ -98,6 +101,8 @@ class MessageComposer(QFrame):
         parent: Owning conversation panel, if any.
     """
 
+    model_selected = Signal(str, str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         """Create an empty input surface without starting a connection."""
         super().__init__(parent)
@@ -125,7 +130,7 @@ class MessageComposer(QFrame):
         actions.addStretch()
         self.model_button = _ModelButton(self)
         self.model_button.setFlat(True)
-        self.model_button.setAccessibleName("モデル・推論量の設定")
+        self.model_button.setAccessibleName("モデル・推論レベルの設定")
         self.model_button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         actions.addWidget(self.model_button)
         self.interrupt_button = _ActionButton("中断", send=False, parent=self)
@@ -133,21 +138,85 @@ class MessageComposer(QFrame):
         actions.addWidget(self.interrupt_button)
         actions.addWidget(self.send_button)
         layout.addLayout(actions)
-        self.set_model("", "")
+        self.selection: ModelSelection | None = None
+        self.popup = QFrame(self, Qt.WindowType.Popup)
+        self.popup.setFrameShape(QFrame.Shape.StyledPanel)
+        form = QFormLayout(self.popup)
+        form.setContentsMargins(16, 14, 16, 14)
+        form.setSpacing(12)
+        self.model_choice = QComboBox(self.popup)
+        self.model_choice.setMinimumContentsLength(20)
+        self.model_choice.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.effort_choice = QComboBox(self.popup)
+        self.model_choice.setAccessibleName("モデル")
+        self.effort_choice.setAccessibleName("推論レベル")
+        form.addRow("モデル", self.model_choice)
+        form.addRow("推論レベル", self.effort_choice)
+        self.apply_model = QPushButton("選択", self.popup)
+        form.addRow(self.apply_model)
+        self.model_choice.currentIndexChanged.connect(self._model_changed)
+        self.apply_model.clicked.connect(self._apply_model)
+        self.model_button.clicked.connect(self._open_models)
+        self.set_choices(None)
         self.render_actions(
             send_enabled=False, interrupt_enabled=False, running=False, has_draft=False
         )
 
     def set_model(self, model: str, effort: str) -> None:
-        """Display observed connection values, retaining the full accessible text.
+        """Display acknowledged next-turn values, retaining the full accessible text.
 
         Args:
-            model: Model reported by the active connection, or empty when unknown.
-            effort: Reasoning effort reported by the connection, or empty.
+            model: Model selected for the next turn, or empty when disconnected.
+            effort: Reasoning level selected for the next turn, or empty.
         """
         value = " · ".join(part for part in (model, effort) if part)
-        self.model_button.setText(value or "モデル・推論量")
-        self.model_button.setAccessibleName(f"モデル・推論量の設定 {value}".rstrip())
+        self.model_button.setText(value or "未接続")
+        self.model_button.setAccessibleName(f"モデル・推論レベルの設定 {value}".rstrip())
+
+    def set_choices(self, selection: ModelSelection | None) -> None:
+        """Display the connection's acknowledged next-turn selection."""
+        self.selection = selection
+        self.popup.hide()
+        self.set_model(selection.model if selection else "", selection.effort if selection else "")
+
+    def _open_models(self) -> None:
+        if self.selection is None:
+            return
+        self.model_choice.blockSignals(True)
+        self.model_choice.clear()
+        self.model_choice.addItems([choice.model for choice in self.selection.choices])
+        self.model_choice.setCurrentText(self.selection.model)
+        self.model_choice.blockSignals(False)
+        self._model_changed()
+        self.effort_choice.setCurrentText(self.selection.effort)
+        self.popup.adjustSize()
+        anchor = self.model_button.mapToGlobal(QPoint(self.model_button.width(), 0))
+        bounds = self.screen().availableGeometry()
+        x = max(
+            bounds.left(), min(anchor.x() - self.popup.width(), bounds.right() - self.popup.width())
+        )
+        y = max(bounds.top(), anchor.y() - self.popup.height() - 6)
+        self.popup.move(x, y)
+        self.popup.show()
+        self.model_choice.setFocus()
+
+    def _model_changed(self) -> None:
+        self.effort_choice.clear()
+        if self.selection is None:
+            return
+        for choice in self.selection.choices:
+            if choice.model == self.model_choice.currentText():
+                self.effort_choice.addItems(list(choice.efforts))
+                self.effort_choice.setCurrentText(choice.default_effort)
+                break
+        self.apply_model.setEnabled(self.effort_choice.count() > 0)
+
+    def _apply_model(self) -> None:
+        self.popup.hide()
+        self.model_selected.emit(self.model_choice.currentText(), self.effort_choice.currentText())
+        self.prompt.setFocus()
 
     def render_actions(
         self, *, send_enabled: bool, interrupt_enabled: bool, running: bool, has_draft: bool

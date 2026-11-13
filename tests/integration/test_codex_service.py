@@ -101,6 +101,9 @@ class ControlledConnection:
         finally:
             self.cancelled.set()
 
+    async def select_model(self, model: str, effort: str) -> None:
+        """Accept a test selection."""
+
     async def steer(self, prompt: str, expected_turn_id: str) -> str:
         """Hold an in-turn submission until cancellation."""
         assert expected_turn_id == "turn-1"
@@ -1305,3 +1308,35 @@ def test_thread_save_failure_does_not_prevent_run(
         service._writer.close()
 
     asyncio.run(check())
+
+
+def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path: Path) -> None:
+    peers: list[FakePeer] = []
+    results: list[ServiceResult] = []
+
+    def factory(
+        options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
+    ) -> CodexConnection:
+        peer = FakePeer()
+        peers.append(peer)
+        return CodexConnection(peer, options, emit)
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path))
+        qtbot.waitUntil(lambda: any(r.operation == "connect" for r in results))
+        service.send("first")
+        qtbot.waitUntil(lambda: any(r.operation == "send" for r in results))
+        service.select_model("other", "low")
+        qtbot.waitUntil(lambda: any(r.operation == "select_model" for r in results))
+        assert not next(r.error for r in results if r.operation == "select_model")
+        calls = peers[0].calls
+        assert not any(method == "turn/interrupt" for method, _ in calls)
+        start = next(params for method, params in calls if method == "turn/start")
+        assert start is not None
+        assert start["model"] == "catalog-default"
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))

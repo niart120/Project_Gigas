@@ -15,6 +15,8 @@ from gigas.runtime.codex.models import (
     ConnectionOptions,
     HumanRequest,
     LoginEvent,
+    ModelChoice,
+    ModelSelection,
     PlanEvent,
     PlanStep,
     Question,
@@ -889,3 +891,49 @@ def test_connection_failure_persists_until_explicit_disconnect(
     assert not panel.connect_action.isEnabled()
     panel.handle_result(ServiceResult(1, "disconnect"))
     assert panel.connect_action.isEnabled()
+
+
+def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.resize(400, 500)
+    panel.show()
+    assert not panel.composer.model_button.isEnabled()
+    panel.activate(1)
+    selection = ModelSelection(
+        (
+            ModelChoice("first", ("low", "high"), "low"),
+            ModelChoice("second", ("medium",), "medium"),
+        ),
+        "first",
+        "high",
+    )
+    panel.handle_event(ServiceEvent(1, selection))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running", "first", "high", True)))
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.prompt.setPlainText("原稿を残す")
+    composer = panel.composer
+    picked: list[tuple[str, str]] = []
+    panel.model_requested.connect(lambda model, effort: picked.append((model, effort)))
+    composer.model_button.click()
+    assert composer.popup.isVisible()
+    composer.model_choice.setCurrentText("second")
+    assert composer.effort_choice.count() == 1
+    qtbot.keyClick(composer.popup, Qt.Key.Key_Escape)
+    assert not composer.popup.isVisible()
+    assert picked == []
+    composer.model_button.click()
+    assert composer.model_choice.currentText() == "first"
+    composer.model_choice.setCurrentText("second")
+    composer.apply_model.click()
+    assert picked == [("second", "medium")]
+    assert composer.model_button.text() == "first · high"
+    assert not composer.model_button.isEnabled()
+    assert composer.interrupt_button.isEnabled()
+    panel.handle_event(ServiceEvent(1, ModelSelection(selection.choices, "second", "medium")))
+    panel.handle_result(ServiceResult(1, "select_model"))
+    assert composer.model_button.text() == "second · medium"
+    assert panel.prompt.toPlainText() == "原稿を残す"
+    panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
+    assert not composer.model_button.isEnabled()
+    assert composer.model_button.text() == "未接続"

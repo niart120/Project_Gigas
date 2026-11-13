@@ -18,6 +18,7 @@ from gigas.runtime.codex.models import (
     ActivityEvent,
     HumanRequest,
     LoginEvent,
+    ModelSelection,
     PlanEvent,
     ReasoningEvent,
     RequestResolved,
@@ -68,6 +69,7 @@ class ConnectionPanel(QWidget):
     connect_requested = Signal()
     disconnect_requested = Signal()
     login_requested = Signal()
+    model_requested = Signal(str, str)
     send_requested = Signal(str)
     steer_requested = Signal(str, str)
     interrupt_requested = Signal()
@@ -120,6 +122,7 @@ class ConnectionPanel(QWidget):
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.transcript, 1)
         self.composer = MessageComposer(self)
+        self.composer.model_selected.connect(self._select_model)
         self.prompt = self.composer.prompt
         self.send_button = self.composer.send_button
         self.interrupt_button = self.composer.interrupt_button
@@ -134,8 +137,14 @@ class ConnectionPanel(QWidget):
         self.prompt.textChanged.connect(self._edit_draft)
         self._render()
 
+    def _select_model(self, model: str, effort: str) -> None:
+        self._pending.add("select_model")
+        self._render()
+        self.model_requested.emit(model, effort)
+
     def activate(self, generation: int) -> None:
         """Reset the view for a newly submitted connection generation."""
+        self.composer.set_choices(None)
         self._generation = generation
         self._failure_ids.clear()
         self._connected = True
@@ -184,9 +193,13 @@ class ConnectionPanel(QWidget):
         if not isinstance(envelope, ServiceEvent) or envelope.generation != self._generation:
             return
         event = envelope.event
-        if isinstance(event, SessionStatus):
+        if isinstance(event, ModelSelection):
+            self.composer.set_choices(event)
+        elif isinstance(event, SessionStatus):
             self._error = ""
             self._status = event
+            if event.phase in {"closed", "error"}:
+                self.composer.set_choices(None)
             if event.failure_id is not None or (event.phase == "error" and event.detail):
                 self._notify_failure(event.detail, event.failure_id)
             if event.phase in {"stopping", "stopped", "closed", "error"}:
@@ -445,4 +458,14 @@ class ConnectionPanel(QWidget):
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
         self.status.setText(_PHASE_LABELS[phase])
-        self.composer.set_model(self._status.model, self._status.effort)
+        model_available = (
+            self._available
+            and self._connected
+            and self._status.phase in {"ready", "running", "waiting", "stopped"}
+            and not self._pending
+        )
+        if not model_available:
+            self.composer.popup.hide()
+        self.composer.model_button.setEnabled(
+            model_available and self.composer.selection is not None
+        )
