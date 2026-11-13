@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -14,8 +15,9 @@ if TYPE_CHECKING:
 class PlanPanel(QFrame):
     """Display the current turn's published work without inferring a Goal.
 
-    The panel remains present when there is no plan or the turn is interrupted.
-    Its single document retains selection and the visible passage across updates.
+    Goal and current-work headings remain present without received content.
+    The Goal value stays empty until Goal integration is provided. The plan's
+    single document retains selection and the visible passage across updates.
 
     Args:
         parent: Owning right-hand pane.
@@ -26,6 +28,16 @@ class PlanPanel(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(self)
+        self.goal_heading = QLabel("目標", self)
+        layout.addWidget(self.goal_heading)
+        self.goal_value = QLabel("—", self)
+        self.goal_value.setAccessibleName("目標")
+        self.goal_value.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        layout.addWidget(self.goal_value)
+        layout.addSpacing(6)
         heading = QHBoxLayout()
         self.heading = QLabel("今回の作業", self)
         heading.addWidget(self.heading)

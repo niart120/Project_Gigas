@@ -14,6 +14,12 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     panel.show()
     before = panel.geometry()
     assert panel.view.toPlainText()
+    assert panel.goal_heading.isVisible()
+    assert panel.goal_value.isVisible()
+    goal_text = panel.goal_value.text()
+    assert goal_text == "—"
+    assert panel.goal_heading.geometry().bottom() < panel.goal_value.geometry().top()
+    assert panel.goal_value.geometry().bottom() < panel.heading.geometry().top()
     event = PlanEvent(
         "turn-1",
         (
@@ -28,6 +34,7 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     for step in event.steps:
         assert step.step in view.toPlainText()
     assert event.explanation in view.toPlainText()
+    assert panel.goal_value.text() == goal_text
     found = view.document().find("橋🙂へ移動")
     assert found.charFormat().fontWeight() == QFont.Weight.Bold
 
@@ -52,6 +59,9 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     assert panel.view.isVisible()
     assert not any(step.step in view.toPlainText() for step in event.steps)
     assert not panel.status.text()
+    assert panel.goal_heading.isVisible()
+    assert panel.goal_value.isVisible()
+    assert panel.goal_value.text() == goal_text
 
 
 def test_plan_update_preserves_reverse_selection_copy_and_reading_position(qtbot: QtBot) -> None:
