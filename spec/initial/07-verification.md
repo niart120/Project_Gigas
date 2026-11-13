@@ -165,7 +165,7 @@ Windowsの製品サービス、採用runtime 0.167.0、既存ChatGPT認証、`gp
 
 実runtimeと模擬モデル/機器では、既存MCP/入力/観測/保存を2自律turnで利用し、停止・neutral・旧Grant拒否・同threadのMCP再公開を確認した。複数質問の一括回答、質問待ちのsteer、Plan有効化後の通知も確認した。300秒は個々のMCP要求の期限でありGoal全体の継続時間と分ける。
 
-memory限定workspace-writeで実モデルの書込と、公開command/execによる原記録読取/書込拒否を確認した。Qt試作では共通欄、2,000件の履歴、選択/コピー/閲覧位置と末尾追従を確認した。製品UI・Goal制御の結合は未実施であり、T06/T07/T08/T19/T21全体の受入とはしない。
+memory限定workspace-writeで実モデルの書込と、公開command/execによる原記録読取/書込拒否を確認した。Qt試作では共通欄、2,000件の履歴、選択/コピー/閲覧位置と末尾追従を確認した。M0時点では製品UI・Goal制御の結合は未実施であり、T06/T07/T08/T19/T21全体の受入とはしない。
 
 M1は共通対話UI・小画面・選択対象の更新を確認し、秘密入力の専用UIは撤回した。M2/M3は自律turnと停止/要求/設定競合、初回observe・memory更新、製品GUI・実機を確認する。実機はUSB Video DeviceとCOM8・CH552・9600 baud。新規ChatGPTログイン/APIキー、公開reasoning要約、利用不能時の停止、長時間運転は今回未検証。後続担当と検証commandは親子仕様を正本とする。
 
@@ -174,3 +174,7 @@ M1は共通対話UI・小画面・選択対象の更新を確認し、秘密入�
 [共通対話UI](../complete/unit_045/COMMON_DIALOGUE_UI.md)で、通常送信・追加指示・質問・承認、公開Plan/summary/activity、閲覧保持と設定を既存試験へ統合した。固定stdio peerを使う製品サービス往復と、既存ChatGPT認証・実モデルの通常turn開始、2回のPlan更新、応答表示、下書き消去、正常終了を区別して確認した。実モデル試験は公開summaryを受信しなかった。
 
 小画面の配分は利用者の指摘を受けて再設計した。ウィンドウの可変性に加え、映像枠の追従、Planの重複除去、承認の横並び、MessageとHistoryの高さを確認する。秘密指定は既存未対応エラーで要求全体を返し、入力欄へ落とさない。実IME変換と複数モニターのDPI切替はM3、長時間履歴はU10へ残す。検証command・画像・残条件は子仕様を正本とする。
+
+## U06 M2の確認範囲（2026-11-13）
+
+[Goal・記憶・記録](../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)で公開Goal、自律turnのrun保持、停止・同一接続再開、限定書込、非同期対話保存を製品へ結合した。最終全unit/integrationは793件成功。採用runtimeと固定Responses・模擬機器で自律継続・設定反映・新MCPを確認し、thread内同期shellの書込中断は公開端末回収を含めて実測した。実モデルの初回observe遵守・実機との一連操作・認証拡張・実summary・IME/DPI・実接続終了はM3、長時間運転はU10へ残す。

@@ -2,11 +2,11 @@
 
 [文書一覧](README.md) · [実行管理](02-runtime.md) · [SDK調査](08-sdk-compatibility.md)
 
-処理フローの初版は2026-11-10、U06 M0による改訂は2026-11-13です。本書はGoalを中心とした攻略、計画的終了、即時停止、明示的再開、記憶整理について、複数部品にまたがる処理順序を示します。図は編集可能なMermaidです。[U06 M0](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)では採用0.167.0の実モデルでGoal操作と設定変更、実runtime・模擬モデル/機器で自律turnの操作権とMCP再公開を確認しました。製品のGoal結合・実機受入はM2/M3、S03の計画終了はU07、再起動後復旧はU08、記憶整理はU09の未実施範囲です。
+処理フローの初版は2026-11-10、U06 M0による改訂は2026-11-13です。本書はGoalを中心とした攻略、計画的終了、即時停止、明示的再開、記憶整理について、複数部品にまたがる処理順序を示します。図は編集可能なMermaidです。[U06 M0](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)では採用0.167.0の実モデルでGoal操作と設定変更、実runtime・模擬モデル/機器で自律turnの操作権とMCP再公開を確認しました。製品のGoal結合はM2で確認しました。実モデル・実機受入はM3、S03の計画終了はU07、再起動後復旧はU08、記憶整理はU09の未実施範囲です。
 
 ## 読み方と設計上の区分
 
-攻略Goalを主軸に継続し、即時入力遮断はモデルの応答を待ちません。[10のUI合意](10-ui-interaction.md)でpause（Goal保持）とstop（Goal破棄）を別アイコンにしました。どちらも推論中断と操作停止を直ちに要求します。計画的終了はMessageからの追加指示に従う区切り作業の経路です。S03は共通の追加指示・公開通知・停止を使い、終了専用ターン・権限・アプリ状態を設けません。成立性はU07 M0で確認します。
+攻略Goalを主軸に継続し、即時入力遮断はモデルの応答を待ちません。[10のUI合意](10-ui-interaction.md)に従い、入力枠の「中断」でGoalを保持して一時停止し、目標欄の「破棄」でGoalを継続対象から外します。どちらも推論中断と操作停止を直ちに要求します。以下の図のpause／stopは、この保持／破棄の違いを表します。Goalなしでは「中断」で通常turnを止めます。計画的終了はMessageからの追加指示に従う区切り作業の経路です。S03は共通の追加指示・公開通知・停止を使い、終了専用ターン・権限・アプリ状態を設けません。成立性はU07 M0で確認します。
 
 呼称は**プレイ終了処理**とします。ゲーム内で区切りを付ける、必要ならセーブする、現状メモを更新する、といった作業です。これはエージェントが指示に従って行う作業の呼称であり、アプリの専用実行モードではありません。アプリのプロセス終了・デバイスの解放とは別で、元の攻略依頼の達成も意味しません。
 
@@ -219,7 +219,7 @@ sequenceDiagram
     participant G as 共通ゲームI/O
     participant C as Codex接続部
     participant R as Codexランタイム
-    U->>A: pauseまたはstop
+    U->>A: 中断またはGoal破棄
     A->>A: 停止意思を保持
     A->>G: InputService.stopを開始・旧Grant失効と要求取消し
     par 物理入力停止の回収
@@ -227,16 +227,30 @@ sequenceDiagram
         G-->>A: 入力終了・解除の送出結果
     and ランタイムの停止
         A->>C: Goal保持または破棄を要求
-        opt Goalが存在する
-            C->>R: goal/set(status=paused, origin=user) または goal/clear(origin=user)
-            R-->>C: Goal変更結果
+        par Goalの変更
+            opt Goalが存在する
+                C->>R: goal/set(status=paused, origin=user) または goal/clear(origin=user)
+                R-->>C: Goal変更結果
+            end
+        and turn中断と公開端末の回収
+            opt 実行中turnがある
+                C->>R: turn/interrupt(threadId, turnId)
+                R-->>C: 中断要求の受付
+            end
+            C->>R: thread/backgroundTerminals/list（全ページ）
+            loop 公開一覧の各processId
+                C->>R: thread/backgroundTerminals/terminate
+                R-->>C: terminatedの確認
+            end
+            C->>R: thread/backgroundTerminals/list
+            R-->>C: 一覧が空であることを確認
+        and turnの終端確認
+            opt 実行中turnがある
+                R-->>C: turn/completed(status=interrupted)
+            end
         end
-        Note over C,R: Goal変更が失敗しても以下の中断を試みる
-        opt 実行中turnがある
-            C->>R: turn/interrupt(threadId, turnId)
-            R-->>C: turn/completed(status=interrupted)
-        end
-        C-->>A: Goal変更とturn終端を別に報告
+        Note over C,R: Goal変更失敗でも回収を試み、終端通知だけで回収完了としない
+        C-->>A: Goal変更・turn終端・端末回収の結果
     end
     Note over A,R: 遅れて届くactive通知や旧回答は停止意思を解除しない
     alt Goal保持/破棄と双方の収束を確認
@@ -250,6 +264,8 @@ sequenceDiagram
 この図はPythonプロセスが生存して停止通知を処理できる場合の契約です。PC異常終了時のMCUの解除保証は別です。ランタイムの中断応答を待ってから入力を止める順序にはしません。停止中に新しい自律turn開始が届いても中断対象にし、入力を許可しません。停止しても提出済みの入力設定適用は継続し、適用成功だけで再開しません。
 
 pause／clearの受付だけで進行中推論・ツール・書込が終わったとは扱いません。Goal破棄は履歴や記憶の削除ではなく、旧目的を継続対象から外す操作です。破棄GoalはS05の再開対象から外します。M01の再開矢印はGoalを保持した停止に限り、全状況を表す巨大な状態列挙を追加しません。
+
+M2ではturn中断後に残る同期`exec_command`を公開端末の一覧・終了APIで回収し、S04の停止後とS05の同Goal再開後にmemory書込が変わらないことを確認しました。[02の停止境界](02-runtime.md#停止の順序)に従い、回収中・未確認失敗は再開させません。公開一覧外の背景子孫や外部書込までの終了保証とは区別します。
 
 ## Codexの公開状態に従う制御
 
@@ -332,7 +348,7 @@ sequenceDiagram
 
 同じGoalの明示的再開には、目的文を送らない`thread/goal/set(status=active, origin=user)`を使います。目的・予算・累積利用量を保ち、APIの受付と実際のターン開始は受け取った通知どおりに扱います。新threadから再構成するU08ではGoalがないため、依頼から新規設定する別の分岐が必要です。開始が起きなくてもアプリから繰り返し再設定しません。
 
-`goal/set`に画像入力欄はありません。再開時の画像はMCPのobserveで渡し、保存済み画像の完成、新しいFrameの到着、余分な準備turnを待ちません。図の「最初にobserve」はモデルへの指示であり、APIがその順序を強制する保証ではありません。実モデルが再開後に現在画面を確認してから操作することは、M2/M3の製品・実機受入で確認します。
+`goal/set`に画像入力欄はありません。再開時の画像はMCPのobserveで渡し、保存済み画像の完成、新しいFrameの到着、余分な準備turnを待ちません。図の「最初にobserve」はモデルへの指示であり、APIがその順序を強制する保証ではありません。M2は固定Responsesによる製品結合を確認し、実モデルが再開後に現在画面を確認してから操作することはM3の実機受入で確認します。
 
 一回のユーザー操作に対して再開要求を重複送信しません。通信失敗などで結果を確認できなければ成功扱いにせず、入力を閉じて停止・エラーを表示します。過去の入力を再送したり、課金先・モデル・予算を自動変更したりしません。
 
@@ -383,7 +399,7 @@ stateDiagram-v2
     Release --> Closed: 解除と旧処理の収束を確認
 ```
 
-操作許可はGoalがactiveであることだけから計算しません。U05の通常ターンにも共通の停止を使い、古いactive通知で旧世代へ許可を戻しません。質問・承認待ちとturn間は既存の入力保留を使い、専用の再開経路や入力世代を追加しません。MCPと同一run/Grantの複数turnはU06 M0で限定確認済みであり、製品の配線・競合はM2/M3の確認事項です。
+操作許可はGoalがactiveであることだけから計算しません。U05の通常ターンにも共通の停止を使い、古いactive通知で旧世代へ許可を戻しません。質問・承認待ちとturn間は既存の入力保留を使い、専用の再開経路や入力世代を追加しません。MCPと同一run/Grantの複数turnはU06 M0で限定確認済みであり、M2で製品の配線・停止競合を固定RPC/模擬機器と実runtimeで確認しました。実モデル・実機の工程受入はM3へ残します。
 
 ## 本実装で確認する接続条件
 

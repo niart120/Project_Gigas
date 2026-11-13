@@ -49,7 +49,8 @@ class ThreadConfiguration:
         cwd: Existing absolute archive directory, independent of the process cwd.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
-        memory_dir: Exclusive runtime write directory, or None for read-only operation.
+        memory_dir: Existing absolute cwd / "memory" directory for exclusive runtime
+            writes, or None for read-only operation.
     """
 
     cwd: "Path"
@@ -62,10 +63,11 @@ class SessionStatus:
     """Current application status derived from operations and runtime notifications.
 
     Attributes:
-        phase: Connection or turn phase. Stopped means no pending start or active turn;
-            interrupt receipt alone does not establish it.
-        model: Selected model for future ordinary turns, empty before catalog validation.
-        effort: Selected reasoning level for future ordinary turns, empty before validation.
+        phase: Connection or turn phase. Stopped means no pending start or active turn
+            and completion of any started terminal cleanup. Interrupt receipt alone
+            does not establish it.
+        model: Selected model for future turns, empty before catalog validation.
+        effort: Selected reasoning level for future turns, empty before validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
         detail: A short application-owned reason safe for display.
         failure_id: Connection-local failure identity shared with an operation result;
