@@ -226,6 +226,55 @@ def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBo
     assert QApplication.clipboard().text() == "計画 20"
 
 
+@pytest.mark.parametrize("reader", ["tail", "reading", "selected"])
+def test_plan_visibility_keeps_history_tail_or_reading_position(qtbot: QtBot, reader: str) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.resize(400, 400)
+    panel.show()
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    qtbot.wait(1)
+    panel.handle_event(
+        ServiceEvent(
+            1, TextEvent("user", "\n".join(f"ユーザー本文 {i}" for i in range(50)), "user")
+        )
+    )
+    history = panel.transcript
+    bar = history.verticalScrollBar()
+    assert bar.value() == bar.maximum()
+    if reader == "reading":
+        bar.setValue(bar.maximum() // 2)
+    elif reader == "selected":
+        selected = history.document().find("ユーザー本文 20")
+        selected.setPosition(selected.selectionEnd())
+        selected.movePosition(
+            QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor
+        )
+        history.setTextCursor(selected)
+        history.ensureCursorVisible()
+    visible = history.cursorForPosition(QPoint(0, 1))
+    visible_y = history.cursorRect(visible).top()
+    previous_height = history.viewport().height()
+    for steps in ((PlanStep("確認", "inProgress"),), ()):
+        panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
+        qtbot.wait(1)
+        assert history.viewport().height() != previous_height
+        previous_height = history.viewport().height()
+        panel.handle_event(ServiceEvent(1, TextEvent("final", "最終応答", replace=True)))
+        qtbot.wait(1)
+        if reader == "tail":
+            assert bar.value() == bar.maximum()
+        else:
+            assert abs(history.cursorRect(visible).top() - visible_y) <= 1
+            if reader == "selected":
+                assert history.textCursor().selectedText() == "ユーザー本文 20"
+                assert history.textCursor().anchor() > history.textCursor().position()
+    assert "最終応答" in history.toPlainText()
+
+
 def test_history_item_updates_preserve_reverse_selection_and_viewport(qtbot: QtBot) -> None:
     history = Transcript()
     qtbot.addWidget(history)

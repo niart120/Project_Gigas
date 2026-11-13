@@ -46,8 +46,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | refactor-skipped | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | `50db697`。red 18 failed/18 passed→関連回帰41 passed。test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
 | refactor-skipped | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | `aaa66d0`。red 38 failed/110 passed→green 148 passed。既存設定保存・適用試験へ統合 |
 | refactor-skipped | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | `857cca8`。window_presets red 2 failed/4 passed→green 6 passed。関連回帰48 passed、製品描画確認 |
-| refactor-skipped | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | red 1 failed→green、GUI/transport/要求寿命63 passed。既存peerとGUI試験へ統合 |
-| todo | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | 実runtime確認画像で最終応答が可視範囲外。Plan初回表示による高さ変更との関係を再現確認する |
+| refactor-skipped | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | `4951e3a`。red 1 failed→green、GUI/transport/要求寿命63 passed。既存peerとGUI試験へ統合 |
+| refactor-skipped | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | red 1 failed/36 passed→green 37 passed。関連回帰57 passed。実runtime画像から見つけたviewport縮小後の追従離脱を修正 |
 
 ## 7. 設計判断
 
@@ -75,6 +75,7 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D05 | `uv run pytest tests/unit/test_settings.py tests/unit/test_video_settings.py tests/integration/test_app_settings.py tests/integration/test_settings_apply_contract.py tests/integration/test_settings_recovery.py -q --tb=short --basetemp=tmp/pytest-u06-reasoning`: red 38 failed/110 passed→green 148 passed。担当ruff check/format、全体ty、diff check: pass | 既定値・厳密bool・往復/再起動・取消し3経路・保存待ち/失敗・閉じた後の中断でも提出済み適用を確認。reasoning単独で停止中/取得中のcapture/input再接続なし。既存bool検証を共用し、追加refactorなし |
 | D06 | `uv run pytest tests/integration/test_window_presets.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py -q --basetemp=tmp/pytest-u06-layout`: 48 passed。担当ruff check/format、全体ty、diff check: pass | 左右配置・status/preset追随、長い送信先/選択肢、承認scrollと中断/送信を確認。800×600/Meiryo UI16ptの製品offscreen描画でHistory101px/Message64px。重複wrapper/見出し/余白とPlan末尾空行を必要な範囲だけ除去、追加refactorなし |
 | D07 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_codex_transport.py tests/integration/test_answer_lifecycle.py -q --basetemp=tmp/pytest-u06-stdio`: red 1 failed→最終63 passed。担当ruff check/format、全体ty、diff check: pass | ApplicationShell→Service/QThread→stdio→公開decoder/UIを往復。Plan/summary/activity、質問中steer、選択・自由文・秘密の一括回答、承認拒否、終端/close。peerは固定フローのassertだけでRPCを保存しない。追加refactorなし |
+| D08 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_window_presets.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u06-qt`: 57 passed。担当ruff check/format、全体ty、diff check: pass | Plan show/hideでの末尾/過去閲覧/逆向き選択を既存GUI試験へ統合。Transcriptのresize前後で既存の末尾/可視文字の復元を行い、新しいstate/timerを追加しない。最小再現も失敗→成功 |
 
 全体gate・製品画面は各項目の結合後に実施する。
 

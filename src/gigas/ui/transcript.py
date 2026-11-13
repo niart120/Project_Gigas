@@ -8,6 +8,7 @@ from PySide6.QtGui import QFont, QPalette, QTextBlockFormat, QTextCharFormat, QT
 from PySide6.QtWidgets import QTextBrowser
 
 if TYPE_CHECKING:
+    from PySide6.QtGui import QResizeEvent
     from PySide6.QtWidgets import QWidget
 
     from gigas.runtime.codex.models import PlanStep
@@ -171,6 +172,24 @@ class Transcript(QTextBrowser):
         """Discard all received items and their displayed text."""
         self._items.clear()
         super().clear()
+
+    def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
+        """Keep the tail or visible passage when surrounding controls change size."""
+        scrollbar = self.verticalScrollBar()
+        following = (
+            scrollbar.value() == scrollbar.maximum() and not self.textCursor().hasSelection()
+        )
+        visible = self.cursorForPosition(QPoint(0, 1))
+        visible_y = self.cursorRect(visible).top()
+        super().resizeEvent(event)
+        layout = self.document().documentLayout()
+        if layout is not None:
+            layout.documentSize()
+        scrollbar.setValue(
+            scrollbar.maximum()
+            if following
+            else scrollbar.value() + self.cursorRect(visible).top() - visible_y
+        )
 
     def _item(self, item_id: str, kind: HistoryKind) -> _Item:
         item = self._items.get(item_id)
