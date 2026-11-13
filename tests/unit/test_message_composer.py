@@ -3,6 +3,7 @@ from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
+from gigas.runtime.codex.models import ModelChoice, ModelSelection
 from gigas.ui.message_composer import MessageComposer
 
 
@@ -81,3 +82,21 @@ def test_composer_paints_one_surface_and_fits_a_normal_model_label(qtbot: QtBot)
         )
         == button.text()
     )
+
+
+def test_composer_unselected_catalog_does_not_choose_first_entry(qtbot: QtBot) -> None:
+    composer = MessageComposer()
+    qtbot.addWidget(composer)
+    disconnected = composer.model_button.text()
+    choices = (ModelChoice("first", ("low", "high"), "low"),)
+    picked: list[tuple[str, str]] = []
+    composer.model_selected.connect(lambda model, effort: picked.append((model, effort)))
+    composer.set_choices(ModelSelection(choices, "", ""))
+    assert composer.model_choice.currentIndex() == -1
+    assert composer.effort_choice.currentIndex() == -1
+    assert composer.model_button.text() != disconnected
+    composer.set_choices(ModelSelection(choices, "first", ""))
+    assert composer.model_choice.currentText() == "first"
+    assert composer.effort_choice.currentIndex() == -1
+    assert composer.effort_choice.count() == 2
+    assert picked == []

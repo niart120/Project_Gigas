@@ -19,6 +19,7 @@ from gigas.runtime.codex.models import (
     DialogueEvent,
     HumanRequest,
     LoginEvent,
+    ModelSelection,
     PlanEvent,
     PlanStep,
     ReasoningEvent,
@@ -290,18 +291,132 @@ def test_login_is_explicit_and_completion_rechecks_account(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(("model", "effort"), [("missing", ""), ("other", "ultra")])
-def test_invalid_model_or_effort_never_starts_a_thread(
-    tmp_path: Path, model: str, effort: str
+@pytest.mark.parametrize("authenticated", [True, False])
+def test_invalid_defaults_preserve_login_and_allow_selection_before_sending(
+    tmp_path: Path, model: str, effort: str, authenticated: bool
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
+        peer.authenticated = authenticated
+        events: list[ConnectionEvent] = []
         connection = CodexConnection(
-            peer, ConnectionOptions(tmp_path, model, effort), lambda _: None
+            peer, ConnectionOptions(tmp_path, model, effort), events.append
         )
-        with pytest.raises(CodexConnectionError):
+        try:
             await connection.open()
-        assert not any(method == "thread/start" for method, _ in peer.calls)
-        assert peer.closed
+            assert not peer.closed
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert status.phase == ("ready" if authenticated else "login_required")
+            assert status.detail
+            selection = next(
+                event for event in reversed(events) if isinstance(event, ModelSelection)
+            )
+            assert [choice.model for choice in selection.choices] == ["other", "catalog-default"]
+            assert selection.model == ("other" if model == "other" else "")
+            assert selection.effort == ""
+            if not authenticated:
+                await connection.login()
+                peer.authenticated = True
+                peer.events.put_nowait(
+                    RpcNotification(
+                        "account/login/completed", {"loginId": "login-1", "success": True}
+                    )
+                )
+                await _events_processed()
+                assert not peer.closed
+                status = events[-1]
+                assert isinstance(status, SessionStatus)
+                assert status.phase == "ready"
+                assert status.authenticated
+            for operation in (connection.send, connection.set_goal):
+                with pytest.raises(CodexConnectionError):
+                    await operation("無効な選択のまま開始しない")
+            assert not any(method == "thread/start" for method, _ in peer.calls)
+            await connection.select_model("other", "low")
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert (status.model, status.effort, status.detail) == ("other", "low", "")
+            await connection.send("選び直して開始")
+            turn = next(params for method, params in peer.calls if method == "turn/start")
+            assert turn is not None
+            assert (turn["model"], turn["effort"]) == ("other", "low")
+            assert sum(method == "initialize" for method, _ in peer.calls) == 1
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_catalog_rpc_failure_before_login_does_not_block_login(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        peer.rpc_errors["model/list"] = -32000
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert status.phase == "login_required"
+            assert not status.model
+            assert not status.effort
+            assert status.detail
+            assert ModelSelection((), "", "") in events
+            await connection.login()
+            del peer.rpc_errors["model/list"]
+            peer.authenticated = True
+            peer.events.put_nowait(
+                RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
+            )
+            await _events_processed()
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert (status.phase, status.model, status.effort) == (
+                "ready",
+                "catalog-default",
+                "medium",
+            )
+            assert not peer.closed
+            await connection.send("ログイン後に開始")
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_catalog_rejection_after_login_preserves_authenticated_connection(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await connection.login()
+            peer.authenticated = True
+            peer.rpc_errors["model/list"] = -32000
+            peer.events.put_nowait(
+                RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
+            )
+            await _events_processed()
+            status = events[-1]
+            assert isinstance(status, SessionStatus)
+            assert status.phase == "ready"
+            assert status.authenticated
+            assert status.detail
+            assert not status.model
+            assert not status.effort
+            assert not peer.closed
+            assert events[-2] == ModelSelection((), "", "")
+            with pytest.raises(CodexConnectionError):
+                await connection.send("一覧取得失敗中")
+            calls = list(peer.calls)
+            await _events_processed()
+            assert peer.calls == calls
+        finally:
+            await connection.close()
 
     _run(scenario())
 

@@ -212,11 +212,19 @@ class ConnectionPanel(QWidget):
             self.composer.set_choices(event)
         elif isinstance(event, SessionStatus):
             self._error = ""
+            previous_detail = self._status.detail
             self._status = event
             if event.phase in {"closed", "error"}:
                 self.composer.set_choices(None)
             if event.failure_id is not None or (event.phase == "error" and event.detail):
                 self._notify_failure(event.detail, event.failure_id)
+            elif (
+                event.phase in {"ready", "login_required"}
+                and event.detail
+                and event.detail != previous_detail
+                and not (event.model and event.effort)
+            ):
+                self._notify_failure(event.detail, operation="select_model")
             if event.phase in {"stopping", "stopped", "closed", "error"}:
                 self._expire_requests()
             if event.phase in {"ready", "stopped", "closed", "error"}:
@@ -457,6 +465,12 @@ class ConnectionPanel(QWidget):
                 "回答・承認の送信に失敗しました。各要求の送信状態を確認してください。"
                 "送信結果が不明な要求は自動再送しません。"
             )
+        elif operation == "select_model" and not (self._status.model and self._status.effort):
+            explanation = (
+                "モデル・推論レベルを選択できないため、送信できません。"
+                "ログイン状態と候補を確認し、選び直してください。"
+                "候補を取得できない場合は、切断して再接続してください。"
+            )
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
 
     def _render(self) -> None:
@@ -471,6 +485,9 @@ class ConnectionPanel(QWidget):
         goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
         goal_mode = self.composer.goal_mode.isChecked()
         settled = phase in {"ready", "stopped"} and self._active_turn is None
+        selection_valid = bool(
+            self._status.authenticated and self._status.model and self._status.effort
+        )
         self.composer.goal_mode.setEnabled(
             available
             and not goal_pending
@@ -480,6 +497,7 @@ class ConnectionPanel(QWidget):
         self.plan_panel.resume_button.setEnabled(
             available
             and settled
+            and selection_valid
             and not self._pending
             and self._goal is not None
             and self._goal.status not in {"active", "complete"}
@@ -493,6 +511,7 @@ class ConnectionPanel(QWidget):
         )
         ready = (
             available
+            and selection_valid
             and (
                 phase in {"ready", "stopped"}
                 or (
@@ -553,5 +572,7 @@ class ConnectionPanel(QWidget):
         self.composer.model_choice.setEnabled(model_available)
         self.composer.effort_choice.setEnabled(model_available)
         self.composer.model_button.setEnabled(
-            model_available and self.composer.selection is not None
+            model_available
+            and self.composer.selection is not None
+            and bool(self.composer.selection.choices)
         )

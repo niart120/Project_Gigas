@@ -151,11 +151,13 @@ class MessageComposer(QFrame):
         form.setContentsMargins(16, 14, 16, 14)
         form.setSpacing(12)
         self.model_choice = QComboBox(self.popup)
+        self.model_choice.setPlaceholderText("モデルを選択")
         self.model_choice.setMinimumContentsLength(20)
         self.model_choice.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self.effort_choice = QComboBox(self.popup)
+        self.effort_choice.setPlaceholderText("推論レベルを選択")
         self.model_choice.setAccessibleName("モデル")
         self.effort_choice.setAccessibleName("推論レベル")
         form.addRow("モデル", self.model_choice)
@@ -172,10 +174,17 @@ class MessageComposer(QFrame):
         """Display acknowledged next-turn values, retaining the full accessible text.
 
         Args:
-            model: Model selected for the next turn, or empty when disconnected.
-            effort: Reasoning level selected for the next turn, or empty.
+            model: Validated model selected for the next turn, or empty when unselected.
+            effort: Validated reasoning level selected for the next turn, or empty.
         """
-        value = " · ".join(part for part in (model, effort) if part)
+        if self.selection is not None and not self.selection.choices:
+            value = "候補なし"
+        elif self.selection is not None and not model:
+            value = "モデルを選択"
+        elif self.selection is not None and not effort:
+            value = f"{model} · 推論レベルを選択"
+        else:
+            value = " · ".join(part for part in (model, effort) if part)
         self.model_button.setText(value or "未接続")
         self.model_button.setAccessibleName(f"モデル・推論レベルの設定 {value}".rstrip())
 
@@ -194,10 +203,10 @@ class MessageComposer(QFrame):
         self.model_choice.blockSignals(True)
         self.model_choice.clear()
         self.model_choice.addItems([choice.model for choice in self.selection.choices])
-        self.model_choice.setCurrentText(self.selection.model)
+        self.model_choice.setCurrentIndex(self.model_choice.findText(self.selection.model))
         self.model_choice.blockSignals(False)
         self._model_changed()
-        self.effort_choice.setCurrentText(self.selection.effort)
+        self.effort_choice.setCurrentIndex(self.effort_choice.findText(self.selection.effort))
 
     def _open_models(self) -> None:
         if self.selection is None:

@@ -4,7 +4,7 @@
 
 通常turnで成立した観測・入力をGoalの継続攻略へ接続し、依頼・記憶・途中介入・公開表示を対応付ける。攻略判断とターン間の継続はCodexへ委任する。
 
-状態: **wip、M0調査・設計完了、従来M1完了、M1追加修正完了、M2実装・検証・コミット完了、M3未着手**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[従来M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)を実装・検証・コミットした。その後のUIレビューと合意を受け、[M1文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)で配置・回答操作・閲覧保持を修正・検証・コミットした。続く[常設目標と一体型入力](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md)で目標欄とMessage入力を追加修正・検証・コミットした。M2を今回の対象とし、M3・PR・mergeは対象外。公開API・隔離接続・Qt試作の結果を製品/実機の受入と混同しない。
+状態: **wip、M0調査・設計完了、従来M1完了、M1追加修正完了、M2実装・検証・コミット完了、M3着手中**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[従来M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)を実装・検証・コミットした。その後のUIレビューと合意を受け、[M1文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)で配置・回答操作・閲覧保持を修正・検証・コミットした。続く[常設目標と一体型入力](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md)で目標欄とMessage入力を追加修正・検証・コミットした。今回の対象は[M3](../unit_050/GOAL_ACCEPTANCE.md)。APIキー認証・PR・mergeは対象外。公開API・隔離接続・Qt試作の結果を製品/実機の受入と混同しない。
 
 起点は[実装計画](../../initial/05-implementation.md)、[認証と実行設定の分離](../../initial/02-runtime.md)、[主画面とメッセージ操作](../../initial/10-ui-interaction.md)。利用場面は明示的な継続開始、公開計画の確認、質問回答/追加指示/承認、停止と同一セッション再開。
 
@@ -33,7 +33,7 @@ M2で公開Goalの自律turnを採用し、サービスのrunを明示開始か�
 | Messageと要求応答 | 通常入力と追加指示はMessage、回答・承認は履歴内の要求カードへ分ける。質問ID別原稿を要求ごとに一つのanswersへまとめ、追加指示は対象turnへのsteerへ渡す。M0で確認した配送契約を維持し、M1修正で送信先リストを撤去した。turn間に配送キューを作らない |
 | 公開表示 | tools.update_plan.enabled=trueが必要。Planは現在turnの公開一覧、reasoningは公開summaryのみ、activityは実item。Qt標準部品で選択/コピー/閲覧保持を確認。実モデルsummaryは今回未受信 |
 | 記憶・記録 | guide/currentは不足時だけ生成、既存保持。Codex書込をmemoryへ限定し、原記録はアプリが同じRecordingServiceで非同期保存。実モデル書込、sandbox内から親原記録の読取成功・書込拒否を確認 |
-| 認証・設定 | ログインとモデル妥当性を分離。公開experimental thread/settings/updateを次turnへ使い、通常/自律turnへのモデル/effort反映を実モデルと実送信で確認。現在turnは変えない。APIキー/新規ログインはM3未検証 |
+| 認証・設定 | ログインとモデル妥当性を分離。公開experimental thread/settings/updateを次turnへ使い、通常/自律turnへのモデル/effort反映を実モデルと実送信で確認。現在turnは変えない。新規ログインはM3未検証。APIキーは今回対象外 |
 
 同期MCPの300秒は各ツール要求の期限でありGoal全体の期限ではない。即時の最新キャッシュ、入力・観測・保存の分離、停止しても提出済み設定適用が続くU05方針を維持する。再開時は現在readerを確認し、共通指示で最初のobserveを求める。保存完了や要求後の新Frameを待たない。
 
@@ -48,9 +48,9 @@ M2で公開Goalの自律turnを採用し、サービスのrunを明示開始か�
 | [M1 文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md) | 修正・検証・コミット完了 | 左の会話内質問/承認と通常Message、右の16:9映像枠と常設Planを結合。letterbox/stretchと要求寿命を維持し、選択・コピー・更新中閲覧保持を受け入れる |
 | [M1 常設目標と一体型入力](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md) | 実装・検証・コミット完了 | 目標と今回の作業を常設し、空欄時のMessage表示・本文・操作・既存設定入口を一体化。配送と閲覧保持を再利用 |
 | [M2 Goal・記憶・記録](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md) | 実装・検証・コミット完了 | Goalとrun寿命、停止/再開/MCP更新、guide/memory・公開対話記録を結合。M1で常設した目標欄の本文・状態を確定Goalへ結合。起動環境/sandboxを製品で再確認 |
-| M3 設定・認証と工程受入 | M2完了 | 認証拡張・利用制限/配送競合、新規ChatGPT/APIキー、実モデル・短い実機依頼を確認 |
+| [M3 設定・認証と工程受入](../unit_050/GOAL_ACCEPTANCE.md) | 着手中、M2完了 | 認証分離・利用制限/配送競合、新規ChatGPT、実モデル・短い実機依頼を確認。APIキーは対象外 |
 
-M1では目標欄を常設し、未接続の本文を—とする。架空のGoal本文・成功や旧新UI切替は作らない。通常turnのモデル/推論レベル選択はM1へ前倒しし、入力枠のポップオーバーから次turn/startへ反映する。既存設定入口への転送は撤去。Goal自律turnへの設定反映はM2で結合し、認証拡張はM3へ残す。今回のM1修正で文字拡大専用の例・検証・分岐も撤去した。未着手の子仕様/全TDD項目を先行作成せず、次の候補はM3とする。
+M1では目標欄を常設し、未接続の本文を—とする。架空のGoal本文・成功や旧新UI切替は作らない。通常turnのモデル/推論レベル選択はM1へ前倒しし、入力枠のポップオーバーから次turn/startへ反映する。既存設定入口への転送は撤去。Goal自律turnへの設定反映はM2で結合し、認証拡張はM3へ残す。今回のM1修正で文字拡大専用の例・検証・分岐も撤去した。未着手の子仕様/全TDD項目を先行作成せず、M3の子仕様を作成して着手した。
 
 ## 7. 振る舞い仕様・TDD Test Listの受入観点
 
@@ -80,7 +80,7 @@ M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe�
 | 小画面、選択箇所自体の更新、IME/DPI、実summary | M1修正で通常フォント条件の大小画面と閲覧保持を検証済み。文字拡大専用の受入は廃止。実IME・複数DPI・実summaryはM3へ残す |
 | Goal開始/再開/完了/制限と要求・停止・設定変更の競合、初回observe、memory書込 | M2で固定通知・実runtime/模擬機器の製品結合を確認。初回observeの実モデル遵守、実機と全認証/利用制限はM3。公開API単体の成功を製品結合の成功にしない |
 | 独立runtime起動環境 | M2で製品起動と書込範囲を確認。Windows sandbox未準備のhomeは設定不一致で拒否し、新規home準備はM3へ残す。desktop由来の2つのCODEX_WINDOWS_*起動変数でsandbox内書込が失敗し、子プロセスから除去すると成立した根拠に従う |
-| 新規ブラウザ認証/APIキー/利用不能時 | M3。既存ChatGPT認証の成功と区別する |
+| 新規ブラウザ認証/利用不能時 | M3。既存ChatGPT認証の成功と区別する |
 | 計画的終了/再起動復旧/記憶整理/長時間 | [U07](../../planned/unit_012/PLANNED_STOP.md)・[U08](../../planned/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)・[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)。共通配送/停止/保持Goalと記録を入口とし、U06では実装しない |
 
 ## 11. 完了チェックリスト
@@ -90,7 +90,7 @@ M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe�
 - [ ] 工程全体の実機/GUI受入を完了した
 - [ ] 利用手順と後続引継ぎを更新し、親をcompleteへ移せる状態にした
 
-M1最終修正: [通常turnのモデル選択](../../complete/unit_048/NEXT_TURN_MODEL.md)。M2は[unit_049](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)で完了、M3未着手。公開端末回収による書込停止・再開境界を含めて確認した。
+M1最終修正: [通常turnのモデル選択](../../complete/unit_048/NEXT_TURN_MODEL.md)。M2は[unit_049](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)で完了、M3着手中。公開端末回収による書込停止・再開境界を含めて確認した。
 
 M2の実runtime製品結合では模擬モデル・機器で複数自律turn、pause/resume/clear、新endpoint、設定反映と記録対応を確認。実モデル・実機の工程受入とは区別し、詳細と未確認はM2子仕様へ記す。
 

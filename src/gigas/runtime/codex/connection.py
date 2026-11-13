@@ -274,9 +274,11 @@ class CodexConnection:
         self._dialogue: dict[tuple[str, str], JsonObject] = {}
 
     async def open(self) -> None:
-        """Initialize, read authentication and validate model settings against the catalog.
+        """Initialize authentication and obtain model choices without starting a thread.
 
         Missing ChatGPT authentication emits login_required without logging in.
+        Invalid defaults or a rejected catalog request preserve the connection for
+        login or explicit model selection; sending requires a valid selection.
         Startup failures release the transport; this connection cannot be reopened.
 
         Raises:
@@ -317,9 +319,9 @@ class CodexConnection:
             for name in servers:
                 key = name if name.replace("_", "").isalnum() else json.dumps(name)
                 self._mcp_config[f"mcp_servers.{key}.enabled"] = False
-            await self._read_models()
+            selection_detail = await self._read_models()
             self._opened = True
-            self._status("ready" if self._authenticated else "login_required")
+            self._status("ready" if self._authenticated else "login_required", selection_detail)
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
@@ -383,6 +385,8 @@ class CodexConnection:
         self._require_open()
         if (
             not self._authenticated
+            or not self._model
+            or not self._effort
             or self._phase not in {"ready", "stopped"}
             or not prompt.strip()
             or self._sending
@@ -490,6 +494,8 @@ class CodexConnection:
         self._require_open()
         if (
             not self._authenticated
+            or not self._model
+            or not self._effort
             or self._sending
             or self._phase not in {"ready", "stopped", "running", "waiting"}
             or (objective is not None and not objective.strip())
@@ -1059,12 +1065,17 @@ class CodexConnection:
         account = result.get("account")
         self._authenticated = isinstance(account, dict) and account.get("type") == "chatgpt"
 
-    async def _read_models(self) -> None:
+    async def _read_models(self) -> str:
+        self._model, self._effort, self._choices = "", "", ()
         models: list[JsonObject] = []
         cursor: str | None = None
         visited: set[str] = set()
         while True:
-            response = _object(await self._peer.request("model/list", {"cursor": cursor}))
+            try:
+                response = _object(await self._peer.request("model/list", {"cursor": cursor}))
+            except RpcError:
+                self._emit(ModelSelection((), "", ""))
+                return "モデル一覧を取得できない"
             data = response.get("data")
             if not isinstance(data, list):
                 message = "モデル一覧が不正"
@@ -1102,20 +1113,23 @@ class CodexConnection:
             ),
             None,
         )
+        detail = ""
         if selected is None:
-            message = "指定モデルを利用できない"
-            raise CodexConnectionError(message)
-        self._model = _text(selected.get("model"))
-        self._effort = self._options.effort or _text(selected.get("defaultReasoningEffort"))
-        efforts = selected.get("supportedReasoningEfforts")
-        if not isinstance(efforts, list) or not any(
-            isinstance(option, dict) and option.get("reasoningEffort") == self._effort
-            for option in efforts
-        ):
-            message = "指定推論レベルを利用できない"
-            raise CodexConnectionError(message)
+            detail = "指定モデルを利用できない"
+        else:
+            self._model = _text(selected.get("model"))
+            effort = self._options.effort or _text(selected.get("defaultReasoningEffort"))
+            efforts = selected.get("supportedReasoningEfforts")
+            if not isinstance(efforts, list) or not any(
+                isinstance(option, dict) and option.get("reasoningEffort") == effort
+                for option in efforts
+            ):
+                detail = "指定推論レベルを利用できない"
+            else:
+                self._effort = effort
 
         self._emit(ModelSelection(self._choices, self._model, self._effort))
+        return detail
 
     async def select_model(self, model: str, effort: str) -> None:
         """Select validated values for future turns without changing an active turn.
@@ -1149,6 +1163,7 @@ class CodexConnection:
                 raise CodexConnectionError("次ターン設定の反映を確認できない") from error
         self._model, self._effort = model, effort
         self._emit(ModelSelection(self._choices, model, effort))
+        self._status(self._phase)
 
     async def _consume_events(self) -> None:
         try:
@@ -1231,8 +1246,8 @@ class CodexConnection:
             self._failure("login_required", "ログインに失敗")
             return
         await self._read_account()
-        await self._read_models()
-        self._status("ready" if self._authenticated else "login_required")
+        selection_detail = await self._read_models()
+        self._status("ready" if self._authenticated else "login_required", selection_detail)
 
     def _adopt_turn(self, turn_id: str) -> None:
         accepting = (

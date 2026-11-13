@@ -165,7 +165,7 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     option = "長い選択肢の本文" * 20
     for event in (
         TurnStarted("turn"),
-        SessionStatus("waiting", "selected-model", "high"),
+        SessionStatus("waiting", "selected-model", "high", True),
         TextEvent("response", "公開された判断本文\n" * 30),
         PlanEvent(
             "turn",

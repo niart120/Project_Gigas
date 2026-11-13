@@ -167,7 +167,7 @@ Windowsの製品サービス、採用runtime 0.167.0、既存ChatGPT認証、`gp
 
 memory限定workspace-writeで実モデルの書込と、公開command/execによる原記録読取/書込拒否を確認した。Qt試作では共通欄、2,000件の履歴、選択/コピー/閲覧位置と末尾追従を確認した。M0時点では製品UI・Goal制御の結合は未実施であり、T06/T07/T08/T19/T21全体の受入とはしない。
 
-M1は共通対話UI・小画面・選択対象の更新を確認し、秘密入力の専用UIは撤回した。M2/M3は自律turnと停止/要求/設定競合、初回observe・memory更新、製品GUI・実機を確認する。実機はUSB Video DeviceとCOM8・CH552・9600 baud。新規ChatGPTログイン/APIキー、公開reasoning要約、利用不能時の停止、長時間運転は今回未検証。後続担当と検証commandは親子仕様を正本とする。
+M1は共通対話UI・小画面・選択対象の更新を確認し、秘密入力の専用UIは撤回した。M2/M3は自律turnと停止/要求/設定競合、初回observe・memory更新、製品GUI・実機を確認する。実機はUSB Video DeviceとCOM8・CH552・9600 baud。新規ChatGPTログイン、公開reasoning要約、利用不能時の停止、長時間運転は今回未検証。APIキー認証はM3の対象外へ変更した。後続担当と検証commandは親子仕様を正本とする。
 
 ## U06 M1の確認範囲（2026-11-13）
 
