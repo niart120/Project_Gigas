@@ -63,14 +63,14 @@ unit057 は実接続・実機受入を終え、`7a9aeb8` で complete へ移動�
 | 記録 | 送信・Goal・停止 | 同じ文脈の request_id と操作を保存する | stop / goal_clear 成功は accepted |
 | ローカル資源 | 設定・project 操作 | 専用の処理と通知を使う | ServiceResult 除外リストを廃止 |
 | shutdown | 接続保持中に終了 | stop を追加せず close を直接待つ | unit057 の所有を維持 |
-| 終了中の拒否 | GUI から提出 | 例外なく not_sent を一度通知する | 保存は所有 loop のみで行う |
+| 終了中の拒否 | GUI から提出 | 例外なく not_sent を一度通知する | GUI 側の拒否は保存しない。loop 側の拒否・実行結果の保存は維持 |
 
 ## 6. TDD Test List
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | D01 既存配送・記録・資源・取消しを維持して構造を整理 | characterization | integration | baseline 309 passed → 構造変更後 309 passed。回答コピーの 1 件を加え service 64 passed |
-| todo | D02 close 待機中の GUI 提出を未送信として拒否 | regression | integration | 生存中の recording へ GUI から入る経路を再現する |
+| refactor-skipped | D02 close 待機中の GUI 提出を未送信として拒否 | regression | integration | loop 不在の red → 拒否時の保存分離で 1 passed。D01 で構造整理済みのため追加構造変更なし |
 
 ## 7. 設計メモ
 
@@ -80,12 +80,15 @@ D01 では `_Command` の 14 フィールドを `_OperationContext` の 4 フィ
 
 root と connection_audit の D01 独立レビューでは、loop 上の生成・接続取得、世代、配送結果、ContextVar、回答不明時の入力保留、ローカル資源回収、停止受付記録、直接 close に阻害指摘なし。既知の GUI 拒否時の保存経路は D02 に分離した。
 
+D01 は `df794a7` で記録した。contract_audit の追加独立レビューも阻害指摘なし。D02 では `FakePeer.close_gate` で接続回収を待機させ、通常送信で記録先を準備した後の GUI 提出から再現した。shutdown の未開始キューと終了受付後の提出だけ `record_delivery=False` とし、loop 上の拒否通知や実行結果は従来どおり記録する。新しい task・待機・再試行・履歴バッファは追加しない。
+
 ## 8. 対象ファイル
 
 | path | change | 内容 |
 |---|---|---|
 | `src/gigas/services/codex.py` | modify | 操作配送と loop 境界 |
 | `tests/integration/test_codex_service.py` | modify | 公開入口と境界回帰 |
+| `docs/codex-gui.md` | modify | 終了受付後の拒否結果を保存しない範囲 |
 | `spec/wip/unit_058/SERVICE_OPERATION_DISPATCH.md` | new | 契約・検証・判断 |
 
 ## 9. 検証
@@ -103,15 +106,23 @@ root と connection_audit の D01 独立レビューでは、loop 上の生成�
 | `uv run ty check --no-progress` / `git diff --check` | passed | 型境界・差分空白 |
 | `uv run ruff format --check .` / `uv run ruff check .` | passed | 220 Python ファイル、D / ANN を含む repo 設定 |
 | `uv lock --check` / `uv build` | passed | lock 整合、sdist / wheel の生成 |
+| `uv run pytest tests/integration/test_codex_service.py::test_submission_during_close_rejects_without_recording_on_gui -q --basetemp=tmp/pytest-u058-reject-red --tb=short` | 1 failed、期待した red | GUI `_reject_submission` → recording の `asyncio.create_task` で実行中 loop がない |
+| 同じ試験、`--basetemp=tmp/pytest-u058-reject-green --tb=short` | 1 passed / 1.04s | GUI 拒否から保存処理へ入らない |
+| 対象 6 ファイル、`-q --basetemp=tmp/pytest-u058-final --tb=short` | 311 passed / 14.99s | D02 後の service / GUI / shutdown / answer / transport / connection 回帰 |
+| D02 後の `ruff format --check .` / `ruff check .` / `ty check --no-progress` / `uv lock --check` / `uv build` / `git diff --check` | passed | Python 220 ファイル、型、lock、sdist / wheel、空白 |
+
+公開サービス API の引数・DTO は維持した。class docstring と `docs/codex-gui.md` に終了受付後の拒否結果を保存しない制約を追加し、送信の not_sent、停止の accepted、shutdown の直接 close と照合した。型の ignore / cast、追加依存、互換層は導入していない。変更文書は内容レビューとローカルリンク 9 件の参照先・仮テキスト検査を完了した。実 runtime・機器の再実行は本単位の対象外であり、本単位で成功したと報告しない。
+
+D02 の contract_audit 独立レビューでは、GUI 拒否だけの保存抑止、loop 内の拒否・取消しの記録維持、close 待機中の再現性、公開文書との一致に修正必須の指摘なし。子の製品変更と gate は完了し、unit058 は親の最終レビュー・complete 移動待ちで wip に残す。
 
 ## 10. 先送り事項
 
-公開 DTO の移動は後続の構造整理単位へ残す。
+公開 DTO の移動と、サービス自身の資源・入力 run・接続配送の状態所有は後続の構造整理単位へ残す。本単位の 14 → 4 は操作文脈の値であり、`CodexServiceThread` 自身の状態を削減した証拠ではない。次の責務分離は DTO の移動だけで済ませず、寿命と処理を持つ所有者を設計してから行う。
 
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test List を更新した
-- [ ] 検証結果または未実行理由を記録した
-- [ ] package / release / public API に触れる場合の gate を記録した
+- [x] TDD Test List を更新した
+- [x] 検証結果または未実行理由を記録した
+- [x] package / release / public API に触れる場合の gate を記録した
 - [ ] 親の最終レビューを受けた

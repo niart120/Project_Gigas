@@ -244,6 +244,7 @@ class CodexServiceThread(QThread):
     this thread does not connect to Codex. shutdown rejects new work and returns
     immediately; finished and wait(0) confirm thread exit. shutdown_error must be
     empty before treating exit as successful cleanup.
+    Rejections reported on the GUI thread do not write to the archive.
 
     Args:
         data_root: Persistent application data directory; unselected chats use chats/.
@@ -466,7 +467,7 @@ class CodexServiceThread(QThread):
                 self._loop.call_soon_threadsafe(self._signal_shutdown)
         for _start, context in queued:
             if context is not None:
-                self._reject_submission(context)
+                self._reject_submission(context, record_delivery=False)
 
     def run(self) -> None:
         """Run and finally close the private asyncio loop on this QThread."""
@@ -499,7 +500,7 @@ class CodexServiceThread(QThread):
                 else:
                     self._loop.call_soon_threadsafe(self._dispatch, start, context)
         if ending and context is not None:
-            self._reject_submission(context)
+            self._reject_submission(context, record_delivery=False)
 
     async def _serve(self) -> None:
         self._done = asyncio.Event()
@@ -570,9 +571,16 @@ class CodexServiceThread(QThread):
             # _execute handles cancellation once entered; this call never started.
             self._reject_submission(context)
 
-    def _reject_submission(self, command: _OperationContext) -> None:
+    def _reject_submission(
+        self, command: _OperationContext, *, record_delivery: bool = True
+    ) -> None:
         if command.operation == "setup_windows_sandbox":
-            self._complete(command, "実行環境の準備を開始していない", "not_sent")
+            self._complete(
+                command,
+                "実行環境の準備を開始していない",
+                "not_sent",
+                record_delivery=record_delivery,
+            )
             return
         if command.operation in {
             "answer",
@@ -583,7 +591,7 @@ class CodexServiceThread(QThread):
             "goal_resume",
             "goal_clear",
         }:
-            self._complete(command, "送信されていない", "not_sent")
+            self._complete(command, "送信されていない", "not_sent", record_delivery=record_delivery)
 
     def _complete(
         self,
@@ -593,6 +601,8 @@ class CodexServiceThread(QThread):
         failure_id: int | None = None,
         turn_id: str | None = None,
         goal_accepted: bool = False,
+        *,
+        record_delivery: bool = True,
     ) -> None:
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
         message = None
@@ -611,7 +621,7 @@ class CodexServiceThread(QThread):
                 if outcome == "sent"
                 else MessageResult(outcome)
             )
-        if command.generation == self._active_generation:
+        if record_delivery and command.generation == self._active_generation:
             self._record_dialogue(
                 "delivery",
                 {

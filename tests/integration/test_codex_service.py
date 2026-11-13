@@ -1099,6 +1099,50 @@ def test_submission_after_service_shutdown_is_reported_not_sent(
     assert _not_sent(results[0], "late")
 
 
+def test_submission_during_close_rejects_without_recording_on_gui(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    peers: list[FakePeer] = []
+    loops: list[asyncio.AbstractEventLoop] = []
+    results: list[ServiceResult] = []
+
+    def factory(
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
+    ) -> CodexConnection:
+        peer = FakePeer()
+        peer.close_gate = asyncio.Event()
+        peers.append(peer)
+        loops.append(asyncio.get_running_loop())
+        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("accepted")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        service.shutdown()
+        qtbot.waitUntil(lambda: peers[0].close_calls == 1)
+
+        service.send("late")
+        sends = [result for result in results if result.operation == "send"]
+        assert len(sends) == 2
+        assert sends[-1].message == MessageResult("not_sent")
+        assert sum(method == "turn/start" for method, _params in peers[0].calls) == 1
+    finally:
+        if peers and peers[0].close_gate is not None:
+            loops[0].call_soon_threadsafe(peers[0].close_gate.set)
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+    assert not service.shutdown_error
+
+
 @pytest.mark.parametrize("operation", ["send", "steer"])
 def test_worker_owns_connection_and_interrupts_while_message_waits(
     qtbot: QtBot, tmp_path: Path, operation: str
