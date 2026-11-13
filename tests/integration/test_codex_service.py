@@ -24,12 +24,9 @@ from gigas.runtime.codex.connection import (
 from gigas.runtime.codex.models import (
     ConnectionEvent,
     ConnectionOptions,
-    GoalEvent,
-    GoalState,
     HumanRequest,
     SandboxEvent,
     SessionStatus,
-    TurnStarted,
 )
 from gigas.runtime.codex.transport import JsonObject, RpcNotification
 from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
@@ -1433,25 +1430,48 @@ def test_input_switch_keeps_latest_target_even_after_stop(
 
 
 def test_thread_save_failure_does_not_prevent_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def check() -> None:
-        service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
-        await service._prepare_turn("input", None)
-        assert service._writer is not None
+    def fail(_writer: ProjectWriter, thread_id: str) -> None:
+        raise OSError(thread_id)
 
-        def fail(thread_id: str) -> None:
-            raise OSError(thread_id)
+    monkeypatch.setattr(ProjectWriter, "record_thread", fail)
+    results: list[ServiceResult] = []
+    failures: list[str] = []
 
-        monkeypatch.setattr(service._writer, "record_thread", fail)
-        await service._thread_started("thread-1")
-        assert service._grant is not None
-        assert service._grant.thread_id == "thread-1"
-        await service._input.close()
-        await service._close_recording()
-        service._writer.close()
+    def factory(
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
+    ) -> CodexConnection:
+        return CodexConnection(
+            FakePeer(), options, emit, prepare_turn=prepare, on_thread_started=started
+        )
 
-    asyncio.run(check())
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    service.recording_failed.connect(lambda _reference, _path, reason: failures.append(reason))
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("input")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert not results[-1].error
+        qtbot.waitUntil(lambda: bool(failures))
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+    archive = next((tmp_path / "chats").iterdir())
+    rows = [
+        json.loads(line)
+        for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        row["type"] == "input.run_started" and row["payload"]["thread_id"] == "thread-1"
+        for row in rows
+    )
 
 
 def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path: Path) -> None:
@@ -1487,49 +1507,6 @@ def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path:
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
-
-
-def test_goal_keeps_one_run_across_turns_and_stops_on_pause(tmp_path: Path) -> None:
-
-    async def scenario() -> None:
-        reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=sample_frame()))
-        service = CodexServiceThread(tmp_path, reader)
-        await service._prepare_turn("goal", None)
-        await service._thread_started("thread-goal")
-        grant = service._grant
-        endpoint = service._mcp
-        assert grant is not None
-        service._goal_preparing = True
-        service._receive(0, TurnStarted("before-goal-reply"))
-        service._receive(0, SessionStatus("running"))
-        service._receive(0, SessionStatus("ready"))
-        assert service._grant is grant
-        service._receive(0, GoalEvent(GoalState("goal", "active")))
-        service._goal_preparing = False
-        service._receive(0, TurnStarted("one"))
-        service._receive(0, SessionStatus("running"))
-        service._receive(0, SessionStatus("ready"))
-        assert service._grant is grant
-        assert service._mcp is endpoint
-        service._receive(0, TurnStarted("two"))
-        service._receive(0, SessionStatus("running"))
-        service._receive(0, GoalEvent(GoalState("goal", "paused")))
-        service._receive(0, SessionStatus("stopped"))
-        assert service._grant is None
-        if service._run_end_task is not None:
-            await service._run_end_task
-        await service._close_recording()
-        assert service._writer is not None
-        records = [
-            json.loads(line)
-            for line in (service._writer.path / "events.jsonl")
-            .read_text(encoding="utf-8")
-            .splitlines()
-        ]
-        assert any(row["type"] == "dialogue.goal" for row in records)
-        service._writer.close()
-
-    asyncio.run(scenario())
 
 
 def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) -> None:
@@ -1580,12 +1557,20 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
                 )
             )
 
+        def endpoint() -> tuple[str, dict[str, str]]:
+            params = next(
+                params
+                for method, params in reversed(peer.calls)
+                if method in {"thread/start", "thread/resume"}
+            )
+            assert params is not None
+            return _mcp_endpoint(params)
+
         async def act() -> dict:
-            assert service._mcp is not None
-            config = service._mcp.config
-            async with httpx.AsyncClient(headers=config["http_headers"], trust_env=False) as client:
+            url, headers = endpoint()
+            async with httpx.AsyncClient(headers=headers, trust_env=False) as client:
                 response = await client.post(
-                    config["url"],
+                    url,
                     json={
                         "jsonrpc": "2.0",
                         "id": 1,
@@ -1601,35 +1586,40 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
                 return response.json()["result"]
 
         try:
-            await submit(lambda: service.set_goal("継続目標"))
-            grant, endpoint = service._grant, service._mcp
-            assert grant is not None
+            gate = peer.gates["thread/goal/set"] = asyncio.Event()
+            service.set_goal("継続目標")
+            await asyncio.wait_for(
+                _until(lambda: any(method == "thread/goal/set" for method, _ in peer.calls)), 5
+            )
+            original_endpoint = endpoint()
+            await notify("before-goal-reply")
+            assert not (await act())["isError"]
+            await notify("before-goal-reply", "completed")
+            assert (await act())["isError"]
+            gate.set()
+            await asyncio.wait_for(_until(lambda: bool(results)), 5)
+            assert not results[-1].error
             for turn in ("auto-one", "auto-two"):
                 await notify(turn)
                 assert not (await act())["isError"]
                 await notify(turn, "completed")
-                assert service._grant is grant
-                assert service._mcp is endpoint
+                assert endpoint() == original_endpoint
                 assert (await act())["isError"]
             await submit(service.interrupt)
             await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
-            assert service._grant is None
             assert peer.goal is not None
             assert peer.goal["status"] == "paused"
             await submit(lambda: service.send("状況だけ"))
             assert (await act())["isError"]
             await notify("turn-1", "completed")
             await submit(service.resume_goal)
-            assert service._grant is not None
-            assert service._grant is not grant
-            assert service._mcp is not endpoint
+            assert endpoint() != original_endpoint
             await notify("auto-three")
             assert not (await act())["isError"]
             await submit(service.clear_goal)
             await notify("auto-three", "interrupted")
             await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
             assert peer.goal is None
-            assert service._grant is None
             assert sum(method == "turn/start" for method, _ in peer.calls) == 1
         finally:
             service._loop = None
@@ -1641,8 +1631,15 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
             for line in (archives[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         inputs = [row["payload"] for row in rows if row["type"] == "input.operation_started"]
-        assert [row["turn_id"] for row in inputs] == ["auto-one", "auto-two", "auto-three"]
-        assert inputs[0]["run_id"] == inputs[1]["run_id"] != inputs[2]["run_id"]
+        assert [row["turn_id"] for row in inputs] == [
+            "before-goal-reply",
+            "auto-one",
+            "auto-two",
+            "auto-three",
+        ]
+        assert (
+            inputs[0]["run_id"] == inputs[1]["run_id"] == inputs[2]["run_id"] != inputs[3]["run_id"]
+        )
         assert any(
             row["type"] == "dialogue.submitted"
             and row["payload"]["content"].get("text") == "継続目標"
@@ -1720,7 +1717,6 @@ def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) ->
                 _until(lambda: peer.goal is not None and peer.goal["status"] == "paused"), 5
             )
             assert peer.goal["status"] == "paused"
-            assert service._grant is None
         finally:
             service._loop = None
             if "thread/goal/set" in peer.gates:

@@ -10,7 +10,6 @@ from uuid import uuid4
 from PySide6.QtCore import QThread, Signal
 
 from gigas.game_io.input.serial import SerialInput, list_serial_ports
-from gigas.mcp.game_io import TOOL_TIMEOUT_SECONDS, GameIoMcpServer
 from gigas.runtime.codex.connection import (
     AnswerDeliveryError,
     CodexConnectionError,
@@ -26,13 +25,11 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SessionStatus,
     TextEvent,
-    ThreadConfiguration,
     TurnStarted,
 )
+from gigas.services._conversation_resources import ConversationResources, recording_reason
 from gigas.services.input import InputService
-from gigas.services.observation import ObservationService
-from gigas.services.recording import RecordingService
-from gigas.storage.project import ProjectError, ProjectWriter
+from gigas.storage.project import ProjectError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -41,9 +38,16 @@ if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.input.config import SerialConfig
     from gigas.game_io.observation import ObservationResolution
-    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, GoalState
+    from gigas.runtime.codex.models import (
+        ConnectionEvent,
+        ConnectionOptions,
+        GoalState,
+        ThreadConfiguration,
+    )
     from gigas.runtime.codex.transport import JsonObject
     from gigas.services.input import InputDevice, InputGrant
+    from gigas.services.observation import ObservationService
+    from gigas.services.recording import RecordingService
 
 type ServiceOperation = Literal[
     "connect",
@@ -283,13 +287,7 @@ class CodexServiceThread(QThread):
         self._input_target: SerialConfig | None = None
         self._input_pending = False
         self._input_apply_task: asyncio.Task[None] | None = None
-        self._data_root = data_root.resolve()
-        self._reader = reader
-        self._project_selected = False
-        self._writer: ProjectWriter | None = None
-        self._observations: ObservationService | None = None
-        self._recording: RecordingService | None = None
-        self._mcp: GameIoMcpServer | None = None
+        self._resources = ConversationResources(data_root, reader, self.recording_failed.emit)
         self._grant: InputGrant | None = None
         self._run_input_allowed = False
         self._run_message = ""
@@ -298,10 +296,8 @@ class CodexServiceThread(QThread):
         self._sending_answers: set[str] = set()
         self._goal: GoalState | None = None
         self._goal_preparing = False
-        self._thread_id: str | None = None
         self._turn_id: str | None = None
         self._turn_running = False
-        self._resolution: ObservationResolution = "full_hd"
         self._resources_lock = asyncio.Lock()
         self._lock = Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -355,7 +351,7 @@ class CodexServiceThread(QThread):
         Args:
             resolution: Validated application setting: original, full_hd, or hd.
         """
-        self._enqueue(lambda: self._set_resolution(resolution))
+        self._enqueue(lambda: self._resources.set_resolution(resolution))
 
     def connect_runtime(self, options: "ConnectionOptions") -> int:
         """Queue a connection using an immutable settings snapshot.
@@ -527,12 +523,7 @@ class CodexServiceThread(QThread):
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
             async with self._resources_lock:
-                try:
-                    await self._close_recording()
-                finally:
-                    if self._writer is not None:
-                        await asyncio.to_thread(self._writer.close)
-                        self._writer = None
+                await self._resources.close()
 
     def _signal_shutdown(self) -> None:
         self._input_pending = False
@@ -660,11 +651,6 @@ class CodexServiceThread(QThread):
         self._input_apply_task = asyncio.create_task(self._apply_input())
         self._track(self._input_apply_task)
 
-    def _set_resolution(self, resolution: "ObservationResolution") -> None:
-        self._resolution = resolution
-        if self._observations is not None:
-            self._observations.resolution = resolution
-
     async def _refresh_input_ports(self) -> None:
         try:
             ports = await asyncio.to_thread(list_serial_ports)
@@ -739,7 +725,6 @@ class CodexServiceThread(QThread):
                 raise CodexConnectionError("接続の終了待ち")
             options.cwd.mkdir(parents=True, exist_ok=True)
             self._goal = None
-            self._thread_id = None
             self._turn_id = None
             self._active_generation = generation
             self._closing = None
@@ -793,8 +778,7 @@ class CodexServiceThread(QThread):
                     self._end_run("goal_inactive")
 
     async def _resume_goal(self, connection: ServiceConnection) -> bool:
-        snapshot = self._reader.snapshot()
-        if snapshot.phase != "streaming" or snapshot.frame is None:
+        if not self._resources.has_live_frame:
             raise CodexConnectionError("再開には取得中の映像が必要です")
         await self._input.drain_input()
         return await self._prepare_goal(connection.resume_goal)
@@ -888,14 +872,12 @@ class CodexServiceThread(QThread):
     def _record_dialogue(
         self, kind: str, payload: "JsonObject", *, turn_id: str | None = None
     ) -> None:
-        if self._recording is not None and self._thread_id is not None:
-            self._recording.submit_dialogue(
-                "dialogue." + kind,
-                payload,
-                thread_id=self._thread_id,
-                turn_id=turn_id or self._turn_id,
-                run_id=self._grant.run_id if self._grant else None,
-            )
+        self._resources.record_dialogue(
+            kind,
+            payload,
+            turn_id=turn_id or self._turn_id,
+            run_id=self._grant.run_id if self._grant else None,
+        )
 
     def _record_event(self, event: "ConnectionEvent") -> None:
         kinds = {
@@ -946,137 +928,73 @@ class CodexServiceThread(QThread):
         if not task.cancelled():
             error = task.exception()
             if error is not None:
-                path = str(self._writer.path) if self._writer is not None else ""
-                self.recording_failed.emit("", path, _recording_reason(error))
+                self._resources.report_failure(error)
 
     async def _change_project(self, path: "Path", *, create: bool) -> None:
         error = ""
         try:
             await self._select_project(path, create=create)
         except Exception as failure:  # noqa: BLE001 -- sanitize unexpected failures at GUI boundary
-            error = _recording_reason(failure)
+            error = recording_reason(failure)
         self.project_completed.emit(ProjectResult(path, error))
 
     async def _select_project(self, path: "Path", *, create: bool) -> None:
         async with self._resources_lock:
             if self._connection is not None:
-                message = "Codexを切断してからプロジェクトを変更してください"
-                raise ProjectError(message)
-            if self._writer is not None and self._writer.path == path:
-                if create:
-                    message = f"{path}: 既存のプロジェクトは新規作成できません"
-                    raise ProjectError(message)
-                await asyncio.to_thread(self._writer.reload)
-            else:
-                operation = ProjectWriter.create if create else ProjectWriter.open
-                candidate = await asyncio.to_thread(operation, path)
-                try:
-                    if self._writer is not None:
-                        await asyncio.to_thread(self._writer.close)
-                except BaseException:
-                    await asyncio.to_thread(candidate.close)
-                    raise
-                self._writer = candidate
-            self._project_selected = True
+                raise ProjectError("Codexを切断してからプロジェクトを変更してください")
+            await self._resources.select_project(path, create=create)
 
-    async def _prepare_turn(self, message: str, thread_id: str | None) -> ThreadConfiguration:
+    async def _prepare_turn(self, message: str, thread_id: str | None) -> "ThreadConfiguration":
         # Cancellation must recover synchronous I/O and its newly acquired writer.
         self._run_input_allowed = (
             self._goal_preparing or self._goal is None or self._goal.status == "complete"
         )
         return await _finish_io(self._prepare_recording(message, thread_id))
 
-    async def _prepare_recording(self, message: str, thread_id: str | None) -> ThreadConfiguration:
+    async def _prepare_recording(
+        self, message: str, thread_id: str | None
+    ) -> "ThreadConfiguration":
         self._end_run("replaced")
         if self._run_end_task is not None:
             await asyncio.shield(self._run_end_task)
         async with self._resources_lock:
-            try:
-                if self._mcp is not None:
-                    await self._mcp.close()
-                    self._mcp = None
-                self._run_message = message
-                if self._writer is None:
-                    self._writer = await asyncio.to_thread(self._create_chat_archive)
-                writer = self._writer
-                if self._recording is None:
-                    self._recording = RecordingService(writer)
-                    self._recording.on_failure = lambda error: self.recording_failed.emit(
-                        "", str(writer.path), _recording_reason(error)
-                    )
-                await self._recording.ensure_memory()
-                if self._observations is None:
-                    self._observations = ObservationService(
-                        self._reader,
-                        self._recording,
-                        resolution=self._resolution,
-                    )
-                protocol = (
-                    self._input_config.protocol
-                    if self._input_config is not None and self._input.connected
-                    else None
-                )
-                self._mcp = GameIoMcpServer(self._observations, self._input, protocol)
+            self._run_message = message
+            protocol = (
+                self._input_config.protocol
+                if self._input_config is not None and self._input.connected
+                else None
+            )
+            configuration, observations, recording = await self._resources.prepare(
+                self._input, protocol
+            )
+            if thread_id is not None:
                 try:
-                    await self._mcp.start()
-                except BaseException:
-                    await self._mcp.close()
-                    self._mcp = None
+                    await self._begin_run(thread_id, observations, recording)
+                except Exception as error:
+                    self._resources.report_failure(error)
                     raise
-                if thread_id is not None:
-                    await self._begin_run(thread_id)
-                prefix = f"mcp_servers.{self._mcp.server_name}."
-                endpoint = self._mcp.config
-                return ThreadConfiguration(
-                    writer.path,
-                    {
-                        prefix + "url": endpoint["url"],
-                        prefix + "http_headers": dict(endpoint["http_headers"]),
-                        prefix + "enabled": True,
-                        prefix + "enabled_tools": ["observe", "act_and_observe"],
-                        prefix + "required": True,
-                        prefix + "startup_timeout_sec": 10,
-                        prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
-                        prefix + "tools.act_and_observe.approval_mode": "approve",
-                    },
-                )
-            except Exception as error:
-                path = self._writer.path if self._writer is not None else self._data_root / "chats"
-                self.recording_failed.emit("", str(path), _recording_reason(error))
-                raise
-
-    def _create_chat_archive(self) -> ProjectWriter:
-        parent = self._data_root / "chats"
-        parent.mkdir(parents=True, exist_ok=True)
-        return ProjectWriter.create(parent / str(uuid4()))
+            return configuration
 
     async def _thread_started(self, thread_id: str) -> None:
         await _finish_io(self._record_thread(thread_id))
-        await self._begin_run(thread_id)
 
-    async def _begin_run(self, thread_id: str) -> None:
-        if self._observations is None or self._recording is None or self._mcp is None:
-            message = "入力実行の記録先が準備されていません"
-            raise ProjectError(message)
+    async def _record_thread(self, thread_id: str) -> None:
+        async with self._resources_lock:
+            observations, recording = self._resources.record_thread(thread_id)
+            await self._begin_run(thread_id, observations, recording)
+
+    async def _begin_run(
+        self, thread_id: str, observations: "ObservationService", recording: "RecordingService"
+    ) -> None:
         self._grant = await self._input.begin_run(
-            self._run_message, thread_id, self._observations, self._recording
+            self._run_message, thread_id, observations, recording
         )
-        self._mcp.bind_grant(self._grant)
+        self._resources.bind(self._grant)
         self._input.suspend()
         if not self._run_input_allowed:
             self._input.stop("実行準備中に停止または入力接続の変更がありました")
         self._waiting_answers.clear()
         self._sending_answers.clear()
-
-    async def _record_thread(self, thread_id: str) -> None:
-        self._thread_id = thread_id
-        async with self._resources_lock:
-            writer, observations = self._writer, self._observations
-            if writer is None or observations is None or self._recording is None:
-                message = "チャットの記録先が準備されていません"
-                raise ProjectError(message)
-            self._recording.submit_thread(thread_id)
-            observations.thread_id = thread_id
 
     async def _close_connection(self) -> None:
         connection = self._connection
@@ -1094,45 +1012,18 @@ class CodexServiceThread(QThread):
         self._end_run("disconnected")
         if self._run_end_task is not None:
             await asyncio.shield(self._run_end_task)
-        closing = [connection.close()]
-        if self._mcp is not None:
-            closing.append(self._mcp.close())
-        outcomes = await asyncio.gather(*closing, return_exceptions=True)
+        outcomes = await asyncio.gather(
+            connection.close(), self._resources.close_endpoint(), return_exceptions=True
+        )
         async with self._resources_lock:
             try:
-                await self._close_recording()
+                await self._resources.disconnect()
             finally:
-                if self._writer is not None and not self._project_selected:
-                    await asyncio.to_thread(self._writer.close)
-                    self._writer = None
                 if not isinstance(outcomes[0], BaseException):
                     self._connection = None
         for result in outcomes:
             if isinstance(result, BaseException):
                 raise result
-
-    async def _close_recording(self) -> None:
-        try:
-            if self._mcp is not None:
-                try:
-                    await self._mcp.close()
-                except Exception:
-                    # The server task has ended and closed its socket. Preserve
-                    # the failure, but do not retry the same failed task forever.
-                    self._mcp = None
-                    raise
-                self._mcp = None
-        finally:
-            if self._observations is not None:
-                try:
-                    await self._observations.drain()
-                except Exception as error:  # noqa: BLE001 -- report encoding failure, then drain saves
-                    path = str(self._writer.path) if self._writer is not None else ""
-                    self.recording_failed.emit("", path, _recording_reason(error))
-                self._observations = None
-            if self._recording is not None:
-                await self._recording.drain()
-                self._recording = None
 
 
 async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:
@@ -1142,9 +1033,3 @@ async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:
     except asyncio.CancelledError:
         await asyncio.gather(task, return_exceptions=True)
         raise
-
-
-def _recording_reason(error: BaseException) -> str:
-    if isinstance(error, ProjectError | OSError):
-        return str(error)
-    return f"記録処理に失敗しました ({type(error).__name__})"
