@@ -33,16 +33,30 @@ def test_usage_values_do_not_invent_missing_windows_or_credit_balances(qtbot: Qt
         )
     )
     text = popup.view.toPlainText()
-    assert "27%" in text
-    assert "36%" in text
+    assert "73%" in text
+    assert "64%" in text
     assert "8.50" in text
     assert "一週間" in text
     assert "Game room" in popup.account.text()
-    assert QDateTime.fromSecsSinceEpoch(reset).toLocalTime().toString("MM/dd HH:mm") in text
+    reset_text = QDateTime.fromSecsSinceEpoch(reset).toLocalTime().toString("MM/dd HH:mm")
+    assert any("73%" in line and reset_text in line for line in text.splitlines())
+    assert "通常モデル" not in text
     popup.set_usage(UsageEvent((UsageBucket("codex"),), available=True))
-    assert "27%" not in popup.view.toPlainText()
+    assert "73%" not in popup.view.toPlainText()
+    assert "100%" not in popup.view.toPlainText()
     assert "0%" not in popup.view.toPlainText()
     assert "8.50" not in popup.view.toPlainText()
+    assert "codex" not in popup.view.toPlainText()
+    popup.set_usage(
+        UsageEvent(
+            (UsageBucket("codex", primary=RateLimitWindow(0), secondary=RateLimitWindow(100)),),
+            available=True,
+        )
+    )
+    percentages = [
+        line.split("%", 1)[0].split()[-1] for line in popup.view.toPlainText().splitlines()
+    ]
+    assert percentages == ["100", "0"]
     popup.set_usage(UsageEvent())
     assert "codex" not in popup.view.toPlainText()
 
@@ -67,7 +81,7 @@ def test_empty_usage_does_not_reserve_a_full_history_panel(qtbot: QtBot) -> None
     bar = panel.view.verticalScrollBar()
     bar.setValue(bar.maximum() // 2)
     position = bar.value()
-    panel.view.setTextCursor(panel.view.document().find("10%"))
+    panel.view.setTextCursor(panel.view.document().find("90%"))
     panel.set_usage(
         UsageEvent(
             tuple(
@@ -77,7 +91,7 @@ def test_empty_usage_does_not_reserve_a_full_history_panel(qtbot: QtBot) -> None
             available=True,
         )
     )
-    assert panel.view.textCursor().selectedText() == "10%"
+    assert panel.view.textCursor().selectedText() == "90%"
     assert bar.value() == position
     panel.reset()
     qtbot.waitUntil(lambda: panel.view.height() == short_height)

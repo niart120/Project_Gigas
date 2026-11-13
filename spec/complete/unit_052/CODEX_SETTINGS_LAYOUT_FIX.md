@@ -43,3 +43,9 @@ Windows Qt描画を760×650と620×440 logicalで再作成し、接続済みと�
 - [x] 修正と回帰検証
 - [x] 実画面と仕様の照合
 - [x] コミット
+
+## 利用状況の追加修正（2026-11-13）
+
+APIのlimitName／limitId（例: codex）を見出しにする表示を削除。期間ごとに「一週間の利用上限　残り 21% (リセット: 11/15 00:00)」の一行へまとめる。残りは100−used_percentで計算し、未取得値は補わない。受信データ・利用制限判定は変更しない。
+
+既存unit/integrationを改訂し、改行の除去と残割合への変換でred→greenを確認（refactor-skipped）。使用済み0%→残り100%、100%→残り0%、未取得、コピー・スクロール保持を検証。`uv run pytest tests/unit/test_codex_settings.py tests/integration/test_codex_gui.py -q --basetemp=tmp/u052-remaining-final`: 51 passed。ruff format/check・ty・文書リンク・diff検査を実施。Qt描画を760×650／620×440で再確認し、利用状況が一行に収まることを目視確認。実API再接続と実機検証は表示だけの変更のため未実行。

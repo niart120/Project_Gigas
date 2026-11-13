@@ -38,7 +38,7 @@ def _window_text(window: "RateLimitWindow") -> str:
     reset = "—"
     if window.resets_at is not None:
         reset = QDateTime.fromSecsSinceEpoch(window.resets_at).toLocalTime().toString("MM/dd HH:mm")
-    return f"{duration}　使用済み {window.used_percent}%\nリセット {reset}"
+    return f"{duration}　残り {100 - window.used_percent}% (リセット: {reset})"
 
 
 class CodexSettings(QFrame):
@@ -129,7 +129,6 @@ class CodexSettings(QFrame):
         if usage.ordinary_usage_allowed is False:
             lines.append("通常利用 不可")
         for bucket in usage.buckets:
-            lines.append(bucket.limit_name or bucket.limit_id or "—")
             lines.extend(
                 _window_text(window)
                 for window in (bucket.primary, bucket.secondary)

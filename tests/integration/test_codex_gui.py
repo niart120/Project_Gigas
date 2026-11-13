@@ -1222,7 +1222,7 @@ def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resu
     assert view.selectedText() == account.email
     qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     assert QApplication.clipboard().text() == account.email
-    assert "30%" in panel.codex_settings.view.toPlainText()
+    assert "70%" in panel.codex_settings.view.toPlainText()
     panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
     panel.prompt.setPlainText("次の依頼")
     panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False, available=True)))
