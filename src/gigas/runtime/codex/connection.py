@@ -309,7 +309,6 @@ class CodexConnection:
         self._operations: set[asyncio.Task[object]] = set()
         self._cleanup: asyncio.Task[None] | None = None
         self._opening = False
-        self._sending = False
         self._login_starting = False
         self._login_completions: dict[str, JsonObject] = {}
         self._failure_serial = 0
@@ -417,7 +416,7 @@ class CodexConnection:
         self._require_open()
         if (
             self._sandbox_setup is not None
-            or self._sending
+            or self._start is not None
             or self._turn_id is not None
             or self._phase not in {"ready", "stopped", "login_required"}
             or (self._goal is not None and self._goal.status == "active")
@@ -534,7 +533,7 @@ class CodexConnection:
             or not self._effort
             or self._phase not in {"ready", "stopped"}
             or not prompt.strip()
-            or self._sending
+            or self._start is not None
             or (self._goal is not None and self._goal.status == "active")
         ):
             message = "ターンを開始できない状態"
@@ -543,8 +542,6 @@ class CodexConnection:
         self._end = None
         self._turn = None
         start = self._start = _Start()
-        self._sending = True
-        submitted = False
         accepted_turn: str | None = None
         try:
             await self._configure_thread(prompt)
@@ -553,7 +550,6 @@ class CodexConnection:
             start.submitted = True
             self._user_items += 1
             self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
-            submitted = True
             result = _object(
                 await self._peer.request(
                     "turn/start",
@@ -580,7 +576,7 @@ class CodexConnection:
             )
             raise CodexConnectionError(str(error), failure_id=failure_id) from None
         except RpcError as error:
-            if not submitted:
+            if not start.submitted:
                 await self.close()
             message = f"ターン開始が拒否された (RPC {error.code})"
             phase = "error" if self._closed else self._phase if self._end is not None else "ready"
@@ -599,13 +595,12 @@ class CodexConnection:
                 raise
             message = "ターン開始に失敗"
             failure_id = self._failure("error", message)
-            if submitted:
+            if start.submitted:
                 raise MessageDeliveryError(message, failure_id=failure_id) from None
             raise CodexConnectionError(message, failure_id=failure_id) from None
         else:
             return accepted_turn
         finally:
-            self._sending = False
             self._start = None
             self._wake_end()
 
@@ -644,7 +639,7 @@ class CodexConnection:
             or self._usage.ordinary_usage_allowed is False
             or not self._model
             or not self._effort
-            or self._sending
+            or self._start is not None
             or self._phase not in {"ready", "stopped", "running", "waiting"}
             or (objective is not None and not objective.strip())
         ):
@@ -656,12 +651,10 @@ class CodexConnection:
             self._turn_id is not None or self._phase not in {"ready", "stopped"}
         ):
             raise CodexConnectionError("ターンの終了を待つ必要がある")
-        submitted = False
-        self._sending = True
+        start = self._start = _Start(goal=True)
         if fresh or resume:
             self._end = None
             self._turn = None
-            self._start = _Start(goal=True)
             self._status("starting")
         try:
             async with self._goal_lock:
@@ -689,9 +682,7 @@ class CodexConnection:
                 if objective is not None:
                     self._user_items += 1
                     self._emit(TextEvent(f"user-{self._user_items}", objective, "user", True))
-                submitted = True
-                if self._start is not None:
-                    self._start.submitted = True
+                start.submitted = True
                 await self._goal_request("thread/goal/set", params)
                 if self._turn_id is None and self._end is None:
                     self._status("ready")
@@ -701,27 +692,22 @@ class CodexConnection:
             raise CodexConnectionError(str(error)) from None
         except RpcError as error:
             self._status(
-                self._phase
-                if self._end is not None
-                else self._phase
-                if self._turn_id is not None
-                else "ready"
+                self._phase if self._end is not None or self._turn_id is not None else "ready"
             )
             message = f"目標の変更が拒否された (RPC {error.code})"
             raise CodexConnectionError(message) from None
         except TransportError:
             await self.close()
-            if submitted:
+            if start.submitted:
                 raise MessageDeliveryError("目標の変更結果を確認できない") from None
             raise CodexConnectionError("目標の準備に失敗") from None
         except CodexConnectionError as error:
             if self._turn_id is None:
                 self._status(self._phase if self._end is not None else "ready")
-            if submitted:
+            if start.submitted:
                 raise MessageDeliveryError("目標の変更結果を確認できない") from error
             raise
         finally:
-            self._sending = False
             self._start = None
             self._wake_end()
 
@@ -1013,15 +999,6 @@ class CodexConnection:
             await self._peer.request(
                 "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}
             )
-
-    async def _terminate_thread_commands(self) -> None:
-        try:
-            await self._terminate_listed_commands()
-        except (TransportError, CodexConnectionError) as error:
-            failure_id = self._failure("error", "端末処理の終了を確認できない")
-            raise CodexConnectionError(
-                "端末処理の終了を確認できない", failure_id=failure_id
-            ) from error
 
     async def _terminate_listed_commands(self) -> None:
         if self._thread_id is None:
@@ -1382,7 +1359,7 @@ class CodexConnection:
         """
         self._require_open()
         if (
-            self._sending
+            self._start is not None
             or not self._authenticated
             or not any(
                 choice.model == model and effort in choice.efforts for choice in self._choices
