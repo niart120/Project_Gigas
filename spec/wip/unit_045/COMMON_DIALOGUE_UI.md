@@ -18,7 +18,7 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 
 [AGENTS.md](../../../AGENTS.md)、[実行管理](../../initial/02-runtime.md)、[工程](../../initial/05-implementation.md)、[検証](../../initial/07-verification.md)、[採用API](../../initial/08-sdk-compatibility.md)、[処理順](../../initial/09-control-flows.md)、[UI](../../initial/10-ui-interaction.md)を正本とする。M0の実呼出しは公開形式の成立確認であり、製品結合の成功とは分ける。
 
-現状は質問ごとの入力欄を表示し、質問待ちに通常入力を隠す。履歴は全本文を組み直してQPlainTextEditへ反映する。これを共通入力とitem単位のQTextBrowser更新へ置き換え、旧経路を併存させない。
+開始時は質問ごとの入力欄を表示し、質問待ちに通常入力を隠していた。履歴は全本文を組み直してQPlainTextEditへ反映していた。これを共通入力とitem単位のQTextBrowser更新へ置き換え、旧経路を併存させない。
 
 ## 5. 振る舞い仕様
 
@@ -42,8 +42,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 |---|---|---|---|---|
 | refactor-skipped | D01 対象turnの公開Plan・reasoning summary・activityを受け取り、旧turn/生reasoningと区別する | new | unit/integration | `0db14a4`。既存開始順序試験へPlanを統合。red 4 failed/69 passed→green 73 passed |
 | refactor-skipped | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | `6cfc3c9`。接続87、サービス/終了回帰149、UI/要求寿命/停止27 passed。受付前消去・実行中送信不可を改訂 |
-| green | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | GUI 24、関連回帰37 passed。既存test_codex_guiへ代表条件を統合 |
-| todo | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
+| refactor-skipped | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | `e2a0148`。GUI 24、関連回帰37 passed。既存test_codex_guiへ代表条件を統合 |
+| refactor-skipped | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | red 18 failed/18 passed→関連回帰41 passed。test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
 | todo | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | 既存設定保存・適用試験へ統合 |
 | todo | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | 既存レイアウト/停止試験、製品画面で確認 |
 | todo | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | 既存transport peerへ固定dialogue例を追加し、GUI試験に統合 |
@@ -69,6 +69,8 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D02静的・独立レビュー | 全体ty、担当ruff check/format、diff check: pass。独立UIレビュー指摘2条件を既存試験へ統合 | 中断後の遅い通知で配送を再開しないことと、新turn IDへの明示送信。追加の構造整理は不要 |
 | D03 | `uv run pytest tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-u06-qt`: red 4 failed/19 passed→green 23 passed。Plan/閲覧端の追加red 2 failed/22 passed→最終24 passed。要求寿命・停止・shutdownとの回帰37 passed | UTF-16逆向き選択、標準コピー、既存item更新、選択対象内置換、末尾/過去閲覧、非表示summaryと再表示、Plan全一覧の選択保持 |
 | D03レビュー・描画 | 担当ruff check/format、全体ty、diff check: pass。`tmp/u06/qt/d03_view.py`の合成イベント画像を目視 | Planの位置・チェック/印太字/箇条書き、literal HTML、ユーザー背景、要約字下げ。Plan全置換による選択消失とsummary再表示の41pxずれを採用指摘として修正。描画共有は必要な挙動変更の範囲で、追加refactorなし |
+| D04 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py -q --basetemp=tmp/pytest-u06-composer`: 最終41 passed。担当ruff check/format、全体ty、diff check: pass | 要求/質問別原稿、秘密提出/失効消去、自由回答不可の明示選択、別送信先への遅い受付、配送結果と失効の順序を確認。不要なWrappedRadioを撤去 |
+| D04独立レビュー | IMEの2件を既存試験へ統合: red 2 failed/1 passed→green | 要求失効時の本文置換後にcompositionが残る問題と、未受付時に開始した新preeditが受付で消える問題を修正。その他の指摘なし。標準Passwordと共通原稿へ置換した範囲以外のrefactorなし |
 
 全体gate・製品画面は各項目の結合後に実施する。
 

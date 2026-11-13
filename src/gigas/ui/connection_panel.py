@@ -2,14 +2,17 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QSignalBlocker, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
+    QComboBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -28,8 +31,8 @@ from gigas.runtime.codex.models import (
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.notifications import Notice
-from gigas.ui.prompt_edit import PromptEdit
-from gigas.ui.request_card import RequestCard
+from gigas.ui.prompt_edit import PromptEdit, SubmitFilter
+from gigas.ui.request_card import DECISION_LABELS, RequestRecord
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
@@ -92,7 +95,9 @@ class ConnectionPanel(QWidget):
         self._error = ""
         self._stopping = False
         self._failure_ids: set[int] = set()
-        self.cards: dict[str, RequestCard] = {}
+        self.requests: dict[str, RequestRecord] = {}
+        self._target: tuple[str, str] | None = None
+        self._message_draft = ""
         layout = QVBoxLayout(self)
         self._layout = layout
         self.connect_action = QAction("接続", self)
@@ -120,17 +125,32 @@ class ConnectionPanel(QWidget):
         layout.addWidget(self.history_heading)
         self.transcript = Transcript(self)
         layout.addWidget(self.transcript, 3)
-        self.requests = QScrollArea(self)
-        self.requests.setWidgetResizable(True)
-        self._request_content = QWidget(self.requests)
-        self._request_layout = QVBoxLayout(self._request_content)
-        self._request_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.requests.setWidget(self._request_content)
-        self.requests.hide()
-        layout.addWidget(self.requests, 2)
-        self.prompt = PromptEdit(self)
-        self.prompt.setMaximumHeight(130)
-        layout.addWidget(self.prompt, 1)
+        self.approvals = QScrollArea(self)
+        self.approvals.setWidgetResizable(True)
+        self.approvals.setMaximumHeight(160)
+        self._approval_content = QWidget(self.approvals)
+        self._approval_layout = QVBoxLayout(self._approval_content)
+        self._approval_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.approvals.setWidget(self._approval_content)
+        layout.addWidget(self.approvals)
+        self.target = QComboBox(self)
+        self.target.setAccessibleName("送信先")
+        self.target.addItem("追加指示", None)
+        layout.addWidget(self.target)
+        layout.addWidget(QLabel("Message", self))
+        self.composer = QStackedWidget(self)
+        self.composer.setMaximumHeight(130)
+        self.prompt = PromptEdit(self.composer)
+        self.prompt.setAccessibleName("Message")
+        self.secret = QLineEdit(self.composer)
+        self.secret.setAccessibleName("秘密回答")
+        self.secret.setEchoMode(QLineEdit.EchoMode.Password)
+        self.choice = QComboBox(self.composer)
+        self.choice.setAccessibleName("回答")
+        self.composer.addWidget(self.prompt)
+        self.composer.addWidget(self.secret)
+        self.composer.addWidget(self.choice)
+        layout.addWidget(self.composer, 1)
         turn_actions = QHBoxLayout()
         turn_actions.addStretch()
         self.send_button = QPushButton("送信", self)
@@ -145,7 +165,14 @@ class ConnectionPanel(QWidget):
         self.send_button.clicked.connect(self._send)
         self.prompt.submit_requested.connect(self.send_button.click)
         self.interrupt_button.clicked.connect(self.interrupt)
-        self.prompt.textChanged.connect(self._render)
+        self.prompt.textChanged.connect(self._edit_draft)
+        self.secret.textChanged.connect(self._edit_draft)
+        self.choice.currentIndexChanged.connect(self._edit_draft)
+        self.target.currentIndexChanged.connect(self._select_target)
+        self._submit_filter = SubmitFilter(self)
+        self._submit_filter.submit_requested.connect(self.send_button.click)
+        self.secret.installEventFilter(self._submit_filter)
+        self.choice.installEventFilter(self._submit_filter)
         self._render()
 
     def activate(self, generation: int) -> None:
@@ -158,12 +185,15 @@ class ConnectionPanel(QWidget):
         self._pending = {"connect"}
         self._stopping = False
         self._active_turn = None
-        for card in self.cards.values():
-            card.invalidate()
-            self._request_layout.removeWidget(card)
-            card.deleteLater()
-        self.cards.clear()
-        self.requests.hide()
+        for record in self.requests.values():
+            record.invalidate()
+            if record.controls is not None:
+                self._approval_layout.removeWidget(record.controls)
+                record.controls.deleteLater()
+        self.requests.clear()
+        self._target = None
+        self._refresh_targets()
+        self._show_editor()
         self.transcript.clear()
         self._clear_plan()
         self.login_url.clear()
@@ -210,12 +240,6 @@ class ConnectionPanel(QWidget):
             if event.turn_id != self._active_turn and not self._stopping:
                 self._clear_plan()
             self._active_turn = event.turn_id
-            for token, card in tuple(self.cards.items()):
-                if card.request.turn_id != event.turn_id and card.is_settled:
-                    self._request_layout.removeWidget(card)
-                    card.deleteLater()
-                    del self.cards[token]
-            self.requests.setVisible(bool(self.cards))
         elif isinstance(event, LoginEvent):
             url = QUrl(event.url)
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
@@ -259,25 +283,16 @@ class ConnectionPanel(QWidget):
             )
         elif isinstance(event, HumanRequest):
             if (
-                event.token not in self.cards
+                event.token not in self.requests
                 and not self._stopping
                 and "disconnect" not in self._pending
                 and self._status.phase in {"starting", "running", "waiting"}
             ):
-                card = RequestCard(event, self._request_content)
-                card.submitted.connect(self.answer_requested)
-                card.changed.connect(self._render)
-                self.cards[event.token] = card
-                self._request_layout.addWidget(card)
-                self.requests.show()
-                QTimer.singleShot(
-                    0,
-                    lambda generation=envelope.generation, token=event.token: self._reveal_request(
-                        generation, token
-                    ),
-                )
-        elif isinstance(event, RequestResolved) and event.token in self.cards:
-            self.cards[event.token].invalidate()
+                self._add_request(event)
+        elif isinstance(event, RequestResolved) and event.token in self.requests:
+            record = self.requests[event.token]
+            record.invalidate()
+            self._request_changed(record)
         self._render()
 
     @Slot(object)
@@ -286,17 +301,21 @@ class ConnectionPanel(QWidget):
         if not isinstance(result, ServiceResult) or result.generation != self._generation:
             return
         if result.operation == "answer" and result.answer is not None:
-            card = self.cards.get(result.answer.token)
-            if card is not None:
-                card.finish_submission(result.answer.outcome)
+            record = self.requests.get(result.answer.token)
+            if record is not None:
+                record.finish_submission(result.answer.outcome)
+                self._request_changed(record)
         if (
             result.operation in {"send", "steer"}
             and result.operation in self._pending
             and result.message is not None
             and result.message.outcome == "accepted"
-            and self.prompt.toPlainText() == self._submitted
+            and self._message_draft == self._submitted
+            and not (self._target is None and self.prompt.is_composing)
         ):
-            self.prompt.clear()
+            self._message_draft = ""
+            if self._target is None:
+                self._show_editor()
         self._pending.discard(result.operation)
         self._error = result.error
         if result.error:
@@ -340,7 +359,10 @@ class ConnectionPanel(QWidget):
     def _send(self) -> None:
         if not self.send_button.isEnabled():
             return
-        self._submitted = self.prompt.toPlainText()
+        if self._target is not None:
+            self._answer(self._target[0])
+            return
+        self._submitted = self._message_draft
         self._error = ""
         steering = self._status.phase in {"running", "waiting"}
         self._pending.add("steer" if steering else "send")
@@ -352,10 +374,163 @@ class ConnectionPanel(QWidget):
         else:
             self.send_requested.emit(self._submitted)
 
+    def _add_request(self, request: HumanRequest) -> None:
+        previous_target = self._target
+        record = RequestRecord(request, len(self.requests) + 1)
+        self.requests[request.token] = record
+        if request.kind != "question":
+            controls = QGroupBox(record.title, self._approval_content)
+            record.controls = controls
+            actions = QVBoxLayout(controls)
+            for decision in request.decisions:
+                button = QPushButton(DECISION_LABELS[decision], controls)
+                button.clicked.connect(
+                    lambda _checked=False, token=request.token, value=decision: self._answer(
+                        token, value
+                    )
+                )
+                record.decision_buttons[decision] = button
+                actions.addWidget(button, alignment=Qt.AlignmentFlag.AlignRight)
+            self._approval_layout.addWidget(controls)
+        if (
+            request.questions
+            and self._target is None
+            and not self._message_draft
+            and not self.prompt.is_composing
+            and not self._pending.intersection({"send", "steer"})
+        ):
+            first = next(
+                item for item in self.requests.values() if item.is_live and item.request.questions
+            )
+            self._target = (first.request.token, first.request.questions[0].id)
+        self._request_changed(record)
+        if self._target != previous_target:
+            self._show_editor()
+
+    def _answer(self, token: str, decision: str | None = None) -> None:
+        record = self.requests[token]
+        if not self._available or self._stopping or "disconnect" in self._pending:
+            return
+        submission = record.submit(decision)
+        if submission is not None:
+            self._request_changed(record)
+            self._render()
+            self.answer_requested.emit(submission)
+
+    def _request_changed(self, record: RequestRecord) -> None:
+        request = record.request
+        body = [f"{record.title} · {record.label}"]
+        if request.details:
+            body.append(request.details)
+        for question in request.questions:
+            body.append(f"{question.header}\n{question.question}")
+            body.extend(f"{option.label}: {option.description}" for option in question.options)
+        key = (request.turn_id, request.token)
+        self.transcript.update_item(f"request:{key!r}", "\n".join(body), kind="request")
+        if record.answer_text:
+            self.transcript.update_item(
+                f"answer:{key!r}",
+                f"{record.title} · {record.label}\n{record.answer_text}",
+                kind="answer",
+            )
+        if record.controls is not None:
+            record.controls.setVisible(record.is_live)
+            for button in record.decision_buttons.values():
+                button.setEnabled(record.is_live)
+        previous_target = self._target
+        self._refresh_targets()
+        if self._target != previous_target or (
+            self._target is not None and self._target[0] == request.token
+        ):
+            self._show_editor()
+
+    def _refresh_targets(self) -> None:
+        with QSignalBlocker(self.target):
+            self.target.clear()
+            self.target.addItem("追加指示", None)
+            for token, record in self.requests.items():
+                for question in record.request.questions:
+                    if record.state in {"waiting", "sending"} or record.drafts.get(question.id):
+                        label = f"{record.title} · {question.header}"
+                        if not record.is_live:
+                            label += f" · {record.label}"
+                        self.target.addItem(label, (token, question.id))
+            index = next(
+                (i for i in range(self.target.count()) if self.target.itemData(i) == self._target),
+                -1,
+            )
+            if index < 0:
+                self._target = None
+                index = 0
+            self.target.setCurrentIndex(index)
+        self.target.setVisible(self.target.count() > 1)
+        self.approvals.setVisible(
+            any(record.is_live and record.controls is not None for record in self.requests.values())
+        )
+
+    def _select_target(self) -> None:
+        self._target = self.target.currentData()
+        self._show_editor()
+        self._render()
+
+    def _show_editor(self) -> None:
+        # Restoring another target must not feed its text back into the previous draft.
+        self._submit_filter.reset_composition()
+        with QSignalBlocker(self.prompt), QSignalBlocker(self.secret), QSignalBlocker(self.choice):
+            self.secret.clear()
+            self.choice.clear()
+            self.choice.setEditable(False)
+            if self._target is None:
+                self.prompt.set_draft(self._message_draft)
+                self.composer.setCurrentWidget(self.prompt)
+                return
+            token, question_id = self._target
+            record = self.requests[token]
+            question = next(item for item in record.request.questions if item.id == question_id)
+            text = record.drafts.get(question_id, "")
+            self.prompt.set_draft("")
+            if question.options and not question.is_other:
+                self.choice.addItems([option.label for option in question.options])
+                if question.is_secret:
+                    self.choice.setEditable(True)
+                    editor = self.choice.lineEdit()
+                    if editor is not None:
+                        editor.setReadOnly(True)
+                        editor.setEchoMode(QLineEdit.EchoMode.Password)
+                        editor.setAccessibleName("秘密回答")
+                        editor.installEventFilter(self._submit_filter)
+                self.choice.setCurrentIndex(self.choice.findText(text) if text else -1)
+                self.composer.setCurrentWidget(self.choice)
+            elif question.is_secret:
+                self.secret.setText(text)
+                self.composer.setCurrentWidget(self.secret)
+            else:
+                self.prompt.set_draft(text)
+                self.composer.setCurrentWidget(self.prompt)
+
+    def _edit_draft(self) -> None:
+        if self._target is None:
+            self._message_draft = self.prompt.toPlainText()
+        else:
+            record = self.requests[self._target[0]]
+            if not record.is_live:
+                return
+            editor = self.composer.currentWidget()
+            text = (
+                self.secret.text()
+                if editor is self.secret
+                else self.choice.currentText()
+                if editor is self.choice
+                else self.prompt.toPlainText()
+            )
+            record.drafts[self._target[1]] = text
+        self._render()
+
     def _expire_requests(self) -> None:
-        for card in self.cards.values():
-            card.invalidate()
-            card.mark_unconfirmed()
+        for record in self.requests.values():
+            record.invalidate()
+            record.mark_unconfirmed()
+            self._request_changed(record)
 
     def _clear_plan(self) -> None:
         self.plan.clear()
@@ -377,17 +552,7 @@ class ConnectionPanel(QWidget):
             )
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
 
-    def _reveal_request(self, generation: int, token: str) -> None:
-        if generation == self._generation and token in self.cards:
-            self._request_layout.activate()
-            self._request_content.adjustSize()
-            self.requests.verticalScrollBar().setValue(self.cards[token].y())
-
     def _render(self) -> None:
-        requesting = any(card.state in {"waiting", "sending"} for card in self.cards.values())
-        self.prompt.setVisible(not requesting)
-        self._layout.setStretchFactor(self.transcript, 1 if requesting else 3)
-        self._layout.setStretchFactor(self.requests, 5 if requesting else 2)
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
@@ -397,7 +562,6 @@ class ConnectionPanel(QWidget):
         )
         ready = (
             available
-            and not requesting
             and (
                 phase in {"ready", "stopped"}
                 or (
@@ -408,8 +572,17 @@ class ConnectionPanel(QWidget):
             )
             and not self._pending.intersection({"send", "steer"})
         )
-        self.send_button.setEnabled(ready and bool(self.prompt.toPlainText().strip()))
-        self.prompt.setReadOnly(not available)
+        editable = available
+        if self._target is not None:
+            record = self.requests[self._target[0]]
+            editable = available and record.is_live and not self._stopping
+            ready = editable and record.complete
+        else:
+            ready = ready and bool(self._message_draft.strip())
+        self.send_button.setEnabled(ready)
+        self.prompt.setReadOnly(not editable)
+        self.secret.setReadOnly(not editable)
+        self.choice.setEnabled(editable)
         self.interrupt_button.setEnabled(
             available
             and (phase in {"starting", "running", "waiting"} or "send" in self._pending)
