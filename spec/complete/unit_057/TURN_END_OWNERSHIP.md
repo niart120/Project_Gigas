@@ -4,13 +4,13 @@
 
 ### 1.1 目的
 
-状態: **wip（製品実装・局所gate完了、親の実接続受入中）**。整理親仕様のM1として、停止理由、対象、完了判定を一つの終了処理へ集約する。ユーザーのM0承認とM1完遂指示を受け、2026-11-13に着手した。
+状態: **complete（製品・局所gate・実接続・実機受入完了）**。整理親仕様のM1として、停止理由、対象、完了判定を一つの終了処理へ集約した。ユーザーのM0承認とM1完遂指示を受け、2026-11-13に着手・完了した。サービス配送と後段の構造分割は親M1で継続する。
 
 ### 1.2 起点 / source
 
 | source | 内容 | path |
 |---|---|---|
-| 承認済み親仕様 | 停止のローカル受付、終端後一回回収、切断、状態寿命 | [unit054](../unit_054/KISS_SIMPLIFICATION.md) |
+| 承認済み親仕様 | 停止のローカル受付、終端後一回回収、切断、状態寿命 | [unit054](../../wip/unit_054/KISS_SIMPLIFICATION.md) |
 | 先行子 | 製品準備必須化、通知採用元と表示締切 | [unit055](../../complete/unit_055/PRODUCT_CONNECTION_ASSEMBLY.md)、[unit056](../../complete/unit_056/TURN_NOTIFICATION_LIFETIME.md) |
 
 ### 1.3 use case
@@ -99,7 +99,7 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 
 ## 9. 検証
 
-局所pytestは`--basetemp=tmp/pytest-u057`を使う。実接続・実機は親担当へ引き渡し、子をwipに保つ。
+局所pytestは`--basetemp=tmp/pytest-u057`を使った。製品green後に親担当が下記の実接続・実機受入を実施した。
 
 | command | result | notes |
 |---|---|---|
@@ -115,11 +115,35 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 | `uv lock --check` / `uv build` | passed / passed | lock整合、sdist・wheel生成 |
 | `git diff --check` | passed | 空白差分。親unit054の同時編集をstageから除外 |
 | 公開docs/docstring読解 | 確認済み | stop/clearのローカル受付、自然完了・失敗の回収、切断の打切り、サービス記録の意味を照合 |
-| 実runtime・実機 | not run | 親担当が製品green後に実施 |
+| 実runtime・実機 | passed（下記3実行） | 停止・自然完了・終端前切断、CH552の短い入力と中立送出を確認 |
+
+### 9.1 実接続・実機受入（2026-11-13）
+
+製品は`f886a97`のD04修正を含み、文書更新のみの`cb78aa4`までの状態で確認した。runtimeは0.167.0、モデルはgpt-6.1-sol / low。既存の隔離homeと認証・準備済み環境を使い、新規ログイン・setupは行っていない。USB映像、CH552 / 9600 baudを使用した。
+
+検証器`tmp/u054/m1_acceptance.py`は製品の要求・通知を観測し、端末一覧・terminateを代行しない。memory内の前景PowerShellで100ms間隔・最大300行の有限書込を行い、製品の停止で止めた。入力は無効または明示した一列一回だけに制限した。
+
+```powershell
+$m1Settings = 'C:/Users/train/AppData/Local/GIGAS/settings.toml'
+$m1Home = 'E:/documents/VSCodeWorkspace/Project_Gigas/tmp/u06-m3/fresh-20261113-180214-566284/home'
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode neutral --settings $m1Settings --codex-home $m1Home
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode close-wait --settings $m1Settings --codex-home $m1Home
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode input --direction RIGHT --hold-ms 500 --reviewed-frame E:/documents/VSCodeWorkspace/Project_Gigas/tmp/u054/m1-close-wait-20261113-222341-805270/before.png --settings $m1Settings --codex-home $m1Home
+```
+
+| mode・結果資料（`tmp/u054/`配下） | 観測結果 |
+|---|---|
+| `m1-neutral-20261113-222202-616766/report.json` | stop受付は対象終端より約0.47秒先。終端後に一回、1ページ列挙・1端末terminate・空一覧確認。7行で停止し、1秒後と同一接続・threadでの再開後も不変。自然完了は最終本文を受信し、interruptなし・終端後一回の空確認でready |
+| `m1-close-wait-20261113-222341-805270/report.json` | 公開stopとdisconnectを順次直ちに提出。実際のclose入口で対象終端未受信、約0.50秒でclose。7行で停止し、切断後1秒も不変。通知を検証器で遅延させていない |
+| `m1-input-20261113-222516-396018/report.json` | 右500ms要求の途中で停止し、送出完了の観測間隔は約313msで中立へ。非中立送出は1回。端末は終端後一回回収され133行で停止、再開後も不変。自然最終応答と同一接続・threadを確認 |
+
+入力実行の`before.png`・`after-stop.png`・`after-resume.png`を目視した。主人公が入口の右へ一マス移動し、停止後から約20秒後の再開完了時も同じ位置である。NPCは移動しており、停止画面の再利用ではない。313msは送出完了の観測間隔で、機器の解除ACKや最悪応答時間の測定ではない。3実行ともサービス・映像・設定・serialが終了し、観測した所有PIDの残存は0だった。
+
+最初のneutral実行`m1-neutral-20261113-222024-125928/report.json`は検証器の誤りで失敗した。観測用`traced_notify`が省略可能なparamsを必須にし、製品の`notify("initialized")`を受けられなかった。initialize成功の後で停止し、thread/Goal/turn・書込・入力は未実行、所有PIDの残存は0。引数を`params=None`へ直して再実行した。この失敗は製品停止の検証結果に数えない。
 
 ## 10. 先送り事項
 
-実runtime有限writer・同接続再開・入力解除の受入は親unit054のM1受入へ引き渡す。保存・入力検証・操作配送の構造変更は後続子が担当する。
+実接続の結果は親unit054へ引き渡した。長時間運転・他入力機器・任意の子孫プロセスは今回の検証外。保存・入力検証・操作配送と責務ごとのファイル分割は後続子が担当する。
 
 ## 11. チェックリスト
 
@@ -128,3 +152,4 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 - [x] 検証結果と未実行理由を記録した
 - [x] 公開API・型・配布gateを記録した
 - [x] 実接続受入へ引き渡した
+- [x] 実接続・実機の結果と検証器側の失敗を区別して記録した
