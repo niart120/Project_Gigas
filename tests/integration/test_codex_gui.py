@@ -9,6 +9,7 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
+from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.models import (
     ActivityEvent,
     ConnectionOptions,
@@ -24,6 +25,7 @@ from gigas.runtime.codex.models import (
     TextEvent,
     TurnStarted,
 )
+from gigas.runtime.codex.transport import StdioTransport
 from gigas.services.codex import (
     AnswerResult,
     CodexServiceThread,
@@ -34,8 +36,12 @@ from gigas.services.codex import (
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.transcript import Transcript
+from tests.integration.test_codex_transport import PEER_COMMAND
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from gigas.runtime.codex.models import ConnectionEvent, ThreadConfiguration
     from gigas.ui.notifications import Notice
 
 
@@ -44,6 +50,81 @@ def _select_question(panel: ConnectionPanel, token: str, question_id: str) -> No
         i for i in range(panel.target.count()) if panel.target.itemData(i) == (token, question_id)
     )
     panel.target.setCurrentIndex(index)
+
+
+def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    def factory(
+        options: ConnectionOptions,
+        emit: "Callable[[ConnectionEvent], None]",
+        prepare: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
+        started: "Callable[[str], Awaitable[None]]",
+    ) -> CodexConnection:
+        peer = StdioTransport((*PEER_COMMAND, "dialogue"), options.cwd)
+        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    results: list[ServiceResult] = []
+    service.completed.connect(results.append)
+    shell = ApplicationShell(tmp_path / "settings.toml", service=service)
+    panel = shell.window.connection
+    shell.start()
+    try:
+        qtbot.waitUntil(lambda: shell.ready)
+        panel.connect_action.trigger()
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        assert not next(result.error for result in results if result.operation == "connect")
+        panel.prompt.setPlainText("開始 日本語🙂")
+        panel.send_button.click()
+        panel.send_button.click()
+        qtbot.waitUntil(lambda: len(panel.requests) == 1)
+        question = next(iter(panel.requests.values()))
+        token = question.request.token
+        assert question.request.kind == "question"
+        assert "経路確認" in panel.plan.toPlainText()
+        assert "公開要約" in panel.transcript.toPlainText()
+        assert "fixture/observe" in panel.transcript.toPlainText()
+        assert "観測完了" in panel.transcript.toPlainText()
+        assert "INTERNAL_CONTENT" not in panel.transcript.toPlainText()
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        panel.target.setCurrentIndex(0)
+        panel.prompt.setPlainText("質問は保留し、門の前で止まる")
+        panel.send_button.click()
+        qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
+        steering = next(result for result in results if result.operation == "steer")
+        assert steering.message == MessageResult("accepted", "dialogue-turn")
+        assert question.is_live
+        _select_question(panel, token, "route")
+        panel.choice.setCurrentIndex(1)
+        _select_question(panel, token, "note")
+        panel.prompt.setPlainText("補給後に現在地を確認する")
+        _select_question(panel, token, "secret")
+        masked_answer = "D07-SYNTHETIC-SECRET"
+        panel.secret.setText(masked_answer)
+        panel.send_button.click()
+        assert panel.secret.text() == ""
+        qtbot.waitUntil(lambda: len(panel.requests) == 2)
+        approval = next(
+            record for record in panel.requests.values() if record.request.kind == "command"
+        )
+        assert "Write-Output fixture" in panel.transcript.toPlainText()
+        approval.decision_buttons["decline"].click()
+        qtbot.waitUntil(lambda: "GIGAS_DIALOGUE_OK" in panel.transcript.toPlainText())
+        qtbot.waitUntil(lambda: panel.status.text() == "待機")
+        assert question.state == "sent"
+        assert approval.state == "sent"
+        assert "拒否" in panel.transcript.toPlainText()
+        assert "✓ 経路確認" in panel.plan.toPlainText()
+        assert panel.target.count() == 1
+        assert not panel.approvals.isVisible()
+        secret_absent = masked_answer not in panel.transcript.toPlainText()
+        assert secret_absent
+    finally:
+        shell.request_close()
+        qtbot.waitUntil(lambda: not shell.window.isVisible())
+    assert service.wait(0)
+    assert service.shutdown_error == ""
 
 
 def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> None:

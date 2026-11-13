@@ -141,6 +141,212 @@ def inherited_pipe_child() -> None:
         time.sleep(0.01)
 
 
+def dialogue() -> None:
+    """Validate one GUI dialogue without recording RPC data or secret answers."""
+    thread_id, turn_id = "dialogue-thread", "dialogue-turn"
+    for raw in sys.stdin.buffer:
+        request = json.loads(raw)
+        method, params = request.get("method"), request.get("params")
+        if method == "initialized":
+            continue
+        if method == "initialize":
+            result = {"userAgent": "gigas-dialogue-peer"}
+        elif method == "account/read":
+            result = {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": True}
+        elif method == "config/read":
+            result = {"config": {"mcp_servers": {}}}
+        elif method == "model/list":
+            result = {
+                "data": [
+                    {
+                        "id": "fixture-model",
+                        "model": "fixture-model",
+                        "isDefault": True,
+                        "defaultReasoningEffort": "low",
+                        "supportedReasoningEfforts": [{"reasoningEffort": "low"}],
+                    }
+                ],
+                "nextCursor": None,
+            }
+        elif method == "thread/start":
+            assert params["sandbox"] == "read-only"
+            assert params["approvalPolicy"] == "on-request"
+            assert params["approvalsReviewer"] == "user"
+            result = {
+                "thread": {"id": thread_id},
+                "model": params["model"],
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": {"type": "readOnly"},
+            }
+        else:
+            assert method == "turn/start"
+            assert params["threadId"] == thread_id
+            assert params["input"] == [{"type": "text", "text": "開始 日本語🙂"}]
+            send({"id": request["id"], "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
+            break
+        send({"id": request["id"], "result": result})
+    else:
+        return
+
+    def notice(method: str, fields: dict[str, object]) -> None:
+        params = {"threadId": thread_id, **fields}
+        if method not in {"turn/started", "turn/completed"}:
+            params["turnId"] = turn_id
+        send({"method": method, "params": params})
+
+    notice("turn/started", {"turn": {"id": turn_id, "status": "inProgress"}})
+    notice("turn/plan/updated", {"plan": [{"step": "経路確認", "status": "inProgress"}]})
+    notice(
+        "item/reasoning/summaryTextDelta",
+        {
+            "itemId": "reason",
+            "summaryIndex": 0,
+            "delta": "公開要約",
+        },
+    )
+    notice(
+        "item/completed",
+        {
+            "item": {
+                "id": "reason",
+                "type": "reasoning",
+                "summary": ["公開要約"],
+                "content": ["INTERNAL_CONTENT"],
+            }
+        },
+    )
+    notice(
+        "item/started",
+        {
+            "item": {
+                "id": "observe",
+                "type": "mcpToolCall",
+                "server": "fixture",
+                "tool": "observe",
+                "status": "inProgress",
+            }
+        },
+    )
+    notice(
+        "item/completed",
+        {
+            "item": {
+                "id": "observe",
+                "type": "mcpToolCall",
+                "server": "fixture",
+                "tool": "observe",
+                "status": "completed",
+                "result": {"content": [{"type": "text", "text": "観測完了"}]},
+            }
+        },
+    )
+    send(
+        {
+            "id": "dialogue-question",
+            "method": "item/tool/requestUserInput",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "itemId": "questions",
+                "isBlocking": True,
+                "questions": [
+                    {
+                        "id": "route",
+                        "header": "経路",
+                        "question": "どの経路ですか?",
+                        "isOther": False,
+                        "isSecret": False,
+                        "options": [
+                            {"label": "North", "description": "北側"},
+                            {"label": "South", "description": "南側"},
+                        ],
+                    },
+                    {
+                        "id": "note",
+                        "header": "補足",
+                        "question": "回答後の指示は?",
+                        "isOther": True,
+                        "isSecret": False,
+                        "options": [],
+                    },
+                    {
+                        "id": "secret",
+                        "header": "秘密",
+                        "question": "確認値は?",
+                        "isOther": False,
+                        "isSecret": True,
+                        "options": [],
+                    },
+                ],
+            },
+        }
+    )
+    steering = json.loads(sys.stdin.buffer.readline())
+    assert steering["method"] == "turn/steer"
+    assert steering["params"] == {
+        "threadId": thread_id,
+        "expectedTurnId": turn_id,
+        "input": [{"type": "text", "text": "質問は保留し、門の前で止まる"}],
+    }
+    send({"id": steering["id"], "result": {"turnId": turn_id}})
+    answer = json.loads(sys.stdin.buffer.readline())
+    answer_matches = answer == {
+        "id": "dialogue-question",
+        "result": {
+            "answers": {
+                "route": {"answers": ["South"]},
+                "note": {"answers": ["補給後に現在地を確認する"]},
+                "secret": {"answers": ["D07-SYNTHETIC-SECRET"]},
+            }
+        },
+    }
+    # Keep failure diagnostics boolean-only, including for the synthetic secret.
+    assert answer_matches
+    del answer
+    notice("serverRequest/resolved", {"requestId": "dialogue-question"})
+    command = {
+        "id": "command",
+        "type": "commandExecution",
+        "command": "Write-Output fixture",
+        "cwd": str(Path.cwd()),
+        "status": "inProgress",
+    }
+    notice("item/started", {"item": command})
+    send(
+        {
+            "id": "dialogue-approval",
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "itemId": "command",
+                "startedAtMs": 1,
+                "command": "Write-Output fixture",
+                "cwd": str(Path.cwd()),
+                "availableDecisions": ["accept", "decline", "cancel"],
+            },
+        }
+    )
+    decision = json.loads(sys.stdin.buffer.readline())
+    assert decision == {"id": "dialogue-approval", "result": {"decision": "decline"}}
+    notice("serverRequest/resolved", {"requestId": "dialogue-approval"})
+    notice("item/completed", {"item": {**command, "status": "declined"}})
+    notice("turn/plan/updated", {"plan": [{"step": "経路確認", "status": "completed"}]})
+    notice(
+        "item/completed",
+        {
+            "item": {
+                "id": "final",
+                "type": "agentMessage",
+                "text": "GIGAS_DIALOGUE_OK",
+            }
+        },
+    )
+    notice("turn/completed", {"turn": {"id": turn_id, "status": "completed"}})
+    sys.stdin.buffer.read()
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "multiplex"
     if mode == "multiplex":
@@ -159,5 +365,7 @@ if __name__ == "__main__":
         inherited_pipe()
     elif mode == "inherited-pipe-child":
         inherited_pipe_child()
+    elif mode == "dialogue":
+        dialogue()
     else:
         invalid(mode)
