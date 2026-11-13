@@ -2221,6 +2221,7 @@ def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) ->
         peer.events.put_nowait(TransportClosed("PRIVATE-UPSTREAM-TEXT"))
         for _ in range(8):
             await asyncio.sleep(0)
+        await _until(lambda: _phase(events) == "error")
         assert peer.closed
         assert RequestResolved(request.token) in events
         assert isinstance(events[-1], SessionStatus)
@@ -3416,7 +3417,10 @@ def test_unconfirmed_terminal_cleanup_keeps_execution_closed(tmp_path: Path, fai
         assert len([method for method, _ in peer.calls if method.endswith("/terminate")]) == 1
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "error"
+        before_close = list(peer.calls)
         await connection.close()
+        assert peer.calls == before_close
+        assert peer.closed
 
     _run(scenario())
 
@@ -3428,14 +3432,46 @@ def test_close_collects_pending_terminal_cleanup(tmp_path: Path) -> None:
         await connection.open()
         await connection.set_goal("goal")
         peer.terminals = ["writer"]
-        peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
-        stopping = asyncio.create_task(connection.stop())
-        for _ in range(20):
-            await asyncio.sleep(0)
-        assert stopping.done()
-        await connection.close()
-        await asyncio.gather(stopping, return_exceptions=True)
+        gate = peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
+        await connection.stop()
+        await _until(lambda: any(method.endswith("/terminate") for method, _ in peer.calls))
+        closing = asyncio.create_task(connection.close())
+        try:
+            await _events_processed()
+            assert not closing.done()
+            assert not peer.closed
+        finally:
+            gate.set()
+            await closing
+        assert not peer.terminals
+        assert sum(method.endswith("/terminate") for method, _ in peer.calls) == 1
         assert peer.closed
-        assert not any(task.get_name() == "gigas-codex-stop" for task in asyncio.all_tasks())
+        assert peer.close_calls == 1
+        assert not any(task.get_name() == "gigas-codex-end" for task in asyncio.all_tasks())
+
+    _run(scenario())
+
+
+def test_close_breaks_goal_lock_and_terminal_wait_without_reinterrupting(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["thread/goal/set"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        starting = asyncio.create_task(connection.set_goal("goal"))
+        await _until(lambda: any(method == "thread/goal/set" for method, _ in peer.calls))
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto"}})
+        )
+        await _until(lambda: TurnStarted("auto") in events)
+        await connection.stop()
+        await _until(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+        await connection.close()
+        await asyncio.gather(starting, return_exceptions=True)
+        assert peer.closed
+        assert sum(method == "turn/interrupt" for method, _ in peer.calls) == 1
+        assert sum(method.endswith("backgroundTerminals/list") for method, _ in peer.calls) == 2
+        assert _phase(events) == "closed"
 
     _run(scenario())

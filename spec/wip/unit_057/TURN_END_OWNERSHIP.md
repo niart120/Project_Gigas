@@ -69,8 +69,8 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | D01 停止受付は即時に戻り、自然完了・中断・開始受付を同じ終了対象として終端と一回回収まで新規実行を閉じる | behavior | unit | pause保留中のstop返却と独立interruptを最初のredにする。旧stop返却=RPC回収完了・complete直後回収の期待を改訂 |
-| todo | D02 切断は未完の開始・終端・Goal lock待ちを打切り、既存回収を共有してtransportを閉じる | behavior | unit/integration | 自己待機・呼出元取消し・失敗後late turn・同対象の二重回収を回帰確認 |
+| refactor-done | D01 停止受付は即時に戻り、自然完了・中断・開始受付を同じ終了対象として終端と一回回収まで新規実行を閉じる | behavior | unit | pause保留中のstop返却と独立interruptを最初のredにする。旧stop返却=RPC回収完了・complete直後回収の期待を改訂 |
+| green | D02 切断は未完の開始・終端・Goal lock待ちを打切り、既存回収を共有してtransportを閉じる | behavior | unit/integration | 自己待機・呼出元取消し・失敗後late turn・同対象の二重回収を回帰確認 |
 | todo | D03 サービスは停止要求のローカル受付を記録し、shutdownではcloseへ直接進む | behavior | integration | ServiceResult型は増やさず、状態通知を実終了の根拠とする |
 
 開始通知なしの未知turn採用、終端済みturnの任意再送、終了通知の重複件数を網羅する模擬入力は保証しない。残る取消し・通信不明・準備失敗・権限境界の試験は維持する。
@@ -78,6 +78,8 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 ## 7. 設計メモ
 
 接続が現在turn・未解決start一件・終了要求一件を所有する。turnはID・終端結果・中断試行を持ち、未解決startが先行turnを参照する。終了要求は理由・対象・Goal操作・回収結果・stickyな失敗を持つ。動作中だけrunnerを保持する。全完了/中断ID集合、stopping/finishing_goalと回収task履歴の組合せを除去する。
+
+D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag・ローカルsubmittedを開始受付記録へ統合した。使用しなくなった旧回収wrapperも削除した。
 
 終了要求が存在する間の成功状態は終了ownerだけが決める。開始側のfinallyや表示status関数は補正しない。close呼出元と終了runner自身は所有task回収から除き、取消された操作は閉鎖済み接続のcloseを再awaitしない。
 
@@ -97,7 +99,8 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 | command | result | notes |
 |---|---|---|
 | D01対象pytest | red: 1 failed / green: 1 passed | Goal pause保留でstopが返らない失敗を確認。接続unit全体は161 passed / 0.75s |
-| D02/D03対象pytest | not run | 各itemでred→greenを記録 |
+| D02対象pytest | red: 1 failed / green: 1 passed | 回収中closeがterminateを取消しwriterを残す失敗を確認。Goal lock待ちと終端未着のclose、失敗済み回収の非再送も検証 |
+| D03対象pytest | not run | red→greenを記録予定 |
 | 接続unit・service/GUI/shutdown/answer/transport integration | not run | 最終回帰 |
 | ruff format/check、ty、lock check、build、diff check | not run | 公開API・型・配布gate |
 | 公開docs/docstring読解 | not run | 実装との意味整合 |

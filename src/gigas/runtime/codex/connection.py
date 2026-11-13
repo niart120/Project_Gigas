@@ -585,7 +585,8 @@ class CodexConnection:
         except asyncio.CancelledError:
             if accepted_turn is None:
                 raise
-            await self.close()
+            if not self._closed:
+                await self.close()
             return accepted_turn
         except (TransportError, CodexConnectionError, OSError, UnicodeError) as error:
             await self.close()
@@ -905,20 +906,32 @@ class CodexConnection:
         end = self._end
         if end is None:
             end = self._end = _End(reason, self._turn)
-        elif reason != "complete":
+        elif reason != "complete" and reason != end.reason:
             end.reason = reason
-        if goal_action == "clear" or (goal_action == "pause" and end.goal_action == "none"):
+            end.done = False
+        if reason == "close" and self._turn is not end.target:
+            end.target = self._turn
+            end.swept = False
+        if goal_action != end.goal_action and (
+            goal_action == "clear" or (goal_action == "pause" and end.goal_action == "none")
+        ):
             end.goal_action = goal_action
             end.done = False
         self._expire_requests()
-        if not end.error:
+        if not end.error and not end.done:
             self._status("stopping")
         self._wake_end()
 
     def _wake_end(self) -> None:
         self._end_changed.set()
-        if self._end is not None and not self._end.error and self._end_task is None:
-            self._end_task = asyncio.create_task(self._run_end(self._end), name="gigas-codex-end")
+        end = self._end
+        if (
+            end is not None
+            and not end.done
+            and (not end.error or end.reason == "close")
+            and self._end_task is None
+        ):
+            self._end_task = asyncio.create_task(self._run_end(end), name="gigas-codex-end")
 
     async def _run_end(self, end: _End) -> None:
         goal: asyncio.Task[None] | None = None
@@ -934,6 +947,11 @@ class CodexConnection:
         try:
             while True:
                 self._end_changed.clear()
+                closing = end.reason == "close"
+                if closing and goal is not None:
+                    goal.cancel()
+                    await asyncio.gather(goal, return_exceptions=True)
+                    goal = None
                 for task in (goal, interrupt, sweep):
                     if task is not None and task.done():
                         try:
@@ -951,8 +969,8 @@ class CodexConnection:
                         end.swept = False
                     sweep = None
                 target = end.target
-                if not end.error:
-                    if goal is None and end.goal_sent != end.goal_action:
+                if not end.error or closing:
+                    if not closing and goal is None and end.goal_sent != end.goal_action:
                         end.goal_sent = end.goal_action
                         goal = launch(self._pause_goal(clear=end.goal_action == "clear"))
                     if (
@@ -967,13 +985,22 @@ class CodexConnection:
                     if (
                         sweep is None
                         and not end.swept
-                        and self._start is None
-                        and (target is None or target.terminal is not None)
+                        and (
+                            (closing and interrupt is None)
+                            or (
+                                not closing
+                                and self._start is None
+                                and (target is None or target.terminal is not None)
+                            )
+                        )
                     ):
                         sweep_target = target
                         end.swept = True
                         sweep = launch(self._terminate_listed_commands())
                 if goal is None and interrupt is None and sweep is None:
+                    if closing:
+                        end.done = True
+                        return
                     if end.error:
                         return
                     if (
@@ -1033,15 +1060,18 @@ class CodexConnection:
             cursor = _text(next_cursor)
 
     async def close(self) -> None:
-        """Wait for owned operations, event consumer and peer to close.
+        """Stop waiting for turn completion and close owned operations and transport.
 
-        Concurrent callers share cleanup. Cancelling a caller does not cancel
-        cleanup; another close call can wait for the same completion.
+        In-flight interruption and public-terminal cleanup are shared. Preparation,
+        start acceptance and Goal-lock waits are cancelled. Final text and Goal
+        persistence are not guaranteed. Concurrent callers share cleanup;
+        cancelling a caller does not cancel it.
         """
         if self._cleanup is None:
             self._closed = True
             self._expire_requests()
             self._flush_dialogue()
+            self._request_end("close")
             self._cleanup = asyncio.create_task(
                 self._shutdown(asyncio.current_task()), name="gigas-codex-close"
             )
@@ -1055,21 +1085,25 @@ class CodexConnection:
 
     async def _shutdown(self, origin: asyncio.Task[object] | None) -> None:
         pending = [task for task in self._operations if task is not origin]
-        if self._end_task is not None:
-            pending.append(self._end_task)
         if self._pump is not None and self._pump is not origin:
             pending.append(self._pump)
         for task in pending:
             task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        if self._login_id is not None:
-            with suppress(TransportError, TimeoutError):
-                async with asyncio.timeout(2):
-                    await self._peer.request("account/login/cancel", {"loginId": self._login_id})
-            self._login_id = None
-        await self._peer.close()
-        self._status("closed")
+        try:
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            if self._end_task is not None:
+                await self._end_task
+            if self._login_id is not None:
+                with suppress(TransportError, TimeoutError):
+                    async with asyncio.timeout(2):
+                        await self._peer.request(
+                            "account/login/cancel", {"loginId": self._login_id}
+                        )
+                self._login_id = None
+        finally:
+            await self._peer.close()
+            self._status("closed")
 
     async def _operate[T](self, operation: "Coroutine[object, object, T]") -> T:
         task = asyncio.create_task(operation, name="gigas-codex-operation")
