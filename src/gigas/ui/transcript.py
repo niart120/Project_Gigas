@@ -172,24 +172,35 @@ class Transcript(QTextBrowser):
         self._render_item(item)
 
     def update_plan(
-        self, item_id: str, steps: "tuple[PlanStep, ...]", explanation: str = ""
+        self,
+        item_id: str,
+        steps: "tuple[PlanStep, ...]",
+        explanation: str = "",
+        *,
+        inactive: bool = False,
     ) -> None:
         """Replace a complete public plan without inferring stable step IDs.
 
-        Completed steps use a check, active steps a mark and bold type, and pending
-        steps a bullet. Selection and viewport follow the same rules as other items.
+        Steps use numbered rows and their public status labels. Active steps use
+        bold type unless inactive. Selection and viewport follow the same rules
+        as other items; presentation does not mutate the supplied step data.
 
         Args:
             item_id: Stable identifier for this turn's plan snapshot.
             steps: Ordered complete plan supplied by the runtime.
-            explanation: Optional literal explanation, used in history only.
+            explanation: Optional literal explanation of this public plan update.
+            inactive: Suppress active emphasis and the active label in a retained
+                plan whose turn is no longer executing.
         """
         text = f"{_paragraph_text(explanation)}\n\n" if explanation else ""
         emphasis: list[tuple[int, int]] = []
-        markers = {"pending": "•", "inProgress": "▶", "completed": "✓"}
-        for step in steps:
-            line = f"{markers[step.status]} {_paragraph_text(step.step)}"
-            if step.status == "inProgress":
+        labels = {"pending": "未着手", "inProgress": "進行中", "completed": "完了"}
+        for index, step in enumerate(steps, 1):
+            label = "" if inactive and step.status == "inProgress" else labels[step.status]
+            line = f"{index}. {_paragraph_text(step.step)}"
+            if label:
+                line += f"　{label}"
+            if step.status == "inProgress" and not inactive:
                 emphasis.append((_utf16_length(text), _utf16_length(line)))
             text += f"{line}\n"
         item = self._item(item_id, "plan")

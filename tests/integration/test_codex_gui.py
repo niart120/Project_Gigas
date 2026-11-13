@@ -111,7 +111,7 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert question.state == "sent"
         assert approval.state == "sent"
         assert "拒否" in panel.transcript.toPlainText()
-        assert "✓ 経路確認" in panel.transcript.toPlainText()
+        assert "1. 経路確認　完了" in panel.transcript.toPlainText()
         assert panel.plan.isHidden()
         assert panel.target.count() == 1
         assert not panel.approvals.isVisible()
@@ -206,9 +206,9 @@ def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBo
     )
     panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
     plan = panel.plan
-    assert "✓ 入口を観測" in plan.toPlainText()
-    assert "▶ 経路を確認" in plan.toPlainText()
-    assert "• 計画 20" in plan.toPlainText()
+    assert "1. 入口を観測　完了" in plan.toPlainText()
+    assert "2. 経路を確認　進行中" in plan.toPlainText()
+    assert "23. 計画 20" in plan.toPlainText()
     assert plan.document().find("経路を確認").charFormat().fontWeight() == QFont.Weight.Bold
     assert plan.document().find("計画 20").charFormat().fontWeight() == QFont.Weight.Normal
     plan.setTextCursor(plan.document().find("計画 20"))
