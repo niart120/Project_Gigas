@@ -3,13 +3,20 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from PySide6.QtCore import QPoint
-from PySide6.QtGui import QFont, QPalette, QTextBlockFormat, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QTextBrowser
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import (
+    QFocusEvent,
+    QFont,
+    QPalette,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+)
+from PySide6.QtWidgets import QTextBrowser, QWidget
 
 if TYPE_CHECKING:
+    from PySide6.QtCore import QObject
     from PySide6.QtGui import QResizeEvent
-    from PySide6.QtWidgets import QWidget
 
     from gigas.runtime.codex.models import PlanStep
 
@@ -35,6 +42,7 @@ class _Item:
     text: str = ""
     displayed: str = ""
     emphasis: tuple[tuple[int, int], ...] = ()
+    control: QWidget | None = None
 
 
 def _utf16_length(text: str) -> int:
@@ -96,6 +104,43 @@ class Transcript(QTextBrowser):
         self._items: dict[str, _Item] = {}
         self._reasoning_visible = True
         self._show_headings = show_headings
+        self._controls: set[QWidget] = set()
+        self._laying_out_controls = False
+        self.verticalScrollBar().valueChanged.connect(self._position_controls)
+        document_layout = self.document().documentLayout()
+        if document_layout is not None:
+            document_layout.documentSizeChanged.connect(self._position_controls)
+
+    def set_item_control(self, item_id: str, control: QWidget | None) -> None:
+        """Place a native question or approval control immediately below its text.
+
+        The item must already exist. Its text remains part of the single selectable
+        document. Passing None hides the previous control without deleting it or
+        discarding its draft. This view owns every attached control until clear.
+        Adding, replacing or removing controls preserves selection and the visible
+        passage, following the tail only when it was unselected.
+
+        Args:
+            item_id: Identifier previously supplied to update_item.
+            control: Input widget to attach, or None to remove the active controls.
+
+        Raises:
+            KeyError: No text item has the given identifier.
+        """
+        item = self._items[item_id]
+        previous = item.control
+        if previous is not None and previous is not control:
+            previous.hide()
+        item.control = control
+        if control is not None and control not in self._controls:
+            self._controls.add(control)
+            control.setParent(self.viewport())
+            control.setAutoFillBackground(True)
+            control.setBackgroundRole(QPalette.ColorRole.AlternateBase)
+            control.installEventFilter(self)
+            for child in control.findChildren(QWidget):
+                child.installEventFilter(self)
+        self._refresh_controls()
 
     def update_item(
         self,
@@ -169,7 +214,11 @@ class Transcript(QTextBrowser):
                 self._render_item(item)
 
     def clear(self) -> None:
-        """Discard all received items and their displayed text."""
+        """Discard all received items and delete attached or hidden controls."""
+        for control in self._controls:
+            control.hide()
+            control.deleteLater()
+        self._controls.clear()
         self._items.clear()
         super().clear()
 
@@ -182,6 +231,7 @@ class Transcript(QTextBrowser):
         visible = self.cursorForPosition(QPoint(0, 1))
         visible_y = self.cursorRect(visible).top()
         super().resizeEvent(event)
+        self._layout_controls()
         layout = self.document().documentLayout()
         if layout is not None:
             layout.documentSize()
@@ -190,6 +240,111 @@ class Transcript(QTextBrowser):
             if following
             else scrollbar.value() + self.cursorRect(visible).top() - visible_y
         )
+        self._position_controls()
+
+    def eventFilter(self, watched: "QObject", event: QEvent) -> bool:  # noqa: N802
+        """Fit native input layouts and expose their keyboard focus without selection changes."""
+        if not self._laying_out_controls:
+            if watched in self._controls and event.type() in {
+                QEvent.Type.LayoutRequest,
+                QEvent.Type.Resize,
+            }:
+                self._refresh_controls()
+            elif (
+                event.type() == QEvent.Type.FocusIn
+                and isinstance(event, QFocusEvent)
+                and event.reason()
+                in {
+                    Qt.FocusReason.TabFocusReason,
+                    Qt.FocusReason.BacktabFocusReason,
+                    Qt.FocusReason.MouseFocusReason,
+                    Qt.FocusReason.ShortcutFocusReason,
+                }
+                and isinstance(watched, QWidget)
+            ):
+                active = any(
+                    item.control is watched
+                    or (item.control is not None and item.control.isAncestorOf(watched))
+                    for item in self._items.values()
+                )
+                if active:
+                    top = watched.mapTo(self.viewport(), QPoint()).y()
+                    bottom = top + watched.height()
+                    bar = self.verticalScrollBar()
+                    if top < 0:
+                        bar.setValue(bar.value() + top)
+                    elif bottom > self.viewport().height():
+                        bar.setValue(bar.value() + bottom - self.viewport().height())
+        return super().eventFilter(watched, event)
+
+    def _control_anchor(self, item: _Item) -> QTextCursor:
+        cursor = QTextCursor(self.document())
+        separator = 2 if self._show_headings else 0
+        position = item.start + _utf16_length(item.displayed) - separator
+        cursor.setPosition(max(item.start, position - 1))
+        return cursor
+
+    def _refresh_controls(self) -> None:
+        bar = self.verticalScrollBar()
+        following = bar.value() == bar.maximum() and not self.textCursor().hasSelection()
+        visible = self.cursorForPosition(QPoint(0, 1))
+        visible_y = self.cursorRect(visible).top()
+        self._layout_controls()
+        bar.setValue(
+            bar.maximum() if following else bar.value() + self.cursorRect(visible).top() - visible_y
+        )
+        self._position_controls()
+
+    def _layout_controls(self) -> None:
+        if not self._controls or self._laying_out_controls:
+            return
+        self._laying_out_controls = True
+        try:
+            margin = int(self.document().documentMargin())
+            width = max(1, self.viewport().width() - 2 * margin)
+            for item in self._items.values():
+                control = item.control
+                if not item.displayed:
+                    if control is not None:
+                        control.hide()
+                    continue
+                height = 0
+                if control is not None:
+                    hint = (
+                        control.heightForWidth(width)
+                        if control.hasHeightForWidth()
+                        else control.sizeHint().height()
+                    )
+                    height = min(
+                        control.maximumHeight(),
+                        max(control.minimumHeight(), control.minimumSizeHint().height(), hint),
+                    )
+                    control.resize(width, max(1, height))
+                    control.show()
+                cursor = self._control_anchor(item)
+                block = cursor.blockFormat()
+                spacing = height + 6 if control is not None else 0
+                if block.bottomMargin() != spacing:
+                    block.setBottomMargin(spacing)
+                    cursor.setBlockFormat(block)
+            layout = self.document().documentLayout()
+            if layout is not None:
+                layout.documentSize()
+        finally:
+            self._laying_out_controls = False
+        if width != max(1, self.viewport().width() - 2 * margin):
+            # Adding the reserved space can introduce the vertical scrollbar.
+            self._layout_controls()
+        self._position_controls()
+
+    def _position_controls(self) -> None:
+        if not self._controls or self._laying_out_controls:
+            return
+        margin = int(self.document().documentMargin())
+        for item in self._items.values():
+            if item.control is not None and item.displayed:
+                anchor = self._control_anchor(item)
+                item.control.move(margin, self.cursorRect(anchor).bottom() + 3)
 
     def _item(self, item_id: str, kind: HistoryKind) -> _Item:
         item = self._items.get(item_id)
@@ -241,19 +396,31 @@ class Transcript(QTextBrowser):
         anchor, position = shifted(selected.anchor()), shifted(selected.position())
         if hidden and selected.selectionStart() < end and selected.selectionEnd() > start:
             anchor = position = item.start
-        edit = QTextCursor(self.document())
-        edit.setPosition(start)
-        edit.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        edit.insertText(inserted)
-        if delta and item is not next(reversed(self._items.values())):
-            after_item = False
-            for stored in self._items.values():
-                if after_item:
-                    stored.start += delta
-                if stored is item:
-                    after_item = True
-        item.displayed = displayed
-        self._format_item(item)
+        # Qt emits layout/scroll signals synchronously while inserting text. Do not
+        # position controls until their item offsets match the changed document.
+        self._laying_out_controls = True
+        try:
+            edit = QTextCursor(self.document())
+            if item.control is not None and item.displayed:
+                control_cursor = self._control_anchor(item)
+                control_format = control_cursor.blockFormat()
+                control_format.setBottomMargin(0)
+                control_cursor.setBlockFormat(control_format)
+            edit.setPosition(start)
+            edit.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            edit.insertText(inserted)
+            if delta and item is not next(reversed(self._items.values())):
+                after_item = False
+                for stored in self._items.values():
+                    if after_item:
+                        stored.start += delta
+                    if stored is item:
+                        after_item = True
+            item.displayed = displayed
+            self._format_item(item)
+        finally:
+            self._laying_out_controls = False
+        self._layout_controls()
         selected.setPosition(anchor)
         selected.setPosition(position, QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(selected)
@@ -265,6 +432,7 @@ class Transcript(QTextBrowser):
             if following
             else scrollbar.value() + self.cursorRect(visible).top() - visible_y
         )
+        self._position_controls()
 
     def _format_item(self, item: _Item) -> None:
         if not item.displayed:
@@ -277,7 +445,7 @@ class Transcript(QTextBrowser):
         body.setFont(self.font())
         body.setForeground(self.palette().brush(QPalette.ColorRole.Text))
         block = QTextBlockFormat()
-        if item.kind == "user":
+        if item.kind in {"user", "request", "answer"}:
             block.setBackground(self.palette().brush(QPalette.ColorRole.AlternateBase))
         elif item.kind == "reasoning":
             block.setLeftMargin(12)
