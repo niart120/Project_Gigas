@@ -2,7 +2,9 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip、製品実装中**。[U06親仕様](../unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行う。
+状態: **wip、UIバランスを再設計中**。[U06親仕様](../unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行う。
+
+2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討する。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直す。D08までの自動検証成功と、UIの受入完了を区別する。
 
 開始時は `codex/u06-m0-goal-design`、M0の未コミット文書だけが残っていた。M0を `79eb6e5` として独立記録した。製品の起点は `ad69559`。U05の入力停止、最新キャッシュ即応、非同期保存、提出済み設定適用の継続を維持する。
 
@@ -27,10 +29,10 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 | 通常メッセージ・実行中の追加指示 | 共通欄と送信/Ctrl+Enterを使う。待機時はturn/start、対象turnが実行中ならexpectedTurnId付きsteer。明確な受付前に下書きを消さず、拒否・受付不明で自動再送しない |
 | 複数質問 | (要求token, question ID)ごとに下書きを保持。送信先選択で共通欄を切替え、選択中要求の必須回答を一つのanswersへ送る。選択肢、自由回答、秘密回答を区別し、質問間・追加指示へ本文を自動転用しない。送信結果で原稿を消すときは提出本文と送信先キーを照合し、別送信先の同文原稿を消さない |
 | 承認・要求失効 | 許可/拒否/取消しは公開要求の明示ボタンだけ。要求本文と配送状態は履歴に残し、操作部は未解決時だけ表示。AnswerResultの送信証拠とresolved通知を区別する |
-| Plan/summary/activity | 採用thread/turn/itemへ対応付ける。Planは全一覧置換、新turnで現在欄を消す。公開summaryだけを表示し、生reasoningは扱わない。activityは公開itemの対象・結果を一項目へ更新する |
+| Plan/summary/activity | 採用thread/turn/itemへ対応付ける。Planは全一覧置換。現在本文は上部だけ、説明は履歴に出し、終了・turn切替で最終一覧を履歴へ移して現在欄を消す。公開summaryだけを表示し、生reasoningは扱わない。activityは公開itemの対象・結果を一項目へ更新する |
 | 履歴更新 | リッチテキストをエスケープし、外部資源を無条件に開かない。itemの更新で選択方向・文字境界・閲覧位置を保ち、選択なしの末尾だけ追従する。隠すsummary内の選択は解除し次項目へ移す |
 | reasoning表示設定 | 初期オン。既存設定の保存成功後だけ表示へ適用し、受信を止めない。映像・入力の再接続や停止の契機にしない |
-| 小画面・入力 | 左に対話、右に映像。Message・承認・中断・送信と判断本文へ到達可能。Enter改行、Ctrl+Enter送信、IME変換中は送信しない |
+| 小画面・入力 | 左に対話、右に映像。映像は枠全体へ追従し、取得寸法を変えない。Planは本文に必要な高さ（上限約3行）、承認は横並びで狭いときだけ番号を上段へ回す。Messageは2行分を確保し残りをHistoryへ渡す。Enter改行、Ctrl+Enter送信、IME変換中は送信しない |
 
 GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常turnの中断を使う。設定適用中の中断でも、提出済み設定は継続する。
 
@@ -47,11 +49,17 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | refactor-skipped | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | `aaa66d0`。red 38 failed/110 passed→green 148 passed。既存設定保存・適用試験へ統合 |
 | refactor-skipped | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | `857cca8`。window_presets red 2 failed/4 passed→green 6 passed。関連回帰48 passed、製品描画確認 |
 | refactor-skipped | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | `4951e3a`。red 1 failed→green、GUI/transport/要求寿命63 passed。既存peerとGUI試験へ統合 |
-| refactor-skipped | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | red 1 failed/36 passed→green 37 passed。関連回帰57 passed。実runtime画像から見つけたviewport縮小後の追従離脱を修正 |
+| refactor-skipped | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | `49293d5`。red 1 failed/36 passed→green 37 passed。関連回帰57 passed。実runtime画像から見つけたviewport縮小後の追従離脱を修正 |
+| refactor-done | D09 通常・縮小ウィンドウで情報の優先順位に沿って対話・映像・操作領域を配分する | regression | integration/manual | 対話red 3 failed/41 passed、映像red 1 failed→対話等51、映像等47 passed。比較と製品描画に基づきPlan・承認・Messageの高さ配分、映像上限と中央寄せを修正。独立レビューで未使用layout参照1件を除去 |
+| todo | D10 秘密入力指定をUIへ出さず、通常質問・承認だけを扱う | regression | unit/integration | U02由来の専用入力を撤去。1問でもisSecret=trueなら要求全体を既存未対応応答で拒否し、通常欄へ変換しない |
 
 ## 7. 設計判断
 
 公開通知を接続部で型付き値へ変換し、UIがwire全体や資格情報を保持しない。Qt標準部品、既存要求寿命、既存設定保存を再利用する。独自の配送キュー・自動再送・継続ループ・表示DB・保持上限は追加しない。構造整理は各項目のgreen後に判断する。
+
+ウィンドウ自体は可変だったが、映像の最大寸法と中央寄せが拡張を妨げていた。両方を撤去し、プリセットは初期ウィンドウ寸法と左右配分だけを決める。現在Planの二重表示と専用の空白を除き、承認の折り返しにはQt標準QFormLayoutを使う。現turnのPlanを1件だけ保持して終端時に履歴へ移し、独自レイアウト状態やタイマは増やさない。
+
+秘密入力対応はU02から引き継いだが、GIGASの利用要件と実モデルからの受信証拠がなく、M1で採用を撤回する。採用版のモデル向け質問ツール定義はisSecretを公開せず、protocolに既定falseの属性があるだけである。要求を未対応として返してもruntimeは空回答へ変換するため、中断成功とは扱わない。専用のPassword UI、消去/記録分岐、自動停止は所有しない。Codexの認証は従来どおり別経路とする。
 
 ## 8. 対象ファイル
 
@@ -76,6 +84,8 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D06 | `uv run pytest tests/integration/test_window_presets.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py -q --basetemp=tmp/pytest-u06-layout`: 48 passed。担当ruff check/format、全体ty、diff check: pass | 左右配置・status/preset追随、長い送信先/選択肢、承認scrollと中断/送信を確認。800×600/Meiryo UI16ptの製品offscreen描画でHistory101px/Message64px。重複wrapper/見出し/余白とPlan末尾空行を必要な範囲だけ除去、追加refactorなし |
 | D07 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_codex_transport.py tests/integration/test_answer_lifecycle.py -q --basetemp=tmp/pytest-u06-stdio`: red 1 failed→最終63 passed。担当ruff check/format、全体ty、diff check: pass | ApplicationShell→Service/QThread→stdio→公開decoder/UIを往復。Plan/summary/activity、質問中steer、選択・自由文・秘密の一括回答、承認拒否、終端/close。peerは固定フローのassertだけでRPCを保存しない。追加refactorなし |
 | D08 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_window_presets.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u06-qt`: 57 passed。担当ruff check/format、全体ty、diff check: pass | Plan show/hideでの末尾/過去閲覧/逆向き選択を既存GUI試験へ統合。Transcriptのresize前後で既存の末尾/可視文字の復元を行い、新しいstate/timerを追加しない。最小再現も失敗→成功 |
+| D09 | 既存codex_gui/window_presets/answer_lifecycle/video_gui: 51 passed。video_gui/video_application/resolution_application/settings_apply_contract: 47 passed。担当ruff check/format、全体ty、diff check: pass | 現在Planの重複・終端残存・承認ボタン可視性のred 3件と、映像追従のred 1件を解消。1280→1920→800の実resizeでも取得世代・原画像寸法・接続を維持。重複するresize専用試験は追加せず既存spawn試験へ統合。rootの結合回帰（同4tree＋ui_control_lifetime/video_application/resolution_application/settings_apply_contract、`--basetemp=tmp/pytest-u06-d09-root`）98 passed。追加refactorなし |
+| D09描画 | 製品部品をそのまま使う固定通知のQt描画、1280×720/1920×1080・11pt、800×600・16ptを目視 | Historyは1280で400px、1920で760px、800の左幅259pxで167px。800でも承認3ボタン同時可視、Messageは2行分。実モデル・物理機器の証拠とは分ける |
 
 全体gate・製品画面は各項目の結合後に実施する。
 

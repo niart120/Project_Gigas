@@ -1,12 +1,14 @@
 """Codex connection controls and item-based conversation rendering."""
 
+from math import ceil
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSignalBlocker, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QAction, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
-    QGroupBox,
+    QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,6 +40,9 @@ from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QResizeEvent
 
 _PHASE_LABELS = {
     "connecting": "接続中",
@@ -93,6 +98,7 @@ class ConnectionPanel(QWidget):
         self._pending: set[str] = set()
         self._submitted = ""
         self._active_turn: str | None = None
+        self._current_plan: PlanEvent | None = None
         self._error = ""
         self._stopping = False
         self._failure_ids: set[int] = set()
@@ -101,7 +107,6 @@ class ConnectionPanel(QWidget):
         self._message_draft = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._layout = layout
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
         self.login_action = QAction("ログイン", self)
@@ -118,30 +123,41 @@ class ConnectionPanel(QWidget):
         login.addWidget(self.open_login_button)
         layout.addLayout(login)
         self.plan_heading = QLabel("Plan", self)
-        layout.addWidget(self.plan_heading)
+        plan_row = QHBoxLayout()
+        plan_row.addWidget(self.plan_heading, 0, Qt.AlignmentFlag.AlignTop)
         self.plan = Transcript(self, show_headings=False)
-        self.plan.setMaximumHeight(96)
-        layout.addWidget(self.plan)
+        self.plan.setFrameShape(QFrame.Shape.NoFrame)
+        palette = self.plan.palette()
+        palette.setBrush(QPalette.ColorRole.Base, self.palette().brush(QPalette.ColorRole.Window))
+        self.plan.setPalette(palette)
+        plan_row.addWidget(self.plan, 1)
+        layout.addLayout(plan_row)
+        document_layout = self.plan.document().documentLayout()
+        if document_layout is not None:
+            document_layout.documentSizeChanged.connect(self._fit_plan)
         self._clear_plan()
         self.history_heading = QLabel("History", self)
         layout.addWidget(self.history_heading)
         self.transcript = Transcript(self)
-        layout.addWidget(self.transcript, 3)
+        self.transcript.setFrameShape(QFrame.Shape.NoFrame)
+        layout.addWidget(self.transcript, 1)
         self.approvals = QScrollArea(self)
         self.approvals.setWidgetResizable(True)
-        self.approvals.setMaximumHeight(160)
+        self.approvals.setFrameShape(QFrame.Shape.NoFrame)
         self._approval_content = QWidget(self.approvals)
         self._approval_layout = QVBoxLayout(self._approval_content)
-        self._approval_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._approval_layout.setContentsMargins(0, 0, 0, 0)
         self.approvals.setWidget(self._approval_content)
+        self.approvals.viewport().installEventFilter(self)
         layout.addWidget(self.approvals)
         self.target = QComboBox(self)
         self.target.setAccessibleName("送信先")
         self.target.addItem("追加指示", None)
-        layout.addWidget(self.target)
-        layout.addWidget(QLabel("Message", self))
+        message_heading = QHBoxLayout()
+        message_heading.addWidget(QLabel("Message", self))
+        message_heading.addWidget(self.target, 1)
+        layout.addLayout(message_heading)
         self.composer = QStackedWidget(self)
-        self.composer.setMaximumHeight(130)
         self.prompt = PromptEdit(self.composer)
         self.prompt.setAccessibleName("Message")
         self.secret = QLineEdit(self.composer)
@@ -157,7 +173,7 @@ class ConnectionPanel(QWidget):
         self.composer.addWidget(self.prompt)
         self.composer.addWidget(self.secret)
         self.composer.addWidget(self.choice)
-        layout.addWidget(self.composer, 1)
+        layout.addWidget(self.composer)
         turn_actions = QHBoxLayout()
         turn_actions.addStretch()
         self.interrupt_button = QPushButton(self)
@@ -194,6 +210,7 @@ class ConnectionPanel(QWidget):
         self._pending = {"connect"}
         self._stopping = False
         self._active_turn = None
+        self._current_plan = None
         for record in self.requests.values():
             record.invalidate()
             if record.controls is not None:
@@ -226,6 +243,7 @@ class ConnectionPanel(QWidget):
         self._notify_failure(self._status.detail)
         self.login_url.clear()
         self._expire_requests()
+        self._archive_plan()
         self._render()
 
     @Slot(object)
@@ -242,12 +260,13 @@ class ConnectionPanel(QWidget):
             if event.phase in {"stopping", "stopped", "closed", "error"}:
                 self._expire_requests()
             if event.phase in {"ready", "stopped", "closed", "error"}:
+                self._archive_plan()
                 self._active_turn = None
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, TurnStarted):
             if event.turn_id != self._active_turn and not self._stopping:
-                self._clear_plan()
+                self._archive_plan()
             self._active_turn = event.turn_id
         elif isinstance(event, LoginEvent):
             url = QUrl(event.url)
@@ -258,7 +277,10 @@ class ConnectionPanel(QWidget):
                 f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
             )
         elif isinstance(event, PlanEvent):
-            self.transcript.update_plan(f"plan:{event.turn_id}", event.steps, event.explanation)
+            if event.explanation:
+                self.transcript.update_item(f"plan-explanation:{event.turn_id}", event.explanation)
+            if event.turn_id == self._active_turn:
+                self._current_plan = event
             if (
                 event.turn_id == self._active_turn
                 and not self._stopping
@@ -268,6 +290,9 @@ class ConnectionPanel(QWidget):
                 self.plan.update_plan("current", event.steps)
                 self.plan.setVisible(bool(event.steps))
                 self.plan_heading.setVisible(bool(event.steps))
+                self._fit_plan()
+            else:
+                self.transcript.update_plan(f"plan:{event.turn_id}", event.steps)
         elif isinstance(event, ReasoningEvent):
             self.transcript.update_item(
                 f"reasoning:{(event.turn_id, event.item_id)!r}",
@@ -388,9 +413,18 @@ class ConnectionPanel(QWidget):
         record = RequestRecord(request, len(self.requests) + 1)
         self.requests[request.token] = record
         if request.kind != "question":
-            controls = QGroupBox(record.title, self._approval_content)
+            controls = QWidget(self._approval_content)
             record.controls = controls
-            actions = QVBoxLayout(controls)
+            form = QFormLayout(controls)
+            form.setContentsMargins(0, 0, 0, 0)
+            form.setVerticalSpacing(4)
+            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            field = QWidget(controls)
+            actions = QHBoxLayout(field)
+            actions.setContentsMargins(0, 0, 0, 0)
+            actions.setSpacing(4)
+            actions.addStretch()
+            form.addRow(record.title, field)
             for decision in request.decisions:
                 button = QPushButton(DECISION_LABELS[decision], controls)
                 button.clicked.connect(
@@ -399,7 +433,7 @@ class ConnectionPanel(QWidget):
                     )
                 )
                 record.decision_buttons[decision] = button
-                actions.addWidget(button, alignment=Qt.AlignmentFlag.AlignRight)
+                actions.addWidget(button)
             self._approval_layout.addWidget(controls)
         if (
             request.questions
@@ -476,6 +510,7 @@ class ConnectionPanel(QWidget):
         self.approvals.setVisible(
             any(record.is_live and record.controls is not None for record in self.requests.values())
         )
+        self._fit_approvals()
 
     def _select_target(self) -> None:
         self._target = self.target.currentData()
@@ -492,6 +527,7 @@ class ConnectionPanel(QWidget):
             if self._target is None:
                 self.prompt.set_draft(self._message_draft)
                 self.composer.setCurrentWidget(self.prompt)
+                self._fit_composer()
                 return
             token, question_id = self._target
             record = self.requests[token]
@@ -516,6 +552,7 @@ class ConnectionPanel(QWidget):
             else:
                 self.prompt.set_draft(text)
                 self.composer.setCurrentWidget(self.prompt)
+        self._fit_composer()
 
     def _edit_draft(self) -> None:
         if self._target is None:
@@ -546,6 +583,52 @@ class ConnectionPanel(QWidget):
         self.plan.hide()
         self.plan_heading.hide()
 
+    def _archive_plan(self) -> None:
+        if self._current_plan is not None:
+            event = self._current_plan
+            self.transcript.update_plan(f"plan:{event.turn_id}", event.steps)
+            self._current_plan = None
+        self._clear_plan()
+
+    def _fit_plan(self) -> None:
+        limit = (
+            3 * self.plan.fontMetrics().lineSpacing() + 2 * self.plan.document().documentMargin()
+        )
+        self.plan.setFixedHeight(ceil(min(self.plan.document().size().height(), limit)))
+
+    def _fit_composer(self) -> None:
+        editor = self.composer.currentWidget()
+        if editor is None or editor is self.prompt:
+            # QPlainTextEdit also reserves one pixel for its final caret line.
+            height = ceil(
+                2 * self.prompt.fontMetrics().lineSpacing()
+                + 2 * self.prompt.document().documentMargin()
+                + 2 * self.prompt.frameWidth()
+                + 1
+            )
+        else:
+            height = editor.sizeHint().height()
+        self.composer.setFixedHeight(height)
+
+    def _fit_approvals(self) -> None:
+        natural = max(
+            self._approval_content.sizeHint().height(),
+            self._approval_content.heightForWidth(self.approvals.viewport().width()),
+        )
+        self._approval_content.setMinimumHeight(natural)
+        self.approvals.setFixedHeight(min(natural, 6 * self.fontMetrics().lineSpacing()))
+
+    def eventFilter(self, watched: "QObject", event: QEvent) -> bool:  # noqa: N802 -- Qt override
+        """Fit approval rows to their viewport using Qt's standard row wrapping."""
+        if watched is self.approvals.viewport() and event.type() == QEvent.Type.Resize:
+            self._fit_approvals()
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
+        """Keep Message at its editor's natural height when resizing the panel."""
+        super().resizeEvent(event)
+        self._fit_composer()
+
     def _notify_failure(
         self, detail: str, failure_id: int | None = None, *, operation: str = ""
     ) -> None:
@@ -562,6 +645,7 @@ class ConnectionPanel(QWidget):
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
 
     def _render(self) -> None:
+        self._fit_composer()
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)

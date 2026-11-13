@@ -291,11 +291,11 @@ class MainWindow(QMainWindow):
         self.window_size_group.setEnabled(enabled)
 
     def apply_window_size_preset(self, key: str) -> None:
-        """Fit the requested window and preview to the available screen.
+        """Fit the requested window and initial pane allocation to the available screen.
 
         Args:
-            key: A validated saved preset. Controls may reduce the actual preview
-                below its scaled target; the selected preview fitting mode stays active.
+            key: A validated saved preset. Later resizing may change either pane;
+                the selected preview fitting mode stays active.
         """
         screen = self.screen()
         if screen is None:
@@ -308,7 +308,6 @@ class MainWindow(QMainWindow):
         )
         self.current_window_size_preset = key
         self.resize(target.window_width, target.window_height)
-        self.video.view.set_preview_size(target.preview_width, target.preview_height)
         self.splitter.setSizes([target.window_width - target.preview_width, target.preview_width])
         fit_to_screen(self)
 

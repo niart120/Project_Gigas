@@ -56,6 +56,21 @@ def test_real_spawn_capture_displays_and_releases_through_application(
                 != QColor("black")
             )
         )
+        initial = service.snapshot()
+        assert initial.frame is not None
+        for width, height in ((1280, 720), (1920, 1080), (800, 600)):
+            shell.window.resize(width, height)
+            qtbot.waitUntil(lambda: view.geometry() == shell.window.video.rect())
+            assert (shell.window.width(), shell.window.height()) == (width, height)
+            current = service.snapshot()
+            assert current.phase == "streaming"
+            assert current.generation == initial.generation
+            assert current.frame is not None
+            assert (current.frame.width, current.frame.height) == (
+                initial.frame.width,
+                initial.frame.height,
+            )
+            assert not marker.exists()
         shell.apply_settings(replace(shell.baseline, capture_device=""))
         qtbot.waitUntil(lambda: shell.operation is None)
         qtbot.waitUntil(lambda: service.snapshot().phase == "idle", timeout=8000)

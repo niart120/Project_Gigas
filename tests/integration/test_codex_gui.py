@@ -115,7 +115,8 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert question.state == "sent"
         assert approval.state == "sent"
         assert "拒否" in panel.transcript.toPlainText()
-        assert "✓ 経路確認" in panel.plan.toPlainText()
+        assert "✓ 経路確認" in panel.transcript.toPlainText()
+        assert panel.plan.isHidden()
         assert panel.target.count() == 1
         assert not panel.approvals.isVisible()
         secret_absent = masked_answer not in panel.transcript.toPlainText()
@@ -143,6 +144,7 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "調査" in panel.plan.toPlainText()
     assert panel.plan_heading.isVisible()
     assert "入口を確認" in panel.transcript.toPlainText()
+    assert "調査" not in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, PlanEvent("old", ())))
     assert panel.plan.isHidden()
     assert panel.plan_heading.isHidden()
@@ -164,7 +166,8 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "観測済み" in history
     assert "公開要約" in history
     panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
-    assert "調査" in panel.plan.toPlainText()
+    assert panel.plan.isHidden()
+    assert "調査" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, TurnStarted("new")))
     panel.handle_event(ServiceEvent(1, SessionStatus("running")))
     assert panel.plan.isHidden()
@@ -183,6 +186,10 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("停止後の通知", "completed"),))))
     assert "移動" in panel.plan.toPlainText()
     assert "停止後の通知" in panel.transcript.toPlainText()
+    panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
+    assert panel.plan.isHidden()
+    assert "停止後の通知" in panel.transcript.toPlainText()
+    assert "移動" not in panel.transcript.toPlainText()
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("旧接続", "pending"),))))
     assert panel.transcript.toPlainText() == ""

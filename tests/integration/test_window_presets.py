@@ -76,14 +76,14 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         capture.stream()
         qtbot.waitUntil(lambda: not shell.video.applying)
         original = capture.snapshot().frame
-        original_limit = shell.window.video.view.maximumSize()
+        original_panes = shell.window.splitter.sizes()
         actions = shell.window.window_size_actions
 
         actions["hd"].trigger()
 
         qtbot.waitUntil(entered.is_set)
         assert actions["full_hd"].isChecked()
-        assert shell.window.video.view.maximumSize() == original_limit
+        assert shell.window.splitter.sizes() == original_panes
         assert all(not action.isEnabled() for action in actions.values())
         assert capture.snapshot().phase == "streaming"
         capture.stream(2)
@@ -93,7 +93,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         assert shell.baseline.window_size_preset == expected
         assert load_settings(path).window_size_preset == expected
         assert actions[expected].isChecked()
-        assert (shell.window.video.view.maximumSize() == original_limit) == fail
+        assert (shell.window.splitter.sizes() == original_panes) == fail
         assert len(capture.connections) == 1
         assert original is not None
         current = capture.snapshot().frame
@@ -136,6 +136,7 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
         conversation = shell.window.connection
         preview = shell.window.video
+        assert preview.view.geometry() == preview.rect()
         assert conversation.mapToGlobal(QPoint()).x() < preview.mapToGlobal(QPoint()).x()
         assert preview.width() > conversation.width()
         for pane, status in ((conversation, conversation.status), (preview, preview.status)):
@@ -206,11 +207,12 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     assert option in panel.transcript.toPlainText()
     panel.target.setCurrentIndex(0)
     panel.prompt.setPlainText("北側から進む\n危険なら停止する")
-    assert panel.transcript.viewport().height() >= 3 * panel.transcript.fontMetrics().lineSpacing()
+    assert panel.transcript.viewport().height() >= 5 * panel.transcript.fontMetrics().lineSpacing()
     panel.plan.setTextCursor(panel.plan.document().find("停止"))
     panel.plan.ensureCursorVisible()
     assert panel.plan.viewport().rect().contains(panel.plan.cursorRect())
     assert panel.prompt.viewport().height() >= 2 * panel.prompt.fontMetrics().lineSpacing()
+    assert panel.prompt.verticalScrollBar().maximum() == 0
     assert panel.interrupt_button.accessibleName() == "中断"
     assert not panel.interrupt_button.icon().isNull()
     assert panel.interrupt_button.text() == ""
@@ -230,9 +232,15 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     bar.setValue(bar.maximum())
     assert bar.value() == bar.maximum()
     viewport = panel.approvals.viewport()
+    qtbot.waitUntil(
+        lambda: all(
+            viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
+            for button in panel.requests["approval"].decision_buttons.values()
+        )
+    )
     for button in panel.requests["approval"].decision_buttons.values():
-        panel.approvals.ensureWidgetVisible(button, 0, 0)
         assert viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
+        assert button.height() >= button.sizeHint().height()
     answers: list[object] = []
     instructions: list[tuple[str, str]] = []
     stops: list[bool] = []

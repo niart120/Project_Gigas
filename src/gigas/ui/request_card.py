@@ -70,7 +70,7 @@ class RequestRecord:
     @property
     def title(self) -> str:
         """Return a short identity shared by history and controls."""
-        kind = {"question": "質問", "command": "コマンド承認", "file": "変更承認"}
+        kind = {"question": "質問", "command": "確認", "file": "確認"}
         return f"{kind[self.request.kind]} {self.number}"
 
     @property

@@ -42,19 +42,12 @@ class VideoView(QWidget):
         super().__init__(parent)
         self._image = QImage()
         self._key: tuple[int, int] | None = None
-        self._preview_size = QSize(640, 360)
         self._letterbox = True
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def set_preview_size(self, width: int, height: int) -> None:
-        """Set the display target while allowing the layout to allocate less space."""
-        self._preview_size = QSize(width, height)
-        self.setMaximumSize(self._preview_size)
-        self.updateGeometry()
-
     def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
-        """Prefer the selected display target without imposing a minimum size."""
-        return self._preview_size
+        """Prefer 640 by 360 logical pixels while accepting the full pane allocation."""
+        return QSize(640, 360)
 
     def set_letterbox(self, enabled: bool) -> None:
         """Change preview fitting without changing the source frame or connection.
@@ -129,7 +122,7 @@ class VideoPanel(QWidget):
         self.status.hide()
         self.source.hide()
         self.view = VideoView(self)
-        layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.view, 1)
 
     def render_state(
         self,

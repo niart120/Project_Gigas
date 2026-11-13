@@ -23,7 +23,7 @@ _HEADINGS = {
     "reasoning": "reasoning",
     "activity": "activity",
     "plan": "Plan",
-    "request": "要求",
+    "request": "",
     "answer": "回答",
 }
 
@@ -83,7 +83,7 @@ class Transcript(QTextBrowser):
 
     Args:
         parent: Owning conversation panel.
-        show_headings: Include role headings; false for a separately labelled Plan.
+        show_headings: Include applicable role headings; false for a separately labelled Plan.
     """
 
     def __init__(self, parent: "QWidget | None" = None, *, show_headings: bool = True) -> None:
@@ -201,7 +201,9 @@ class Transcript(QTextBrowser):
 
     def _render_item(self, item: _Item) -> None:
         hidden = item.kind == "reasoning" and not self._reasoning_visible
-        heading = f"{_HEADINGS[item.kind]}\n" if self._show_headings else ""
+        heading = (
+            f"{_HEADINGS[item.kind]}\n" if self._show_headings and _HEADINGS[item.kind] else ""
+        )
         separator = "\n\n" if self._show_headings else ""
         displayed = (
             f"{heading}{_paragraph_text(item.text)}{separator}" if item.text and not hidden else ""
@@ -283,7 +285,7 @@ class Transcript(QTextBrowser):
         cursor.setBlockFormat(block)
         cursor.setCharFormat(body)
         body_start = item.start
-        if self._show_headings:
+        if self._show_headings and _HEADINGS[item.kind]:
             cursor.setPosition(item.start)
             cursor.setPosition(
                 item.start + _utf16_length(_HEADINGS[item.kind]), QTextCursor.MoveMode.KeepAnchor
