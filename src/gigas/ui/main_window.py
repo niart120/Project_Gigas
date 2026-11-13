@@ -43,8 +43,8 @@ class _PaneStatuses(QWidget):
         self._splitter = splitter
         self._rows: list[QWidget] = []
         for title, status, identifier in (
-            ("映像", video.status, video.source),
             ("Codex", connection.status, connection.model),
+            ("映像", video.status, video.source),
         ):
             row = QWidget(self)
             layout = QHBoxLayout(row)
@@ -171,11 +171,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.close_progress)
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
+        self.connection = ConnectionPanel(self.splitter)
         self.video = VideoPanel(self.splitter)
-        conversation = QWidget(self.splitter)
-        conversation_layout = QVBoxLayout(conversation)
-        conversation_layout.addWidget(QLabel("Codex", conversation))
-        self.connection = ConnectionPanel(conversation)
         self.connection.failed.connect(self.notifications.publish)
         for action in (
             self.connection.connect_action,
@@ -191,11 +188,10 @@ class MainWindow(QMainWindow):
         self._video_device_group = QActionGroup(self)
         self._video_device_group.setExclusive(True)
         self._video_choices: tuple[tuple[str, str], ...] = ()
-        conversation_layout.addWidget(self.connection, 1)
+        self.splitter.addWidget(self.connection)
         self.splitter.addWidget(self.video)
-        self.splitter.addWidget(conversation)
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 3)
         layout.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
         self.statusBar().setSizeGripEnabled(False)
@@ -313,7 +309,7 @@ class MainWindow(QMainWindow):
         self.current_window_size_preset = key
         self.resize(target.window_width, target.window_height)
         self.video.view.set_preview_size(target.preview_width, target.preview_height)
-        self.splitter.setSizes([target.preview_width, target.window_width - target.preview_width])
+        self.splitter.setSizes([target.window_width - target.preview_width, target.preview_width])
         fit_to_screen(self)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override

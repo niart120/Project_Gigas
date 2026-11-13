@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -99,6 +100,7 @@ class ConnectionPanel(QWidget):
         self._target: tuple[str, str] | None = None
         self._message_draft = ""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         self._layout = layout
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
@@ -118,7 +120,7 @@ class ConnectionPanel(QWidget):
         self.plan_heading = QLabel("Plan", self)
         layout.addWidget(self.plan_heading)
         self.plan = Transcript(self, show_headings=False)
-        self.plan.setMaximumHeight(120)
+        self.plan.setMaximumHeight(96)
         layout.addWidget(self.plan)
         self._clear_plan()
         self.history_heading = QLabel("History", self)
@@ -147,16 +149,23 @@ class ConnectionPanel(QWidget):
         self.secret.setEchoMode(QLineEdit.EchoMode.Password)
         self.choice = QComboBox(self.composer)
         self.choice.setAccessibleName("回答")
+        for combo in (self.target, self.choice):
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(12)
         self.composer.addWidget(self.prompt)
         self.composer.addWidget(self.secret)
         self.composer.addWidget(self.choice)
         layout.addWidget(self.composer, 1)
         turn_actions = QHBoxLayout()
         turn_actions.addStretch()
+        self.interrupt_button = QPushButton(self)
+        self.interrupt_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.interrupt_button.setAccessibleName("中断")
         self.send_button = QPushButton("送信", self)
-        self.interrupt_button = QPushButton("中断", self)
-        turn_actions.addWidget(self.send_button)
         turn_actions.addWidget(self.interrupt_button)
+        turn_actions.addWidget(self.send_button)
         layout.addLayout(turn_actions)
         self.connect_action.triggered.connect(self.connect_requested)
         self.disconnect_action.triggered.connect(self._disconnect)

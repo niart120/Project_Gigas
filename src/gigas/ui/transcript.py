@@ -183,7 +183,10 @@ class Transcript(QTextBrowser):
     def _render_item(self, item: _Item) -> None:
         hidden = item.kind == "reasoning" and not self._reasoning_visible
         heading = f"{_HEADINGS[item.kind]}\n" if self._show_headings else ""
-        displayed = f"{heading}{_paragraph_text(item.text)}\n\n" if item.text and not hidden else ""
+        separator = "\n\n" if self._show_headings else ""
+        displayed = (
+            f"{heading}{_paragraph_text(item.text)}{separator}" if item.text and not hidden else ""
+        )
         if displayed == item.displayed:
             return
         start, end, inserted = _replacement(item.displayed, displayed)
@@ -247,9 +250,8 @@ class Transcript(QTextBrowser):
             return
         cursor = QTextCursor(self.document())
         cursor.setPosition(item.start)
-        cursor.setPosition(
-            item.start + _utf16_length(item.displayed) - 1, QTextCursor.MoveMode.KeepAnchor
-        )
+        end = item.start + _utf16_length(item.displayed)
+        cursor.setPosition(end - 1 if self._show_headings else end, QTextCursor.MoveMode.KeepAnchor)
         body = QTextCharFormat()
         body.setFont(self.font())
         body.setForeground(self.palette().brush(QPalette.ColorRole.Text))

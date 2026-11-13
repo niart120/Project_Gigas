@@ -3,7 +3,8 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QFont
 from pytestqt.qtbot import QtBot
 
 from gigas.app import video
@@ -11,7 +12,20 @@ from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import Frame
+from gigas.runtime.codex.models import (
+    HumanRequest,
+    PlanEvent,
+    PlanStep,
+    Question,
+    QuestionOption,
+    SessionStatus,
+    TextEvent,
+    TurnStarted,
+)
+from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.ui.main_window import MainWindow
+from gigas.ui.request_card import AnswerSubmission
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_video_gui import (
@@ -120,6 +134,14 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert shell.window.video_device_actions[""].isCheckable()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
+        conversation = shell.window.connection
+        preview = shell.window.video
+        assert conversation.mapToGlobal(QPoint()).x() < preview.mapToGlobal(QPoint()).x()
+        assert preview.width() > conversation.width()
+        for pane, status in ((conversation, conversation.status), (preview, preview.status)):
+            left = pane.mapToGlobal(QPoint()).x()
+            center = status.mapToGlobal(status.rect().center()).x()
+            assert left <= center < left + pane.width()
         for widget in (
             shell.window.menuBar(),
             shell.window.settings_button,
@@ -129,6 +151,102 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         ):
             assert widget.isVisible()
             assert available.contains(QRect(widget.mapToGlobal(QPoint()), widget.size()))
+
+
+def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBot) -> None:
+    window = MainWindow()
+    window.allow_close = True
+    qtbot.addWidget(window)
+    font = QFont(window.font())
+    font.setPointSize(16)
+    window.setFont(font)
+    panel = window.connection
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    header = "長い質問の識別名" * 20
+    option = "長い選択肢の本文" * 20
+    for event in (
+        TurnStarted("turn"),
+        SessionStatus("waiting", "selected-model", "high"),
+        TextEvent("response", "公開された判断本文\n" * 30),
+        PlanEvent(
+            "turn",
+            (
+                PlanStep("観測", "completed"),
+                PlanStep("移動", "inProgress"),
+                PlanStep("停止", "pending"),
+            ),
+        ),
+        HumanRequest(
+            "question",
+            1,
+            "thread",
+            "turn",
+            "question",
+            questions=(Question("route", header, "経路を選ぶ", (QuestionOption(option, "説明"),)),),
+        ),
+        HumanRequest(
+            "approval",
+            2,
+            "thread",
+            "turn",
+            "command",
+            details="確認対象の詳細\n" * 20,
+            decisions=("accept", "decline", "cancel"),
+        ),
+    ):
+        panel.handle_event(ServiceEvent(1, event))
+    window.resize(800, 600)
+    window.show()
+    window.splitter.setSizes([267, 533])
+    qtbot.waitUntil(panel.choice.isVisible)
+    assert (window.width(), window.height()) == (800, 600)
+    assert window.rect().contains(QRect(panel.choice.mapTo(window, QPoint()), panel.choice.size()))
+    assert header in panel.transcript.toPlainText()
+    assert option in panel.transcript.toPlainText()
+    panel.target.setCurrentIndex(0)
+    panel.prompt.setPlainText("北側から進む\n危険なら停止する")
+    assert panel.transcript.viewport().height() >= 3 * panel.transcript.fontMetrics().lineSpacing()
+    panel.plan.setTextCursor(panel.plan.document().find("停止"))
+    panel.plan.ensureCursorVisible()
+    assert panel.plan.viewport().rect().contains(panel.plan.cursorRect())
+    assert panel.prompt.viewport().height() >= 2 * panel.prompt.fontMetrics().lineSpacing()
+    assert panel.interrupt_button.accessibleName() == "中断"
+    assert not panel.interrupt_button.icon().isNull()
+    assert panel.interrupt_button.text() == ""
+    assert panel.interrupt_button.geometry().right() < panel.send_button.geometry().left()
+    for widget in (
+        panel.plan,
+        panel.transcript,
+        panel.target,
+        panel.composer,
+        panel.interrupt_button,
+        panel.send_button,
+    ):
+        assert widget.isVisible()
+        assert window.rect().contains(QRect(widget.mapTo(window, QPoint()), widget.size()))
+    bar = panel.transcript.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    assert bar.value() == bar.maximum()
+    viewport = panel.approvals.viewport()
+    for button in panel.requests["approval"].decision_buttons.values():
+        panel.approvals.ensureWidgetVisible(button, 0, 0)
+        assert viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
+    answers: list[object] = []
+    instructions: list[tuple[str, str]] = []
+    stops: list[bool] = []
+    panel.answer_requested.connect(answers.append)
+    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.interrupt_requested.connect(lambda: stops.append(True))
+    qtbot.mouseClick(
+        panel.requests["approval"].decision_buttons["cancel"], Qt.MouseButton.LeftButton
+    )
+    qtbot.mouseClick(panel.send_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(panel.interrupt_button, Qt.MouseButton.LeftButton)
+    assert answers == [AnswerSubmission("approval", decision="cancel")]
+    assert instructions == [("北側から進む\n危険なら停止する", "turn")]
+    assert stops == [True]
 
 
 def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_menu(
