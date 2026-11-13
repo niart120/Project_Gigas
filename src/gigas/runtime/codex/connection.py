@@ -1084,7 +1084,7 @@ class CodexConnection:
         )
 
     def _refresh_usage(self) -> None:
-        if not self._closed:
+        if self._opened and not self._closed:
             self._account.refresh_usage()
 
     async def _read_models(self) -> str:

@@ -4,7 +4,7 @@
 
 ### 1.1 目的
 
-着手中の子仕様。質問・承認、モデル候補、Windows環境準備、認証・利用枠の状態を、それぞれの操作と寿命を持つ担当へ移す。会話・Goal・開始・終了・公開phaseとtransportの寿命はCodexConnectionへ残す。公開契約を変えない構造整理として進める。
+着手中の子仕様。質問・承認、モデル候補、Windows環境準備、認証・利用枠の状態を、それぞれの操作と寿命を持つ担当へ移す。会話・Goal・開始・終了・公開phaseとtransportの寿命はCodexConnectionへ残す。公開契約を変えない構造整理をD01〜D04で行い、確認中に見つけた起動途中の利用枠取得をD05の回帰修正として分ける。
 
 ### 1.2 起点 / source
 
@@ -56,8 +56,9 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 2. D02: モデル候補と選択を既存snapshotにまとめる。
 3. D03: 環境準備一件と初期readiness取得を分ける。
 4. D04: 認証・ログイン相関・利用枠を分ける。
+5. D05: 起動途中の利用枠通知で終了phaseへ遷移せず、起動完了時の全体取得で利用禁止を反映する。
 
-各段階をgreen確認後に別commitとする。新しい振る舞いは追加せず、構造だけのredを作らない。全体gateと独立レビュー後、親の実runtime受入へwipで引き渡す。
+各段階をgreen確認後に別commitとする。構造だけのredを作らず、D05だけは到達する起動順序を代表一件でred→greenにする。全体gateと独立レビュー後、親の実runtime受入へwipで引き渡す。
 
 ## 5. 振る舞い仕様
 
@@ -70,6 +71,7 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 | 利用枠 | 疎な通知、取得失敗、明示false | 全体再取得を集約し、既知falseを保持。接続が停止を決定 | unknownから許可を推測しない |
 | 環境準備 | 開始受付不明、先行完了 | 再送せず完了とreadinessを待つ | 明示拒否と受付不明を区別 |
 | close | 背景取得・setup・loginが保留 | 同期に取消しを要求し、所有者が回収 | close後にusage taskを再生成しない |
+| 起動途中の利用枠通知 | account確認済み・catalog応答待ち | 接続完了前は利用枠取得を始めず、初期取得をopen末尾で行う | connectingの間にstopping/error/stoppedを発行しない |
 
 ## 6. TDD Test List
 
@@ -79,6 +81,7 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 | refactor-done | D02 次ターン選択とGoal設定を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。確定snapshot一件とRpcPeerの再公開 |
 | refactor-done | D03 環境準備の先行通知・受付不明・切断を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。初期取得とsetup completionを所有 |
 | refactor-done | D04 認証・利用枠・close後の通知抑止を維持 | characterization | unit / integration | 抽出後6ファイル310 passed、全体846 passed。ログイン操作のtaskは接続側 |
+| refactor-skipped | D05 起動途中の利用枠通知を初期取得へまとめる | regression | unit | connectingがstoppingになるred→起動条件を一か所変更してgreen。D04で所有を分離済みのため追加構造変更なし |
 
 ## 7. 設計メモ
 
@@ -99,6 +102,10 @@ D02は`b4dcdb5`で記録し、独立レビューでもcatalog取得拒否、無�
 D03は`59d5be5`で記録した。親の独立レビューでもmoduleと配線の阻害指摘なし。指摘に従い、cancel_pending済みのreadをcloseで再cancelする分岐と、通常例外を返さない子closeへの重複したfinallyを除いた。
 
 D04は先行login完了の保持をJSON全体から`dict[str, bool]`へ絞り、秘密のremote errorを保持しない。FalseとNoneを区別し、既存の失敗通知・相関を維持する。親だけがclosedを確認してusage取得を始め、子は事実を同期通知する。UsageEventの明示falseから接続が同期に終了要求を作るため、子がstop/closeをawaitして自分の回収を待つ経路を持たない。
+
+D04は`337c291`で構造commitした。最終確認で、pump開始→account確認→catalog待機中の利用枠通知という順序を見つけた。旧stopの未接続例外はこの経路で到達し得るため、「到達不能」という説明を撤回した。D05はrefreshの受付をopenedかつnot closedへ限定し、既存のopen末尾の初期取得へ合流する。新しい保留状態・再送・例外回復を追加しない。
+
+D05の親レビューでは、内部flagを直接操作せずcatalog保留と実通知から再現し、公開phase・RPC・利用禁止後の送信拒否を確認する試験と、一か所の受付条件変更に追加指摘なし。D01〜D04の構造greenとD05のred/greenを別の変更として記録した。
 
 独立レビューではD04の先行完了、子背景taskの単独所有、同期取消しとclosed後の再起動抑止、phase・終了要求の唯一所有、既存login取消しに阻害指摘なし。子と接続の相互参照、外部からの子private属性の読み書き、追加のignore/castはない。
 
@@ -131,11 +138,17 @@ D04は先行login完了の保持をJSON全体から`dict[str, bool]`へ絞り、
 | baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-sandbox` | 310 passed / 15.08s | D03。準備受付不明、先行完了、切断中readiness、製品準備 |
 | D03対象2ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 子背景taskの所有、公開例外への変換、事実通知 |
 | baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-account` | 310 passed / 15.24s | D04。認証・usage・close・GUI配送の回帰 |
-| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u060-full --tb=short` | 846 passed / 61.80s | 全unit/integrationの最終確認 |
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u060-full --tb=short` | 846 passed / 61.80s | D04終了時の全unit/integration |
 | `uv run ruff format --check .` / `uv run ruff check .` / `uv run ty check --no-progress` | passed | Python228ファイル、D/ANNを含む形式・型境界 |
 | `uv lock --check` / `uv build` / `git diff --check` | passed | lock整合、sdist/wheel生成、差分空白 |
 | `uv run python -X utf8 tmp/u054/validate_docs.py ef469a4` | 4 documents / 45 local_links / 60 units、errors=0 | 子仕様と同時作業中の親文書の参照先・仮テキスト検査 |
 | source/docstring/docs review | 確認済み | 公開操作・例外・RpcPeer再公開を維持。親の公開docs訂正と現在の製品準備・停止受付の契約を照合 |
+| `uv run pytest tests/unit/test_codex_connection.py::test_usage_notifications_during_open_wait_for_initial_read -q --basetemp=tmp/pytest-u060-open-usage-red --tb=short` | 1 failed、期待したred | catalog保留中に利用枠通知を受け、connecting期待がstoppingになる |
+| 同じ試験、`--basetemp=tmp/pytest-u060-open-usage-green` | 1 passed / 0.06s | openedかつnot closedだけで取得を開始。初期falseと送信拒否を確認 |
+| baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-final` | 311 passed / 16.42s | D05後の関連回帰 |
+| D05後のrepo `ruff format --check .` / `ruff check .` / `ty check --no-progress` / `uv lock --check` / `uv build` / `git diff --check` | passed | 最終sourceの形式・型・lock・配布物・空白 |
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u060-final-full --tb=short` | 847 passed / 62.78s | D05を含む最終全unit/integration |
+| 最終の`uv run python -X utf8 tmp/u054/validate_docs.py ef469a4` | 5 documents / 53 local_links / 60 units、errors=0 | 子仕様と親が訂正中の文書を含む。内容レビューとは区別 |
 | 実runtime | not run | 親の受入待ち |
 
 ## 10. 先送り事項
@@ -148,4 +161,4 @@ M2の保存・入力契約は[親仕様](../unit_054/KISS_SIMPLIFICATION.md)に�
 - [x] TDD Test Listを更新した
 - [x] 検証結果または未実行理由を記録した
 - [x] 公開API・型・package gateを記録した
-- [ ] 独立レビューと親の実runtime受入へ引き渡した
+- [x] 独立レビューと親の実runtime受入へ引き渡した

@@ -552,6 +552,40 @@ def test_account_usage_is_public_and_zero_credits_do_not_block_included_usage(
     _run(scenario())
 
 
+def test_usage_notifications_during_open_wait_for_initial_read(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        catalog = peer.gates["model/list"] = asyncio.Event()
+        peer.responses["account/rateLimits/read"] = {
+            "rateLimits": {},
+            "ordinaryUsageAllowed": False,
+        }
+        events: list[ConnectionEvent] = []
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
+        opening = asyncio.create_task(connection.open())
+        try:
+            await _until(lambda: any(method == "model/list" for method, _ in peer.calls))
+            peer.events.put_nowait(RpcNotification("account/rateLimits/updated", {}))
+            await _events_processed()
+            assert _phase(events) == "connecting"
+            assert not any(method == "account/rateLimits/read" for method, _ in peer.calls)
+
+            catalog.set()
+            await opening
+            await _until(lambda: _phase(events) == "stopped")
+            assert sum(method == "account/rateLimits/read" for method, _ in peer.calls) == 1
+            usage = next(event for event in reversed(events) if isinstance(event, UsageEvent))
+            assert usage.ordinary_usage_allowed is False
+            with pytest.raises(CodexConnectionError):
+                await connection.send("利用不可のまま開始しない")
+        finally:
+            catalog.set()
+            await connection.close()
+            await asyncio.gather(opening, return_exceptions=True)
+
+    _run(scenario())
+
+
 def test_usage_refresh_is_nonblocking_and_sparse_notifications_refetch_full_snapshot(
     tmp_path: Path,
 ) -> None:
