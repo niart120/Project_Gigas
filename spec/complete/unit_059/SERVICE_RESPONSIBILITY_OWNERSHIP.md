@@ -4,13 +4,13 @@
 
 ### 1.1 目的
 
-着手中の子仕様。保存資源と入力 run の操作・状態・寿命を所有者へ移し、Qt サービスにある横断参照を取り除く。公開契約を変えない構造整理であり、単なる DTO 移動や大きい async core への一括移設は行わない。
+完了した子仕様。保存資源と入力 run の操作・状態・寿命を所有者へ移し、Qt サービスにある横断参照を取り除いた。公開契約を変えない構造整理であり、単なる DTO 移動や大きい async core への一括移設は行わない。
 
 ### 1.2 起点 / source
 
 | source | 内容 | path |
 |---|---|---|
-| user request | 状態と責務を往復し、帰属を見つける | [親仕様 5.9](../unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
+| user request | 状態と責務を往復し、帰属を見つける | [親仕様 5.9](../../wip/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
 | preceding unit | 操作文脈と束縛関数、GUI 拒否の保存境界 | [unit058](../../complete/unit_058/SERVICE_OPERATION_DISPATCH.md) |
 
 ### 1.3 use case
@@ -36,7 +36,7 @@
 
 ## 4. 関連 docs
 
-- [親仕様](../unit_054/KISS_SIMPLIFICATION.md)
+- [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)
 - [Codex 利用手順](../../../docs/codex.md)
 - [会話と機器の GUI](../../../docs/codex-gui.md)
 - [保存 API](../../../docs/recorded-observation.md)
@@ -96,7 +96,7 @@ AST で `3cf71c3` と最終コードを比較した結果、CodexServiceThread �
 | `src/gigas/services/_conversation_resources.py` | new | 保存・観測・MCP の資源所有 |
 | `src/gigas/services/_conversation_run.py` | new | run 許可・終了の所有 |
 | `tests/integration/test_codex_service.py` | modify | 既存試験の境界整理 |
-| `spec/wip/unit_059/SERVICE_RESPONSIBILITY_OWNERSHIP.md` | new | 設計・状態移管・検証 |
+| `spec/complete/unit_059/SERVICE_RESPONSIBILITY_OWNERSHIP.md` | new | 設計・状態移管・検証 |
 
 ## 9. 検証
 
@@ -116,7 +116,29 @@ AST で `3cf71c3` と最終コードを比較した結果、CodexServiceThread �
 
 公開 API の引数・戻り値・DTO は維持し、公開 DTO の移動は行わなかった。必要な戻り値型を private 所有者の境界へ明示し、型の ignore / cast / Any、追加依存、互換層は導入していない。公開 docstring と docs/codex.md・docs/codex-gui.md・docs/recorded-observation.md の所有・配送・停止・保存・終了順を読み、公開説明を変える差分がないことを確認した。
 
-製品コードを固定して親へ引き渡し、親担当が実機 input 受入を実行する。結果は親が追記し、受入前に本単位を complete へ移さない。
+実装はD01 `7b04abf`、D02 `f063856`。独立レビューと親担当のソース・試験レビューで阻害指摘なし。親担当が最終コードを固定した状態で次節の実機受入を実行した。
+
+### 9.1 実runtime・実機受入
+
+採用runtime 0.167.0、既存認証済みの隔離home、gpt-6.1-sol / low、現行設定のCH552・COM8とUSB映像を使用した。新規login・sandbox setup・自動承認・ユーザー回答は行っていない。
+
+```powershell
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode capture --settings C:/Users/train/AppData/Local/GIGAS/settings.toml
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode input --settings C:/Users/train/AppData/Local/GIGAS/settings.toml --codex-home E:/documents/VSCodeWorkspace/Project_Gigas/tmp/u06-m3/fresh-20261113-180214-566284/home --direction LEFT --hold-ms 500 --reviewed-frame E:/documents/VSCodeWorkspace/Project_Gigas/tmp/u054/m1-capture-20261113-231328-004204/after-5s.png
+```
+
+captureの結果は`tmp/u054/m1-capture-20261113-231328-004204/report.json`、inputの結果は`tmp/u054/m1-input-20261113-231603-615948/report.json`で、いずれもpassed。検証器の入力制限はサービス構築時にInputServiceへ適用し、新しいRunが同じ制限付きInputServiceを参照する。サービス構築後に参照を書き換える方法は使わない。thread IDは実thread開始応答から観測した。
+
+| 観測 | 結果と限界 |
+|---|---|
+| 短い入力と停止 | LEFT 500ms要求を一回だけ受け、送出中に停止。非中立送出完了から中立送出完了まで203ms。機器ACKや最悪停止時間の測定ではない |
+| ローカル受付と回収 | stop受付264178.031、turn終端264178.406、stopped 264178.562。終端後の1ページ列挙・1件終了・空一覧再確認を製品が実行 |
+| 有限書込 | 最大300回・100ms間隔の前景書込は136行で停止。停止後1秒と同接続・同threadの再開後で不変。検証器から終了RPCを送っていない |
+| 自然最終応答 | 再開後に最終マーカーを受信。自然終端264197.656→ready 264197.687、空一覧の列挙・再確認のみで再中断なし |
+| 映像 | 親担当がbefore・after-stop・after-resumeを視認。入口右隣から入口へ1マス移動し、23:16:58の停止後と23:17:16の再開後で位置を維持。NPCの変化も確認。自動reportのphysical_release_confirmedは未測定のfalseのまま保持 |
+| 終了 | service・settings・capture・serialを全回収、shutdown errorなし、所有PID残存0 |
+
+この単位で変更した入力runと資源組立の受入であり、全機器・長時間運転の保証ではない。接続側を分離した後の受入は後続子と親で別に確認する。
 
 最終の connection_audit 独立レビューで阻害指摘なし。Run の依存は InputService だけで、Resources への例外 callback・task 二重登録・他所有者の private 属性参照はない。必要点での drain、機器 close 失敗を扱う既存 finally、保存資源の回収を確認した。文書の参照先・仮テキストと public API / docs の整合は実装担当が確認し、実機記録と最終 complete 移動は親担当へ引き渡す。
 
@@ -131,4 +153,4 @@ AST で `3cf71c3` と最終コードを比較した結果、CodexServiceThread �
 - [x] 削除と移動、所有者と終了順を確認した
 - [x] 検証結果と未実行範囲を記録した
 - [x] 公開境界・型・package gate を確認した
-- [ ] 親の最終レビューを受けた
+- [x] 親の最終レビューと実runtime・実機受入を受けた
