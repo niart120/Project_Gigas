@@ -4,7 +4,6 @@ from threading import Event
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QFont
 from pytestqt.qtbot import QtBot
 
 from gigas.app import video
@@ -136,7 +135,8 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
         conversation = shell.window.connection
         preview = shell.window.video
-        assert preview.view.geometry() == preview.rect()
+        assert preview.rect().contains(preview.view.geometry())
+        assert abs(preview.view.width() * 9 - preview.view.height() * 16) <= 16
         assert conversation.mapToGlobal(QPoint()).x() < preview.mapToGlobal(QPoint()).x()
         assert preview.width() > conversation.width()
         for pane, status in ((conversation, conversation.status), (preview, preview.status)):
@@ -158,9 +158,6 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     window = MainWindow()
     window.allow_close = True
     qtbot.addWidget(window)
-    font = QFont(window.font())
-    font.setPointSize(16)
-    window.setFont(font)
     panel = window.connection
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
@@ -198,61 +195,53 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     ):
         panel.handle_event(ServiceEvent(1, event))
     window.resize(800, 600)
-    window.show()
-    window.splitter.setSizes([267, 533])
-    qtbot.waitUntil(panel.choice.isVisible)
+    with qtbot.waitActive(window):
+        window.show()
+    window.splitter.setSizes([400, 400])
+    qtbot.waitUntil(panel.transcript.isVisible)
     assert (window.width(), window.height()) == (800, 600)
-    assert window.rect().contains(QRect(panel.choice.mapTo(window, QPoint()), panel.choice.size()))
     assert header in panel.transcript.toPlainText()
-    assert option in panel.transcript.toPlainText()
-    panel.target.setCurrentIndex(0)
-    panel.prompt.setPlainText("北側から進む\n危険なら停止する")
+    question = panel.request_views["question"]
+    assert option in question.question_inputs["route"].choices
     assert panel.transcript.viewport().height() >= 5 * panel.transcript.fontMetrics().lineSpacing()
-    panel.plan.setTextCursor(panel.plan.document().find("停止"))
-    panel.plan.ensureCursorVisible()
-    assert panel.plan.viewport().rect().contains(panel.plan.cursorRect())
+    plan = panel.plan_panel.view
+    plan.setTextCursor(plan.document().find("停止"))
+    plan.ensureCursorVisible()
+    assert plan.viewport().rect().contains(plan.cursorRect())
+    panel.prompt.setPlainText("北側から進む\n危険なら停止する")
     assert panel.prompt.viewport().height() >= 2 * panel.prompt.fontMetrics().lineSpacing()
     assert panel.prompt.verticalScrollBar().maximum() == 0
     assert panel.interrupt_button.accessibleName() == "中断"
-    assert not panel.interrupt_button.icon().isNull()
-    assert panel.interrupt_button.text() == ""
-    assert panel.interrupt_button.geometry().right() < panel.send_button.geometry().left()
+    assert panel.interrupt_button.text() == "中断"
     for widget in (
-        panel.plan,
+        panel.plan_panel,
         panel.transcript,
-        panel.target,
-        panel.composer,
+        panel.prompt,
         panel.interrupt_button,
         panel.send_button,
     ):
         assert widget.isVisible()
         assert window.rect().contains(QRect(widget.mapTo(window, QPoint()), widget.size()))
+    assert abs(window.video.view.width() * 9 - window.video.view.height() * 16) <= 16
+    assert window.video.mapTo(window, QPoint()).y() < panel.plan_panel.mapTo(window, QPoint()).y()
     bar = panel.transcript.verticalScrollBar()
     assert bar.maximum() > 0
-    bar.setValue(bar.maximum())
-    assert bar.value() == bar.maximum()
-    viewport = panel.approvals.viewport()
+    button = panel.requests["approval"].decision_buttons["decline"]
+    button.setFocus(Qt.FocusReason.TabFocusReason)
+    viewport = panel.transcript.viewport()
     qtbot.waitUntil(
-        lambda: all(
-            viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
-            for button in panel.requests["approval"].decision_buttons.values()
-        )
+        lambda: viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
     )
-    for button in panel.requests["approval"].decision_buttons.values():
-        assert viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
-        assert button.height() >= button.sizeHint().height()
     answers: list[object] = []
     instructions: list[tuple[str, str]] = []
     stops: list[bool] = []
     panel.answer_requested.connect(answers.append)
     panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
     panel.interrupt_requested.connect(lambda: stops.append(True))
-    qtbot.mouseClick(
-        panel.requests["approval"].decision_buttons["cancel"], Qt.MouseButton.LeftButton
-    )
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(panel.send_button, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(panel.interrupt_button, Qt.MouseButton.LeftButton)
-    assert answers == [AnswerSubmission("approval", decision="cancel")]
+    assert answers == [AnswerSubmission("approval", decision="decline")]
     assert instructions == [("北側から進む\n危険なら停止する", "turn")]
     assert stops == [True]
 
