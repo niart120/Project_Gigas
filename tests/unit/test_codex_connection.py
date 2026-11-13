@@ -215,6 +215,15 @@ async def _events_processed() -> None:
         await asyncio.sleep(0)
 
 
+def _phase(events: list["ConnectionEvent"]) -> str:
+    return next(event.phase for event in reversed(events) if isinstance(event, SessionStatus))
+
+
+async def _until(condition: "Callable[[], bool]") -> None:
+    while not condition():  # noqa: ASYNC110 -- public observations, bounded by _run deadline.
+        await asyncio.sleep(0)
+
+
 def _connection(
     peer: FakePeer,
     options: ConnectionOptions,
@@ -1179,7 +1188,7 @@ def test_failed_login_completion_has_a_failure_without_exposing_remote_text(tmp_
     _run(scenario())
 
 
-@pytest.mark.parametrize("operation", ["send", "stop", "unsubscribe", "resume"])
+@pytest.mark.parametrize("operation", ["send", "unsubscribe", "resume"])
 def test_turn_operation_failures_share_status_id_with_exception(
     tmp_path: Path, operation: str
 ) -> None:
@@ -1207,7 +1216,7 @@ def test_turn_operation_failures_share_status_id_with_exception(
                 peer.failure = f"thread/{operation}"
             else:
                 peer.failure = "turn/start" if operation == "send" else "turn/interrupt"
-            call = connection.stop() if operation == "stop" else connection.send("開始")
+            call = connection.send("開始")
             with pytest.raises(CodexConnectionError) as error:
                 await call
             status = events[-1]
@@ -1699,7 +1708,8 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
             peer.events.put_nowait(_terminal("interrupted"))
             await _events_processed()
         assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "stopped"
+        await _until(lambda: _phase(events) == "stopped")
+        assert _phase(events) == "stopped"
         await connection.close()
 
     _run(scenario())
@@ -1960,7 +1970,8 @@ def test_start_acceptance_survives_subsequent_interrupt_failure(tmp_path: Path) 
         peer.failure = "turn/interrupt"
         peer.gates["turn/start"].set()
         assert await sending == "turn-1"
-        assert peer.closed
+        await _until(lambda: _phase(events) == "error")
+        assert not peer.closed
         assert any(
             isinstance(event, SessionStatus) and event.failure_id is not None for event in events
         )
@@ -2375,10 +2386,16 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
         await _events_processed()
         assert not any(isinstance(event, TextEvent) and event.item_id == "old" for event in events)
         assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == ("stopped" if stopping or status == "interrupted" else "ready")
+        assert _phase(events) == ("stopped" if stopping or status != "completed" else "ready")
         if status == "failed":
-            assert events[-1].failure_id is not None
-            assert events[-1].detail == "ターンが失敗"
+            assert any(
+                isinstance(event, SessionStatus) and event.failure_id is not None
+                for event in events
+            )
+            assert any(
+                isinstance(event, SessionStatus) and event.detail == "ターンが失敗"
+                for event in events
+            )
         assert not peer.closed
         assert len([call for call in peer.calls if call[0] == "turn/start"]) == 1
         peer.responses["turn/start"] = {
@@ -2735,7 +2752,8 @@ def test_thread_preparation_and_recording_precede_turn_and_allow_stop(
         if stopping:
             assert sum(method == "turn/start" for method, _ in peer.calls) == initial_turns
             assert isinstance(events[-1], SessionStatus)
-            assert events[-1].phase == "stopped"
+            await _until(lambda: _phase(events) == "stopped")
+            assert _phase(events) == "stopped"
         if stage != "prepare" or not stopping:
             start = next(params for method, params in peer.calls if method == "thread/start")
             assert start is not None
@@ -2901,11 +2919,13 @@ def test_goal_continues_updates_and_pauses_without_starting_extra_turn(tmp_path:
         assert sets[-1] == {"threadId": "thread-1", "objective": "revised", "origin": "user"}
         assert not any(method == "turn/start" for method, _ in peer.calls)
         await connection.stop()
+        await _until(lambda: _phase(events) == "stopped")
         assert peer.goal["status"] == "paused"
         assert await connection.resume_goal()
         assert peer.goal["tokensUsed"] == 12
         assert [method for method, _ in peer.calls].count("thread/resume") == 1
         await connection.clear_goal()
+        await _until(lambda: peer.goal is None)
         assert peer.goal is None
         await connection.close()
 
@@ -2928,23 +2948,34 @@ def test_goal_stop_interrupts_even_when_pause_fails_and_rejects_late_turn_input(
         if fail_pause:
             peer.rpc_errors["thread/goal/set"] = -32600
         peer.terminals = ["writer"]
+        await connection.stop()
+        await _until(
+            lambda: ("turn/interrupt", {"threadId": "thread-1", "turnId": "auto-1"}) in peer.calls
+        )
+        assert peer.terminals == ["writer"]
         if fail_pause:
-            with pytest.raises(CodexConnectionError):
-                await connection.stop()
-        else:
-            await connection.stop()
-        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "auto-1"}) in peer.calls
-        assert not peer.terminals
+            await _until(lambda: _phase(events) == "error")
         await connection._notification(
             RpcNotification(
                 "turn/completed",
                 {"threadId": "thread-1", "turn": {"id": "auto-1", "status": "interrupted"}},
             )
         )
+        if not fail_pause:
+            await _until(lambda: _phase(events) == "stopped")
+            assert not peer.terminals
+        before_late = list(peer.calls)
         await connection._notification(
             RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
         )
-        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+        if fail_pause:
+            await _events_processed()
+            assert peer.calls == before_late
+            assert _phase(events) == "error"
+        else:
+            await _until(
+                lambda: ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+            )
         with pytest.raises(CodexConnectionError):
             await connection.steer("late instruction", "late")
         assert not any(
@@ -2988,8 +3019,9 @@ def test_memory_sandbox_and_goal_settings_use_current_selection(tmp_path: Path) 
             return ThreadConfiguration(tmp_path)
 
         peer = FakePeer()
+        events: list[ConnectionEvent] = []
         connection = _connection(
-            peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
+            peer, ConnectionOptions(tmp_path), events.append, prepare_turn=prepare
         )
         await connection.open()
         await connection.set_goal("goal")
@@ -2999,6 +3031,7 @@ def test_memory_sandbox_and_goal_settings_use_current_selection(tmp_path: Path) 
             {"threadId": "thread-1", "model": "other", "effort": "low"},
         )
         await connection.stop()
+        await _until(lambda: _phase(events) == "stopped")
         await connection.resume_goal()
         resumed = next(params for method, params in peer.calls if method == "thread/resume")
         assert resumed is not None
@@ -3101,6 +3134,8 @@ def test_autonomous_turn_failure_pauses_goal_before_further_input(
                 "turn/completed", {"threadId": "thread-1", "turn": {"id": "auto", "status": status}}
             )
         )
+        await _until(lambda: _phase(events) == "stopped")
+        assert not any(method == "turn/interrupt" for method, _ in peer.calls)
         assert peer.goal is not None
         assert peer.goal["status"] == "paused"
         assert isinstance(events[-1], SessionStatus)
@@ -3117,20 +3152,62 @@ def test_cleared_goal_still_interrupts_a_late_autonomous_turn(tmp_path: Path) ->
         await connection.open()
         await connection.set_goal("goal")
         await connection.clear_goal()
-        assert peer.goal is None
+        await _until(lambda: peer.goal is None)
         await connection._notification(
             RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
         )
-        assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+        await _until(
+            lambda: ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+        )
         await connection.close()
 
     _run(scenario())
 
 
+def test_stop_acceptance_does_not_wait_for_goal_or_turn_completion(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("goal")
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+        )
+        await _events_processed()
+        pause = peer.gates["thread/goal/set"] = asyncio.Event()
+        stopping = asyncio.create_task(connection.stop())
+        try:
+            await _until(stopping.done)
+            assert stopping.done()
+            await stopping
+            await _until(
+                lambda: (
+                    ("turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}) in peer.calls
+                )
+            )
+            assert not any("/backgroundTerminals/" in method for method, _ in peer.calls)
+            assert _phase(events) == "stopping"
+            with pytest.raises(CodexConnectionError):
+                await connection.send("too early")
+            peer.events.put_nowait(_terminal("interrupted"))
+            await _events_processed()
+            assert _phase(events) == "stopping"
+            pause.set()
+            await _until(lambda: _phase(events) == "stopped")
+            assert _phase(events) == "stopped"
+            assert sum(method.endswith("backgroundTerminals/list") for method, _ in peer.calls) == 2
+        finally:
+            pause.set()
+            await asyncio.gather(stopping, return_exceptions=True)
+            await connection.close()
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize("action", ["natural", "stop", "clear"])
-@pytest.mark.parametrize("cleanup_pending", [False, True])
 def test_completed_goal_preserves_final_reply_or_accepts_manual_stop(
-    tmp_path: Path, action: str, *, cleanup_pending: bool
+    tmp_path: Path, action: str
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -3143,31 +3220,18 @@ def test_completed_goal_preserves_final_reply_or_accepts_manual_stop(
         )
         assert peer.goal is not None
         peer.goal = {**peer.goal, "status": "complete"}
-        gate = asyncio.Event()
-        if cleanup_pending:
-            peer.gates["thread/backgroundTerminals/list"] = gate
-        before_complete = len(events)
         peer.events.put_nowait(
             RpcNotification("thread/goal/updated", {"threadId": "thread-1", "goal": peer.goal})
         )
-        await _events_processed()
+        await _until(lambda: _phase(events) == "stopping")
         assert not any(method == "turn/interrupt" for method, _ in peer.calls)
-        assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "stopping"
+        assert not any("/backgroundTerminals/" in method for method, _ in peer.calls)
         with pytest.raises(CodexConnectionError):
             await connection.steer("more", "turn-1")
         with pytest.raises(CodexConnectionError):
             await connection.send("new")
-
+        peer.events.put_nowait(_question(blocking=False))
         if action == "natural":
-            gate.set()
-            await _events_processed()
-            # Repeated lifetime notifications and a late request do not interrupt
-            # the same turn while it is preparing its final report.
-            peer.events.put_nowait(
-                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
-            )
-            peer.events.put_nowait(_question(blocking=False))
             peer.events.put_nowait(
                 RpcNotification(
                     "item/agentMessage/delta",
@@ -3179,67 +3243,33 @@ def test_completed_goal_preserves_final_reply_or_accepts_manual_stop(
                     },
                 )
             )
-            peer.events.put_nowait(
-                RpcNotification(
-                    "item/completed",
-                    {
-                        "threadId": "thread-1",
-                        "turnId": "turn-1",
-                        "item": {"id": "final", "type": "agentMessage", "text": "Final report"},
-                    },
-                )
-            )
-            await _events_processed()
-            peer.terminals = ["final-writer"]
-            final_cleanup = peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
-            peer.events.put_nowait(_terminal("completed"))
-            await _events_processed()
-            assert isinstance(events[-1], SessionStatus)
-            assert events[-1].phase == "stopping"
-            final_cleanup.set()
+            await _until(lambda: TextEvent("final", "Final report") in events)
         else:
-            stopping = asyncio.create_task(
-                connection.stop() if action == "stop" else connection.clear_goal()
-            )
-            await _events_processed()
-            assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}) in peer.calls
-            if cleanup_pending:
-                assert not stopping.done()
-            gate.set()
-            await stopping
-            peer.events.put_nowait(_terminal("interrupted"))
-        await _events_processed()
-        assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == ("ready" if action == "natural" else "stopped")
+            await (connection.stop() if action == "stop" else connection.clear_goal())
+            await _until(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+        peer.terminals = ["final-writer"]
+        gate = peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
+        peer.events.put_nowait(_terminal("completed" if action == "natural" else "interrupted"))
+        await _until(lambda: any(method.endswith("/terminate") for method, _ in peer.calls))
+        assert _phase(events) == "stopping"
+        with pytest.raises(CodexConnectionError):
+            await connection.send("before cleanup")
+        gate.set()
+        await _until(lambda: _phase(events) == ("ready" if action == "natural" else "stopped"))
         assert not peer.terminals
+        assert sum(method.endswith("backgroundTerminals/list") for method, _ in peer.calls) == 2
+        assert not any(isinstance(event, HumanRequest) for event in events)
+        assert not peer.replies
+        assert not peer.rejections
         if action == "natural":
-            assert not any(
-                isinstance(event, SessionStatus) and event.phase == "stopped"
-                for event in events[before_complete:]
-            )
             assert not any(method == "turn/interrupt" for method, _ in peer.calls)
-            assert TextEvent("final", "Final report") in events
-            assert (
-                DialogueEvent(
-                    "message",
-                    {
-                        "item_id": "final",
-                        "kind": "message",
-                        "text": "Final report",
-                        "partial": False,
-                    },
-                    "turn-1",
-                )
-                in events
+            assert any(
+                isinstance(event, DialogueEvent) and event.payload.get("text") == "Final report"
+                for event in events
             )
-            assert not any(isinstance(event, HumanRequest) for event in events)
-            assert not peer.replies
-            assert not peer.rejections
-            peer.events.put_nowait(
-                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
-            )
-            await _events_processed()
-            assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
+            await connection.clear_goal()
+            await _until(lambda: peer.goal is None and _phase(events) == "stopped")
+            assert sum(method.endswith("backgroundTerminals/list") for method, _ in peer.calls) == 2
         await connection.close()
 
     _run(scenario())
@@ -3291,9 +3321,8 @@ def test_goal_stop_waits_for_terminal_cleanup_before_new_execution(
                     )
                 )
             )
-        for _ in range(20):
-            await asyncio.sleep(0)
-        assert not stopping.done()
+        await stopping
+        assert _phase(events) == "stopping"
         completion: asyncio.Task[None] | None = None
         if trigger == "late_complete":
             assert peer.goal is not None
@@ -3339,7 +3368,7 @@ def test_goal_stop_waits_for_terminal_cleanup_before_new_execution(
         await terminal
         if completion is not None:
             await completion
-        await _events_processed()
+        await _until(lambda: _phase(events) == "stopped")
         assert not peer.terminals
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "stopped"
@@ -3375,8 +3404,8 @@ def test_unconfirmed_terminal_cleanup_keeps_execution_closed(tmp_path: Path, fai
             peer.rpc_errors["thread/backgroundTerminals/terminate"] = -32600
         else:
             peer.responses["thread/backgroundTerminals/terminate"] = {"terminated": True}
-        with pytest.raises(CodexConnectionError):
-            await connection.stop()
+        await connection.stop()
+        await _until(lambda: _phase(events) == "error")
         for operation in (
             connection.resume_goal(),
             connection.send("chat"),
@@ -3403,7 +3432,7 @@ def test_close_collects_pending_terminal_cleanup(tmp_path: Path) -> None:
         stopping = asyncio.create_task(connection.stop())
         for _ in range(20):
             await asyncio.sleep(0)
-        assert not stopping.done()
+        assert stopping.done()
         await connection.close()
         await asyncio.gather(stopping, return_exceptions=True)
         assert peer.closed
