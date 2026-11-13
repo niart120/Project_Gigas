@@ -3,19 +3,14 @@
 from math import ceil
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QDesktopServices, QKeyEvent, QPalette
+from PySide6.QtCore import Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
-    QComboBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
-    QStackedWidget,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -34,14 +29,15 @@ from gigas.runtime.codex.models import (
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.notifications import Notice
+from gigas.ui.plan_panel import PlanPanel
 from gigas.ui.prompt_edit import PromptEdit
-from gigas.ui.request_card import DECISION_LABELS, RequestRecord
+from gigas.ui.request_card import RequestRecord
+from gigas.ui.request_view import RequestView
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtCore import QObject
     from PySide6.QtGui import QResizeEvent
 
 _PHASE_LABELS = {
@@ -103,7 +99,7 @@ class ConnectionPanel(QWidget):
         self._stopping = False
         self._failure_ids: set[int] = set()
         self.requests: dict[str, RequestRecord] = {}
-        self._target: tuple[str, str] | None = None
+        self.request_views: dict[str, RequestView] = {}
         self._message_draft = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -122,61 +118,23 @@ class ConnectionPanel(QWidget):
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
         layout.addLayout(login)
-        self.plan_heading = QLabel("Plan", self)
-        plan_row = QHBoxLayout()
-        plan_row.addWidget(self.plan_heading, 0, Qt.AlignmentFlag.AlignTop)
-        self.plan = Transcript(self, show_headings=False)
-        self.plan.setFrameShape(QFrame.Shape.NoFrame)
-        palette = self.plan.palette()
-        palette.setBrush(QPalette.ColorRole.Base, self.palette().brush(QPalette.ColorRole.Window))
-        self.plan.setPalette(palette)
-        plan_row.addWidget(self.plan, 1)
-        layout.addLayout(plan_row)
-        document_layout = self.plan.document().documentLayout()
-        if document_layout is not None:
-            document_layout.documentSizeChanged.connect(self._fit_plan)
-        self._clear_plan()
+        self.plan_panel = PlanPanel(self)
+        self.plan_panel.hide()  # MainWindow places this in the right pane.
         self.history_heading = QLabel("History", self)
         layout.addWidget(self.history_heading)
         self.transcript = Transcript(self)
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.transcript, 1)
-        self.approvals = QScrollArea(self)
-        self.approvals.setWidgetResizable(True)
-        self.approvals.setFrameShape(QFrame.Shape.NoFrame)
-        self._approval_content = QWidget(self.approvals)
-        self._approval_layout = QVBoxLayout(self._approval_content)
-        self._approval_layout.setContentsMargins(0, 0, 0, 0)
-        self.approvals.setWidget(self._approval_content)
-        self.approvals.viewport().installEventFilter(self)
-        layout.addWidget(self.approvals)
-        self.target = QComboBox(self)
-        self.target.setAccessibleName("送信先")
-        self.target.addItem("追加指示", None)
-        message_heading = QHBoxLayout()
-        message_heading.addWidget(QLabel("Message", self))
-        message_heading.addWidget(self.target, 1)
-        layout.addLayout(message_heading)
-        self.composer = QStackedWidget(self)
-        self.prompt = PromptEdit(self.composer)
+        layout.addWidget(QLabel("Message", self))
+        self.prompt = PromptEdit(self)
         self.prompt.setAccessibleName("Message")
-        self.choice = QComboBox(self.composer)
-        self.choice.setAccessibleName("回答")
-        for combo in (self.target, self.choice):
-            combo.setSizeAdjustPolicy(
-                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-            )
-            combo.setMinimumContentsLength(12)
-        self.composer.addWidget(self.prompt)
-        self.composer.addWidget(self.choice)
-        layout.addWidget(self.composer)
+        layout.addWidget(self.prompt)
         turn_actions = QHBoxLayout()
-        turn_actions.addStretch()
-        self.interrupt_button = QPushButton(self)
-        self.interrupt_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.interrupt_button = QPushButton("中断", self)
         self.interrupt_button.setAccessibleName("中断")
         self.send_button = QPushButton("送信", self)
         turn_actions.addWidget(self.interrupt_button)
+        turn_actions.addStretch()
         turn_actions.addWidget(self.send_button)
         layout.addLayout(turn_actions)
         self.connect_action.triggered.connect(self.connect_requested)
@@ -187,9 +145,6 @@ class ConnectionPanel(QWidget):
         self.prompt.submit_requested.connect(self.send_button.click)
         self.interrupt_button.clicked.connect(self.interrupt)
         self.prompt.textChanged.connect(self._edit_draft)
-        self.choice.currentIndexChanged.connect(self._edit_draft)
-        self.target.currentIndexChanged.connect(self._select_target)
-        self.choice.installEventFilter(self)
         self._render()
 
     def activate(self, generation: int) -> None:
@@ -205,13 +160,8 @@ class ConnectionPanel(QWidget):
         self._current_plan = None
         for record in self.requests.values():
             record.invalidate()
-            if record.controls is not None:
-                self._approval_layout.removeWidget(record.controls)
-                record.controls.deleteLater()
         self.requests.clear()
-        self._target = None
-        self._refresh_targets()
-        self._show_editor()
+        self.request_views.clear()
         self.transcript.clear()
         self._clear_plan()
         self.login_url.clear()
@@ -236,6 +186,9 @@ class ConnectionPanel(QWidget):
         self.login_url.clear()
         self._expire_requests()
         self._archive_plan()
+        if self._active_turn is not None:
+            self.plan_panel.set_plan(self._current_plan, interrupted=True)
+        self._active_turn = None
         self._render()
 
     @Slot(object)
@@ -253,12 +206,19 @@ class ConnectionPanel(QWidget):
                 self._expire_requests()
             if event.phase in {"ready", "stopped", "closed", "error"}:
                 self._archive_plan()
+                if self._active_turn is not None and not self._stopping:
+                    self.plan_panel.set_plan(
+                        self._current_plan,
+                        interrupted=event.phase != "ready",
+                        finished=event.phase == "ready",
+                    )
                 self._active_turn = None
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, TurnStarted):
             if event.turn_id != self._active_turn and not self._stopping:
                 self._archive_plan()
+                self._clear_plan()
             self._active_turn = event.turn_id
         elif isinstance(event, LoginEvent):
             url = QUrl(event.url)
@@ -269,8 +229,6 @@ class ConnectionPanel(QWidget):
                 f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
             )
         elif isinstance(event, PlanEvent):
-            if event.explanation:
-                self.transcript.update_item(f"plan-explanation:{event.turn_id}", event.explanation)
             if event.turn_id == self._active_turn:
                 self._current_plan = event
             if (
@@ -279,12 +237,14 @@ class ConnectionPanel(QWidget):
                 and self._status.phase != "stopping"
                 and "disconnect" not in self._pending
             ):
-                self.plan.update_plan("current", event.steps)
-                self.plan.setVisible(bool(event.steps))
-                self.plan_heading.setVisible(bool(event.steps))
-                self._fit_plan()
+                self.plan_panel.set_plan(event)
             else:
-                self.transcript.update_plan(f"plan:{event.turn_id}", event.steps)
+                self.transcript.update_plan(
+                    f"plan:{event.turn_id}",
+                    event.steps,
+                    event.explanation,
+                    inactive=True,
+                )
         elif isinstance(event, ReasoningEvent):
             self.transcript.update_item(
                 f"reasoning:{(event.turn_id, event.item_id)!r}",
@@ -337,11 +297,10 @@ class ConnectionPanel(QWidget):
             and result.message is not None
             and result.message.outcome == "accepted"
             and self._message_draft == self._submitted
-            and not (self._target is None and self.prompt.is_composing)
+            and not self.prompt.is_composing
         ):
             self._message_draft = ""
-            if self._target is None:
-                self._show_editor()
+            self.prompt.clear()
         self._pending.discard(result.operation)
         self._error = result.error
         if result.error:
@@ -359,6 +318,8 @@ class ConnectionPanel(QWidget):
             return
         self._pending.add("stop")
         self._stopping = True
+        if self._active_turn is not None:
+            self.plan_panel.set_plan(self._current_plan, interrupted=True)
         self._expire_requests()
         self._render()
         self.interrupt_requested.emit()
@@ -385,9 +346,6 @@ class ConnectionPanel(QWidget):
     def _send(self) -> None:
         if not self.send_button.isEnabled():
             return
-        if self._target is not None:
-            self._answer(self._target[0])
-            return
         self._submitted = self._message_draft
         self._error = ""
         steering = self._status.phase in {"running", "waiting"}
@@ -401,46 +359,9 @@ class ConnectionPanel(QWidget):
             self.send_requested.emit(self._submitted)
 
     def _add_request(self, request: HumanRequest) -> None:
-        previous_target = self._target
         record = RequestRecord(request, len(self.requests) + 1)
         self.requests[request.token] = record
-        if request.kind != "question":
-            controls = QWidget(self._approval_content)
-            record.controls = controls
-            form = QFormLayout(controls)
-            form.setContentsMargins(0, 0, 0, 0)
-            form.setVerticalSpacing(4)
-            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-            field = QWidget(controls)
-            actions = QHBoxLayout(field)
-            actions.setContentsMargins(0, 0, 0, 0)
-            actions.setSpacing(4)
-            actions.addStretch()
-            form.addRow(record.title, field)
-            for decision in request.decisions:
-                button = QPushButton(DECISION_LABELS[decision], controls)
-                button.clicked.connect(
-                    lambda _checked=False, token=request.token, value=decision: self._answer(
-                        token, value
-                    )
-                )
-                record.decision_buttons[decision] = button
-                actions.addWidget(button)
-            self._approval_layout.addWidget(controls)
-        if (
-            request.questions
-            and self._target is None
-            and not self._message_draft
-            and not self.prompt.is_composing
-            and not self._pending.intersection({"send", "steer"})
-        ):
-            first = next(
-                item for item in self.requests.values() if item.is_live and item.request.questions
-            )
-            self._target = (first.request.token, first.request.questions[0].id)
-        self._request_changed(record)
-        if self._target != previous_target:
-            self._show_editor()
+        self.request_views[request.token] = RequestView(record, self.transcript, self._answer)
 
     def _answer(self, token: str, decision: str | None = None) -> None:
         record = self.requests[token]
@@ -453,95 +374,12 @@ class ConnectionPanel(QWidget):
             self.answer_requested.emit(submission)
 
     def _request_changed(self, record: RequestRecord) -> None:
-        request = record.request
-        body = [f"{record.title} · {record.label}"]
-        if request.details:
-            body.append(request.details)
-        for question in request.questions:
-            body.append(f"{question.header}\n{question.question}")
-            body.extend(f"{option.label}: {option.description}" for option in question.options)
-        key = (request.turn_id, request.token)
-        self.transcript.update_item(f"request:{key!r}", "\n".join(body), kind="request")
-        if record.answer_text:
-            self.transcript.update_item(
-                f"answer:{key!r}",
-                f"{record.title} · {record.label}\n{record.answer_text}",
-                kind="answer",
-            )
-        if record.controls is not None:
-            record.controls.setVisible(record.is_live)
-            for button in record.decision_buttons.values():
-                button.setEnabled(record.is_live)
-        previous_target = self._target
-        self._refresh_targets()
-        if self._target != previous_target or (
-            self._target is not None and self._target[0] == request.token
-        ):
-            self._show_editor()
-
-    def _refresh_targets(self) -> None:
-        with QSignalBlocker(self.target):
-            self.target.clear()
-            self.target.addItem("追加指示", None)
-            for token, record in self.requests.items():
-                for question in record.request.questions:
-                    if record.state in {"waiting", "sending"} or record.drafts.get(question.id):
-                        label = f"{record.title} · {question.header}"
-                        if not record.is_live:
-                            label += f" · {record.label}"
-                        self.target.addItem(label, (token, question.id))
-            index = next(
-                (i for i in range(self.target.count()) if self.target.itemData(i) == self._target),
-                -1,
-            )
-            if index < 0:
-                self._target = None
-                index = 0
-            self.target.setCurrentIndex(index)
-        self.target.setVisible(self.target.count() > 1)
-        self.approvals.setVisible(
-            any(record.is_live and record.controls is not None for record in self.requests.values())
+        self.request_views[record.request.token].refresh(
+            available=self._available and not self._stopping and "disconnect" not in self._pending
         )
-        self._fit_approvals()
-
-    def _select_target(self) -> None:
-        self._target = self.target.currentData()
-        self._show_editor()
-        self._render()
-
-    def _show_editor(self) -> None:
-        # Restoring another target must not feed its text back into the previous draft.
-        with QSignalBlocker(self.prompt), QSignalBlocker(self.choice):
-            self.choice.clear()
-            if self._target is None:
-                self.prompt.set_draft(self._message_draft)
-                self.composer.setCurrentWidget(self.prompt)
-                self._fit_composer()
-                return
-            token, question_id = self._target
-            record = self.requests[token]
-            question = next(item for item in record.request.questions if item.id == question_id)
-            text = record.drafts.get(question_id, "")
-            self.prompt.set_draft("")
-            if question.options and not question.is_other:
-                self.choice.addItems([option.label for option in question.options])
-                self.choice.setCurrentIndex(self.choice.findText(text) if text else -1)
-                self.composer.setCurrentWidget(self.choice)
-            else:
-                self.prompt.set_draft(text)
-                self.composer.setCurrentWidget(self.prompt)
-        self._fit_composer()
 
     def _edit_draft(self) -> None:
-        if self._target is None:
-            self._message_draft = self.prompt.toPlainText()
-        else:
-            record = self.requests[self._target[0]]
-            if not record.is_live:
-                return
-            editor = self.composer.currentWidget()
-            text = self.choice.currentText() if editor is self.choice else self.prompt.toPlainText()
-            record.drafts[self._target[1]] = text
+        self._message_draft = self.prompt.toPlainText()
         self._render()
 
     def _expire_requests(self) -> None:
@@ -551,64 +389,27 @@ class ConnectionPanel(QWidget):
             self._request_changed(record)
 
     def _clear_plan(self) -> None:
-        self.plan.clear()
-        self.plan.hide()
-        self.plan_heading.hide()
+        self._current_plan = None
+        self.plan_panel.set_plan(None)
 
     def _archive_plan(self) -> None:
-        if self._current_plan is not None:
+        if self._current_plan is not None and self._current_plan.turn_id == self._active_turn:
             event = self._current_plan
-            self.transcript.update_plan(f"plan:{event.turn_id}", event.steps)
-            self._current_plan = None
-        self._clear_plan()
-
-    def _fit_plan(self) -> None:
-        limit = (
-            3 * self.plan.fontMetrics().lineSpacing() + 2 * self.plan.document().documentMargin()
-        )
-        self.plan.setFixedHeight(ceil(min(self.plan.document().size().height(), limit)))
+            self.transcript.update_plan(
+                f"plan:{event.turn_id}",
+                event.steps,
+                event.explanation,
+                inactive=True,
+            )
 
     def _fit_composer(self) -> None:
-        editor = self.composer.currentWidget()
-        if editor is None or editor is self.prompt:
-            # QPlainTextEdit also reserves one pixel for its final caret line.
-            height = ceil(
-                2 * self.prompt.fontMetrics().lineSpacing()
-                + 2 * self.prompt.document().documentMargin()
-                + 2 * self.prompt.frameWidth()
-                + 1
-            )
-        else:
-            height = editor.sizeHint().height()
-        self.composer.setFixedHeight(height)
-
-    def _fit_approvals(self) -> None:
-        natural = max(
-            self._approval_content.sizeHint().height(),
-            self._approval_content.heightForWidth(self.approvals.viewport().width()),
+        height = ceil(
+            2 * self.prompt.fontMetrics().lineSpacing()
+            + 2 * self.prompt.document().documentMargin()
+            + 2 * self.prompt.frameWidth()
+            + 1
         )
-        self._approval_content.setMinimumHeight(natural)
-        self.approvals.setFixedHeight(min(natural, 6 * self.fontMetrics().lineSpacing()))
-
-    def eventFilter(self, watched: "QObject", event: QEvent) -> bool:  # noqa: N802 -- Qt override
-        """Handle choice submission and fit approval rows to their viewport."""
-        if (
-            isinstance(event, QKeyEvent)
-            and watched is self.choice
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
-            and event.modifiers()
-            in {
-                Qt.KeyboardModifier.ControlModifier,
-                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.KeypadModifier,
-            }
-        ):
-            if not event.isAutoRepeat():
-                self.send_button.click()
-            return True
-        if watched is self.approvals.viewport() and event.type() == QEvent.Type.Resize:
-            self._fit_approvals()
-        return super().eventFilter(watched, event)
+        self.prompt.setFixedHeight(height)
 
     def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
         """Keep Message at its editor's natural height when resizing the panel."""
@@ -651,16 +452,10 @@ class ConnectionPanel(QWidget):
             )
             and not self._pending.intersection({"send", "steer"})
         )
-        editable = available
-        if self._target is not None:
-            record = self.requests[self._target[0]]
-            editable = available and record.is_live and not self._stopping
-            ready = editable and record.complete
-        else:
-            ready = ready and bool(self._message_draft.strip())
-        self.send_button.setEnabled(ready)
-        self.prompt.setReadOnly(not editable)
-        self.choice.setEnabled(editable)
+        self.send_button.setEnabled(ready and bool(self._message_draft.strip()))
+        self.prompt.setReadOnly(not available)
+        for view in self.request_views.values():
+            view.refresh(available=available and not self._stopping)
         self.interrupt_button.setEnabled(
             available
             and (phase in {"starting", "running", "waiting"} or "send" in self._pending)

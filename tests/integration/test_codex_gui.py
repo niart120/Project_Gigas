@@ -43,13 +43,13 @@ if TYPE_CHECKING:
 
     from gigas.runtime.codex.models import ConnectionEvent, ThreadConfiguration
     from gigas.ui.notifications import Notice
+    from gigas.ui.prompt_edit import PromptEdit
 
 
-def _select_question(panel: ConnectionPanel, token: str, question_id: str) -> None:
-    index = next(
-        i for i in range(panel.target.count()) if panel.target.itemData(i) == (token, question_id)
-    )
-    panel.target.setCurrentIndex(index)
+def _answer_editor(panel: ConnectionPanel, token: str, question_id: str) -> "PromptEdit":
+    editor = panel.request_views[token].question_inputs[question_id].editor
+    assert editor is not None
+    return editor
 
 
 def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
@@ -82,24 +82,22 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         question = next(iter(panel.requests.values()))
         token = question.request.token
         assert question.request.kind == "question"
-        assert "経路確認" in panel.plan.toPlainText()
+        assert "経路確認" in panel.plan_panel.view.toPlainText()
         assert "公開要約" in panel.transcript.toPlainText()
         assert "fixture/observe" in panel.transcript.toPlainText()
         assert "観測完了" in panel.transcript.toPlainText()
         assert "INTERNAL_CONTENT" not in panel.transcript.toPlainText()
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
-        panel.target.setCurrentIndex(0)
         panel.prompt.setPlainText("質問は保留し、門の前で止まる")
         panel.send_button.click()
         qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
         steering = next(result for result in results if result.operation == "steer")
         assert steering.message == MessageResult("accepted", "dialogue-turn")
         assert question.is_live
-        _select_question(panel, token, "route")
-        panel.choice.setCurrentIndex(1)
-        _select_question(panel, token, "note")
-        panel.prompt.setPlainText("補給後に現在地を確認する")
-        panel.send_button.click()
+        route = panel.request_views[token].question_inputs["route"]
+        tuple(route.choices.values())[1].click()
+        _answer_editor(panel, token, "note").setPlainText("補給後に現在地を確認する")
+        panel.request_views[token].submit_button.click()
         qtbot.waitUntil(lambda: len(panel.requests) == 2)
         approval = next(
             record for record in panel.requests.values() if record.request.kind == "command"
@@ -111,10 +109,10 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert question.state == "sent"
         assert approval.state == "sent"
         assert "拒否" in panel.transcript.toPlainText()
-        assert "1. 経路確認　完了" in panel.transcript.toPlainText()
-        assert panel.plan.isHidden()
-        assert panel.target.count() == 1
-        assert not panel.approvals.isVisible()
+        assert "経路確認" in panel.plan_panel.view.toPlainText()
+        assert panel.plan_panel.isVisible()
+        assert approval.controls is not None
+        assert not approval.controls.isVisible()
     finally:
         shell.request_close()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
@@ -128,20 +126,18 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     panel.show()
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    assert panel.plan.isHidden()
-    assert panel.plan_heading.isHidden()
+    assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, TurnStarted("old")))
     panel.handle_event(ServiceEvent(1, SessionStatus("running")))
     panel.handle_event(
         ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),), "入口を確認"))
     )
-    assert "調査" in panel.plan.toPlainText()
-    assert panel.plan_heading.isVisible()
-    assert "入口を確認" in panel.transcript.toPlainText()
+    assert "調査" in panel.plan_panel.view.toPlainText()
+    assert "入口を確認" in panel.plan_panel.view.toPlainText()
+    assert "入口を確認" not in panel.transcript.toPlainText()
     assert "調査" not in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, PlanEvent("old", ())))
-    assert panel.plan.isHidden()
-    assert panel.plan_heading.isHidden()
+    assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),))))
     panel.handle_event(ServiceEvent(1, ReasoningEvent("old", "shared", ("公開要約",))))
     panel.handle_event(
@@ -160,16 +156,28 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "観測済み" in history
     assert "公開要約" in history
     panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
-    assert panel.plan.isHidden()
+    assert "調査" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
+    assert panel.plan_panel.status.text() == "終了"
+    assert "進行中" not in panel.plan_panel.view.toPlainText()
+    assert "進行中" not in panel.transcript.toPlainText()
+    assert (
+        panel.plan_panel.view.document().find("調査").charFormat().fontWeight() != QFont.Weight.Bold
+    )
+    panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
+    assert panel.plan_panel.status.text() == "終了"
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("終端後の訂正", "completed"),))))
     panel.handle_event(ServiceEvent(1, TurnStarted("new")))
+    assert "終端後の訂正" in panel.transcript.toPlainText()
+    assert "調査" not in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, SessionStatus("running")))
-    assert panel.plan.isHidden()
+    assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
     panel.handle_event(ServiceEvent(1, ReasoningEvent("new", "shared", ("新しい要約",))))
     panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("旧計画の訂正", "completed"),))))
-    assert "移動" in panel.plan.toPlainText()
-    assert "旧計画の訂正" not in panel.plan.toPlainText()
+    assert "移動" in panel.plan_panel.view.toPlainText()
+    assert "旧計画の訂正" not in panel.plan_panel.view.toPlainText()
     assert "旧計画の訂正" in panel.transcript.toPlainText()
     assert "新しい要約" in panel.transcript.toPlainText()
     assert "公開要約" in panel.transcript.toPlainText()
@@ -177,18 +185,29 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "公開要約" not in panel.transcript.toPlainText()
     assert "新しい要約" in panel.transcript.toPlainText()
     panel.interrupt()
-    panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("停止後の通知", "completed"),))))
-    assert "移動" in panel.plan.toPlainText()
+    panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("停止後の通知", "inProgress"),))))
+    assert "移動" in panel.plan_panel.view.toPlainText()
     assert "停止後の通知" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
-    assert panel.plan.isHidden()
+    assert "移動" in panel.plan_panel.view.toPlainText()
+    assert panel.plan_panel.status.text() == "中断"
     assert "停止後の通知" in panel.transcript.toPlainText()
     assert "移動" not in panel.transcript.toPlainText()
+    panel.handle_result(ServiceResult(1, "stop"))
+    panel.prompt.setPlainText("次の依頼")
+    panel.send_button.click()
+    panel.handle_event(ServiceEvent(1, SessionStatus("starting")))
+    panel.handle_event(ServiceEvent(1, TurnStarted("after-stop")))
+    assert "停止後の通知" in panel.transcript.toPlainText()
+    assert "進行中" not in panel.transcript.toPlainText()
+    assert (
+        panel.transcript.document().find("停止後の通知").charFormat().fontWeight()
+        != QFont.Weight.Bold
+    )
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("旧接続", "pending"),))))
     assert panel.transcript.toPlainText() == ""
-    assert panel.plan.isHidden()
-    assert panel.plan_heading.isHidden()
+    assert panel.plan_panel.view.toPlainText() == "—"
 
 
 def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBot) -> None:
@@ -205,10 +224,14 @@ def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBo
         *(PlanStep(f"計画 {index}", "pending") for index in range(40)),
     )
     panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
-    plan = panel.plan
-    assert "1. 入口を観測　完了" in plan.toPlainText()
-    assert "2. 経路を確認　進行中" in plan.toPlainText()
-    assert "23. 計画 20" in plan.toPlainText()
+    panel.plan_panel.resize(400, 200)
+    panel.plan_panel.show()
+    plan = panel.plan_panel.view
+    assert "入口を観測" in plan.toPlainText()
+    assert "完了" in plan.toPlainText()
+    assert "経路を確認" in plan.toPlainText()
+    assert "進行中" in plan.toPlainText()
+    assert "計画 20" in plan.toPlainText()
     assert plan.document().find("経路を確認").charFormat().fontWeight() == QFont.Weight.Bold
     assert plan.document().find("計画 20").charFormat().fontWeight() == QFont.Weight.Normal
     plan.setTextCursor(plan.document().find("計画 20"))
@@ -228,7 +251,9 @@ def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBo
 
 
 @pytest.mark.parametrize("reader", ["tail", "reading", "selected"])
-def test_plan_visibility_keeps_history_tail_or_reading_position(qtbot: QtBot, reader: str) -> None:
+def test_plan_updates_do_not_resize_history_or_move_reading_position(
+    qtbot: QtBot, reader: str
+) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.resize(400, 400)
@@ -262,7 +287,7 @@ def test_plan_visibility_keeps_history_tail_or_reading_position(qtbot: QtBot, re
     for steps in ((PlanStep("確認", "inProgress"),), ()):
         panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
         qtbot.wait(1)
-        assert history.viewport().height() != previous_height
+        assert history.viewport().height() == previous_height
         previous_height = history.viewport().height()
         panel.handle_event(ServiceEvent(1, TextEvent("final", "最終応答", replace=True)))
         qtbot.wait(1)
@@ -585,20 +610,22 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     )
     panel.handle_event(ServiceEvent(5, request))
     record = panel.requests["token"]
-    assert panel.target.currentData() == ("token", "choice")
-    assert panel.choice.currentIndex() == -1
+    view = panel.request_views["token"]
+    inputs = view.question_inputs
+    assert not any(button.isChecked() for button in inputs["choice"].choices.values())
     assert not panel.send_button.isEnabled()
-    panel.choice.setCurrentIndex(1)
-    _select_question(panel, "token", "text")
-    panel.prompt.setPlainText("弓")
-    _select_question(panel, "token", "other")
-    panel.prompt.setPlainText("custom; stop before the gate")
-    assert panel.prompt.isVisible()
-    _select_question(panel, "token", "choice")
-    qtbot.keyClick(panel.choice, Qt.Key.Key_Return)
+    assert not view.submit_button.isEnabled()
+    inputs["choice"].choices["B"].click()
+    assert inputs["text"].editor is not None
+    inputs["text"].editor.setPlainText("弓")
+    assert inputs["other"].editor is not None
+    assert inputs["other"].other_button is not None
+    inputs["other"].other_button.click()
+    inputs["other"].editor.setPlainText("custom; stop before the gate")
+    qtbot.keyClick(inputs["choice"].choices["B"], Qt.Key.Key_Return)
     assert not answers
-    qtbot.keyClick(panel.choice, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
-    panel.send_button.click()
+    view.submit_button.click()
+    view.submit_button.click()
     assert len(answers) == 1
     assert answers[0] == AnswerSubmission(
         "token", answers={"choice": "B", "text": "弓", "other": "custom; stop before the gate"}
@@ -606,21 +633,46 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     panel.handle_event(ServiceEvent(5, RequestResolved("token")))
     assert not record.is_live
     assert record.drafts["text"] == "弓"
-    assert "装備: 弓" in panel.transcript.toPlainText()
-    assert "説明B" in panel.transcript.toPlainText()
-    assert "custom; stop before the gate" in panel.transcript.toPlainText()
+    assert inputs["text"].editor.toPlainText() == "弓"
     panel.handle_result(ServiceResult(5, "answer", answer=AnswerResult("token", "sent")))
     assert not record.drafts
-    assert panel.target.count() == 1
-    assert not panel.target.isVisible()
-    assert "送信済み" in panel.transcript.toPlainText()
+    assert panel.transcript.toPlainText().strip() == "B"
+    view.expand_button.click()
+    assert "A\n説明A" in panel.transcript.toPlainText()
+    assert "B\n説明B" in panel.transcript.toPlainText()
+    assert "弓" in panel.transcript.toPlainText()
+    assert "custom; stop before the gate" in panel.transcript.toPlainText()
+    assert not view.submit_button.isVisible()
+    assert panel.prompt.toPlainText() == ""
+    panel.handle_event(
+        ServiceEvent(
+            5,
+            HumanRequest(
+                "pending",
+                8,
+                "thread",
+                "turn",
+                "question",
+                questions=(Question("late", "経路", "次の経路は?"),),
+            ),
+        )
+    )
+    pending_record = panel.requests["pending"]
+    pending_view = panel.request_views["pending"]
+    pending_editor = pending_view.question_inputs["late"].editor
+    assert pending_editor is not None
+    pending_editor.setPlainText("北側")
+    assert pending_view.submit_button.isEnabled()
     panel.activate(6)
+    assert not pending_record.is_live
+    pending_view.submit_button.click()
+    assert len(answers) == 1
     panel.handle_event(ServiceEvent(5, request))
     assert not panel.requests
 
 
 @pytest.mark.parametrize("outcome", ["sent", "not_sent", "unknown"])
-def test_question_targets_isolate_drafts_and_late_message_acceptance(
+def test_question_cards_isolate_drafts_and_late_message_acceptance(
     qtbot: QtBot, outcome: str
 ) -> None:
     panel = ConnectionPanel()
@@ -646,43 +698,38 @@ def test_question_targets_isolate_drafts_and_late_message_acceptance(
                 ),
             )
         )
-    assert panel.target.currentData() is None
-    _select_question(panel, "first", "route")
-    assert panel.prompt.toPlainText() == ""
-    panel.prompt.setPlainText("same text")
+    first = _answer_editor(panel, "first", "route")
+    second = _answer_editor(panel, "second", "route")
+    assert first.toPlainText() == second.toPlainText() == ""
+    first.setPlainText("same text")
+    second.setPlainText("second draft")
     panel.handle_result(ServiceResult(1, "steer", message=MessageResult("accepted", "turn")))
-    assert panel.prompt.toPlainText() == "same text"
-    _select_question(panel, "second", "route")
     assert panel.prompt.toPlainText() == ""
-    panel.prompt.setPlainText("second draft")
-    _select_question(panel, "first", "route")
+    assert first.toPlainText() == "same text"
     sent: list[object] = []
     panel.answer_requested.connect(sent.append)
-    panel.send_button.click()
+    panel.request_views["first"].submit_button.click()
     assert sent == [AnswerSubmission("first", answers={"route": "same text"})]
-    _select_question(panel, "second", "route")
     result = {
         "sent": AnswerResult("first", "sent"),
         "not_sent": AnswerResult("first", "not_sent"),
         "unknown": AnswerResult("first", "unknown"),
     }[outcome]
     panel.handle_result(ServiceResult(1, "answer", answer=result))
-    assert panel.prompt.toPlainText() == "second draft"
+    assert second.toPlainText() == "second draft"
     if outcome != "sent":
-        _select_question(panel, "first", "route")
-        assert panel.prompt.toPlainText() == "same text"
-        assert panel.prompt.isReadOnly()
-        assert not panel.send_button.isEnabled()
-        _select_question(panel, "second", "route")
+        assert first.toPlainText() == "same text"
+        assert first.isReadOnly()
+        assert not panel.request_views["first"].submit_button.isEnabled()
     panel.handle_event(ServiceEvent(1, RequestResolved("second")))
-    assert panel.prompt.toPlainText() == "second draft"
-    assert panel.prompt.isReadOnly()
-    assert not panel.send_button.isEnabled()
-    panel.target.setCurrentIndex(0)
+    assert second.toPlainText() == "second draft"
+    assert second.isReadOnly()
+    assert not panel.request_views["second"].submit_button.isEnabled()
     assert panel.prompt.toPlainText() == ""
+    assert not panel.prompt.isReadOnly()
 
 
-def test_composition_keeps_message_target_and_question_ctrl_enter_waits(qtbot: QtBot) -> None:
+def test_composition_keeps_message_and_question_ctrl_enter_waits(qtbot: QtBot) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.show()
@@ -703,27 +750,25 @@ def test_composition_keeps_message_target_and_question_ctrl_enter_waits(qtbot: Q
             ),
         )
     )
-    assert panel.target.currentData() is None
     assert panel.prompt.is_composing
     layout = panel.prompt.document().firstBlock().layout()
     assert layout is not None
     assert layout.preeditAreaText() == "へんかん"
     QApplication.sendEvent(panel.prompt, QInputMethodEvent("", []))
-    _select_question(panel, "route", "value")
-    panel.prompt.setPlainText("東")
+    editor = _answer_editor(panel, "route", "value")
+    editor.setPlainText("東")
     sent: list[object] = []
     panel.answer_requested.connect(sent.append)
-    QApplication.sendEvent(panel.prompt, QInputMethodEvent("へんかん", []))
-    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    QApplication.sendEvent(editor, QInputMethodEvent("へんかん", []))
+    qtbot.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
     assert not sent
-    QApplication.sendEvent(panel.prompt, QInputMethodEvent("", []))
-    panel.prompt.moveCursor(QTextCursor.MoveOperation.End)
-    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return)
+    QApplication.sendEvent(editor, QInputMethodEvent("", []))
+    editor.moveCursor(QTextCursor.MoveOperation.End)
+    qtbot.keyClick(editor, Qt.Key.Key_Return)
     assert not sent
-    assert panel.prompt.toPlainText() == "東\n"
-    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert editor.toPlainText() == "東\n"
+    qtbot.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
     assert sent == [AnswerSubmission("route", answers={"value": "東\n"})]
-    assert "経路: 東" in panel.transcript.toPlainText()
     panel.handle_event(
         ServiceEvent(
             1,
@@ -737,10 +782,9 @@ def test_composition_keeps_message_target_and_question_ctrl_enter_waits(qtbot: Q
             ),
         )
     )
-    _select_question(panel, "free", "value")
-    QApplication.sendEvent(panel.prompt, QInputMethodEvent("未確定の回答", []))
+    free = _answer_editor(panel, "free", "value")
+    QApplication.sendEvent(free, QInputMethodEvent("未確定の回答", []))
     panel.handle_event(ServiceEvent(1, RequestResolved("free")))
-    panel.target.setCurrentIndex(0)
     panel.prompt.setPlainText("次の指示")
     instructions: list[tuple[str, str]] = []
     panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
@@ -768,7 +812,8 @@ def test_approval_is_explicit_and_invalidated_locally(qtbot: QtBot, ending: str)
     panel.handle_event(ServiceEvent(1, request))
     card = panel.requests["approval"]
     assert not answers
-    assert set(card.decision_buttons) == {"accept", "decline", "cancel"}
+    assert set(card.decision_buttons) == {"accept", "decline"}
+    assert "cancel" in panel.request_views["approval"].decision_actions
     if ending == "resolved":
         panel.handle_event(ServiceEvent(1, RequestResolved("approval")))
     elif ending == "stop":

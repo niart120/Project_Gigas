@@ -69,8 +69,11 @@ def test_results_remain_until_next_turn_is_confirmed(panel: ConnectionPanel) -> 
     panel.send_button.click()
     panel.handle_event(ServiceEvent(1, TurnStarted("next")))
     assert set(panel.requests) == {"first", "second"}
-    assert not panel.approvals.isVisible()
-    assert "送信済み" in panel.transcript.toPlainText()
+    assert all(
+        record.controls is not None and not record.controls.isVisible()
+        for record in panel.requests.values()
+    )
+    assert "許可" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, SessionStatus("running")))
     panel.handle_event(
         ServiceEvent(

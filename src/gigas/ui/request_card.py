@@ -45,7 +45,7 @@ class RequestRecord:
 
     Args:
         request: Runtime request with a connection-unique token.
-        number: Display number shared by history, targets and approval controls.
+        number: Display number used to identify an otherwise unnamed request.
     """
 
     request: "HumanRequest"
@@ -53,6 +53,7 @@ class RequestRecord:
     state: RequestState = "waiting"
     drafts: dict[str, str] = field(default_factory=dict, repr=False)
     answer_text: str = ""
+    submitted_answers: dict[str, str] = field(default_factory=dict, repr=False)
     controls: "QWidget | None" = field(default=None, repr=False)
     decision_buttons: "dict[str, QPushButton]" = field(default_factory=dict, repr=False)
     _result_received: bool = False
@@ -101,9 +102,8 @@ class RequestRecord:
             if decision is not None or not self.complete:
                 return None
             answers = {question.id: self.drafts[question.id] for question in self.request.questions}
-            self.answer_text = "\n".join(
-                f"{question.header}: {answers[question.id]}" for question in self.request.questions
-            )
+            self.submitted_answers = answers
+            self.answer_text = "\n".join(answers.values())
             submission = AnswerSubmission(self.request.token, answers=answers)
         else:
             if decision not in self.request.decisions or decision is None:

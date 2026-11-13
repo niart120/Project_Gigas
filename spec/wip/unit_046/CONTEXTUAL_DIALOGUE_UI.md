@@ -38,7 +38,7 @@ M2以降、Goalの製品制御・仮表示、PR作成・マージ、実機入力
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | D01 文脈内操作の追加・撤去と追記で本文選択・コピー・閲覧位置が保たれる | regression | integration | 単一文書と既存差分更新を維持。inline 7件成功 |
-| todo | D02 質問・承認へその場で応答し通常原稿・要求寿命・配送証拠を保つ | regression | integration | 既存GUI/要求寿命/stdio往復を改訂、送信先combo試験を撤去 |
+| refactor-done | D02 質問・承認へその場で応答し通常原稿・要求寿命・配送証拠を保つ | regression | integration | 既存GUI/要求寿命/stdio往復を改訂、送信先comboと共有編集切替を撤去 |
 | refactor-skipped | D03 常設Planが更新・中断・空状態でも正しい本文と閲覧位置を保つ | regression | integration | 既存差分更新を再利用。独立部品2件と既存GUIへ終端・訂正を統合 |
 | todo | D04 16:9表示枠と左右配置で既存プレビュー方式・通常小画面操作が成立する | regression | integration | 拡大専用ケースを通常文字サイズへ統合 |
 
@@ -57,6 +57,8 @@ M2以降、Goalの製品制御・仮表示、PR作成・マージ、実機入力
 D01: `uv run pytest tests/integration/test_inline_transcript.py -q`。API未実装の5件redからgreen、スクロールバー出現時の横幅と空itemの同期layout通知の回帰を加えて7 passed。複数本文をまたぐ逆方向選択・コピー、操作部の追加/撤去/高さ変更、閲覧アンカー・末尾追従、Tab到達を確認。本文更新中の既存layout guardを共用し、遅延タイマーや位置clampによる回避は追加しない。担当ruff/format/ty成功。
 
 D03: `uv run pytest tests/unit/test_plan_panel.py tests/integration/test_codex_gui.py -q`は35 passed。Plan部品未実装のredから2件green。既存GUI試験へ終端後の訂正・中断後の次turn・通常終了後の切断を統合し各red→green。正常終端で未完項目が残れば欄は「終了」、全項目が公開completedなら「完了」、中断時は「中断」。終端後の進行中ラベル/強調を外し、公開状態は変更しない。退避は現turn所有時だけ行い、別の退避フラグは持たない。部品のコミット後、既存接続パネルへの結合をD02でコミットする。
+
+D02: 既存質問試験を会話内操作へ改訂し、`request_views`未実装のredを確認して結合。`test_codex_gui.py`、`test_answer_lifecycle.py`、`test_ui_control_lifetime.py`の41件が成功。stdio往復、複数質問一括配送、同名質問の分離、通常原稿とIME、成功/失敗/不明、中断・失効を維持。レビューで見つけた旧世代callbackの失効と、回答展開時の選択肢説明欠落も既存試験でred→green。回答本文を要約し、展開時だけ全質問・選択肢・回答を戻す。配送状態は既存RequestRecordを再利用し、二重の状態機械や再送を追加しない。
 
 ## 10. 先送り事項
 
