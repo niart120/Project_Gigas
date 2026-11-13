@@ -1,6 +1,5 @@
 """Codex connection controls and item-based conversation rendering."""
 
-from math import ceil
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QUrl, Signal, Slot
@@ -27,10 +26,9 @@ from gigas.runtime.codex.models import (
     TurnStarted,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
-from gigas.ui.elided_label import ElidedLabel
+from gigas.ui.message_composer import MessageComposer
 from gigas.ui.notifications import Notice
 from gigas.ui.plan_panel import PlanPanel
-from gigas.ui.prompt_edit import PromptEdit
 from gigas.ui.request_card import RequestRecord
 from gigas.ui.request_view import RequestView
 from gigas.ui.transcript import Transcript
@@ -38,7 +36,6 @@ from gigas.ui.transcript import Transcript
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QResizeEvent
 
 _PHASE_LABELS = {
     "connecting": "接続中",
@@ -61,7 +58,7 @@ class ConnectionPanel(QWidget):
     The failed signal carries a Notice for display-safe failures. A generation's
     failure IDs correlate state events with command results; activating a new
     connection discards those IDs, without modifying retained notification history.
-    MainWindow places the status and model widgets in its shared status bar.
+    MainWindow places the connection status in its shared status bar.
 
     Args:
         parent: Owning widget, if any.
@@ -108,9 +105,7 @@ class ConnectionPanel(QWidget):
         self.login_action = QAction("ログイン", self)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
-        self.model = ElidedLabel(parent=self)
         self.status.hide()
-        self.model.hide()
         login = QHBoxLayout()
         self.login_url = QLineEdit(self)
         self.login_url.setReadOnly(True)
@@ -120,23 +115,15 @@ class ConnectionPanel(QWidget):
         layout.addLayout(login)
         self.plan_panel = PlanPanel(self)
         self.plan_panel.hide()  # MainWindow places this in the right pane.
-        self.history_heading = QLabel("History", self)
-        layout.addWidget(self.history_heading)
         self.transcript = Transcript(self)
+        self.transcript.setAccessibleName("会話")
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.transcript, 1)
-        layout.addWidget(QLabel("Message", self))
-        self.prompt = PromptEdit(self)
-        self.prompt.setAccessibleName("Message")
-        layout.addWidget(self.prompt)
-        turn_actions = QHBoxLayout()
-        self.interrupt_button = QPushButton("中断", self)
-        self.interrupt_button.setAccessibleName("中断")
-        self.send_button = QPushButton("送信", self)
-        turn_actions.addWidget(self.interrupt_button)
-        turn_actions.addStretch()
-        turn_actions.addWidget(self.send_button)
-        layout.addLayout(turn_actions)
+        self.composer = MessageComposer(self)
+        self.prompt = self.composer.prompt
+        self.send_button = self.composer.send_button
+        self.interrupt_button = self.composer.interrupt_button
+        layout.addWidget(self.composer)
         self.connect_action.triggered.connect(self.connect_requested)
         self.disconnect_action.triggered.connect(self._disconnect)
         self.login_action.triggered.connect(self._login)
@@ -402,20 +389,6 @@ class ConnectionPanel(QWidget):
                 inactive=True,
             )
 
-    def _fit_composer(self) -> None:
-        height = ceil(
-            2 * self.prompt.fontMetrics().lineSpacing()
-            + 2 * self.prompt.document().documentMargin()
-            + 2 * self.prompt.frameWidth()
-            + 1
-        )
-        self.prompt.setFixedHeight(height)
-
-    def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
-        """Keep Message at its editor's natural height when resizing the panel."""
-        super().resizeEvent(event)
-        self._fit_composer()
-
     def _notify_failure(
         self, detail: str, failure_id: int | None = None, *, operation: str = ""
     ) -> None:
@@ -432,7 +405,6 @@ class ConnectionPanel(QWidget):
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
 
     def _render(self) -> None:
-        self._fit_composer()
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
@@ -452,19 +424,25 @@ class ConnectionPanel(QWidget):
             )
             and not self._pending.intersection({"send", "steer"})
         )
-        self.send_button.setEnabled(ready and bool(self._message_draft.strip()))
         self.prompt.setReadOnly(not available)
         for view in self.request_views.values():
             view.refresh(available=available and not self._stopping)
-        self.interrupt_button.setEnabled(
-            available
-            and (phase in {"starting", "running", "waiting"} or "send" in self._pending)
-            and "stop" not in self._pending
+        running = phase in {"starting", "running", "waiting", "stopping"} or bool(
+            self._pending.intersection({"send", "stop"})
+        )
+        self.composer.render_actions(
+            send_enabled=ready and bool(self._message_draft.strip()),
+            interrupt_enabled=(
+                available
+                and (phase in {"starting", "running", "waiting"} or "send" in self._pending)
+                and "stop" not in self._pending
+                and not self._stopping
+            ),
+            running=running,
+            has_draft=bool(self._message_draft.strip()),
         )
         visible = available and phase == "authenticating" and bool(self.login_url.text())
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
         self.status.setText(_PHASE_LABELS[phase])
-        self.model.setText(
-            " · ".join(value for value in (self._status.model, self._status.effort) if value)
-        )
+        self.composer.set_model(self._status.model, self._status.effort)

@@ -42,10 +42,15 @@ def shell(
 
 
 def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot: QtBot) -> None:
-    qtbot.mouseClick(shell.window.settings_button, Qt.MouseButton.LeftButton)
+    panel = shell.window.connection
+    panel.prompt.setPlainText("未送信の原稿")
+    qtbot.mouseClick(panel.composer.model_button, Qt.MouseButton.LeftButton)
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(dialog.isVisible)
+    assert dialog.model.isVisible()
+    assert dialog.effort.isVisible()
+    assert panel.prompt.toPlainText() == "未送信の原稿"
     dialog.model.setText("edited")
 
     shell.window.settings_action.trigger()

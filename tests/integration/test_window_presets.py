@@ -212,7 +212,7 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     assert panel.prompt.viewport().height() >= 2 * panel.prompt.fontMetrics().lineSpacing()
     assert panel.prompt.verticalScrollBar().maximum() == 0
     assert panel.interrupt_button.accessibleName() == "中断"
-    assert panel.interrupt_button.text() == "中断"
+    assert panel.composer.isAncestorOf(panel.interrupt_button)
     for widget in (
         panel.plan_panel,
         panel.transcript,

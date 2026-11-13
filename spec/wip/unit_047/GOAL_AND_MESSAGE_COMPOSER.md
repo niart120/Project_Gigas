@@ -2,11 +2,11 @@
 
 ## 1. 概要
 
-U06 M1の追加修正。利用者の2026-11-13の指示を起点に、目標と今回の作業を別見出しで常設し、Messageチップを入力枠内へ置く。一体型入力欄は通常送信と途中指示の既存配送を使う。
+U06 M1の追加修正。利用者の2026-11-13の指示を起点に、目標と今回の作業を別見出しで常設し、空欄時のMessageプレースホルダーを入力枠内へ置く。一体型入力欄は通常送信と途中指示の既存配送を使う。
 
 ## 2. 対象範囲
 
-目標の空状態、履歴の外側見出し撤去、入力枠内のMessageチップ・本文・操作列・モデル/推論量表示と既存Codex設定への入口。実行中の原稿ありは最終指示に従い送信と小さい中断を両方表示する。
+目標の空状態、履歴の外側見出し撤去、入力枠内のMessageプレースホルダー・本文・操作列・モデル/推論量表示と既存Codex設定への入口。実行中の原稿ありは最終指示に従い送信と小さい中断を両方表示する。
 
 ## 3. 対象外
 
@@ -21,7 +21,7 @@ Goal接続・Goal送信モード・pause/resumeはM2。候補モデル取得・�
 | 対象 | 契約 |
 |---|---|
 | 目標/今回の作業 | 右側映像下で両見出しを常設。M1の目標本文は—。入力やPlanからGoalを捏造しない。Planの更新・終端・選択・コピー・閲覧保持は既存契約を維持 |
-| 入力 | 一つの枠内にMessageチップ、本文、下部操作列。チップは原稿文字列・コピー・送信へ混入しない。History/Messageの枠外見出しは置かず、アクセシブル名は維持 |
+| 入力 | 一つの枠内に本文と下部操作列。空欄時だけ薄いMessageプレースホルダーを表示し、入力すると消える。固定バッジを置かず、案内文字は原稿・コピー・送信へ混入しない。History/Messageの枠外見出しは置かず、アクセシブル名は維持 |
 | 操作 | 待機中は送信、実行中かつ原稿なしは同じ右端位置に中断。実行中かつ原稿ありは右端に送信と隣に小さい中断。中断送信中は重複操作を防ぎ原稿を保持。Ctrl+Enterは送信専用で空欄時の中断に転用しない |
 | 配送 | 通常turn/steerの既存可否・成功証拠と原稿保持を再利用。IME、質問・承認、送信中の追記、失敗/不明を維持 |
 | モデル/推論量 | 入力枠内は実接続の値を表示し、既存設定のCodexタブを開く。未接続は設定入口名のみ。現在接続へ未反映の保存値を実行中の値として表示しない。次turn反映を先行実装しない |
@@ -31,7 +31,7 @@ Goal接続・Goal送信モード・pause/resumeはM2。候補モデル取得・�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | D01 目標と今回の作業が空/更新/終端でも常設され閲覧を保持する | regression | unit | 既存Plan試験を改訂、2件成功 |
-| todo | D02 一体入力が状態別操作・途中指示・原稿/IME保持・設定入口を満たす | regression | integration | 既存GUI/keyboard/window/settings試験を改訂・統合 |
+| refactor-skipped | D02 一体入力が状態別操作・途中指示・原稿/IME保持・設定入口を満たす | regression | integration | 既存GUI/window/settings試験を改訂・統合。最終関連61件成功 |
 
 ## 7. 設計メモ
 
@@ -48,6 +48,10 @@ src/gigas/uiのPlanPanel、MessageComposer、ConnectionPanel、MainWindow、設�
 対象のred/green、unit/integration、ruff format/check、ty、lock/build、文書リンク、Windows通常/小画面で配置と操作を確認する。結果は作業後に記録する。
 
 D01: `uv run pytest tests/unit/test_plan_panel.py -q`で未実装属性のred→2 passed。表示順・空欄常設・Plan更新で目標値不変を既存試験へ統合。既存GUIのPlan回帰5 passed。担当ruff/format/ty成功。GoalのAPI・状態・架空の本文は追加しない。
+
+D02: 部品未実装のred→部品3件green、既存GUIの途中指示6件と設定入口1件を未実装のredから結合。既存GUI/設定/小画面58件成功。最終は`uv run pytest tests/unit/test_message_composer.py tests/integration/test_codex_gui.py tests/integration/test_app_settings.py tests/integration/test_window_presets.py -q --basetemp=tmp/pytest-u047-render-final`で61 passed。通常原稿の選択/コピー、空欄Ctrl+Enterの中断誤操作防止、原稿ありの送信/中断併置、既存のIME・配送結果・要求寿命を維持。表示面の分離は専用部品に限定し追加の配送状態を持たない。
+
+固定Messageバッジは採用せず、利用者の訂正に従いQt標準placeholderを使う。本文背景を一体面へ揃え、モデル名は小数文字幅を切り上げて省略判定と一致させた。Windows通常フォント/DPR 1.5で整数丸めによる末尾省略を再現し修正。拡大専用分岐・検証は追加していない。
 
 ## 10. 先送り事項
 

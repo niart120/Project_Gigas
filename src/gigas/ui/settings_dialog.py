@@ -151,6 +151,7 @@ class SettingsDialog(QDialog):
         controller_form.addRow("プロトコル", self.serial_protocol)
         controller_form.addRow("通信速度", self.serial_baudrate)
         agent_form = self._tab("Codex")
+        self.codex_tab = self.tabs.count() - 1
         self.model = self._text_field()
         self.effort = self._text_field()
         self.auth_method = QComboBox(self)

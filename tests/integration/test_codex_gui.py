@@ -440,11 +440,21 @@ def test_running_turn_accepts_one_targeted_instruction(
 ) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
+    panel.show()
+    assert panel.composer.isAncestorOf(panel.prompt)
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
     panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
     panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    assert panel.interrupt_button.isVisible()
+    assert not panel.send_button.isVisible()
+    stops: list[bool] = []
+    panel.interrupt_requested.connect(lambda: stops.append(True))
+    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert not stops
     panel.prompt.setPlainText("補給後に現在地を確認する")
+    assert panel.send_button.isVisible()
+    assert panel.interrupt_button.isVisible()
     assert panel.send_button.isEnabled()
     instructions: list[tuple[str, str]] = []
     panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))

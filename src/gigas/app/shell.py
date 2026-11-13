@@ -107,6 +107,7 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
+        self.window.codex_settings_requested.connect(self._open_codex_settings)
         self.window.new_project_requested.connect(self._new_project)
         self.window.open_project_requested.connect(self._open_project)
         self.window.input_menu.aboutToShow.connect(self.refresh_input_ports)
@@ -406,6 +407,11 @@ class ApplicationShell(QObject):
         self.dialog.activateWindow()
         self.refresh_video_devices()
         self.refresh_input_ports()
+
+    def _open_codex_settings(self) -> None:
+        self.open_settings()
+        if self.dialog is not None and self.dialog.isVisible():
+            self.dialog.tabs.setCurrentIndex(self.dialog.codex_tab)
 
     def _open_settings_location(self) -> None:
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent))):

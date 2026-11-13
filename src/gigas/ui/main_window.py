@@ -43,7 +43,7 @@ class _PaneStatuses(QWidget):
         self._splitter = splitter
         self._rows: list[QWidget] = []
         for title, status, identifier in (
-            ("Codex", connection.status, connection.model),
+            ("Codex", connection.status, None),
             ("映像", video.status, video.source),
         ):
             row = QWidget(self)
@@ -51,9 +51,12 @@ class _PaneStatuses(QWidget):
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(QLabel(title, row))
             layout.addWidget(status)
-            layout.addWidget(identifier, 1)
+            if identifier is not None:
+                layout.addWidget(identifier, 1)
+                identifier.show()
+            else:
+                layout.addStretch()
             status.show()
-            identifier.show()
             row.installEventFilter(self)
             self._rows.append(row)
         for index in range(splitter.count()):
@@ -100,6 +103,7 @@ class MainWindow(QMainWindow):
     """Present shared menus, video, conversation, and current status."""
 
     settings_requested = Signal()
+    codex_settings_requested = Signal()
     new_project_requested = Signal()
     open_project_requested = Signal()
     close_requested = Signal()
@@ -172,6 +176,12 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.connection = ConnectionPanel(self.splitter)
+        self.connection.composer.model_button.clicked.connect(self.codex_settings_requested)
+        self.settings_action.changed.connect(
+            lambda: self.connection.composer.model_button.setEnabled(
+                self.settings_action.isEnabled()
+            )
+        )
         self.connection.setMinimumWidth(320)
         self.right_pane = QWidget(self.splitter)
         right_layout = QVBoxLayout(self.right_pane)
