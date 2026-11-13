@@ -20,7 +20,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `SandboxEvent(readiness, setting_up, detail)`はWindows実行環境の状態です。`readiness`は`ready`、`notConfigured`、`updateRequired`、取得不能の`None`です。接続後に非同期で取得し、認証や候補の取得とは分けます。`setup_windows_sandbox()`は、ターンとactive Goalがない接続で明示的に準備を開始します。認証は不要です。管理者権限での準備をruntimeへ依頼し、Windowsの確認操作は利用者が行います。
 
-同メソッドは開始受付だけでは完了せず、完了通知と準備状態の再取得を待ちます。準備失敗・状態取得不能・再取得で非readyの場合は`CodexConnectionError`を返し、接続は維持します。準備後も非readyなら明示的に切断・再接続してください。受付不明のときは`setting_up=True`と理由を通知し、自動再送せず完了通知を待ちます。待機中も`close()`できますが、切断をWindows側の準備処理の取消しとは扱いません。
+同メソッドは開始受付だけでは完了せず、完了通知と準備状態の再取得を待ちます。準備失敗・状態取得不能・再取得で非readyの場合は`CodexConnectionError`を返し、接続は維持します。ランタイムが公開した準備失敗の理由は例外と`SandboxEvent.detail`へ保持し、通知詳細から再確認できます。理由が返らない場合は原因を補いません。準備後も非readyなら明示的に切断・再接続してください。受付不明のときは`setting_up=True`と理由を通知し、自動再送せず完了通知を待ちます。待機中も`close()`できますが、切断をWindows側の準備処理の取消しとは扱いません。
 
 `memory_dir`付きの新規送信・Goal開始・再開は、実行環境が`ready`でなければ開始前に拒否します。初回の状態取得中なら既存の取得だけを待ち、その間に停止された場合はthreadやGoalを提出しません。追加問い合わせや自動再試行はしません。読み取り専用の送信、既存Goalの目的更新、途中指示、回答・承認、停止にはこの条件を追加しません。`ready`の確認後もthread応答の書込範囲を検証します。
 

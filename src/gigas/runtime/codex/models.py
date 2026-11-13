@@ -242,7 +242,8 @@ class SandboxEvent:
         readiness: Last public readiness result, or None when unavailable.
         setting_up: Whether this connection is awaiting setup acceptance/completion.
             Closing the connection ends local waiting, not the OS-owned setup.
-        detail: Application-owned error reason, empty when no failure is known.
+        detail: Public setup failure or application-owned readiness error reason;
+            empty when no failure is known.
     """
 
     readiness: Literal["ready", "notConfigured", "updateRequired"] | None = None

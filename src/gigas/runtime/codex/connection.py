@@ -326,7 +326,7 @@ class CodexConnection:
         self._usage_refresh_pending = False
         self._sandbox = SandboxEvent()
         self._sandbox_read: asyncio.Task[None] | None = None
-        self._sandbox_setup: asyncio.Future[bool] | None = None
+        self._sandbox_setup: asyncio.Future[str | None] | None = None
 
     async def open(self) -> None:
         """Initialize authentication and obtain model choices without starting a thread.
@@ -408,6 +408,7 @@ class CodexConnection:
         Setup does not require login and never grants the runtime cwd as a workspace.
         A lost start response keeps waiting for completion without resending. Closing
         this connection cancels only local waiting; no OS setup cancellation is claimed.
+        Public setup failure reasons remain available in the exception and event detail.
 
         Raises:
             CodexConnectionError: Setup is unavailable, rejected, failed, or its
@@ -445,7 +446,7 @@ class CodexConnection:
         finally:
             self._sandbox_setup = None
 
-    async def _run_sandbox_setup(self, completion: asyncio.Future[bool]) -> None:
+    async def _run_sandbox_setup(self, completion: asyncio.Future[str | None]) -> None:
         if self._sandbox_read is not None:
             await self._sandbox_read
         self._require_open()
@@ -464,8 +465,9 @@ class CodexConnection:
                 self._sandbox.readiness, True, "準備開始の受付結果を確認できない"
             )
             self._emit(self._sandbox)
-        if not await completion:
-            raise CodexConnectionError("実行環境の準備に失敗")
+        error = await completion
+        if error is not None:
+            raise CodexConnectionError(error)
         await self._read_sandbox()
         if self._sandbox.readiness is None:
             raise CodexConnectionError("準備後の実行環境を確認できない")
@@ -1429,7 +1431,8 @@ class CodexConnection:
                 and params.get("mode") == "elevated"
                 and isinstance(success, bool)
             ):
-                self._sandbox_setup.set_result(success)
+                error = _optional_text(params.get("error"))
+                self._sandbox_setup.set_result(None if success else error or "実行環境の準備に失敗")
             return
         if event.method == "account/login/completed":
             login_id = params.get("loginId")

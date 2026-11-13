@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。最終受入監査で見つかったD05も修正・固定検証済み。D06と実接続受入を継続中で、M3全体は未完了。
+2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。最終受入監査で見つかったD05は10fa771で修正し、D06も修正・固定検証済み。実接続受入を継続中で、M3全体は未完了。
 
 ## 2. 対象範囲
 
@@ -35,7 +35,7 @@
 | refactor-skipped | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 公開readiness/setupと既存login/終了経路を結合。全832件成功、実新規ログイン・OS準備は本人操作待ち |
 | refactor-skipped | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。859197bで新機能より先に修正 |
 | refactor-skipped | D05 Goal complete後の入力を閉じながら最終応答を中断しない | regression、unit/integration/実接続 | 固定peerで欠落を再現し既存回収試験を改訂。明示停止先行/遅いcomplete、終端/中断RPC競合、UI中断/Plan表示を確認。全843件成功、実モデルは未確認 |
-| todo | D06 Windows準備の公開失敗理由を診断へ保持する | regression、unit/実接続 | 実setup失敗時の理由を既存bool通知変換が破棄していた。既存sandbox試験を改訂し、理由あり/なしを区別する |
+| refactor-skipped | D06 Windows準備の公開失敗理由を診断へ保持する | regression、unit/実接続 | 既存sandbox失敗試験を理由あり/null/空へ改訂し1 failed→5 passed。全845件成功。実OS準備の再確認は未完 |
 
 ## 7. 設計メモ
 
@@ -52,6 +52,8 @@ D05は完了時のturn IDだけを保持する。先行item/要求で別turnのI
 D02: read.ordinaryUsageAllowed=falseと現在turnのwillRetry=falseだけを停止根拠とする。残高ゼロ・使用率・reset時刻で推測しない。疎な更新通知では完全snapshotを再取得し、単一owned taskが処理中の通知を一回分へまとめる。定期poll・再試行はなくcloseで回収する。falseをnull/失敗で解除しない。接続→Codexの非modalポップオーバーは既存Transcriptの選択/コピー/スクロール保持を再利用し、常設表示を増やさない。
 
 D03設計: Windows製品の接続時にreadinessを取得し、未準備/更新必要/取得不能でも接続・認証を維持する。memory書込が必要なthread準備だけreadyを前提にし、read-only利用は変えない。既存Codexメニューの明示準備操作がsetupStart(mode=elevated、cwd省略)を呼ぶ。開始受付とsetupCompleted・再readinessを区別し、待機中も切断可能。切断でOS準備が取消されたとは表示しない。採用版sourceは起動時設定をreadinessへ使用するため、成功後もnotConfiguredなら自動再接続せず再接続必要を通知する。権限モードの自動fallbackなし。
+
+D06は公開setupCompleted.errorを既存例外・SandboxEvent.detail・操作結果・通知詳細へ保持する。成功時はerrorを採用せず、失敗理由がnull/空なら既存の短い失敗理由だけを示す。Futureの結果を成功None/失敗文字列で表し、新しいクラス・状態は追加しない。schema、切断・pending境界、公開型/docstringを独立レビュー済み。
 
 ## 8. 対象ファイル
 
@@ -74,6 +76,8 @@ D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤
 D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、失敗・error・skipなし（JUnit `tmp/u050-d03-reviewed-all.xml`）。`uv run ruff format --check .`（211 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功。配布物は隔離wheel install、capture worker終了、module/script両入口の起動終了を確認した。公開型/docstring、既存phase・owned task・終了経路をレビュー済み。close競合1例・初回readiness競合4例の指摘を採用して既存試験を改訂し、別状態機械・自動再試行は不要と判断した。
 
 D05最終gate: `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d05-final-all --junitxml=tmp/u050-d05-final-all.xml`は843 passed（62.55秒）。上記ruff format/check・ty・lock check・build・配布物検査・diff checkも全て成功。固定completeの8件でredを確認し、追加レビューで中断RPC応答前のturn終端、手動停止先行のlate complete、UIの中断不能とPlan誤表示を既存試験へ統合して修正した。実モデルの自然最終応答はこの固定試験で代用せず、準備完了後に確認する。
+
+D06最終gate: 既存`test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmation`を改訂し、`-k sandbox_setup_failure_preserves_connection --basetemp=tmp/pytest-u050-d06-red`は公開理由喪失の1 failed/4 passed、修正後`-green`は5 passed。`uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d06-all --junitxml=tmp/u050-d06-all.xml`は845 passed（61.71秒）。ruff format/check・ty・lock check・build・配布物検査・diff check成功。formatの1箇所を修正して再確認し、意味変更はない。文書リンク921件/50 units/errorsなし。実OS準備成功はこの結果に含めない。
 
 文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。
 
@@ -125,7 +129,7 @@ APIキーは今回対象外であり再採用時に別途合意する。公開�
 ## 11. チェックリスト
 
 - [x] 合意範囲とAPIキー除外を記録した
-- [x] D01〜D03の必要な実装と既存試験改訂を完了した
+- [x] D01〜D06の必要な実装と既存試験改訂を完了した
 - [ ] 全受入項目の実行結果と残る制約を記録した
 - [ ] 品質gate、型/docstring・公開docs・初期設計・親仕様を整合した
 - [ ] KISSと既存実装の一貫性を再レビューし、論理単位でコミットした

@@ -744,9 +744,18 @@ def test_explicit_sandbox_setup_preserves_login_and_handles_early_completion(
     _run(scenario())
 
 
-@pytest.mark.parametrize("outcome", ["failed", "not_ready", "read_failed"])
+@pytest.mark.parametrize(
+    ("outcome", "setup_error"),
+    [
+        ("failed", "setup helper exited with status 1"),
+        ("failed", None),
+        ("failed", ""),
+        ("not_ready", "ignored error on success"),
+        ("read_failed", "ignored error on success"),
+    ],
+)
 def test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmation(
-    tmp_path: Path, outcome: str
+    tmp_path: Path, outcome: str, setup_error: str | None
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -766,18 +775,22 @@ def test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmat
                     {
                         "mode": "elevated",
                         "success": outcome != "failed",
-                        "error": "PRIVATE-SETUP-ERROR",
+                        "error": setup_error,
                     },
                 )
             )
-            with pytest.raises(CodexConnectionError):
+            with pytest.raises(CodexConnectionError) as failure:
                 await setting_up
             event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))
             assert not event.setting_up
             assert event.readiness != "ready"
+            assert event.detail == str(failure.value)
             assert event.detail
             assert not peer.closed
-            assert "PRIVATE-SETUP-ERROR" not in repr(events)
+            if outcome == "failed" and setup_error:
+                assert event.detail == setup_error
+            elif setup_error:
+                assert setup_error not in event.detail
         finally:
             await connection.close()
 
