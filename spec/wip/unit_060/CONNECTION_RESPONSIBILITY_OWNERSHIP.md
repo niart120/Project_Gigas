@@ -78,7 +78,7 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 | refactor-done | D01 質問・承認・回答・失効を維持 | characterization | unit / integration | baseline 310 passed。抽出後のconnection・answer・GUI 219 passed |
 | refactor-done | D02 次ターン選択とGoal設定を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。確定snapshot一件とRpcPeerの再公開 |
 | refactor-done | D03 環境準備の先行通知・受付不明・切断を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。初期取得とsetup completionを所有 |
-| green | D04 認証・利用枠・close後の通知抑止を維持 | characterization | unit / integration | baseline 310 passed。ログイン操作のtaskは接続側 |
+| refactor-done | D04 認証・利用枠・close後の通知抑止を維持 | characterization | unit / integration | 抽出後6ファイル310 passed、全体846 passed。ログイン操作のtaskは接続側 |
 
 ## 7. 設計メモ
 
@@ -95,6 +95,14 @@ Connection.closeの同期部で子の背景taskとsetup completionを取り消�
 D01は`ab74e25`で記録した。独立レビューでは所属/end判定後の受付、invalid IDの消費、回答検証後の消費、file承認の一件ずつの失効とRPC順に阻害指摘なし。候補tupleを返すdocstringを実体に合わせた。D02は候補・model・effortをModelSelection一件へ寄せ、設定RPCの後だけcommitする。RpcPeerはtransportへ移し、従来のconnectionからのimportを明示的な再公開で維持した。
 
 D02は`b4dcdb5`で記録し、独立レビューでもcatalog取得拒否、無効effort、設定RPC後のcommit、公開Protocol再公開に阻害指摘なし。D03は環境準備moduleと接続配線を別担当で実装・相互確認した。setup completionをclose同期部で失効し、各await後に同じcompletionが有効か確認する。子にclosed状態や接続状態を読むcallbackは追加していない。初期read待機後に停止済みなら、readiness不備を新しい準備失敗として報告せず従来どおり中止する。
+
+D03は`59d5be5`で記録した。親の独立レビューでもmoduleと配線の阻害指摘なし。指摘に従い、cancel_pending済みのreadをcloseで再cancelする分岐と、通常例外を返さない子closeへの重複したfinallyを除いた。
+
+D04は先行login完了の保持をJSON全体から`dict[str, bool]`へ絞り、秘密のremote errorを保持しない。FalseとNoneを区別し、既存の失敗通知・相関を維持する。親だけがclosedを確認してusage取得を始め、子は事実を同期通知する。UsageEventの明示falseから接続が同期に終了要求を作るため、子がstop/closeをawaitして自分の回収を待つ経路を持たない。
+
+独立レビューではD04の先行完了、子背景taskの単独所有、同期取消しとclosed後の再起動抑止、phase・終了要求の唯一所有、既存login取消しに阻害指摘なし。子と接続の相互参照、外部からの子private属性の読み書き、追加のignore/castはない。
+
+構造の補助測定では`ef469a4`からCodexConnectionのclass範囲が1524→1215行、直下method数が60→54、初期属性が43→29へ変わった。これは子へ移した状態を含む総状態量が同数減ったという意味ではない。具体的な削減は要求の逆引き辞書2個、選択の独立属性3個から既存snapshot一件、login先行通知のraw payload保持である。背景taskの回収は共有task集合から各子へ限定し、各責務の状態を直接読み書きする箇所を接続本体から除いた。
 
 ## 8. 対象ファイル
 
@@ -122,7 +130,12 @@ D02は`b4dcdb5`で記録し、独立レビューでもcatalog取得拒否、無�
 | D02対象3ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 新snapshot所有とProtocolの移動。ignore/cast追加なし |
 | baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-sandbox` | 310 passed / 15.08s | D03。準備受付不明、先行完了、切断中readiness、製品準備 |
 | D03対象2ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 子背景taskの所有、公開例外への変換、事実通知 |
-| 段階別・最終gate | not run | 実装後に実行 |
+| baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-account` | 310 passed / 15.24s | D04。認証・usage・close・GUI配送の回帰 |
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u060-full --tb=short` | 846 passed / 61.80s | 全unit/integrationの最終確認 |
+| `uv run ruff format --check .` / `uv run ruff check .` / `uv run ty check --no-progress` | passed | Python228ファイル、D/ANNを含む形式・型境界 |
+| `uv lock --check` / `uv build` / `git diff --check` | passed | lock整合、sdist/wheel生成、差分空白 |
+| `uv run python -X utf8 tmp/u054/validate_docs.py ef469a4` | 4 documents / 45 local_links / 60 units、errors=0 | 子仕様と同時作業中の親文書の参照先・仮テキスト検査 |
+| source/docstring/docs review | 確認済み | 公開操作・例外・RpcPeer再公開を維持。親の公開docs訂正と現在の製品準備・停止受付の契約を照合 |
 | 実runtime | not run | 親の受入待ち |
 
 ## 10. 先送り事項
@@ -133,6 +146,6 @@ M2の保存・入力契約は[親仕様](../unit_054/KISS_SIMPLIFICATION.md)に�
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを更新した
-- [ ] 検証結果または未実行理由を記録した
-- [ ] 公開API・型・package gateを記録した
+- [x] 検証結果または未実行理由を記録した
+- [x] 公開API・型・package gateを記録した
 - [ ] 独立レビューと親の実runtime受入へ引き渡した

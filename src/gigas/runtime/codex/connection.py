@@ -1,13 +1,12 @@
-"""Codex account, catalog and conversation behavior over one RPC transport."""
+"""Codex conversation and connection lifecycle over one RPC transport."""
 
 import asyncio
 import json
-from contextlib import suppress
 from dataclasses import dataclass
 from importlib import resources
 from typing import TYPE_CHECKING, Literal
-from urllib.parse import urlsplit
 
+from gigas.runtime.codex._account_session import AccountSession
 from gigas.runtime.codex._human_requests import HumanRequests
 from gigas.runtime.codex._model_catalog import ModelCatalog
 from gigas.runtime.codex._notifications import TurnContent
@@ -18,14 +17,11 @@ from gigas.runtime.codex.models import (
     GoalState,
     LoginEvent,
     ModelSelection,
-    RateLimitWindow,
     RequestResolved,
     SandboxEvent,
     SessionStatus,
     TextEvent,
     TurnStarted,
-    UsageBucket,
-    UsageCredits,
     UsageEvent,
 )
 from gigas.runtime.codex.transport import (
@@ -102,52 +98,6 @@ def _text(value: "JsonValue") -> str:
     raise CodexConnectionError(message)
 
 
-def _login_url(value: "JsonValue") -> str:
-    url = _text(value)
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        message = "ログインURLが不正"
-        raise CodexConnectionError(message)
-    return url
-
-
-def _optional_text(value: "JsonValue") -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _usage_window(value: "JsonValue") -> RateLimitWindow | None:
-    if value is None:
-        return None
-    window = _object(value)
-    used = window.get("usedPercent")
-    minutes, resets = window.get("windowDurationMins"), window.get("resetsAt")
-    if type(used) is not int:
-        raise CodexConnectionError("利用枠の応答形式が不正")
-    return RateLimitWindow(
-        used,
-        minutes if type(minutes) is int else None,
-        resets if type(resets) is int else None,
-    )
-
-
-def _usage_bucket(value: "JsonValue", key: str | None = None) -> UsageBucket:
-    bucket = _object(value)
-    credit_snapshot = None
-    if bucket.get("credits") is not None:
-        data = _object(bucket["credits"])
-        has_credits, unlimited = data.get("hasCredits"), data.get("unlimited")
-        if not isinstance(has_credits, bool) or not isinstance(unlimited, bool):
-            raise CodexConnectionError("追加利用枠の応答形式が不正")
-        credit_snapshot = UsageCredits(has_credits, unlimited, _optional_text(data.get("balance")))
-    return UsageBucket(
-        _optional_text(bucket.get("limitId")) or key,
-        _optional_text(bucket.get("limitName")),
-        _usage_window(bucket.get("primary")),
-        _usage_window(bucket.get("secondary")),
-        credit_snapshot,
-    )
-
-
 @dataclass(slots=True)
 class _Turn:
     id: str
@@ -174,7 +124,7 @@ class _End:
 
 
 class CodexConnection:
-    """Own account validation and one conversation over a single RPC peer.
+    """Own conversation and lifecycle decisions over a single RPC peer.
 
     All methods and the synchronous event callback run on the same asyncio loop.
     The callback must return promptly. Authentication remains owned by the runtime;
@@ -216,13 +166,12 @@ class CodexConnection:
         self._pump: asyncio.Task[None] | None = None
         self._opened = False
         self._closed = False
-        self._authenticated = False
+        self._account = AccountSession(peer, self._runtime_fact)
         self._catalog = ModelCatalog(peer, self._runtime_fact)
         self._phase: ConnectionPhase = "connecting"
         self._thread_id: str | None = None
         self._turn: _Turn | None = None
         self._start: _Start | None = None
-        self._login_id: str | None = None
         self._mcp_config: JsonObject = {}
         self._user_items = 0
         self._end: _End | None = None
@@ -233,15 +182,10 @@ class CodexConnection:
         self._operations: set[asyncio.Task[object]] = set()
         self._cleanup: asyncio.Task[None] | None = None
         self._opening = False
-        self._login_starting = False
-        self._login_completions: dict[str, JsonObject] = {}
         self._failure_serial = 0
         self._goal: GoalState | None = None
         self._goal_lock = asyncio.Lock()
         self._goal_revision = 0
-        self._usage = UsageEvent()
-        self._usage_read: asyncio.Task[None] | None = None
-        self._usage_refresh_pending = False
         self._sandbox = WindowsSandbox(peer, self._runtime_fact)
 
     async def open(self) -> None:
@@ -276,7 +220,7 @@ class CodexConnection:
             )
             await self._peer.notify("initialized")
             self._pump = asyncio.create_task(self._consume_events(), name="gigas-codex-events")
-            await self._read_account()
+            await self._account.read_account()
             config = _object(
                 await self._peer.request(
                     "config/read",
@@ -291,13 +235,21 @@ class CodexConnection:
                 key = name if name.replace("_", "").isalnum() else json.dumps(name)
                 self._mcp_config[f"mcp_servers.{key}.enabled"] = False
             selection_detail = await self._read_models()
+            if self._closed:
+                raise asyncio.CancelledError
             self._opened = True
-            self._status("ready" if self._authenticated else "login_required", selection_detail)
+            self._status(
+                "ready" if self._account.authenticated else "login_required", selection_detail
+            )
             self._refresh_usage()
             if not self._closed:
                 self._sandbox.start_read()
-        except (TransportError, CodexConnectionError) as error:
-            reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
+        except (TransportError, CodexConnectionError, ValueError) as error:
+            reason = (
+                str(error)
+                if isinstance(error, CodexConnectionError | ValueError)
+                else "Codex接続に失敗"
+            )
             await self.close()
             failure_id = self._failure("error", reason)
             raise CodexConnectionError(reason, failure_id=failure_id) from None
@@ -347,26 +299,16 @@ class CodexConnection:
 
     async def _login(self) -> None:
         self._require_open()
-        if self._authenticated or self._login_id is not None or self._login_starting:
-            message = "ログインを開始できない状態"
-            raise CodexConnectionError(message)
-        self._login_starting = True
+        if not self._account.can_login:
+            raise CodexConnectionError("ログインを開始できない状態")
         self._status("authenticating")
         try:
-            result = _object(await self._peer.request("account/login/start", {"type": "chatgpt"}))
-            self._login_id = _text(result.get("loginId"))
-            completion = self._login_completions.get(self._login_id)
-            if completion is not None:
-                await self._complete_login(completion)
-            else:
-                self._emit(LoginEvent(_login_url(result.get("authUrl"))))
-        except (TransportError, CodexConnectionError):
+            outcome = await self._account.login()
+            await self._complete_login(outcome)
+        except (TransportError, CodexConnectionError, ValueError):
             message = "ログイン開始に失敗"
             failure_id = self._failure("login_required", message)
             raise CodexConnectionError(message, failure_id=failure_id) from None
-        finally:
-            self._login_starting = False
-            self._login_completions.clear()
 
     async def send(self, prompt: str) -> str | None:
         """Prepare the thread's current configuration and start one ordinary turn.
@@ -388,8 +330,8 @@ class CodexConnection:
     async def _send(self, prompt: str) -> str | None:
         self._require_open()
         if (
-            not self._authenticated
-            or self._usage.ordinary_usage_allowed is False
+            not self._account.authenticated
+            or self._account.usage.ordinary_usage_allowed is False
             or not self._catalog.snapshot.model
             or not self._catalog.snapshot.effort
             or self._phase not in {"ready", "stopped"}
@@ -497,8 +439,8 @@ class CodexConnection:
     async def _set_goal(self, objective: str | None, *, resume: bool) -> bool:
         self._require_open()
         if (
-            not self._authenticated
-            or self._usage.ordinary_usage_allowed is False
+            not self._account.authenticated
+            or self._account.usage.ordinary_usage_allowed is False
             or not self._catalog.snapshot.model
             or not self._catalog.snapshot.effort
             or self._start is not None
@@ -937,6 +879,7 @@ class CodexConnection:
         """
         if self._cleanup is None:
             self._closed = True
+            self._account.cancel_pending()
             self._sandbox.cancel_pending()
             self._expire_requests()
             self._flush_dialogue()
@@ -963,19 +906,11 @@ class CodexConnection:
                 await asyncio.gather(*pending, return_exceptions=True)
             if self._end_task is not None:
                 await self._end_task
-            if self._login_id is not None:
-                with suppress(TransportError, TimeoutError):
-                    async with asyncio.timeout(2):
-                        await self._peer.request(
-                            "account/login/cancel", {"loginId": self._login_id}
-                        )
-                self._login_id = None
         finally:
-            try:
-                await self._sandbox.close()
-            finally:
-                await self._peer.close()
-                self._status("closed")
+            await self._account.close()
+            await self._sandbox.close()
+            await self._peer.close()
+            self._status("closed")
 
     async def _operate[T](self, operation: "Coroutine[object, object, T]") -> T:
         task = asyncio.create_task(operation, name="gigas-codex-operation")
@@ -1114,9 +1049,19 @@ class CodexConnection:
                 raise _ThreadPreparationError(message) from error
         self._thread_id = thread_id
 
-    def _runtime_fact(self, event: ModelSelection | SandboxEvent) -> None:
-        if not self._closed:
-            self._emit(event)
+    def _runtime_fact(
+        self, event: AccountInfo | LoginEvent | UsageEvent | ModelSelection | SandboxEvent
+    ) -> None:
+        if self._closed:
+            return
+        self._emit(event)
+        if (
+            isinstance(event, UsageEvent)
+            and event.ordinary_usage_allowed is False
+            and self._end is None
+        ):
+            self._failure("stopping", "利用制限により続行できない")
+            self._request_end("interrupt", goal_action="pause")
 
     def _failure(self, phase: "ConnectionPhase", detail: str) -> int:
         self._failure_serial += 1
@@ -1132,66 +1077,15 @@ class CodexConnection:
                 phase,
                 self._catalog.snapshot.model,
                 self._catalog.snapshot.effort,
-                self._authenticated,
+                self._account.authenticated,
                 detail,
                 failure_id,
             )
         )
 
-    async def _read_account(self) -> None:
-        result = _object(await self._peer.request("account/read", {"refreshToken": False}))
-        account = result.get("account")
-        self._authenticated = isinstance(account, dict) and account.get("type") == "chatgpt"
-        self._emit(
-            AccountInfo(
-                _optional_text(account.get("email")),
-                _optional_text(account.get("planType")),
-                _optional_text(account.get("workspaceName")),
-                True,
-            )
-            if self._authenticated and isinstance(account, dict)
-            else AccountInfo()
-        )
-
     def _refresh_usage(self) -> None:
-        if not self._authenticated or self._closed:
-            return
-        self._usage_refresh_pending = True
-        if self._usage_read is None or self._usage_read.done():
-            self._usage_read = asyncio.create_task(self._read_usage(), name="gigas-codex-usage")
-            self._operations.add(self._usage_read)
-            self._usage_read.add_done_callback(self._operations.discard)
-
-    async def _read_usage(self) -> None:
-        while self._usage_refresh_pending and not self._closed:
-            self._usage_refresh_pending = False
-            try:
-                result = _object(await self._peer.request("account/rateLimits/read", {}))
-                keyed = result.get("rateLimitsByLimitId")
-                buckets = (
-                    tuple(_usage_bucket(value, key) for key, value in keyed.items())
-                    if isinstance(keyed, dict) and keyed
-                    else (_usage_bucket(result.get("rateLimits")),)
-                )
-                allowed = result.get("ordinaryUsageAllowed")
-                permission = allowed if isinstance(allowed, bool) else None
-                if permission is None and self._usage.ordinary_usage_allowed is False:
-                    permission = False
-                self._usage = UsageEvent(buckets, permission, True)
-            except (TransportError, CodexConnectionError):
-                self._usage = UsageEvent(
-                    self._usage.buckets, self._usage.ordinary_usage_allowed, False
-                )
-            if self._closed:
-                return
-            self._emit(self._usage)
-            if self._usage.ordinary_usage_allowed is False and self._end is None:
-                self._failure("stopping", "利用制限により続行できない")
-                try:
-                    await self.stop()
-                except CodexConnectionError:
-                    if not self._closed:
-                        self._failure("error", "利用制限による停止を確認できない")
+        if not self._closed:
+            self._account.refresh_usage()
 
     async def _read_models(self) -> str:
         try:
@@ -1213,7 +1107,7 @@ class CodexConnection:
             CodexConnectionError: Selection is unavailable or not in the catalog.
         """
         self._require_open()
-        if self._start is not None or not self._authenticated:
+        if self._start is not None or not self._account.authenticated:
             raise CodexConnectionError("モデル・推論レベルを選択できない状態")
         try:
             selection = self._catalog.propose(model, effort)
@@ -1255,12 +1149,12 @@ class CodexConnection:
                 self._sandbox.accept_completion(params)
             return
         if event.method == "account/login/completed":
-            login_id = params.get("loginId")
-            if isinstance(login_id, str):
-                if login_id == self._login_id:
-                    await self._complete_login(params)
-                elif self._login_starting:
-                    self._login_completions[login_id] = params
+            if not self._closed:
+                try:
+                    outcome = await self._account.accept_login_completion(params)
+                except ValueError as error:
+                    raise CodexConnectionError(str(error)) from error
+                await self._complete_login(outcome)
             return
         if event.method == "account/rateLimits/updated":
             # Rolling updates may omit account metadata; obtain the full snapshot
@@ -1305,15 +1199,18 @@ class CodexConnection:
         elif self._turn_id is not None and params.get("turnId") == self._turn_id:
             await self._item_notification(event.method, params)
 
-    async def _complete_login(self, params: "JsonObject") -> None:
-        self._login_id = None
-        if params.get("success") is not True:
+    async def _complete_login(self, outcome: bool | None) -> None:
+        if self._closed or outcome is None:
+            return
+        if not outcome:
             self._failure("login_required", "ログインに失敗")
             return
-        await self._read_account()
         selection_detail = await self._read_models()
-        self._status("ready" if self._authenticated else "login_required", selection_detail)
-        self._refresh_usage()
+        if not self._closed:
+            self._status(
+                "ready" if self._account.authenticated else "login_required", selection_detail
+            )
+            self._refresh_usage()
 
     def _adopt_turn(self, turn_id: str) -> None:
         if self._turn is not None and self._turn.id == turn_id:

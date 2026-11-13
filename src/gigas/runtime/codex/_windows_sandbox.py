@@ -146,7 +146,6 @@ class WindowsSandbox:
             completion.cancel()
 
     async def close(self) -> None:
-        """Cancel and collect the initial read; the connection owns the setup task."""
+        """Collect the cancelled initial read; the connection owns the setup task."""
         if self._read_task is not None:
-            self._read_task.cancel()
             await asyncio.gather(self._read_task, return_exceptions=True)
