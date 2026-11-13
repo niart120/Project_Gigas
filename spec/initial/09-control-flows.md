@@ -2,7 +2,7 @@
 
 [文書一覧](README.md) · [実行管理](02-runtime.md) · [SDK調査](08-sdk-compatibility.md)
 
-処理フローの初版は2026-11-10、UI・操作要求の改訂は2026-11-12です。本書はGoalを中心とした攻略、計画的終了、即時停止、明示的再開、記憶整理について、複数部品にまたがる処理順序を示します。図は編集可能なMermaidです。これらのGoal・機器フローの実行確認は未実施です。通常ターン接続はU02で別に確認します。
+処理フローの初版は2026-11-10、U06 M0による改訂は2026-11-13です。本書はGoalを中心とした攻略、計画的終了、即時停止、明示的再開、記憶整理について、複数部品にまたがる処理順序を示します。図は編集可能なMermaidです。[U06 M0](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)では採用0.167.0の実モデルでGoal操作と設定変更、実runtime・模擬モデル/機器で自律turnの操作権とMCP再公開を確認しました。製品のGoal結合・実機受入はM2/M3、S03の計画終了はU07、再起動後復旧はU08、記憶整理はU09の未実施範囲です。
 
 ## 読み方と設計上の区分
 
@@ -33,8 +33,8 @@
 
 ```mermaid
 flowchart TD
-    Start["ユーザーが依頼して開始"] --> Setup["依頼を保存・通知受信を準備"]
-    Setup --> Context["スレッド・採用する記憶・現在画面を用意"]
+    Start["ユーザーが依頼して開始"] --> Setup["依頼記録を提出・通知受信を準備"]
+    Setup --> Context["スレッド・記憶入口・最新キャッシュの利用可否を確認"]
     Context --> Goal["攻略Goalを開始または明示的に再開"]
     Goal --> Play["Codexが観測・操作・検索・記憶更新"]
     Play --> Event{"公開通知またはユーザー操作"}
@@ -74,28 +74,32 @@ sequenceDiagram
     participant G as ゲームMCP・I/O
     participant D as 記録・記憶
     U->>A: 依頼して開始
-    A->>D: 依頼と実行識別子を保存
+    A->>D: 依頼と実行識別子の記録を提出
     A->>C: 通知受信・実行との対応を準備
-    C->>R: 公開プロトコルでスレッド・共通指示・接続を設定
-    A->>G: 今回の実行だけに操作許可
-    C->>R: 元の攻略目的でGoalを開始
+    A->>G: 今回のrun/Grant/endpointを準備
+    C->>R: thread/startで共通指示・MCP・次turn設定を用意
+    Note over A,R: 既存threadは必要なMCP再公開を先に行う。購読と入力受付条件も開始前に用意
+    C->>R: thread/goal/set(objective, active, origin=user)
+    Note over C,R: Goal setが開始を起こす。重ねてturn/startを送らない
     loop Goalが継続可能
         R-->>C: ターン開始・計画・進捗通知
-        C-->>A: 実行情報を反映
+        C-->>A: 同じthreadの自律turnも採用
+        A->>G: 同じrunへturnをbind・要求待ち/停止なしなら入力受付
         loop 一つのターン内
             R->>G: observe または act_and_observe
-            G->>D: 操作・観測を記録
+            G->>D: 操作・観測の非同期保存を提出
             G-->>R: 画像・時刻・観測ID
             R->>D: 必要な記憶を読む・更新する
         end
         R-->>C: ターン終了
-        Note over A,R: ターン終了だけでは依頼完了にしない
+        A->>G: turn間の入力を保留・run/Grant/endpointを保持
+        Note over A,R: ターン終了だけでは依頼完了やrun終了にしない
         R->>R: Goalと継続条件を確認
     end
     R-->>C: 元Goalのcomplete
     C-->>A: 対象依頼のGoal完了通知
     A->>A: 対象依頼への追加指示を閉じ・未配送分を破棄
-    A->>G: 新規入力を閉じる
+    A->>G: 共通停止でGrantを失効・入力解除
     A->>D: 未適用の指示と破棄理由を記録
     opt 完了後に旧依頼宛ての追加指示を受け付けた
         U->>A: 追加指示
@@ -103,21 +107,21 @@ sequenceDiagram
         A-->>U: 依頼完了のため未適用
     end
     Note over A,R: 新Goal化・新規ターン開始・次依頼への転送・再送は行わない
-    A->>C: 残るターン・書き込みの終了を確認
+    A->>C: 残るターンの中断・終端を確認
     A->>G: 残る入力・解除処理の終了を確認
     A->>D: 依頼完了を確定
-    A->>D: 整理前の記憶を退避
-    opt 退避が成功した
-        A->>C: 別スレッドで記憶整理
+    opt U09で記憶整理を提供した後
+        A->>D: 書込収束を確認して整理前の記憶を退避
+        A->>C: 退避成功時だけ別スレッドで記憶整理
     end
-    Note over A,D: 整理を開始した場合、次の攻略は整理成功または失敗・中断後の記憶復元を完了してから
+    Note over A,D: U06では完了記録後に次の依頼を待つ。U09の整理・復元を先行実装しない
 ```
 
-ループを抜ける理由はcompleteだけではありません。pause、blocked、利用制限、エラー、ユーザー要求は別の分岐へ移ります。二つのループ枠は反復の担当を表し、アプリがその回数を決める意味ではありません。追加指示は依頼に紐付け、完了通知で未配送分を破棄します。既にランタイムへ送信した指示を遡って取り消せるとはせず、受付不明なら未確認と記録し、再送しません。詳細は[02の追加指示の扱い](02-runtime.md)に従います。
+ループを抜ける理由はcompleteだけではありません。pause、blocked、利用制限、エラー、ユーザー要求は別の分岐へ移ります。二つのループ枠は反復の担当を表し、アプリがその回数を決める意味ではありません。自律turnごとにrun/Grantを新設せず、継続区間を保持します。turn間の追加指示は下書きのまま利用者が次turnで送信し、配送キューや自動再送を作りません。既にランタイムへ送信した指示を遡って取り消せるとはせず、受付不明なら未確認と記録します。詳細は[02の追加指示の扱い](02-runtime.md)に従います。対話と観測の非同期保存完了を次の操作条件にはせず、ターン終端から外部コマンドの全書込終了を推定しません。
 
 ## S02 — 操作列と事後観測
 
-以下は[U05 M0](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で採用した、操作前記録と事後観測の設計です。物理入力前の開始行も非同期投入し、操作結果と同じObservationの画像はU04の非同期保存へ渡します。製品実装と実機によるこの図の結合確認はM1/M2へ残します。
+以下は[U05 M0](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)を[最新キャッシュ観測](../complete/unit_040/LATEST_CACHE_OBSERVATION.md)と[M2の製品結合](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)で具体化した流れです。物理入力前の開始行も非同期投入し、操作結果と同じObservationの画像はU04の非同期保存へ渡します。通常turnの製品・実機確認と、U06のGoal結合は別に扱います。
 
 ```mermaid
 sequenceDiagram
@@ -140,7 +144,7 @@ sequenceDiagram
         G-->>M: BUSY
         M-->>R: 待ち列へ入れず拒否
     end
-    G->>D: 操作開始を記録
+    G->>D: 操作開始の非同期記録を提出
     G->>I: 操作列を実行
     loop 操作列の各要素
         I->>I: 入力または中断可能な待機
@@ -216,27 +220,34 @@ sequenceDiagram
     participant C as Codex接続部
     participant R as Codexランタイム
     U->>A: pauseまたはstop
-    A->>A: 停止意思を保持・旧世代の入力許可を閉じる
-    par 物理入力の停止
-        A->>G: 操作列をキャンセル
-        G->>G: 後続入力を破棄・ニュートラル送信
+    A->>A: 停止意思を保持
+    A->>G: InputService.stopを開始・旧Grant失効と要求取消し
+    par 物理入力停止の回収
+        G->>G: 開始済みwriteを回収・ニュートラル送信
         G-->>A: 入力終了・解除の送出結果
     and ランタイムの停止
-        A->>C: Goal保持または破棄・実行中ターン中断
-        C->>R: pauseまたはclearとinterrupt（順序は採用版で確認）
-        R-->>C: Goal状態・ターン終了
-        C-->>A: 旧実行と書き込みの収束状況
+        A->>C: Goal保持または破棄を要求
+        opt Goalが存在する
+            C->>R: goal/set(status=paused, origin=user) または goal/clear(origin=user)
+            R-->>C: Goal変更結果
+        end
+        Note over C,R: Goal変更が失敗しても以下の中断を試みる
+        opt 実行中turnがある
+            C->>R: turn/interrupt(threadId, turnId)
+            R-->>C: turn/completed(status=interrupted)
+        end
+        C-->>A: Goal変更とturn終端を別に報告
     end
     Note over A,R: 遅れて届くactive通知や旧回答は停止意思を解除しない
-    alt 双方の収束を確認
+    alt Goal保持/破棄と双方の収束を確認
         A-->>U: 停止結果（Goal保持なら明示的再開、破棄なら新規依頼）
-    else 解除または旧処理の終了が未確認
+    else Goal変更・解除・旧処理のいずれかが未確認
         A-->>U: 停止処理中・未確認箇所を表示
         Note over A,G: 確認できるまで新しい入力世代を開かない
     end
 ```
 
-この図はPythonプロセスが生存して停止通知を処理できる場合の契約です。PC異常終了時のMCUの解除保証は別です。ランタイムの中断応答を待ってから入力を止める順序にはしません。
+この図はPythonプロセスが生存して停止通知を処理できる場合の契約です。PC異常終了時のMCUの解除保証は別です。ランタイムの中断応答を待ってから入力を止める順序にはしません。停止中に新しい自律turn開始が届いても中断対象にし、入力を許可しません。停止しても提出済みの入力設定適用は継続し、適用成功だけで再開しません。
 
 pause／clearの受付だけで進行中推論・ツール・書込が終わったとは扱いません。Goal破棄は履歴や記憶の削除ではなく、旧目的を継続対象から外す操作です。破棄GoalはS05の再開対象から外します。M01の再開矢印はGoalを保持した停止に限り、全状況を表す巨大な状態列挙を追加しません。
 
@@ -259,7 +270,7 @@ Codexを実行状態の正本とし、アプリは受け取った通知を表示
 
 ## S05 — ユーザーの明示的な再開
 
-U06では接続中の同じスレッドと保持Goalを使って再開します。U08は保存参照の読込・接続再起動・スレッド再構成を前処理として追加します。旧入力の失効、収束、現在画面、明示操作の契約は共用し、同一セッションの再開に毎回スレッド再読込を要求しません。記憶整理の復元条件はU09で追加します。
+U06では同じapp-server接続・thread・保持Goalを使います。失効した操作権を再利用せず、新run/endpointの設定を `thread/unsubscribe` → 同IDの `thread/resume` で読み込ませます。loaded状態のresumeだけではMCP設定が更新されないU05の確認結果を引き継ぎます。U08は保存参照の読込・接続再起動・スレッド再構成、U09は必要な記憶復元を前処理として追加します。
 
 ```mermaid
 sequenceDiagram
@@ -271,47 +282,57 @@ sequenceDiagram
     participant D as 保存管理・記憶
     U->>A: 停止後に明示的再開
     A->>G: 入力を閉じた状態で旧入力の終了を確認
-    A->>C: 旧実行・書き込みの終了を確認
+    A->>C: 旧turn・未回答要求の収束を確認
     break 旧処理の終了を確認できない
         A-->>U: 停止処理中またはエラー・再開しない
     end
-    A->>D: 未完の整理と採用する記憶を確認
-    opt 失敗・中断した整理がある
-        A->>D: 整理前の記憶へ復元
-    end
-    break 記憶の復元が必要だが完了できない
-        A-->>U: 記憶を利用できない理由を表示・再開しない
+    opt U09の失敗・中断した整理がある
+        A->>D: 整理書込の収束後に記憶を復元
+        Note over A,D: 必要な復元が完了できなければ再開しない
     end
     A->>D: 保持している依頼・記憶参照を用意（保存参照の読込はU08）
     opt ユーザーがアプリを再起動済み
         A->>C: 通常の起動手順でapp-server接続と通知受信を用意
     end
     alt 同一セッションの保持Goal（U06）
-        C->>C: 現接続・スレッド・保持Goalを使う
+        A->>G: 旧endpointを閉じ、新run/Grant/endpointを準備
+        C->>R: thread/unsubscribe(threadId)
+        R-->>C: 購読解除結果
+        C->>R: 同IDのthread/resume（新MCP・共通指示・現在の次turn設定）
+        R-->>C: 同threadの読込結果
+        C->>R: thread/goal/getで保持Goalを確認
     else 保存スレッドを読み込む（U08）
         C->>R: スレッドを読み込み元Goalの公開状態を取得
     else 既存スレッドを使わない（U08）
         C->>R: 新しいスレッドへ依頼と記憶の入口を渡す
     end
     Note over A,R: スレッド読込だけでゲーム入力を許可しない
-    A->>G: 現在画面を取得・新しい接続世代を用意
-    G-->>A: 保存済みの新しい観測
-    A->>C: 再開指示・記憶参照・現在画面を渡す
-    C->>R: 攻略に戻る前に現在状況の確認を指示
+    A->>G: readerのstreamingとFrameありを確認
+    G-->>A: 最新キャッシュの利用可否
+    Note over A,R: 共通指示で再開後まずobserveと画面・メモの照合を求める
     alt 続行可能な未完依頼
-        A->>G: 今回の実行に入力を許可
-        C->>R: 同じGoalを再開（新規スレッドでは依頼から設定）
+        A->>G: 新runの受付条件を用意
+        alt 同じGoalを保持
+            C->>R: goal/set(status=active, origin=user)、objective省略
+        else U08の新threadから再構成
+            C->>R: 保持依頼から新Goalを設定（U08で具体化）
+        end
         R-->>C: 公開状態・ターン・質問などの通知
+        A->>G: 同threadのturnをrunへbind
         C-->>A: 受信した内容を表示・記録
+        R->>G: 指示に従い最初にobserve
+        G-->>R: その時点の最新キャッシュ画像・観測ID
     else 完了・未解決要求・接続失敗など
         A-->>U: 該当する状態を表示し、無条件に攻略を開始しない
     end
     Note over A,R: 過去操作の再送、自動修復・再投入は行わない
 ```
 
-これは既存の明示的再開の手順です。独立した復帰操作や、自動的にランタイムを再構築する機構ではありません。接続が利用不能なら理由を表示し、必要に応じてユーザーがアプリを再起動して再開します。スレッドを使えない場合はコールドスタートとして扱います。現在画面と記憶の照合はCodexの攻略再開作業であり、アプリによるランタイム状態の整合性修復ではありません。
+これは既存の明示的再開の手順です。独立した復帰操作や、自動的にランタイムを再構築する機構ではありません。U06の同thread読込に失敗したら再開せず、別threadへ自動置換しません。保存参照や新threadからの再構成はU08で設計・検証します。現在画面と記憶の照合はCodexの攻略再開作業であり、アプリによるランタイム状態の整合性修復ではありません。
 
-同じGoalの明示的再開には、目的文を送らない`thread/goal/set(status=active)`を候補とします。目的・予算を置き換えず、APIの受付と実際のターン開始は受け取った通知どおりに扱います。開始が起きなくてもアプリから繰り返し再設定しません。再開指示と現在画面を渡す公開経路は採用版で確認します。
+同じGoalの明示的再開には、目的文を送らない`thread/goal/set(status=active, origin=user)`を使います。目的・予算・累積利用量を保ち、APIの受付と実際のターン開始は受け取った通知どおりに扱います。新threadから再構成するU08ではGoalがないため、依頼から新規設定する別の分岐が必要です。開始が起きなくてもアプリから繰り返し再設定しません。
+
+`goal/set`に画像入力欄はありません。再開時の画像はMCPのobserveで渡し、保存済み画像の完成、新しいFrameの到着、余分な準備turnを待ちません。図の「最初にobserve」はモデルへの指示であり、APIがその順序を強制する保証ではありません。実モデルが再開後に現在画面を確認してから操作することは、M2/M3の製品・実機受入で確認します。
 
 一回のユーザー操作に対して再開要求を重複送信しません。通信失敗などで結果を確認できなければ成功扱いにせず、入力を閉じて停止・エラーを表示します。過去の入力を再送したり、課金先・モデル・予算を自動変更したりしません。
 
@@ -362,7 +383,7 @@ stateDiagram-v2
     Release --> Closed: 解除と旧処理の収束を確認
 ```
 
-操作許可はGoalがactiveであることだけから計算しません。U05の通常ターンにも共通の停止を使い、古いactive通知で旧世代へ許可を戻しません。質問・承認待ちの入力保留は有効な要求に基づく受付条件とし、専用の再開経路や入力世代を追加しません。MCP接続と実行世代の対応付けは08の確認事項です。
+操作許可はGoalがactiveであることだけから計算しません。U05の通常ターンにも共通の停止を使い、古いactive通知で旧世代へ許可を戻しません。質問・承認待ちとturn間は既存の入力保留を使い、専用の再開経路や入力世代を追加しません。MCPと同一run/Grantの複数turnはU06 M0で限定確認済みであり、製品の配線・競合はM2/M3の確認事項です。
 
 ## 本実装で確認する接続条件
 
@@ -381,5 +402,5 @@ stateDiagram-v2
 
 ## 根拠
 
-Codexの継続・再試行・状態取得の調査根拠は[08の継続制御への委任と制約](08-sdk-compatibility.md)にまとめます。公開資料は[Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)と[app-server](https://learn.chatgpt.com/docs/app-server)、ソースはコミット`0811df39768427445b9730c039d6c04020670e04`の[Goal runtime](https://github.com/openai/codex/blob/0811df39768427445b9730c039d6c04020670e04/codex-rs/ext/goal/src/runtime.rs)、[ライフサイクル処理](https://github.com/openai/codex/blob/0811df39768427445b9730c039d6c04020670e04/codex-rs/ext/goal/src/extension.rs)、[外部Goal更新](https://github.com/openai/codex/blob/0811df39768427445b9730c039d6c04020670e04/codex-rs/ext/goal/src/api.rs)です。ソースの存在と、採用配布版・実機での動作実証は区別します。
+Codexの継続・再試行・状態取得の調査根拠は[08](08-sdk-compatibility.md)と[U06 M0](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)にまとめます。公開資料は[Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)と[app-server](https://learn.chatgpt.com/docs/app-server)、採用版ソースはコミット`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`の[Goal runtime](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/runtime.rs)、[ライフサイクル処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/extension.rs)、[外部Goal更新](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/api.rs)です。ソースの存在、模擬条件の実runtime、実モデル、製品・実機の確認範囲を区別します。
 

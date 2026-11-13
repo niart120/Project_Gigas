@@ -106,8 +106,8 @@ NyXの期限なしhold、dummy、接続cache、実行後の自動再構築、key
 |---|---|---|
 | write中の停止 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | M2でCH552への解除送出と移動後の停止映像を確認。B解除ACK、writeの最悪所要時間、DTR/RTSによるresetは未検証。固定write期限や独自cancel_write制御は置かない |
 | 長いMCP要求 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | 300秒設定で65秒waitと途中停止、短縮期限を確認。300秒経過と長時間連続運転は未検証。期限内の結果配送・実解除は保証せず、自動再送しない。詳細は[M2子](../unit_042/INPUT_APPLICATION_INTEGRATION.md) |
-| Goal継続と全介入 | [U06](../../planned/unit_011/GOAL_EXECUTION.md) | 本工程の通常ターンと停止部品へ継続通知・追加指示・制限を接続する |
-| 停止後の再開 | [U06](../../planned/unit_011/GOAL_EXECUTION.md)・[U08](../../planned/unit_013/RESUME.md) | 本工程の世代失効・旧処理収束を共用し、同一セッションの保持Goal再開はU06、保存参照からの復帰はU08で作る |
+| Goal継続と全介入 | [U06](../../wip/unit_011/GOAL_EXECUTION.md) | 本工程の通常ターンと停止部品へ継続通知・追加指示・制限を接続する |
+| 停止後の再開 | [U06](../../wip/unit_011/GOAL_EXECUTION.md)・[U08](../../planned/unit_013/RESUME.md) | 本工程の世代失効・旧処理収束を共用し、同一セッションの保持Goal再開はU06、保存参照からの復帰はU08で作る |
 | 長時間の遅延・機器条件 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | PokeCon・3DS実機、他OS、長時間連続運転、通信断時の機器挙動は未検証。今回のCH552の結果を他構成へ拡張しない |
 
 ## 11. 完了チェックリスト
