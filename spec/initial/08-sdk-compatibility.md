@@ -89,7 +89,7 @@ M1で秘密入力の採用を撤回した。採用版の[protocol定義](https:/
 
 実行根拠は`tmp/u06/runtime-goal/live-20261113-021248/report.json`（Goal）、`live-20261113-021441/report.json`（設定）、`wire-20261113-022053/report.json`（設定適用境界）、`live-20261113-021808/report.json`（paused中の通常送信）、`tmp/u06/mcp-20261113-021320/report.json`（操作権）、`tmp/u06/interaction-20261113-021655/report.json`（質問・steer・Plan）。短い実モデル試験では公開reasoning要約を受信しておらず、全認証・モデルでの提供を保証しない。このM0結果に続くM1では製品の表示結合を確認した。M2のGoalと質問/承認の競合、M3の実モデル・実機の一連操作は後続確認とする。300秒経過、長時間継続、APIキー課金経路、制限の実発生はこの結果に含まない。
 
-M1の製品結合: [子仕様](../wip/unit_045/COMMON_DIALOGUE_UI.md)で共通入力・公開表示・配送結果を実装し、固定stdio peer経由の質問/steer/承認/終端を確認した。既存ChatGPT認証と実モデル`gpt-6.1-sol`・lowでは、製品ApplicationShellから通常turnを一度開始し、2回のPlan更新、応答の表示、下書き消去、終端とサービス終了を確認した。公開summaryは未受信。Goal制御・実機・新規認証の証拠には使わない。
+M1の製品結合: [子仕様](../complete/unit_045/COMMON_DIALOGUE_UI.md)で共通入力・公開表示・配送結果を実装し、固定stdio peer経由の質問/steer/承認/終端を確認した。既存ChatGPT認証と実モデル`gpt-6.1-sol`・lowでは、製品ApplicationShellから通常turnを一度開始し、2回のPlan更新、応答の表示、下書き消去、終端とサービス終了を確認した。公開summaryは未受信。Goal制御・実機・新規認証の証拠には使わない。
 
 # 1. この文書の位置づけ
 

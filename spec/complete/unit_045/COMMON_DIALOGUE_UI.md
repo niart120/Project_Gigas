@@ -2,9 +2,9 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip、実装・検証完了、仕様の最終確認中**。[U06親仕様](../unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行う。
+状態: **complete、M1実装・検証完了**。[U06親仕様](../../wip/unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行った。
 
-2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討する。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直す。D08までの自動検証成功と、UIの受入完了を区別する。
+2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討した。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直した。D08までの自動検証成功と、UIの受入完了を区別する。
 
 開始時は `codex/u06-m0-goal-design`、M0の未コミット文書だけが残っていた。M0を `79eb6e5` として独立記録した。製品の起点は `ad69559`。U05の入力停止、最新キャッシュ即応、非同期保存、提出済み設定適用の継続を維持する。
 
@@ -52,7 +52,7 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | refactor-skipped | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | `4951e3a`。red 1 failed→green、GUI/transport/要求寿命63 passed。既存peerとGUI試験へ統合 |
 | refactor-skipped | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | `49293d5`。red 1 failed/36 passed→green 37 passed。関連回帰57 passed。実runtime画像から見つけたviewport縮小後の追従離脱を修正 |
 | refactor-done | D09 通常・縮小ウィンドウで情報の優先順位に沿って対話・映像・操作領域を配分する | regression | integration/manual | `729c109`。対話red 3 failed/41 passed、映像red 1 failed→対話等51、映像等47 passed。比較と製品描画に基づきPlan・承認・Messageの高さ配分、映像上限と中央寄せを修正。独立レビューで未使用layout参照1件を除去 |
-| refactor-skipped | D10 秘密入力指定をUIへ出さず、通常質問・承認だけを扱う | regression | unit/integration | U02由来の専用入力と秘密専用4試験を撤去。既存不正要求試験へ混在要求を統合、red 1 failed/1 passed→green 2 passed、関連157 passed |
+| refactor-skipped | D10 秘密入力指定をUIへ出さず、通常質問・承認だけを扱う | regression | unit/integration | `b6a0312`。U02由来の専用入力と秘密専用4試験を撤去。既存不正要求試験へ混在要求を統合、red 1 failed/1 passed→green 2 passed、関連157 passed |
 
 ## 7. 設計判断
 
@@ -60,7 +60,7 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 
 ウィンドウ自体は可変だったが、映像の最大寸法と中央寄せが拡張を妨げていた。両方を撤去し、プリセットは初期ウィンドウ寸法と左右配分だけを決める。現在Planの二重表示と専用の空白を除き、承認の折り返しにはQt標準QFormLayoutを使う。現turnのPlanを1件だけ保持して終端時に履歴へ移し、独自レイアウト状態やタイマは増やさない。
 
-秘密入力対応はU02から引き継いだが、GIGASの利用要件と実モデルからの受信証拠がなく、M1で採用を撤回する。採用版のモデル向け質問ツール定義はisSecretを公開せず、protocolに既定falseの属性があるだけである。要求を未対応として返してもruntimeは空回答へ変換するため、中断成功とは扱わない。専用のPassword UI、消去/記録分岐、自動停止は所有しない。Codexの認証は従来どおり別経路とする。
+秘密入力対応はU02から引き継いだが、GIGASの利用要件と実モデルからの受信証拠がなく、M1で採用を撤回した。採用版のモデル向け質問ツール定義はisSecretを公開せず、protocolに既定falseの属性があるだけである。要求を未対応として返してもruntimeは空回答へ変換するため、中断成功とは扱わない。専用のPassword UI、消去/記録分岐、自動停止は所有しない。Codexの認証は従来どおり別経路とする。
 
 ## 8. 対象ファイル
 
@@ -87,9 +87,9 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D08 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_window_presets.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u06-qt`: 57 passed。担当ruff check/format、全体ty、diff check: pass | Plan show/hideでの末尾/過去閲覧/逆向き選択を既存GUI試験へ統合。Transcriptのresize前後で既存の末尾/可視文字の復元を行い、新しいstate/timerを追加しない。最小再現も失敗→成功 |
 | D09 | 既存codex_gui/window_presets/answer_lifecycle/video_gui: 51 passed。video_gui/video_application/resolution_application/settings_apply_contract: 47 passed。担当ruff check/format、全体ty、diff check: pass | 現在Planの重複・終端残存・承認ボタン可視性のred 3件と、映像追従のred 1件を解消。1280→1920→800の実resizeでも取得世代・原画像寸法・接続を維持。重複するresize専用試験は追加せず既存spawn試験へ統合。rootの結合回帰（同4tree＋ui_control_lifetime/video_application/resolution_application/settings_apply_contract、`--basetemp=tmp/pytest-u06-d09-root`）98 passed。独立レビューの未使用layout参照を除去し、codex_gui/window_presets 43 passed |
 | D09描画 | 製品部品をそのまま使う固定通知のQt描画、1280×720/1920×1080・11pt、800×600・16ptを目視 | Historyは1280で400px、1920で760px、800の左幅259pxで167px。800でも承認3ボタン同時可視、Messageは2行分。実モデル・物理機器の証拠とは分ける |
-
 | D10 | `uv run pytest tests/unit/test_codex_connection.py::test_invalid_server_requests_report_distinct_failures_without_changing_phase -q --basetemp=tmp/pytest-u06-d10-secret`: red 1 failed/1 passed→green 2 passed。接続unit＋codex_gui/codex_transport/answer_lifecycle/ui_control_lifetime/window_presets: 157 passed | 混在要求でwaitingへ移るredを解消。HumanRequestなし、部分応答・interruptなし、元のrunning維持を確認。普通質問の複数回答・IME・原稿隔離を維持し、不要SubmitFilterを既存eventFilterへ統合。担当ruff/全体ty/diff pass、独立レビュー追加指摘なし、追加refactorなし |
 | 最終全体gate | `uv run pytest tests/unit tests/integration -q --tb=short --basetemp=tmp/pytest-u06-final-d10`: **730 passed / 58.42s** | 全製品単体・結合回帰。秘密専用試験の撤去を含む最終件数 |
+| 文書検査 | `uv run python -X utf8 tmp/u06-m1/validate_docs.py`: 13文書、858ローカルリンク、45個の一意なunit、errors 0 | 移動後のリンク・未閉鎖fence・仮テキスト・unit重複を検査。本文の根拠と現行契約は独立読取レビューで確認 |
 | 最終静的・配布 | `uv run ruff format --check .`（196 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`（83 packages）、`uv build`、`git diff --check`: pass | 書式・lint/Google docstring・公開型境界、lock、sdist/wheel。依存追加・cast/ignore追加なし |
 
 D04/D07の秘密入力の検証は当時の実績であり、現行の採用を意味しない。D10でその経路と専用試験を撤去し、通常質問の回帰へ統合した。
@@ -98,14 +98,20 @@ D04/D07の秘密入力の検証は当時の実績であり、現行の採用を�
 
 最初の隔離実行はapp-serverの初期化前に終了した。読み取り権限のsandboxでCodex homeのSQLite初期化とPATH alias処理が拒否されたため、同じ隔離プロジェクトの検証を通常権限で実行して成立を確認した。資格情報のコピーや再認証はしていない。D09後の配置とD10後の通常質問は、固定stdioの製品往復とWindows画面で別途確認し、D08時点の実モデル画像を最終配置の証拠にしない。
 
+最終のWindows画面は`$env:QT_QPA_PLATFORM='windows'; uv run python -X utf8 tmp/u06-m1/native_ui.py`（通常）と`--large`（小画面）で確認した。製品MainWindowへ固定通知・合成映像を入れ、runtime・機器サービスは起動していない。Meiryo UI 11pt/16pt、表示倍率150%。1280×720から2560×1369の最大化と復元、800×600で質問の選択肢/自由文・Enter改行/Ctrl+Enter一括送信・拒否・履歴スクロール・中断とPlanの履歴移動を操作した。2つの回答は1件、拒否は1件、中断は1件としてfixtureに記録され、ウィンドウを閉じたPythonもexit 0だった。根拠は`tmp/u06-m1/native-{normal-pending,large,large-after-answers,maximized}.json`と対応画像。
+
+[最終の通常画面](assets/native-normal.png)、[小画面の中断後](assets/native-small-stopped.png)、[狭幅の承認配置](assets/qt-small-pending.png)を残す。最後の画像はD09時点のoffscreen描画であり、秘密入力を含まない共通レイアウトの確認用。実ゲーム画面・モデル判断ではない。実IME変換は操作ツールが切替キーを扱えず未確認。D08時点のnative選択/コピー確認と合成Qt preedit試験を、実IME確認へ広げない。複数モニターでのDPI切替も未実施。
+
+最終KISSレビュー: 独立担当が通知・steer・配送証拠・設定とU05停止、別担当がD09/D10の画面・要求寿命を確認した。D09で指摘された未使用layout参照だけを除去し、追加の修正必須事項なし。公開型/docstringは具体的なイベントと配送結果へ対応し、新しい状態機械・自動再送・復旧・Goalの仮実装はない。既存試験への統合を優先し、秘密専用4件と重複resize案を撤去した。全体テストの成功は実モデルsummary・物理機器・実IMEの証拠にはしない。
+
 ## 10. 先送り事項
 
-Goalと入力run寿命・記憶・可搬記録はM2。新規ChatGPT/APIキー・次turn設定・Goal/実機一連受入はM3。長時間履歴/運転はU10。実機が必要になった場合はUSB Video Device、COM8・CH552・9600 baudを使う。自動Qt通知だけで実Windows IMEや実DPI操作の確認済みとはしない。
+M2着手条件は本M1の共通表示・要求寿命を前提に、M0のGoalと既存run/Grant寿命、停止/再開/MCP再公開、memory限定書込、非同期の公開対話保存を一つの着手子仕様へ具体化すること。独自継続ループや別の回答経路は作らない。M2は未着手。新規ChatGPT/APIキー・次turn設定・Goal/実機一連受入はM3。実モデルからの公開summary、command/file/MCP activityをM1画面へ通す一連試験、実IME・複数モニターDPIもM3で確認する。長時間履歴/運転はU10。実機が必要になった場合はUSB Video Device、COM8・CH552・9600 baudを使う。自動Qt通知だけで実Windows IMEや実DPI操作の確認済みとはしない。
 
 ## 11. 完了チェックリスト
 
 - [x] M0の決定と今回の対象範囲を確認した
-- [ ] TDD項目を検証・コミットした
-- [ ] 公開型/docstring/docsと品質gateを確認した
-- [ ] 製品画面・未検証事項とM2への引継ぎを記録した
-- [ ] 最終KISSレビューを行い、本子仕様だけをcompleteへ移した
+- [x] TDD項目を検証・コミットした
+- [x] 公開型/docstring/docsと品質gateを確認した
+- [x] 製品画面・未検証事項とM2への引継ぎを記録した
+- [x] 最終KISSレビューを行い、本子仕様だけをcompleteへ移した

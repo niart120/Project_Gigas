@@ -4,7 +4,7 @@
 
 通常turnで成立した観測・入力をGoalの継続攻略へ接続し、依頼・記憶・途中介入・公開表示を対応付ける。攻略判断とターン間の継続はCodexへ委任する。
 
-状態: **wip、M0調査・設計完了、M1実装中、M2以降未着手**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[M1](../unit_045/COMMON_DIALOGUE_UI.md)の実装・検証・コミットへ着手した。PR・mergeは対象外。M0の公開API・隔離接続・Qt試作の結果を、製品/実機の受入と混同しない。
+状態: **wip、M0調査・設計完了、M1実装・検証完了、M2以降未着手**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)の実装・検証・コミットを完了した。PR・mergeは対象外。M0の公開API・隔離接続・Qt試作の結果を、製品/実機の受入と混同しない。
 
 起点は[実装計画](../../initial/05-implementation.md)、[認証と実行設定の分離](../../initial/02-runtime.md)、[主画面とメッセージ操作](../../initial/10-ui-interaction.md)。利用場面は明示的な継続開始、公開計画の確認、質問回答/追加指示/承認、停止と同一セッション再開。
 
@@ -44,11 +44,11 @@
 | 子工程 | 状態・開始条件 | 到達点 |
 |---|---|---|
 | [M0 API・操作契約・Qt](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md) | 調査・設計完了 | 公開形式/実呼出し/模擬機器/Qtと未検証を分け、KISSで設計を確定 |
-| [M1 共通対話UI](../unit_045/COMMON_DIALOGUE_UI.md) | 実装中。通常turnの共通入力/表示経路は成立 | 左右配置、共通Message/History、質問・承認、Plan/reasoning/activityを実通知へ接続。旧質問入力を置換し、選択/下書き/閲覧保持を確認 |
+| [M1 共通対話UI](../../complete/unit_045/COMMON_DIALOGUE_UI.md) | 実装・検証完了。通常turnの実モデル結合と最終固定通知UIを区別して記録 | 左右配置、共通Message/History、質問・承認、Plan/reasoning/activityを実通知へ接続。旧質問入力を置換し、選択/下書き/閲覧保持を確認 |
 | M2 Goal・記憶・記録 | M1完了とM0契約の実装詳細化 | Goalとrun寿命、停止/再開/MCP更新、guide/memory・公開対話記録を結合。起動環境/sandboxを製品で再確認 |
 | M3 設定・認証と工程受入 | M2完了 | 認証と独立した次turn設定、制限/配送競合、新規ChatGPT/APIキー、実モデル・短い実機依頼を確認 |
 
-M1にGoalの仮表示・偽の成功や旧新UI切替を作らない。M3の設定変更をUI置換へ混ぜない。未着手の子仕様/全TDD項目は先行作成せず、次の作業はM1一つを選ぶ。
+M1にGoalの仮表示・偽の成功や旧新UI切替を作らない。M3の設定変更をUI置換へ混ぜない。未着手の子仕様/全TDD項目は先行作成せず、次の候補はM2一つとし、今回M1から先へ着手しない。
 
 ## 7. 振る舞い仕様・TDD Test Listの受入観点
 
@@ -67,7 +67,7 @@ M0は本親・子仕様、初期設計、移動参照、Qt証跡と隔離調査�
 
 ## 9. 検証状態
 
-M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験とGUI/実機はnot run。通常turnのU05実機受入を流用しない。
+M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験とGUI/実機はnot run。通常turnのU05実機受入を流用しない。M1は共通対話UIを実装し全unit/integration 730 passed、通常turnの実モデルPlan/応答と固定通知のWindows操作を確認した。利用者の指摘に従い映像枠と高さ配分を見直し、秘密入力の専用UIは撤回した。実IME・複数DPI・実summaryはM3へ残す。
 
 M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe、複数turn、介入、質問/承認、pause/再開/clear、設定適用と停止、記録IDを短い実機依頼で対応付ける。300秒実待機や長時間はU10。制限検証で意図的な課金超過は起こさない。
 
