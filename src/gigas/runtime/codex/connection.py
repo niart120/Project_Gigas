@@ -11,11 +11,13 @@ from urllib.parse import urlsplit
 from gigas.runtime.codex._human_requests import HumanRequests
 from gigas.runtime.codex._model_catalog import ModelCatalog
 from gigas.runtime.codex._notifications import TurnContent
+from gigas.runtime.codex._windows_sandbox import WindowsSandbox
 from gigas.runtime.codex.models import (
     AccountInfo,
     GoalEvent,
     GoalState,
     LoginEvent,
+    ModelSelection,
     RateLimitWindow,
     RequestResolved,
     SandboxEvent,
@@ -215,7 +217,7 @@ class CodexConnection:
         self._opened = False
         self._closed = False
         self._authenticated = False
-        self._catalog = ModelCatalog(peer, emit)
+        self._catalog = ModelCatalog(peer, self._runtime_fact)
         self._phase: ConnectionPhase = "connecting"
         self._thread_id: str | None = None
         self._turn: _Turn | None = None
@@ -240,9 +242,7 @@ class CodexConnection:
         self._usage = UsageEvent()
         self._usage_read: asyncio.Task[None] | None = None
         self._usage_refresh_pending = False
-        self._sandbox = SandboxEvent()
-        self._sandbox_read: asyncio.Task[None] | None = None
-        self._sandbox_setup: asyncio.Future[str | None] | None = None
+        self._sandbox = WindowsSandbox(peer, self._runtime_fact)
 
     async def open(self) -> None:
         """Initialize authentication and obtain model choices without starting a thread.
@@ -294,11 +294,8 @@ class CodexConnection:
             self._opened = True
             self._status("ready" if self._authenticated else "login_required", selection_detail)
             self._refresh_usage()
-            self._sandbox_read = asyncio.create_task(
-                self._read_sandbox(), name="gigas-codex-sandbox"
-            )
-            self._operations.add(self._sandbox_read)
-            self._sandbox_read.add_done_callback(self._operations.discard)
+            if not self._closed:
+                self._sandbox.start_read()
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
@@ -337,74 +334,16 @@ class CodexConnection:
     async def _setup_windows_sandbox(self) -> None:
         self._require_open()
         if (
-            self._sandbox_setup is not None
-            or self._start is not None
+            self._start is not None
             or self._turn_id is not None
             or self._phase not in {"ready", "stopped", "login_required"}
             or (self._goal is not None and self._goal.status == "active")
         ):
             raise CodexConnectionError("実行環境の準備を開始できない状態")
-        completion = asyncio.get_running_loop().create_future()
-        self._sandbox_setup = completion
-        self._sandbox = SandboxEvent(self._sandbox.readiness, True)
-        self._emit(self._sandbox)
         try:
-            await self._run_sandbox_setup(completion)
-        except CodexConnectionError as error:
-            self._sandbox = SandboxEvent(self._sandbox.readiness, False, str(error))
-            if not self._closed:
-                self._emit(self._sandbox)
-            raise
-        else:
-            if self._closed:
-                raise asyncio.CancelledError
-            self._sandbox = SandboxEvent(
-                self._sandbox.readiness, reconnect_required=self._sandbox.readiness != "ready"
-            )
-            self._emit(self._sandbox)
-        finally:
-            self._sandbox_setup = None
-
-    async def _run_sandbox_setup(self, completion: asyncio.Future[str | None]) -> None:
-        if self._sandbox_read is not None:
-            await self._sandbox_read
-        self._require_open()
-        try:
-            response = await self._peer.request("windowsSandbox/setupStart", {"mode": "elevated"})
-        except RpcError:
-            raise CodexConnectionError("実行環境の準備開始が拒否された") from None
-        except TransportError:
-            response = None
-        if self._closed:
-            raise asyncio.CancelledError
-        if isinstance(response, dict) and response.get("started") is False:
-            raise CodexConnectionError("実行環境の準備が開始されなかった")
-        if not isinstance(response, dict) or response.get("started") is not True:
-            self._sandbox = SandboxEvent(
-                self._sandbox.readiness, True, "準備開始の受付結果を確認できない"
-            )
-            self._emit(self._sandbox)
-        error = await completion
-        if error is not None:
-            raise CodexConnectionError(error)
-        await self._read_sandbox()
-        if self._sandbox.readiness is None:
-            raise CodexConnectionError("準備後の実行環境を確認できない")
-
-    async def _read_sandbox(self) -> None:
-        try:
-            result = _object(await self._peer.request("windowsSandbox/readiness", {}))
-        except (TransportError, CodexConnectionError):
-            result = {}
-        readiness = result.get("status")
-        if isinstance(readiness, str) and readiness in {"ready", "notConfigured", "updateRequired"}:
-            self._sandbox = SandboxEvent(readiness, self._sandbox_setup is not None)
-        else:
-            self._sandbox = SandboxEvent(
-                None, self._sandbox_setup is not None, "実行環境の準備状態を取得できない"
-            )
-        if not self._closed:
-            self._emit(self._sandbox)
+            await self._sandbox.setup()
+        except ValueError as error:
+            raise CodexConnectionError(str(error)) from error
 
     async def _login(self) -> None:
         self._require_open()
@@ -998,6 +937,7 @@ class CodexConnection:
         """
         if self._cleanup is None:
             self._closed = True
+            self._sandbox.cancel_pending()
             self._expire_requests()
             self._flush_dialogue()
             self._request_end("close")
@@ -1031,8 +971,11 @@ class CodexConnection:
                         )
                 self._login_id = None
         finally:
-            await self._peer.close()
-            self._status("closed")
+            try:
+                await self._sandbox.close()
+            finally:
+                await self._peer.close()
+                self._status("closed")
 
     async def _operate[T](self, operation: "Coroutine[object, object, T]") -> T:
         task = asyncio.create_task(operation, name="gigas-codex-operation")
@@ -1072,16 +1015,14 @@ class CodexConnection:
             raise _ThreadPreparationError(message)
         if self._end is not None:
             return
-        if self._sandbox_read is not None:
-            await self._sandbox_read
+        try:
+            await self._sandbox.require_ready()
+        except ValueError as error:
+            if self._end is not None:
+                return
+            raise _ThreadPreparationError(str(error)) from error
         if self._end is not None:
             return
-        if self._sandbox.readiness != "ready":
-            message = (
-                "サンドボックス環境の準備が必要です。"
-                "設定 → Codex → サンドボックス環境から設定・更新してください。"
-            )
-            raise _ThreadPreparationError(message)
         instructions = read_play_instructions()
         if not instructions.strip():
             message = "共通指示が空"
@@ -1172,6 +1113,10 @@ class CodexConnection:
                 message = "チャットの対応記録を保存できない"
                 raise _ThreadPreparationError(message) from error
         self._thread_id = thread_id
+
+    def _runtime_fact(self, event: ModelSelection | SandboxEvent) -> None:
+        if not self._closed:
+            self._emit(event)
 
     def _failure(self, phase: "ConnectionPhase", detail: str) -> int:
         self._failure_serial += 1
@@ -1306,16 +1251,8 @@ class CodexConnection:
     async def _notification(self, event: RpcNotification) -> None:
         params = event.params or {}
         if event.method == "windowsSandbox/setupCompleted":
-            success = params.get("success")
-            if (
-                not self._closed
-                and self._sandbox_setup is not None
-                and not self._sandbox_setup.done()
-                and params.get("mode") == "elevated"
-                and isinstance(success, bool)
-            ):
-                error = _optional_text(params.get("error"))
-                self._sandbox_setup.set_result(None if success else error or "実行環境の準備に失敗")
+            if not self._closed:
+                self._sandbox.accept_completion(params)
             return
         if event.method == "account/login/completed":
             login_id = params.get("loginId")

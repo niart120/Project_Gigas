@@ -77,7 +77,7 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 |---|---|---|---|---|
 | refactor-done | D01 質問・承認・回答・失効を維持 | characterization | unit / integration | baseline 310 passed。抽出後のconnection・answer・GUI 219 passed |
 | refactor-done | D02 次ターン選択とGoal設定を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。確定snapshot一件とRpcPeerの再公開 |
-| green | D03 環境準備の先行通知・受付不明・切断を維持 | characterization | unit / integration | baseline 310 passed。初期取得とsetup completionを所有 |
+| refactor-done | D03 環境準備の先行通知・受付不明・切断を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。初期取得とsetup completionを所有 |
 | green | D04 認証・利用枠・close後の通知抑止を維持 | characterization | unit / integration | baseline 310 passed。ログイン操作のtaskは接続側 |
 
 ## 7. 設計メモ
@@ -93,6 +93,8 @@ Connection.closeの同期部で子の背景taskとsetup completionを取り消�
 子の不正値は局所ValueError、I/OはTransportError/RpcErrorを用い、公開CodexConnectionErrorとfailure IDは接続で扱う。用途固有の受付不明・準備失敗・秘密値拒否を維持し、共有例外moduleを追加しない。
 
 D01は`ab74e25`で記録した。独立レビューでは所属/end判定後の受付、invalid IDの消費、回答検証後の消費、file承認の一件ずつの失効とRPC順に阻害指摘なし。候補tupleを返すdocstringを実体に合わせた。D02は候補・model・effortをModelSelection一件へ寄せ、設定RPCの後だけcommitする。RpcPeerはtransportへ移し、従来のconnectionからのimportを明示的な再公開で維持した。
+
+D02は`b4dcdb5`で記録し、独立レビューでもcatalog取得拒否、無効effort、設定RPC後のcommit、公開Protocol再公開に阻害指摘なし。D03は環境準備moduleと接続配線を別担当で実装・相互確認した。setup completionをclose同期部で失効し、各await後に同じcompletionが有効か確認する。子にclosed状態や接続状態を読むcallbackは追加していない。初期read待機後に停止済みなら、readiness不備を新しい準備失敗として報告せず従来どおり中止する。
 
 ## 8. 対象ファイル
 
@@ -118,6 +120,8 @@ D01は`ab74e25`で記録した。独立レビューでは所属/end判定後の�
 | D01対象2ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress`、`git diff --check` | passed | 要求担当の抽出。JSON field不正をValueErrorへ揃える2箇所はTRY004の局所説明を付記 |
 | baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-catalog` | 310 passed / 15.06s | D02。選択・Goal設定・transport公開境界を含む |
 | D02対象3ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 新snapshot所有とProtocolの移動。ignore/cast追加なし |
+| baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-sandbox` | 310 passed / 15.08s | D03。準備受付不明、先行完了、切断中readiness、製品準備 |
+| D03対象2ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 子背景taskの所有、公開例外への変換、事実通知 |
 | 段階別・最終gate | not run | 実装後に実行 |
 | 実runtime | not run | 親の受入待ち |
 
