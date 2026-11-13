@@ -904,6 +904,8 @@ class CodexConnection:
         goal_action: Literal["none", "pause", "clear"] = "none",
     ) -> None:
         end = self._end
+        if end is not None and end.reason == "close" and reason != "close":
+            return
         if end is None:
             end = self._end = _End(reason, self._turn)
         elif reason != "complete" and reason != end.reason:
@@ -1521,7 +1523,8 @@ class CodexConnection:
             self._emit(TurnStarted(turn_id))
             if self._end is not None and not self._end.error:
                 self._end.target = turn
-                self._end.reason = "interrupt"
+                if self._end.reason != "close":
+                    self._end.reason = "interrupt"
                 self._end.swept = False
                 self._end.done = False
                 self._status("stopping")

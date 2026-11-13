@@ -58,7 +58,7 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 | 通常会話・Goal turn間 | completed | 表示を締め、通常会話はready。active Goalはturn間の入力保留 | 終了要求なしの成功turnに回収を追加しない |
 | 失敗・中断 | failed/interrupted | 必要ならGoal pauseし、回収後stopped | 終了済みturnをinterruptしない |
 | 正常停止後の合法late turn | turn/started | 入力を戻さず中断し終端後回収 | item/質問から未知turnを採用しない |
-| 終了操作失敗 | Goal操作・interrupt・回収失敗 | errorを保持し新規実行を拒否。開始済み独立I/Oは回収 | 以後のlate turnでrunner再開・RPC再試行をしない。復旧は明示切断 |
+| 終了操作失敗 | Goal操作・interrupt・回収失敗 | errorを保持し新規実行を拒否。開始済み独立I/Oは回収 | 以後のlate turnのID・終端・表示は受け取るが、新しい中断・回収を開始しない。closeは保持した現在IDを使用できる。復旧は明示切断 |
 | 切断 | close | 準備・開始・Goal lock・終端待ちを打切り、可能な中断と公開端末回収を経て必ずtransport close | 同対象へ発行済みのinterrupt/回収は共有し、失敗済み試行も自動再試行しない |
 
 一回の回収は全ページ列挙・terminate・空一覧確認である。Aの回収開始前に合法Bが始まれば対象をBへ進め、B終端後に回収する。Aの回収が開始済みなら完了まで共有し、その結果をBに流用しない。過去全turnの回収キューは持たない。自然完了後のclearはGoal操作の変更であり、同対象の回収を繰り返さない。
@@ -71,7 +71,10 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 |---|---|---|---|---|
 | refactor-done | D01 停止受付は即時に戻り、自然完了・中断・開始受付を同じ終了対象として終端と一回回収まで新規実行を閉じる | behavior | unit | pause保留中のstop返却と独立interruptを最初のredにする。旧stop返却=RPC回収完了・complete直後回収の期待を改訂 |
 | refactor-skipped | D02 切断は未完の開始・終端・Goal lock待ちを打切り、既存回収を共有してtransportを閉じる | behavior | unit/integration | 自己待機・呼出元取消し・失敗後late turn・同対象の二重回収を回帰確認 |
-| green | D03 サービスは停止要求のローカル受付を記録し、shutdownではcloseへ直接進む | behavior | integration | ServiceResult型は増やさず、状態通知を実終了の根拠とする |
+| refactor-skipped | D03 サービスは停止要求のローカル受付を記録し、shutdownではcloseへ直接進む | behavior | integration | ServiceResult型は増やさず、状態通知を実終了の根拠とする |
+| refactor-skipped | D04 切断直後に配達済みの開始通知が届いても、終端待ちへ戻らずcloseする | regression | unit | 独立reviewで切断理由が中断へ上書きされる競合を指摘。D03完了後に一件追加 |
+
+旧`test_turn_operation_failures_share_status_id_with_exception`のstop例は、stop自身のRPC失敗例外という契約を廃止したため除いた。失敗は`test_unconfirmed_terminal_cleanup_keeps_execution_closed`で状態通知として確認する。自然completeの`cleanup_pending`総当たりは早期回収を廃止したため削除し、終端後に回収を保留する3操作の代表例へ統合した。shutdownのruntime_stop失敗2形式は追加stopの廃止に伴って削除し、直接closeと入力close失敗の回収へ分けた。
 
 開始通知なしの未知turn採用、終端済みturnの任意再送、終了通知の重複件数を網羅する模擬入力は保証しない。残る取消し・通信不明・準備失敗・権限境界の試験は維持する。
 
@@ -98,10 +101,12 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 
 | command | result | notes |
 |---|---|---|
-| D01対象pytest | red: 1 failed / green: 1 passed | Goal pause保留でstopが返らない失敗を確認。接続unit全体は161 passed / 0.75s |
-| D02対象pytest | red: 1 failed / green: 1 passed | 回収中closeがterminateを取消しwriterを残す失敗を確認。Goal lock待ちと終端未着のclose、失敗済み回収の非再送も検証 |
-| D03対象pytest | red: 1 failed / green: 1 passed | shutdownで追加stopが呼ばれる失敗を先に確認。停止受付の記録と公開phaseでの再開待ちも確認 |
-| 接続unit・service/GUI/shutdown/answer/transport integration | not run | 最終回帰 |
+| `uv run pytest tests/unit/test_codex_connection.py -q -k test_stop_acceptance_does_not_wait_for_goal_or_turn_completion --basetemp=tmp/pytest-u057` | red: 1 failed / green: 1 passed | Goal pause保留でstopが返らない失敗を確認。接続unit全体は161 passed / 0.75s |
+| `uv run pytest tests/unit/test_codex_connection.py -q -k test_close_collects_pending_terminal_cleanup --basetemp=tmp/pytest-u057` | red: 1 failed / green: 1 passed | 回収中closeがterminateを取消しwriterを残す失敗を確認。Goal lock待ちと終端未着のclose、失敗済み回収の非再送も検証 |
+| `uv run pytest tests/integration/test_codex_service.py -q -k test_shutdown_closes_without_submitting_an_additional_stop --basetemp=tmp/pytest-u057` | red: 1 failed / green: 1 passed | shutdownで追加stopが呼ばれる失敗を先に確認。停止受付の記録と公開phaseでの再開待ちも確認 |
+| `uv run pytest tests/unit/test_codex_connection.py -q -k test_queued_turn_start_cannot_restore_terminal_wait_during_close --basetemp=tmp/pytest-u057` | red: 1 failed / green: 1 passed | 配達済みstartedが切断理由を降格し終端待ちへ戻るTimeoutErrorを確認後、close優先で修正 |
+| `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-u057` | 163 passed / 0.43s | 最終回帰前のD04確認 |
+| `uv run pytest tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-u057` | 146 passed / 14.29s | D03関連回帰 |
 | ruff format/check、ty、lock check、build、diff check | not run | 公開API・型・配布gate |
 | 公開docs/docstring読解 | not run | 実装との意味整合 |
 | 実runtime・実機 | not run | 親担当が製品green後に実施 |

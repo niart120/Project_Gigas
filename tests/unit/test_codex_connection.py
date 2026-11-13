@@ -3475,3 +3475,30 @@ def test_close_breaks_goal_lock_and_terminal_wait_without_reinterrupting(tmp_pat
         assert _phase(events) == "closed"
 
     _run(scenario())
+
+
+def test_queued_turn_start_cannot_restore_terminal_wait_during_close(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        await connection.open()
+        await connection.set_goal("goal")
+        closing = asyncio.create_task(connection.close())
+        # The waiting consumer is scheduled after close, before shutdown cancels it.
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "late"}})
+        )
+        try:
+            await asyncio.wait_for(asyncio.shield(closing), 1)
+            assert peer.closed
+        finally:
+            await connection._notification(
+                RpcNotification(
+                    "turn/completed",
+                    {"threadId": "thread-1", "turn": {"id": "late", "status": "interrupted"}},
+                )
+            )
+            await connection.close()
+            await closing
+
+    _run(scenario())
