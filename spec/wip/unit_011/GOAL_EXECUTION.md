@@ -69,7 +69,7 @@ M0は本親・子仕様、初期設計、移動参照、Qt証跡と隔離調査�
 
 ## 9. 検証状態
 
-M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験と固定通知GUIはM2で確認し、実モデル・実機での工程受入はM3へ残す。通常turnのU05実機受入を流用しない。従来M1は全unit/integration 730 passed、通常turnの実モデルPlan/応答と固定通知のWindows操作を確認した。今回のunit_046修正は全unit/integration 740 passed、配布物検査と固定通知によるWindows通常・小画面、回答/拒否/中断、複数発言の選択・コピー保持を確認した。実モデル・実機の再受入とは区別する。unit_047は全unit/integration 743 passed、最終描画の関連61件、Windows通常/小画面のplaceholder・途中指示・中断を確認した。実モデル/機器を用いた受入ではない。実IME・複数DPI・実summaryはM3へ残す。
+M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験と固定通知GUIはM2で確認し、実モデル・実機での工程受入はM3へ残す。通常turnのU05実機受入を流用しない。従来M1は全unit/integration 730 passed、通常turnの実モデルPlan/応答と固定通知のWindows操作を確認した。今回のunit_046修正は全unit/integration 740 passed、配布物検査と固定通知によるWindows通常・小画面、回答/拒否/中断、複数発言の選択・コピー保持を確認した。実モデル・実機の再受入とは区別する。unit_047は全unit/integration 743 passed、最終描画の関連61件、Windows通常/小画面のplaceholder・途中指示・中断を確認した。実モデル/機器を用いた受入ではない。実IME・実summaryはM3へ残す。モニター間DPI遷移確認は追加合意で対象外。
 
 M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe、複数turn、介入、質問/承認、pause/再開/clear、設定適用と停止、記録IDを短い実機依頼で対応付ける。300秒実待機や長時間はU10。制限検証で意図的な課金超過は起こさない。
 
@@ -77,7 +77,7 @@ M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe�
 
 | 事項 | 担当・期限 |
 |---|---|
-| 小画面、選択箇所自体の更新、IME/DPI、実summary | M1修正で通常フォント条件の大小画面と閲覧保持を検証済み。文字拡大専用の受入は廃止。実IME・複数DPI・実summaryはM3へ残す |
+| 小画面、選択箇所自体の更新、IME、実summary | M1修正で通常フォント条件の大小画面と閲覧保持を検証済み。文字拡大専用の受入は廃止。実IME・実summaryはM3へ残す。モニター間DPI遷移確認は追加合意で対象外 |
 | Goal開始/再開/完了/制限と要求・停止・設定変更の競合、初回observe、memory書込 | M2で固定通知・実runtime/模擬機器の製品結合を確認。初回observeの実モデル遵守、実機と全認証/利用制限はM3。公開API単体の成功を製品結合の成功にしない |
 | 独立runtime起動環境 | M2で製品起動と書込範囲を確認。Windows sandbox未準備のhomeは設定不一致で拒否し、新規home準備はM3へ残す。desktop由来の2つのCODEX_WINDOWS_*起動変数でsandbox内書込が失敗し、子プロセスから除去すると成立した根拠に従う |
 | 新規ブラウザ認証/利用不能時 | M3。既存ChatGPT認証の成功と区別する |

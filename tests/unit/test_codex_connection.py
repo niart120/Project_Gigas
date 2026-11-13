@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Coroutine
 from importlib import resources
 from pathlib import Path
@@ -1274,8 +1275,10 @@ def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_pat
     _run(scenario())
 
 
+@pytest.mark.parametrize("wrapped_result", [False, True])
 def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
     tmp_path: Path,
+    wrapped_result: bool,
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -1285,6 +1288,16 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
         await connection.send("開始")
 
         def notify(method: str, fields: JsonObject, *, turn: str = "turn-1") -> None:
+            item = fields.get("item")
+            if (
+                wrapped_result
+                and isinstance(item, dict)
+                and item.get("type") == "mcpToolCall"
+                and isinstance(result := item.get("result"), dict)
+            ):
+                item["result"] = {
+                    "content": [{"type": "text", "text": json.dumps({**result, "isError": False})}]
+                }
             peer.events.put_nowait(
                 RpcNotification(method, {"threadId": "thread-1", "turnId": turn, **fields})
             )

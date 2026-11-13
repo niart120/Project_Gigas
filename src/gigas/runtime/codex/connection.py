@@ -1425,6 +1425,28 @@ class CodexConnection:
                 )
 
     @staticmethod
+    def _mcp_text(text: str) -> str:
+        # The pinned runtime can wrap the whole MCP result in a text block.
+        # Unwrap that single wire envelope, retaining only its text content.
+        try:
+            result = json.loads(text)
+        except (ValueError, RecursionError):
+            return text
+        if (
+            isinstance(result, dict)
+            and isinstance(result.get("content"), list)
+            and type(result.get("isError")) is bool
+        ):
+            return "\n".join(
+                block["text"]
+                for block in result["content"]
+                if isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+            )
+        return text
+
+    @staticmethod
     def _activity(turn_id: str, item_id: str, item: "JsonObject") -> ActivityEvent | None:
         kind, status = item.get("type"), item.get("status")
         if (
@@ -1458,7 +1480,7 @@ class CodexConnection:
                     if isinstance(block, dict) and block.get("type") == "text":
                         text = block.get("text")
                         if isinstance(text, str):
-                            details.append(text)
+                            details.append(CodexConnection._mcp_text(text))
             error = item.get("error")
             if isinstance(error, dict) and isinstance(message := error.get("message"), str):
                 details.append(message)
