@@ -304,6 +304,8 @@ class ConnectionPanel(QWidget):
         self._pending.discard(result.operation)
         self._error = result.error
         if result.error:
+            if result.operation == "select_model":
+                self.composer.set_choices(self.composer.selection)
             self._notify_failure(result.error, result.failure_id, operation=result.operation)
         if result.operation == "connect" and result.error:
             self._status = SessionStatus("error", detail=result.error)
@@ -464,8 +466,10 @@ class ConnectionPanel(QWidget):
             and self._status.phase in {"ready", "running", "waiting", "stopped"}
             and not self._pending
         )
-        if not model_available:
+        if not model_available and "select_model" not in self._pending:
             self.composer.popup.hide()
+        self.composer.model_choice.setEnabled(model_available)
+        self.composer.effort_choice.setEnabled(model_available)
         self.composer.model_button.setEnabled(
             model_available and self.composer.selection is not None
         )

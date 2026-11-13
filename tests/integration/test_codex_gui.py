@@ -917,22 +917,27 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     panel.model_requested.connect(lambda model, effort: picked.append((model, effort)))
     composer.model_button.click()
     assert composer.popup.isVisible()
-    composer.model_choice.setCurrentText("second")
-    assert composer.effort_choice.count() == 1
-    qtbot.keyClick(composer.popup, Qt.Key.Key_Escape)
-    assert not composer.popup.isVisible()
     assert picked == []
-    composer.model_button.click()
-    assert composer.model_choice.currentText() == "first"
+    composer.effort_choice.setCurrentText("low")
+    composer.effort_choice.activated.emit(composer.effort_choice.currentIndex())
+    assert picked == [("first", "low")]
+    panel.handle_event(ServiceEvent(1, ModelSelection(selection.choices, "first", "low")))
+    panel.handle_result(ServiceResult(1, "select_model"))
+    picked.clear()
     composer.model_choice.setCurrentText("second")
-    composer.apply_model.click()
+    composer.model_choice.activated.emit(composer.model_choice.currentIndex())
+    assert composer.effort_choice.count() == 1
     assert picked == [("second", "medium")]
-    assert composer.model_button.text() == "first · high"
+    assert composer.model_button.text() == "first · low"
     assert not composer.model_button.isEnabled()
     assert composer.interrupt_button.isEnabled()
     panel.handle_event(ServiceEvent(1, ModelSelection(selection.choices, "second", "medium")))
     panel.handle_result(ServiceResult(1, "select_model"))
     assert composer.model_button.text() == "second · medium"
+    assert composer.popup.isVisible()
+    qtbot.keyClick(composer.popup, Qt.Key.Key_Escape)
+    assert not composer.popup.isVisible()
+    assert picked == [("second", "medium")]
     assert panel.prompt.toPlainText() == "原稿を残す"
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     assert not composer.model_button.isEnabled()

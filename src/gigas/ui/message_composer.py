@@ -53,7 +53,7 @@ class _ActionButton(QPushButton):
         super().__init__(parent)
         self._send = send
         self.setAccessibleName(name)
-        self.setFixedSize(36, 36)
+        self.setFixedSize(30, 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
 
@@ -154,10 +154,8 @@ class MessageComposer(QFrame):
         self.effort_choice.setAccessibleName("推論レベル")
         form.addRow("モデル", self.model_choice)
         form.addRow("推論レベル", self.effort_choice)
-        self.apply_model = QPushButton("選択", self.popup)
-        form.addRow(self.apply_model)
-        self.model_choice.currentIndexChanged.connect(self._model_changed)
-        self.apply_model.clicked.connect(self._apply_model)
+        self.model_choice.activated.connect(self._choose_model)
+        self.effort_choice.activated.connect(self._apply_model)
         self.model_button.clicked.connect(self._open_models)
         self.set_choices(None)
         self.render_actions(
@@ -178,10 +176,13 @@ class MessageComposer(QFrame):
     def set_choices(self, selection: ModelSelection | None) -> None:
         """Display the connection's acknowledged next-turn selection."""
         self.selection = selection
-        self.popup.hide()
+        if selection is None:
+            self.popup.hide()
+        else:
+            self._populate_models()
         self.set_model(selection.model if selection else "", selection.effort if selection else "")
 
-    def _open_models(self) -> None:
+    def _populate_models(self) -> None:
         if self.selection is None:
             return
         self.model_choice.blockSignals(True)
@@ -191,6 +192,11 @@ class MessageComposer(QFrame):
         self.model_choice.blockSignals(False)
         self._model_changed()
         self.effort_choice.setCurrentText(self.selection.effort)
+
+    def _open_models(self) -> None:
+        if self.selection is None:
+            return
+        self._populate_models()
         self.popup.adjustSize()
         anchor = self.model_button.mapToGlobal(QPoint(self.model_button.width(), 0))
         bounds = self.screen().availableGeometry()
@@ -211,12 +217,16 @@ class MessageComposer(QFrame):
                 self.effort_choice.addItems(list(choice.efforts))
                 self.effort_choice.setCurrentText(choice.default_effort)
                 break
-        self.apply_model.setEnabled(self.effort_choice.count() > 0)
+
+    def _choose_model(self) -> None:
+        self._model_changed()
+        self._apply_model()
 
     def _apply_model(self) -> None:
-        self.popup.hide()
-        self.model_selected.emit(self.model_choice.currentText(), self.effort_choice.currentText())
-        self.prompt.setFocus()
+        if self.effort_choice.count():
+            self.model_selected.emit(
+                self.model_choice.currentText(), self.effort_choice.currentText()
+            )
 
     def render_actions(
         self, *, send_enabled: bool, interrupt_enabled: bool, running: bool, has_draft: bool
@@ -231,6 +241,6 @@ class MessageComposer(QFrame):
         """
         self.send_button.setEnabled(send_enabled)
         self.interrupt_button.setEnabled(interrupt_enabled)
-        self.interrupt_button.setFixedSize(28 if has_draft else 36, 28 if has_draft else 36)
+        self.interrupt_button.setFixedSize(24 if has_draft else 30, 24 if has_draft else 30)
         self.send_button.setVisible(not running or has_draft)
         self.interrupt_button.setVisible(running)
