@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QPoint, Qt, QUrl
 from PySide6.QtGui import QFont, QInputMethodEvent, QTextCursor
-from PySide6.QtWidgets import QApplication, QLineEdit, QTextBrowser
+from PySide6.QtWidgets import QApplication, QTextBrowser
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -99,11 +99,7 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         panel.choice.setCurrentIndex(1)
         _select_question(panel, token, "note")
         panel.prompt.setPlainText("補給後に現在地を確認する")
-        _select_question(panel, token, "secret")
-        masked_answer = "D07-SYNTHETIC-SECRET"
-        panel.secret.setText(masked_answer)
         panel.send_button.click()
-        assert panel.secret.text() == ""
         qtbot.waitUntil(lambda: len(panel.requests) == 2)
         approval = next(
             record for record in panel.requests.values() if record.request.kind == "command"
@@ -119,8 +115,6 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert panel.plan.isHidden()
         assert panel.target.count() == 1
         assert not panel.approvals.isVisible()
-        secret_absent = masked_answer not in panel.transcript.toPlainText()
-        assert secret_absent
     finally:
         shell.request_close()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
@@ -583,7 +577,7 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
                 "どれにしますか?",
                 (QuestionOption("A", "説明A"), QuestionOption("B", "説明B")),
             ),
-            Question("text", "入力", "秘密の値は?", is_secret=True),
+            Question("text", "装備", "使用する装備は?"),
             Question(
                 "other", "経路", "別の経路?", (QuestionOption("既定", "説明"),), is_other=True
             ),
@@ -596,25 +590,27 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     assert not panel.send_button.isEnabled()
     panel.choice.setCurrentIndex(1)
     _select_question(panel, "token", "text")
-    assert panel.secret.echoMode() == QLineEdit.EchoMode.Password
-    panel.secret.setText("secret")
+    panel.prompt.setPlainText("弓")
     _select_question(panel, "token", "other")
     panel.prompt.setPlainText("custom; stop before the gate")
     assert panel.prompt.isVisible()
-    panel.send_button.click()
+    _select_question(panel, "token", "choice")
+    qtbot.keyClick(panel.choice, Qt.Key.Key_Return)
+    assert not answers
+    qtbot.keyClick(panel.choice, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
     panel.send_button.click()
     assert len(answers) == 1
     assert answers[0] == AnswerSubmission(
-        "token", answers={"choice": "B", "text": "secret", "other": "custom; stop before the gate"}
+        "token", answers={"choice": "B", "text": "弓", "other": "custom; stop before the gate"}
     )
     panel.handle_event(ServiceEvent(5, RequestResolved("token")))
     assert not record.is_live
-    assert panel.secret.text() == ""
-    assert record.drafts.get("text", "") == ""
-    assert "secret" not in panel.transcript.toPlainText()
+    assert record.drafts["text"] == "弓"
+    assert "装備: 弓" in panel.transcript.toPlainText()
     assert "説明B" in panel.transcript.toPlainText()
     assert "custom; stop before the gate" in panel.transcript.toPlainText()
     panel.handle_result(ServiceResult(5, "answer", answer=AnswerResult("token", "sent")))
+    assert not record.drafts
     assert panel.target.count() == 1
     assert not panel.target.isVisible()
     assert "送信済み" in panel.transcript.toPlainText()
@@ -686,47 +682,7 @@ def test_question_targets_isolate_drafts_and_late_message_acceptance(
     assert panel.prompt.toPlainText() == ""
 
 
-@pytest.mark.parametrize("ending", ["resolved", "stop", "disconnect", "terminal"])
-def test_secret_drafts_are_removed_without_transferring_to_messages(
-    qtbot: QtBot, ending: str
-) -> None:
-    panel = ConnectionPanel()
-    qtbot.addWidget(panel)
-    panel.activate(1)
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
-    panel.handle_event(
-        ServiceEvent(
-            1,
-            HumanRequest(
-                "secret",
-                1,
-                "thread",
-                "turn",
-                "question",
-                questions=(Question("value", "秘密", "秘密の値", is_secret=True),),
-            ),
-        )
-    )
-    panel.secret.setText("PRIVATE-DRAFT")
-    panel.target.setCurrentIndex(0)
-    assert panel.prompt.toPlainText() == ""
-    panel.prompt.setPlainText("ordinary draft")
-    if ending == "resolved":
-        panel.handle_event(ServiceEvent(1, RequestResolved("secret")))
-    elif ending == "stop":
-        panel.interrupt()
-    elif ending == "disconnect":
-        panel.disconnect_action.trigger()
-    else:
-        panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
-    assert panel.requests["secret"].drafts.get("value", "") == ""
-    assert panel.secret.text() == ""
-    assert panel.prompt.toPlainText() == "ordinary draft"
-    assert "PRIVATE-DRAFT" not in panel.transcript.toPlainText()
-
-
-def test_composition_keeps_message_target_and_secret_ctrl_enter_waits(qtbot: QtBot) -> None:
+def test_composition_keeps_message_target_and_question_ctrl_enter_waits(qtbot: QtBot) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.show()
@@ -738,12 +694,12 @@ def test_composition_keeps_message_target_and_secret_ctrl_enter_waits(qtbot: QtB
         ServiceEvent(
             1,
             HumanRequest(
-                "secret",
+                "route",
                 1,
                 "thread",
                 "turn",
                 "question",
-                questions=(Question("value", "秘密", "秘密の値", is_secret=True),),
+                questions=(Question("value", "経路", "どの道を通るか"),),
             ),
         )
     )
@@ -753,20 +709,21 @@ def test_composition_keeps_message_target_and_secret_ctrl_enter_waits(qtbot: QtB
     assert layout is not None
     assert layout.preeditAreaText() == "へんかん"
     QApplication.sendEvent(panel.prompt, QInputMethodEvent("", []))
-    _select_question(panel, "secret", "value")
-    panel.secret.setText("private-value")
+    _select_question(panel, "route", "value")
+    panel.prompt.setPlainText("東")
     sent: list[object] = []
     panel.answer_requested.connect(sent.append)
-    QApplication.sendEvent(panel.secret, QInputMethodEvent("へんかん", []))
-    qtbot.keyClick(panel.secret, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    QApplication.sendEvent(panel.prompt, QInputMethodEvent("へんかん", []))
+    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
     assert not sent
-    QApplication.sendEvent(panel.secret, QInputMethodEvent("", []))
-    qtbot.keyClick(panel.secret, Qt.Key.Key_Return)
+    QApplication.sendEvent(panel.prompt, QInputMethodEvent("", []))
+    panel.prompt.moveCursor(QTextCursor.MoveOperation.End)
+    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return)
     assert not sent
-    qtbot.keyClick(panel.secret, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
-    assert sent == [AnswerSubmission("secret", answers={"value": "private-value"})]
-    assert panel.secret.text() == ""
-    assert "private-value" not in panel.transcript.toPlainText()
+    assert panel.prompt.toPlainText() == "東\n"
+    qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert sent == [AnswerSubmission("route", answers={"value": "東\n"})]
+    assert "経路: 東" in panel.transcript.toPlainText()
     panel.handle_event(
         ServiceEvent(
             1,

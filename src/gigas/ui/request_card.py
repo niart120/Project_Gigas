@@ -87,7 +87,7 @@ class RequestRecord:
         )
 
     def submit(self, decision: str | None = None) -> AnswerSubmission | None:
-        """Snapshot one valid submission and immediately remove secret drafts.
+        """Snapshot one valid submission without discarding its pending draft.
 
         Args:
             decision: Explicit advertised decision, or None to answer all questions.
@@ -102,8 +102,7 @@ class RequestRecord:
                 return None
             answers = {question.id: self.drafts[question.id] for question in self.request.questions}
             self.answer_text = "\n".join(
-                f"{question.header}: {'秘密回答' if question.is_secret else answers[question.id]}"
-                for question in self.request.questions
+                f"{question.header}: {answers[question.id]}" for question in self.request.questions
             )
             submission = AnswerSubmission(self.request.token, answers=answers)
         else:
@@ -112,14 +111,12 @@ class RequestRecord:
             self.answer_text = DECISION_LABELS[decision]
             submission = AnswerSubmission(self.request.token, decision=decision)
         self.state = "sending"
-        self._clear_secrets()
         return submission
 
     def invalidate(self) -> None:
         """Expire unanswered requests without changing submitted delivery evidence."""
         if self.is_live:
             self.state = "expired"
-        self._clear_secrets()
 
     def mark_unconfirmed(self) -> None:
         """Mark an outstanding submission unknown until its queued result arrives."""
@@ -137,8 +134,3 @@ class RequestRecord:
             self.state = outcome
             if outcome == "sent":
                 self.drafts.clear()
-
-    def _clear_secrets(self) -> None:
-        for question in self.request.questions:
-            if question.is_secret:
-                self.drafts.pop(question.id, None)

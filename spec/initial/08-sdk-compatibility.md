@@ -83,9 +83,13 @@ GameIoMcpServer(observations, inputs, protocol)がobserveとact_and_observeを�
 
 同じ模擬モデル経路で、質問保留中の`turn/steer`、複数question IDへの一括回答、回答に含めた追加指示と別steerの一回ずつの配送、終了後steerの`-32600`拒否を確認した。`tools.update_plan.enabled=true`で2項目と説明の`turn/plan/updated`を受信した。これは採用版で既定falseの[Planツール設定](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/tools/spec_plan.rs#L1301)を明示する必要がある。自然文を質問回答と追加指示へ自動分類せず、質問IDと送信対象を選ぶ。承認は要求IDに対応する明示操作だけで返す。
 
+M1で秘密入力の採用を撤回した。採用版の[protocol定義](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/protocol/src/request_user_input.rs#L15)には既定falseの`isSecret`があるが、[モデル向け質問ツール定義](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/tools/handlers/request_user_input_spec.rs#L39)では公開されない。GIGASの用途と実モデルからの受信証拠はなく、専用UIを維持しない。1問でもtrueなら既存の未対応エラーで要求全体を拒否する。[app-serverの応答処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/bespoke_event_handling.rs#L1707)はそのエラーを空回答へ変換するため、拒否をturnの中断と同一視しない。以上は固定版ソースの確認と製品decoderの設計であり、実モデルから秘密質問を受信して拒否した実測ではない。
+
 設定適用の境界は実runtimeとローカルResponses mockの送信JSONでも確認した。ツール保留中に設定を変えても、同じターンのツール結果後の推論は旧モデルを使い、次の自律ターンから新モデル・effortを使った。実モデルの開始時記録だけを根拠に同ターン内の適用時点まで断定していない。
 
-実行根拠は`tmp/u06/runtime-goal/live-20261113-021248/report.json`（Goal）、`live-20261113-021441/report.json`（設定）、`wire-20261113-022053/report.json`（設定適用境界）、`live-20261113-021808/report.json`（paused中の通常送信）、`tmp/u06/mcp-20261113-021320/report.json`（操作権）、`tmp/u06/interaction-20261113-021655/report.json`（質問・steer・Plan）。短い実モデル試験では公開reasoning要約を受信しておらず、全認証・モデルでの提供を保証しない。M1の表示結合、M2のGoalと質問/承認の競合、M3の実モデル・実機の一連操作は後続確認とする。300秒経過、長時間継続、APIキー課金経路、制限の実発生はこの結果に含まない。
+実行根拠は`tmp/u06/runtime-goal/live-20261113-021248/report.json`（Goal）、`live-20261113-021441/report.json`（設定）、`wire-20261113-022053/report.json`（設定適用境界）、`live-20261113-021808/report.json`（paused中の通常送信）、`tmp/u06/mcp-20261113-021320/report.json`（操作権）、`tmp/u06/interaction-20261113-021655/report.json`（質問・steer・Plan）。短い実モデル試験では公開reasoning要約を受信しておらず、全認証・モデルでの提供を保証しない。このM0結果に続くM1では製品の表示結合を確認した。M2のGoalと質問/承認の競合、M3の実モデル・実機の一連操作は後続確認とする。300秒経過、長時間継続、APIキー課金経路、制限の実発生はこの結果に含まない。
+
+M1の製品結合: [子仕様](../wip/unit_045/COMMON_DIALOGUE_UI.md)で共通入力・公開表示・配送結果を実装し、固定stdio peer経由の質問/steer/承認/終端を確認した。既存ChatGPT認証と実モデル`gpt-6.1-sol`・lowでは、製品ApplicationShellから通常turnを一度開始し、2回のPlan更新、応答の表示、下書き消去、終端とサービス終了を確認した。公開summaryは未受信。Goal制御・実機・新規認証の証拠には使わない。
 
 # 1. この文書の位置づけ
 
@@ -133,7 +137,7 @@ Goal開始前に永続thread・通知購読・操作権を用意します。採�
 
 初回SDK調査では、標準承認ハンドラがacceptを返す実装と、唯一の受信スレッド内でハンドラを同期実行する構造を確認しました。回答保留で後続受信が止まる問題はU02の模擬peerで再現し、SDK不採用の根拠としました。
 
-製品のCodex接続部は一つの公開app-server接続で受信を継続し、回答待ちを受信処理の外で扱います。要求IDに対応する有効な回答だけを返し、承認はGUIの明示操作で送ります。通常ターンの保留・中断・失効はU02、ゲーム入力の独立した停止はU05で確認済みです。共通MessageとGoalへの結合・競合はU06 M1〜M3で確認します。別受信経路やSDK内部handlerの差し替えは追加しません。
+製品のCodex接続部は一つの公開app-server接続で受信を継続し、回答待ちを受信処理の外で扱います。要求IDに対応する有効な回答だけを返し、承認はGUIの明示操作で送ります。通常ターンの保留・中断・失効はU02、ゲーム入力の独立した停止はU05で確認済みです。共通Messageへの結合はU06 M1の固定stdio往復で確認し、Goalとの競合はM2/M3へ残します。別受信経路やSDK内部handlerの差し替えは追加しません。
 
 # 5. 認証・モデル・利用制限
 
@@ -159,7 +163,9 @@ app-server の利用枠情報は ChatGPT 利用枠が対象です。取得でき
 | 継続保留 | [goals.rs](https://github.com/openai/codex/blob/0811df39768427445b9730c039d6c04020670e04/codex-rs/state/src/runtime/goals.rs)には保存済みの継続保留があります | 内部DBを編集したり、状態を再設定し続けたりして保留を解除しません |
 | 接続の実体 | U02の[製品transport](../../src/gigas/runtime/codex/transport.py)がローカルapp-serverと一つのstdio接続を所有します | 明示的な通信故障では入力を止めます。自動再接続・再起動して攻略を復帰させる機構は設けません |
 
-### 明示的な操作に必要な状態取得
+#
+
+## 明示的な操作に必要な状態取得
 
 `thread/goal/get`や`thread/read`などの状態取得は、開始・明示的再開・計画的終了の手順で必要なときに利用します。通常実行中の表示は公開通知に従い、整合性検査のための定期取得や、通知の取りこぼしを推定して状態を再構築する機構は作りません。
 
@@ -257,7 +263,6 @@ U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確�
 - [承認モードの変換](https://github.com/openai/codex/blob/27fcd7cbedd7efd63fd704bd01a0cfe1d7b85a26/sdk/python/src/openai_codex/_approval_mode.py)
 
 - [Python パッケージ定義](https://github.com/openai/codex/blob/27fcd7cbedd7efd63fd704bd01a0cfe1d7b85a26/sdk/python/pyproject.toml)
-
 
 ## U04 M2前の追加調査: 永続チャットと完全出力
 

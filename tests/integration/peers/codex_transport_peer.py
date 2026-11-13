@@ -142,7 +142,7 @@ def inherited_pipe_child() -> None:
 
 
 def dialogue() -> None:
-    """Validate one GUI dialogue without recording RPC data or secret answers."""
+    """Validate one GUI dialogue without recording RPC data."""
     thread_id, turn_id = "dialogue-thread", "dialogue-turn"
     for raw in sys.stdin.buffer:
         request = json.loads(raw)
@@ -270,14 +270,6 @@ def dialogue() -> None:
                         "isSecret": False,
                         "options": [],
                     },
-                    {
-                        "id": "secret",
-                        "header": "秘密",
-                        "question": "確認値は?",
-                        "isOther": False,
-                        "isSecret": True,
-                        "options": [],
-                    },
                 ],
             },
         }
@@ -297,11 +289,10 @@ def dialogue() -> None:
             "answers": {
                 "route": {"answers": ["South"]},
                 "note": {"answers": ["補給後に現在地を確認する"]},
-                "secret": {"answers": ["D07-SYNTHETIC-SECRET"]},
             }
         },
     }
-    # Keep failure diagnostics boolean-only, including for the synthetic secret.
+    # Keep failure diagnostics boolean-only instead of exposing RPC payloads.
     assert answer_matches
     del answer
     notice("serverRequest/resolved", {"requestId": "dialogue-question"})

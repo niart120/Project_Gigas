@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip、UIバランスを再設計中**。[U06親仕様](../unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行う。
+状態: **wip、実装・検証完了、仕様の最終確認中**。[U06親仕様](../unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行う。
 
 2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討する。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直す。D08までの自動検証成功と、UIの受入完了を区別する。
 
@@ -10,7 +10,7 @@
 
 ## 2. 対象範囲
 
-通常turnの共通Message、質問回答・追加指示・承認、History、現在turnの公開Plan、公開reasoning summary、実itemのactivity、左右配置、reasoning表示設定。M0の選択/コピー/閲覧保持、秘密入力、小画面、IME/DPIの未確認事項を製品で検証する。
+通常turnの共通Message、質問回答・追加指示・承認、History、現在turnの公開Plan、公開reasoning summary、実itemのactivity、左右配置、reasoning表示設定。M0の選択/コピー/閲覧保持、小画面、IME/DPIの未確認事項を製品で検証する。秘密入力は対応を撤回し、要求全体の未対応拒否を確認する。
 
 ## 3. 対象外
 
@@ -27,7 +27,8 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 | 入力・状態 | 期待する振る舞い |
 |---|---|
 | 通常メッセージ・実行中の追加指示 | 共通欄と送信/Ctrl+Enterを使う。待機時はturn/start、対象turnが実行中ならexpectedTurnId付きsteer。明確な受付前に下書きを消さず、拒否・受付不明で自動再送しない |
-| 複数質問 | (要求token, question ID)ごとに下書きを保持。送信先選択で共通欄を切替え、選択中要求の必須回答を一つのanswersへ送る。選択肢、自由回答、秘密回答を区別し、質問間・追加指示へ本文を自動転用しない。送信結果で原稿を消すときは提出本文と送信先キーを照合し、別送信先の同文原稿を消さない |
+| 複数質問 | (要求token, question ID)ごとに下書きを保持。送信先選択で共通欄を切替え、選択中要求の必須回答を一つのanswersへ送る。選択肢と自由回答を区別し、質問間・追加指示へ本文を自動転用しない。送信結果で原稿を消すときは提出本文と送信先キーを照合し、別送信先の同文原稿を消さない |
+| 秘密入力指定 | isSecret=trueを含む要求全体を未対応として返し、UIへ渡さない。専用入力・通常文への置換・部分回答・自動停止は行わない |
 | 承認・要求失効 | 許可/拒否/取消しは公開要求の明示ボタンだけ。要求本文と配送状態は履歴に残し、操作部は未解決時だけ表示。AnswerResultの送信証拠とresolved通知を区別する |
 | Plan/summary/activity | 採用thread/turn/itemへ対応付ける。Planは全一覧置換。現在本文は上部だけ、説明は履歴に出し、終了・turn切替で最終一覧を履歴へ移して現在欄を消す。公開summaryだけを表示し、生reasoningは扱わない。activityは公開itemの対象・結果を一項目へ更新する |
 | 履歴更新 | リッチテキストをエスケープし、外部資源を無条件に開かない。itemの更新で選択方向・文字境界・閲覧位置を保ち、選択なしの末尾だけ追従する。隠すsummary内の選択は解除し次項目へ移す |
@@ -50,8 +51,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | refactor-skipped | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | `857cca8`。window_presets red 2 failed/4 passed→green 6 passed。関連回帰48 passed、製品描画確認 |
 | refactor-skipped | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | `4951e3a`。red 1 failed→green、GUI/transport/要求寿命63 passed。既存peerとGUI試験へ統合 |
 | refactor-skipped | D08 Plan表示等で履歴領域が変わっても、末尾追従と過去閲覧を区別する | regression | integration | `49293d5`。red 1 failed/36 passed→green 37 passed。関連回帰57 passed。実runtime画像から見つけたviewport縮小後の追従離脱を修正 |
-| refactor-done | D09 通常・縮小ウィンドウで情報の優先順位に沿って対話・映像・操作領域を配分する | regression | integration/manual | 対話red 3 failed/41 passed、映像red 1 failed→対話等51、映像等47 passed。比較と製品描画に基づきPlan・承認・Messageの高さ配分、映像上限と中央寄せを修正。独立レビューで未使用layout参照1件を除去 |
-| todo | D10 秘密入力指定をUIへ出さず、通常質問・承認だけを扱う | regression | unit/integration | U02由来の専用入力を撤去。1問でもisSecret=trueなら要求全体を既存未対応応答で拒否し、通常欄へ変換しない |
+| refactor-done | D09 通常・縮小ウィンドウで情報の優先順位に沿って対話・映像・操作領域を配分する | regression | integration/manual | `729c109`。対話red 3 failed/41 passed、映像red 1 failed→対話等51、映像等47 passed。比較と製品描画に基づきPlan・承認・Messageの高さ配分、映像上限と中央寄せを修正。独立レビューで未使用layout参照1件を除去 |
+| refactor-skipped | D10 秘密入力指定をUIへ出さず、通常質問・承認だけを扱う | regression | unit/integration | U02由来の専用入力と秘密専用4試験を撤去。既存不正要求試験へ混在要求を統合、red 1 failed/1 passed→green 2 passed、関連157 passed |
 
 ## 7. 設計判断
 
@@ -84,10 +85,18 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D06 | `uv run pytest tests/integration/test_window_presets.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py -q --basetemp=tmp/pytest-u06-layout`: 48 passed。担当ruff check/format、全体ty、diff check: pass | 左右配置・status/preset追随、長い送信先/選択肢、承認scrollと中断/送信を確認。800×600/Meiryo UI16ptの製品offscreen描画でHistory101px/Message64px。重複wrapper/見出し/余白とPlan末尾空行を必要な範囲だけ除去、追加refactorなし |
 | D07 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_codex_transport.py tests/integration/test_answer_lifecycle.py -q --basetemp=tmp/pytest-u06-stdio`: red 1 failed→最終63 passed。担当ruff check/format、全体ty、diff check: pass | ApplicationShell→Service/QThread→stdio→公開decoder/UIを往復。Plan/summary/activity、質問中steer、選択・自由文・秘密の一括回答、承認拒否、終端/close。peerは固定フローのassertだけでRPCを保存しない。追加refactorなし |
 | D08 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_window_presets.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u06-qt`: 57 passed。担当ruff check/format、全体ty、diff check: pass | Plan show/hideでの末尾/過去閲覧/逆向き選択を既存GUI試験へ統合。Transcriptのresize前後で既存の末尾/可視文字の復元を行い、新しいstate/timerを追加しない。最小再現も失敗→成功 |
-| D09 | 既存codex_gui/window_presets/answer_lifecycle/video_gui: 51 passed。video_gui/video_application/resolution_application/settings_apply_contract: 47 passed。担当ruff check/format、全体ty、diff check: pass | 現在Planの重複・終端残存・承認ボタン可視性のred 3件と、映像追従のred 1件を解消。1280→1920→800の実resizeでも取得世代・原画像寸法・接続を維持。重複するresize専用試験は追加せず既存spawn試験へ統合。rootの結合回帰（同4tree＋ui_control_lifetime/video_application/resolution_application/settings_apply_contract、`--basetemp=tmp/pytest-u06-d09-root`）98 passed。追加refactorなし |
+| D09 | 既存codex_gui/window_presets/answer_lifecycle/video_gui: 51 passed。video_gui/video_application/resolution_application/settings_apply_contract: 47 passed。担当ruff check/format、全体ty、diff check: pass | 現在Planの重複・終端残存・承認ボタン可視性のred 3件と、映像追従のred 1件を解消。1280→1920→800の実resizeでも取得世代・原画像寸法・接続を維持。重複するresize専用試験は追加せず既存spawn試験へ統合。rootの結合回帰（同4tree＋ui_control_lifetime/video_application/resolution_application/settings_apply_contract、`--basetemp=tmp/pytest-u06-d09-root`）98 passed。独立レビューの未使用layout参照を除去し、codex_gui/window_presets 43 passed |
 | D09描画 | 製品部品をそのまま使う固定通知のQt描画、1280×720/1920×1080・11pt、800×600・16ptを目視 | Historyは1280で400px、1920で760px、800の左幅259pxで167px。800でも承認3ボタン同時可視、Messageは2行分。実モデル・物理機器の証拠とは分ける |
 
-全体gate・製品画面は各項目の結合後に実施する。
+| D10 | `uv run pytest tests/unit/test_codex_connection.py::test_invalid_server_requests_report_distinct_failures_without_changing_phase -q --basetemp=tmp/pytest-u06-d10-secret`: red 1 failed/1 passed→green 2 passed。接続unit＋codex_gui/codex_transport/answer_lifecycle/ui_control_lifetime/window_presets: 157 passed | 混在要求でwaitingへ移るredを解消。HumanRequestなし、部分応答・interruptなし、元のrunning維持を確認。普通質問の複数回答・IME・原稿隔離を維持し、不要SubmitFilterを既存eventFilterへ統合。担当ruff/全体ty/diff pass、独立レビュー追加指摘なし、追加refactorなし |
+| 最終全体gate | `uv run pytest tests/unit tests/integration -q --tb=short --basetemp=tmp/pytest-u06-final-d10`: **730 passed / 58.42s** | 全製品単体・結合回帰。秘密専用試験の撤去を含む最終件数 |
+| 最終静的・配布 | `uv run ruff format --check .`（196 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`（83 packages）、`uv build`、`git diff --check`: pass | 書式・lint/Google docstring・公開型境界、lock、sdist/wheel。依存追加・cast/ignore追加なし |
+
+D04/D07の秘密入力の検証は当時の実績であり、現行の採用を意味しない。D10でその経路と専用試験を撤去し、通常質問の回帰へ統合した。
+
+実runtimeの通常turn結合はD08完了時に実施した。`$env:QT_QPA_PLATFORM='offscreen'; uv run python -X utf8 tmp/u06-m1/live_ui_probe.py`で、製品ApplicationShellと既定factory、採用runtime 0.167.0、既存ChatGPT認証、`gpt-6.1-sol`・lowを使った。送信1件の公開受付、2回のPlan更新、最終応答の一致と可視、下書き消去、ready終端、サービス・設定・取得の正常回収が成功した。根拠は`tmp/u06-m1/live-20261113-131612-782657/report.json`と`ui.png`。Goal・機器操作・追加認証は行わず、公開summaryは未受信だった。
+
+最初の隔離実行はapp-serverの初期化前に終了した。読み取り権限のsandboxでCodex homeのSQLite初期化とPATH alias処理が拒否されたため、同じ隔離プロジェクトの検証を通常権限で実行して成立を確認した。資格情報のコピーや再認証はしていない。D09後の配置とD10後の通常質問は、固定stdioの製品往復とWindows画面で別途確認し、D08時点の実モデル画像を最終配置の証拠にしない。
 
 ## 10. 先送り事項
 

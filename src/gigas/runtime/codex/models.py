@@ -191,7 +191,6 @@ class Question:
         question: Model-provided question text.
         options: Selectable model-provided choices; empty allows text input.
         is_other: Whether text outside the supplied options is allowed.
-        is_secret: Whether answer entry should hide the typed text.
     """
 
     id: str
@@ -199,7 +198,6 @@ class Question:
     question: str
     options: tuple[QuestionOption, ...] = ()
     is_other: bool = False
-    is_secret: bool = False
 
 
 @dataclass(frozen=True, slots=True)

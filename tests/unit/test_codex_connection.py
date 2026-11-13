@@ -409,8 +409,10 @@ def test_turn_operation_failures_share_status_id_with_exception(
     _run(scenario())
 
 
+@pytest.mark.parametrize("case", ["malformed", "secret"])
 def test_invalid_server_requests_report_distinct_failures_without_changing_phase(
     tmp_path: Path,
+    case: str,
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -421,11 +423,25 @@ def test_invalid_server_requests_report_distinct_failures_without_changing_phase
             await connection.send("開始")
             failures: list[int] = []
             for request_id in ("invalid-1", "invalid-2"):
+                params: JsonObject = {"threadId": "thread-1", "turnId": "turn-1", "itemId": "item"}
+                if case == "secret":
+                    params.update(
+                        isBlocking=True,
+                        questions=[
+                            {"id": "route", "header": "進路", "question": "次の進路は?"},
+                            {
+                                "id": "private",
+                                "header": "確認",
+                                "question": "確認値は?",
+                                "isSecret": True,
+                            },
+                        ],
+                    )
                 peer.events.put_nowait(
                     ServerRequest(
                         request_id,
                         "item/tool/requestUserInput",
-                        {"threadId": "thread-1", "turnId": "turn-1", "itemId": "item"},
+                        params,
                     )
                 )
                 await _events_processed()
@@ -436,6 +452,9 @@ def test_invalid_server_requests_report_distinct_failures_without_changing_phase
                 failures.append(status.failure_id)
             assert failures[1] > failures[0]
             assert len(peer.rejections) == 2
+            assert not any(isinstance(event, HumanRequest) for event in events)
+            assert not peer.replies
+            assert not any(method == "turn/interrupt" for method, _ in peer.calls)
         finally:
             await connection.close()
 

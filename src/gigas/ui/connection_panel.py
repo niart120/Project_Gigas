@@ -4,7 +4,7 @@ from math import ceil
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QDesktopServices, QPalette
+from PySide6.QtGui import QAction, QDesktopServices, QKeyEvent, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -34,7 +34,7 @@ from gigas.runtime.codex.models import (
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.notifications import Notice
-from gigas.ui.prompt_edit import PromptEdit, SubmitFilter
+from gigas.ui.prompt_edit import PromptEdit
 from gigas.ui.request_card import DECISION_LABELS, RequestRecord
 from gigas.ui.transcript import Transcript
 
@@ -160,9 +160,6 @@ class ConnectionPanel(QWidget):
         self.composer = QStackedWidget(self)
         self.prompt = PromptEdit(self.composer)
         self.prompt.setAccessibleName("Message")
-        self.secret = QLineEdit(self.composer)
-        self.secret.setAccessibleName("秘密回答")
-        self.secret.setEchoMode(QLineEdit.EchoMode.Password)
         self.choice = QComboBox(self.composer)
         self.choice.setAccessibleName("回答")
         for combo in (self.target, self.choice):
@@ -171,7 +168,6 @@ class ConnectionPanel(QWidget):
             )
             combo.setMinimumContentsLength(12)
         self.composer.addWidget(self.prompt)
-        self.composer.addWidget(self.secret)
         self.composer.addWidget(self.choice)
         layout.addWidget(self.composer)
         turn_actions = QHBoxLayout()
@@ -191,13 +187,9 @@ class ConnectionPanel(QWidget):
         self.prompt.submit_requested.connect(self.send_button.click)
         self.interrupt_button.clicked.connect(self.interrupt)
         self.prompt.textChanged.connect(self._edit_draft)
-        self.secret.textChanged.connect(self._edit_draft)
         self.choice.currentIndexChanged.connect(self._edit_draft)
         self.target.currentIndexChanged.connect(self._select_target)
-        self._submit_filter = SubmitFilter(self)
-        self._submit_filter.submit_requested.connect(self.send_button.click)
-        self.secret.installEventFilter(self._submit_filter)
-        self.choice.installEventFilter(self._submit_filter)
+        self.choice.installEventFilter(self)
         self._render()
 
     def activate(self, generation: int) -> None:
@@ -519,11 +511,8 @@ class ConnectionPanel(QWidget):
 
     def _show_editor(self) -> None:
         # Restoring another target must not feed its text back into the previous draft.
-        self._submit_filter.reset_composition()
-        with QSignalBlocker(self.prompt), QSignalBlocker(self.secret), QSignalBlocker(self.choice):
-            self.secret.clear()
+        with QSignalBlocker(self.prompt), QSignalBlocker(self.choice):
             self.choice.clear()
-            self.choice.setEditable(False)
             if self._target is None:
                 self.prompt.set_draft(self._message_draft)
                 self.composer.setCurrentWidget(self.prompt)
@@ -536,19 +525,8 @@ class ConnectionPanel(QWidget):
             self.prompt.set_draft("")
             if question.options and not question.is_other:
                 self.choice.addItems([option.label for option in question.options])
-                if question.is_secret:
-                    self.choice.setEditable(True)
-                    editor = self.choice.lineEdit()
-                    if editor is not None:
-                        editor.setReadOnly(True)
-                        editor.setEchoMode(QLineEdit.EchoMode.Password)
-                        editor.setAccessibleName("秘密回答")
-                        editor.installEventFilter(self._submit_filter)
                 self.choice.setCurrentIndex(self.choice.findText(text) if text else -1)
                 self.composer.setCurrentWidget(self.choice)
-            elif question.is_secret:
-                self.secret.setText(text)
-                self.composer.setCurrentWidget(self.secret)
             else:
                 self.prompt.set_draft(text)
                 self.composer.setCurrentWidget(self.prompt)
@@ -562,13 +540,7 @@ class ConnectionPanel(QWidget):
             if not record.is_live:
                 return
             editor = self.composer.currentWidget()
-            text = (
-                self.secret.text()
-                if editor is self.secret
-                else self.choice.currentText()
-                if editor is self.choice
-                else self.prompt.toPlainText()
-            )
+            text = self.choice.currentText() if editor is self.choice else self.prompt.toPlainText()
             record.drafts[self._target[1]] = text
         self._render()
 
@@ -619,7 +591,21 @@ class ConnectionPanel(QWidget):
         self.approvals.setFixedHeight(min(natural, 6 * self.fontMetrics().lineSpacing()))
 
     def eventFilter(self, watched: "QObject", event: QEvent) -> bool:  # noqa: N802 -- Qt override
-        """Fit approval rows to their viewport using Qt's standard row wrapping."""
+        """Handle choice submission and fit approval rows to their viewport."""
+        if (
+            isinstance(event, QKeyEvent)
+            and watched is self.choice
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
+            and event.modifiers()
+            in {
+                Qt.KeyboardModifier.ControlModifier,
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.KeypadModifier,
+            }
+        ):
+            if not event.isAutoRepeat():
+                self.send_button.click()
+            return True
         if watched is self.approvals.viewport() and event.type() == QEvent.Type.Resize:
             self._fit_approvals()
         return super().eventFilter(watched, event)
@@ -674,7 +660,6 @@ class ConnectionPanel(QWidget):
             ready = ready and bool(self._message_draft.strip())
         self.send_button.setEnabled(ready)
         self.prompt.setReadOnly(not editable)
-        self.secret.setReadOnly(not editable)
         self.choice.setEnabled(editable)
         self.interrupt_button.setEnabled(
             available

@@ -137,6 +137,9 @@ def _questions(value: "JsonValue") -> tuple[Question, ...]:
     questions: list[Question] = []
     for item in value:
         data = _object(item)
+        if data.get("isSecret") is True:
+            message = "入力を秘匿する質問形式には未対応"
+            raise CodexConnectionError(message)
         choices = data.get("options")
         options: list[QuestionOption] = []
         if choices is not None:
@@ -158,7 +161,6 @@ def _questions(value: "JsonValue") -> tuple[Question, ...]:
                 _text(data.get("question")),
                 tuple(options),
                 data.get("isOther") is True,
-                data.get("isSecret") is True,
             )
         )
     if len({question.id for question in questions}) != len(questions):
