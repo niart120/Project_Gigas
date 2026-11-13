@@ -6,6 +6,7 @@ import re
 import sys
 from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime
+from importlib import resources
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Lock
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from gigas.game_io.observation import Observation
+    from gigas.runtime.codex.transport import JsonObject
     from gigas.storage.input_events import InputEvent
 
 
@@ -145,6 +147,82 @@ class ProjectWriter:
             if self._lock_file is not None:
                 self._lock_file.close()
                 self._lock_file = None
+
+    def ensure_memory(self) -> Path:
+        """Create missing memory entry files without replacing user or agent content.
+
+        Returns:
+            Absolute memory directory to use as the runtime workspace.
+
+        Raises:
+            ProjectBusyError: Another synchronous operation owns the writer.
+            ProjectError: The writer is closed or an entry could not be created.
+        """
+        with self._operation():
+            self._require_open()
+            memory = self.path / "memory"
+            try:
+                memory.mkdir(exist_ok=True)
+                for target, template in (
+                    (self.path / "guide.md", "guide.md"),
+                    (memory / "current.md", "current.md"),
+                ):
+                    if target.exists():
+                        continue
+                    text = resources.files("gigas.prompts").joinpath(template).read_text("utf-8")
+                    with target.open("x", encoding="utf-8", newline="\n") as stream:
+                        stream.write(text)
+            except OSError as error:
+                message = f"{self.path}: 記憶の入口を準備できません。既存資材は保持します: {error}"
+                raise ProjectError(message) from error
+            return memory
+
+    def record_dialogue(
+        self,
+        kind: str,
+        content: "JsonObject",
+        *,
+        thread_id: str,
+        turn_id: str | None = None,
+        run_id: str | None = None,
+        received_at: str | None = None,
+    ) -> None:
+        """Append application-selected public dialogue using the shared event envelope.
+
+        Args:
+            kind: Event name beginning with dialogue.; never a raw RPC method.
+            content: Public fields selected by the caller, excluding secrets and drafts.
+            thread_id: Owning runtime conversation.
+            turn_id: Owning turn when known.
+            run_id: Input permission interval when associated.
+            received_at: UTC receipt time captured before asynchronous storage.
+                None uses the synchronous call time.
+
+        Raises:
+            ProjectBusyError: Another synchronous operation owns the writer.
+            ProjectError: The envelope is invalid, unavailable, or cannot be appended.
+        """
+        payload: dict[str, object] = {
+            "thread_id": thread_id,
+            "content": content,
+            "received_at": received_at or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
+        if run_id is not None:
+            payload["run_id"] = run_id
+        with self._operation():
+            sequence = self._require_writable()
+            if not kind.startswith("dialogue.") or not kind.removeprefix("dialogue."):
+                message = "対話イベント名が不正です"
+                raise ProjectError(message)
+            try:
+                _validate_dialogue(payload)
+                json.dumps(content, allow_nan=False)
+            except (ValueError, TypeError) as error:
+                message = f"対話記録が不正です。記録していません: {error}"
+                raise ProjectError(message) from error
+            self._append_event(kind, payload, sequence)
 
     def record_thread(self, thread_id: str) -> None:
         """Record a real Codex thread before its first turn is submitted.
@@ -441,7 +519,19 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         if payload.get("runtime") != "codex":
             message = "会話記録のruntimeが不正です"
             raise ValueError(message)
+    elif kind.startswith("dialogue."):
+        _validate_dialogue(record["payload"])
     return sequence
+
+
+def _validate_dialogue(value: object) -> None:
+    payload = _object(value)
+    _thread_id(payload.get("thread_id"))
+    _timestamp(payload.get("received_at"))
+    for name in ("turn_id", "run_id"):
+        if name in payload:
+            _thread_id(payload[name])
+    _object(payload.get("content"))
 
 
 def _validate_observation(value: object) -> None:

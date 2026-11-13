@@ -64,7 +64,12 @@ def create_connection(
         path_key = next((key for key in os.environ if key.upper() == "PATH"), "PATH")
         env[path_key] = str(path_dir) + os.pathsep + os.environ.get(path_key, "")
     return CodexConnection(
-        StdioTransport(command, options.cwd, env),
+        StdioTransport(
+            command,
+            options.cwd,
+            env,
+            unset_env=("CODEX_WINDOWS_REGISTERED_CORE", "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY"),
+        ),
         options,
         emit,
         prepare_turn=prepare_turn,

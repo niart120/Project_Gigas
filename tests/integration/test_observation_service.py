@@ -18,6 +18,7 @@ from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
+    from gigas.runtime.codex.transport import JsonObject
 
 
 def test_submitted_records_keep_storage_order_and_drain_ownership(
@@ -44,10 +45,20 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
             assert await asyncio.to_thread(entered.wait, 3)
             observation = Observation.from_frame(sample_frame())
             recording.submit_observation(observation)
+            payload: JsonObject = {"text": "公開応答"}
+            recording.submit_dialogue(
+                "dialogue.message", payload, thread_id="thread", turn_id="turn", run_id="run"
+            )
+            payload["text"] = "変更後"
             recording.submit_input(RunFinished("req", "run", "stopped"))
             with pytest.raises(ProjectBusyError):
                 writer.close()
             assert not (writer.path / observation.image_path).exists()
+            preparing = asyncio.create_task(recording.ensure_memory())
+            await asyncio.sleep(0)
+            preparing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await preparing
             waiting = asyncio.create_task(recording.drain())
             await asyncio.sleep(0)
             assert not waiting.done()
@@ -61,9 +72,19 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
         assert [row["type"] for row in records] == [
             "input.run_started",
             "observation.recorded",
+            "dialogue.message",
             "input.run_finished",
         ]
+        recorded_payload = records[2]["payload"]
+        assert recorded_payload.pop("received_at") <= records[2]["occurred_at"]
+        assert recorded_payload == {
+            "thread_id": "thread",
+            "turn_id": "turn",
+            "run_id": "run",
+            "content": {"text": "公開応答"},
+        }
         assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+        assert (writer.path / "memory/current.md").is_file()
 
     try:
         asyncio.run(scenario())
@@ -88,7 +109,7 @@ def test_record_failure_reaches_shared_failure_callback(
     async def scenario() -> None:
         recording.on_failure = failures.append
         recording.submit_input(RunStarted("req", "run", "thread", "A"))
-        recording.submit_input(RunFinished("req", "run", "start_failed"))
+        recording.submit_dialogue("dialogue.delivery", {"outcome": "unknown"}, thread_id="thread")
         await recording.drain()
         assert len(failures) == 2
 

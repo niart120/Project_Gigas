@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -201,6 +202,8 @@ def test_close_waits_for_child_exit_and_releases_all_tasks(
         waited: list[int] = []
         loop = asyncio.get_running_loop()
         original_spawn = loop.subprocess_exec
+        monkeypatch.setenv("GIGAS_REMOVED_FROM_CHILD", "parent-value")
+        monkeypatch.setenv("GIGAS_PRESERVED_IN_CHILD", "preserved-value")
 
         async def observed_spawn(
             factory: Callable[[], _ProcessProtocol],
@@ -212,6 +215,9 @@ def test_close_waits_for_child_exit_and_releases_all_tasks(
             stderr: int,
             creationflags: int,
         ) -> tuple[asyncio.SubprocessTransport, _ProcessProtocol]:
+            assert "GIGAS_REMOVED_FROM_CHILD" not in env
+            assert env["GIGAS_PRESERVED_IN_CHILD"] == "preserved-value"
+            assert os.environ["GIGAS_REMOVED_FROM_CHILD"] == "parent-value"
             process, protocol = await original_spawn(
                 factory,
                 *command,
@@ -251,6 +257,7 @@ def test_close_waits_for_child_exit_and_releases_all_tasks(
             tmp_path,
             env={"GIGAS_TRANSPORT_TEST": "isolated"},
             close_timeout=0.1,
+            unset_env=("gigas_removed_from_child",),
         )
         await asyncio.gather(transport.start(), transport.start())
         try:
