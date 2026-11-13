@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。実接続受入を継続中で、M3全体は未完了。
+2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。最終受入監査で見つかったD05を修正中。実接続受入を継続中で、M3全体は未完了。
 
 ## 2. 対象範囲
 
@@ -34,6 +34,8 @@
 | refactor-skipped | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合、812件成功、96937c9へコミット |
 | refactor-skipped | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 公開readiness/setupと既存login/終了経路を結合。全832件成功、実新規ログイン・OS準備は本人操作待ち |
 | refactor-skipped | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。859197bで新機能より先に修正 |
+| red | D05 Goal complete後の入力を閉じながら最終応答を中断しない | regression、unit/integration/実接続 | 固定peerで製品自身のinterruptによる最終応答欠落を再現。明示停止と自然完了を既存回収試験で区別する |
+| todo | D06 Windows準備の公開失敗理由を診断へ保持する | regression、unit/実接続 | 実setup失敗時の理由を既存bool通知変換が破棄していた。既存sandbox試験を改訂し、理由あり/なしを区別する |
 
 ## 7. 設計メモ
 
@@ -42,6 +44,8 @@
 採用版schema（`tmp/u06/storage-auth/schema/v2`）でaccount/read、rateLimits/readと部分更新通知、windowsSandbox/readiness・setupStart・setupCompletedを確認した。[公式app-server文書](https://learn.chatgpt.com/docs/app-server)も2026-11-13に参照。利用枠のnull値から回復を推測しない。sandbox準備は受付と完了通知を分け、書込範囲の最終確認は従来のthread応答検証を維持する。これらのschema確認だけでは製品接続の受入済みとしない。
 
 D01は新phaseを作らず、ModelSelectionの候補を保持して無効なmodel/effortだけ空にする。選び直しは既存select_model、catalogのRPC拒否は接続を維持して明示再接続で再取得する。プロトコル不正・transport障害は従来どおり終了する。
+
+D05の決定: Goal completeでは入力・追加指示・要求を閉じて公開端末を回収するが、現在turnへinterruptを送らず最終応答と自然終端を待つ。turn終端でも公開端末が残っていないことを確認してからstoppedにする。待機中の明示stop/clear、pause・block・制限・失敗では従来どおりinterruptを送る。新phaseや継続ループは作らず、公開一覧外の背景子孫の終了保証は拡張しない。
 
 ## 8. 対象ファイル
 
@@ -61,20 +65,22 @@ D01: connectionの旧挙動で5件、GUIの暗黙選択/再開許可で3件、�
 
 | 受入項目 | 必要な証拠 | 現状 |
 |---|---|---|
-| 無効設定・認証分離、新規ログイン | 固定RPC/Qtと新規ブラウザ認証の実接続 | 無効値/候補/既存認証は確認済み。新規ログインは本人操作待ち |
-| sandbox初回準備 | 未準備homeから準備、memory書込と原記録保全 | 固定受付/完了/失敗/切断を確認。新規homeはnotConfigured、OS準備は本人操作待ち |
+| 無効設定・認証分離、新規ログイン | 固定RPC/Qtと新規ブラウザ認証の実接続 | 無効値/候補/既存認証を確認。本人の新規ログイン成功も公開再取得で確認済み |
+| sandbox初回準備 | 未準備homeから準備、memory書込と原記録保全 | 固定受付/完了/失敗/切断を確認。本人の準備操作は実行済みだが実runtimeが失敗を通知。原因調査中 |
 | 利用制限 | 実取得、固定通知/失敗の停止確認。意図的課金超過なし | 実アカウント/利用枠UI、固定通知による利用不能停止を確認済み |
 | Goal開始・目的更新・複数turn・完了・pause/resume/clear | 実モデル・実機の通知と操作記録 | 実2自律turnとcomplete通知を確認。目的更新/pause/resume/clear・自然最終応答は未確認 |
 | 介入・質問・承認・配送競合 | 実要求と回答、固定競合試験、遅い応答の失効 | 固定通知/競合試験は既存実績。今回の実要求は未確認 |
-| 操作権・観測・停止・再公開 | USB Video Device、COM8・CH552・9600 baud。再開初回observe、旧権限失効、入力解除 | 同runの初回observe・各入力解除を確認。実機再開/再公開は未確認 |
+| 操作権・観測・停止・再公開 | USB Video Device、COM8・CH552・9600 baud。再開初回observe、旧権限失効、入力解除 | 同runの初回observe・中立状態の送出を確認。ゲーム機側の解除確認、入力途中停止、paused中会話の入力不可、手動操作後の再開observe/再公開は未確認 |
 | 次turnモデル/推論レベル、機器設定と停止 | 通常/自律turn、現在turn不変、提出済み機器設定適用の継続 | M0実API/M2模擬結合を維持。実機設定提出後の停止と適用継続を確認。Goal実行中との結合・製品実モデルの設定確認は準備待ち |
 | 記憶書込中断・公開記録 | 実機停止と書込停止、再開、対話/input/observeのID対応と非同期保存 | 実記録ID・画像非複製のreplayを確認。実モデルのmemory書込/中断は未確認 |
-| 実応答UI | 実summary/Plan/応答、選択コピー/更新中スクロール、実IME | 実Plan3件、summary未受信。閲覧保持は既存固定試験、実IMEは本人操作待ち |
+| 実応答UI | 実summary/Plan/応答、選択コピー/更新中スクロール、実IME | 実Plan3件、summary未受信。閲覧保持は既存固定試験、実IMEは本人操作とQt未確定/確定イベントで確認済み |
 | 実接続終了 | 切断/アプリ終了、所有処理回収。M2中間版の終了timeoutを再確認 | 実Goal/実アカウント/新規home接続のサービス終了と所有PID回収を確認済み |
 
 ## 10. 先送り事項
 
 APIキーは今回対象外であり再採用時に別途合意する。公開一覧外の背景子孫の終了保証、計画終了・復旧・記憶整理・長時間は親のU07以降の境界を維持する。今回の受入が実行できない場合は理由と影響をここに残し、完了へ移さない。
+
+2026-11-13の追加指示: 現行実装の検証を終えた段階で、ログイン・実行準備・利用状況を設定ダイアログへまとめる方向を検討する。アカウント認証、Windows側の準備、app-server接続の役割と名称を整理し、日常の接続/切断操作との区別を見直す。検証中にはUI配置変更を広げず、未合意の配置を採用済みとしない。
 
 ## 11. チェックリスト
 
@@ -84,7 +90,7 @@ APIキーは今回対象外であり再採用時に別途合意する。公開�
 - [ ] 品質gate、型/docstring・公開docs・初期設計・親仕様を整合した
 - [ ] KISSと既存実装の一貫性を再レビューし、論理単位でコミットした
 
-M3実機途中結果: `goal-20261113-173702-808589/report.json`。実gpt-6.1-sol/low、2自律turn・同run、LEFT100ms/RIGHT100ms各1回、各input_sent/neutral=sent、入力前observe、記録ID、公開Plan3件、Goal complete、サービス・所有PID終了を確認。summary0件、current.md更新未確認。モデルがyielded execのwaitをせずturnを終了した記録があり、権限不備とは断定しない。complete通知直後にprobeがinterruptしたため自然最終応答の受入とは分ける。
+M3実機途中結果: `goal-20261113-173702-808589/report.json`。実gpt-6.1-sol/low、2自律turn・同run、LEFT100ms/RIGHT100ms各1回、各input_sent/neutral=sent、入力前observe、記録ID、公開Plan3件、Goal complete、サービス・所有PID終了を確認。summary0件、current.md更新未確認。モデルがyielded execのwaitをせずturnを終了した記録があり、権限不備とは断定しない。complete通知直後にprobeがinterruptし、製品も同通知でinterruptすることが後続監査の固定peer再生で判明した。最終応答の欠落をprobeだけの原因とせず、D05修正後に自然終端を再確認する。
 
 D04: 実通知のtext blockにMCP結果全体のJSONが入り、activity/detailsへ約104万文字のbase64画像等を重複保存した。採用版で観測した一段のMCP結果包みだけを解き、内側のtext blockを抽出して画像・structuredContent・_metaを除外する。既存test_public_progressを直形式/包み形式でparameterizeし、包み形式1 failed→2 passed（`--basetemp=tmp/pytest-u050-mcp-red`/`-green`）。公開表示とDialogueEventは同じActivityEventを使うため両方へ反映する。
 
@@ -98,7 +104,7 @@ D01時点の`uv build`・`uv run python scripts/check_package.py`も成功。最
 
 D03設計: Windows製品の接続時にreadinessを取得し、未準備/更新必要/取得不能でも接続・認証を維持する。memory書込が必要なthread準備だけreadyを前提にし、read-only利用は変えない。既存Codexメニューの明示準備操作がsetupStart(mode=elevated、cwd省略)を呼ぶ。開始受付とsetupCompleted・再readinessを区別し、待機中も切断可能。切断でOS準備が取消されたとは表示しない。採用版sourceは起動時設定をreadinessへ使用するため、成功後もnotConfiguredなら自動再接続せず再接続必要を通知する。権限モードの自動fallbackなし。
 
-新規home preflight: `tmp/u06-m3/fresh-home-20261113-173855/report.json`で認証コピーなしの隔離homeからlogin_required、モデル候補9件、readiness=notConfigured、接続終了を確認。本人の新規ログインとOS準備はまだ未実施。
+新規home preflight: `tmp/u06-m3/fresh-home-20261113-173855/report.json`で認証コピーなしの隔離homeからlogin_required、モデル候補9件、readiness=notConfigured、接続終了を確認。その後の本人操作による認証・準備結果は下記に記録する。
 
 D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤判定する競合を通常/Goal×停止有無の4例でred→green。新規問い合わせ・自動再送は加えず、既存の初回取得taskだけを待つ。停止が先行すればthread/Goalを提出しない。setup完了待ちとcloseの競合も再現し、閉接続へ遅い成功を通知しない。OS処理の取消しを保証する変更ではない。
 
@@ -109,3 +115,7 @@ D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、�
 文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。
 
 実機設定/停止: `tmp/u06-m3/settings-stop-20261113-180709/report.json`。USB Video DeviceとCOM8・CH552・9600への設定保存を提出直後にstopし、stop完了後もserial接続・映像適用が完了した。続けて取得要求FPS60→30の保存提出直後にstopしても、映像世代1→2へ再接続・適用が完了した。実FPSの測定ではない。同値serialは同ownerを保持し、再接続した証拠にはしない。ボタン入力要求0・モデル0、接続時の中立状態送信のみ。serial owner、全サービスと映像worker PID33184/58844の回収を確認。Goal active中の検証とは区別する。
+
+本人操作の受入: `tmp/u06-m3/fresh-20261113-180214-566284/report.json`。認証コピーなしの隔離homeで、ログイン開始→ブラウザ認証→account再取得authenticated=true→readyを確認。setupは本人の操作後に失敗通知となったため成功扱いにしない。全サービス・所有PIDを正常回収。`fresh-20261113-181828-460469/report.json`では、本人のIME入力・変換・確定に対応するQt InputMethodイベント14件（未確定文字と4文字/3文字の確定）を受信し、モデル送信0で正常終了した。先行の認証用画面は検証fixtureでMessageを無効化しており、IME受入には用いない。
+
+最終受入監査: 実記録74件のevent ID一意、6観測のPNG存在/寸法、2入力完了から観測への参照を独立確認。実モデル設定probeは選択受理だけでは不十分なため、診断のthread/turn IDと実採用model/effortを照合し、診断欠落・不一致では成功にしない。製品には内部診断読取への依存を追加しない。
