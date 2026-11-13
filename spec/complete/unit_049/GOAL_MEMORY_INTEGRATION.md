@@ -15,6 +15,8 @@ Goalは公開状態を正本とし、goal/setだけで開始する。目的更�
 
 turn/interruptの終端だけでは、thread内の同期exec_commandも終了しないことを実測した。停止では公開thread/backgroundTerminals/listの全ページを取得し、processIdごとにterminateして、最後に一度一覧の空を確認する。接続が一つの共有taskで回収を所有し、回収中はstopping、未確認失敗はerrorとして新規送信・再開を拒否する。Goal自然停止、失敗・中断、承認cancel、遅いturnも同じ経路を使う。監視・再試行・OS PID終了は追加しない。公開一覧に属さない任意の子孫プロセスや外部書込の終了までは保証しない。
 
+M3の後続修正: complete時も一律interruptして最終応答を切る問題を確認した。[M3 D05](../../wip/unit_050/GOAL_ACCEPTANCE.md)で、入力停止と公開端末回収を維持しながら完了時のturnの自然終端を待つ契約へ改訂する。明示停止・休止・制限・失敗の中断は維持する。
+
 Goal本文とPlanは別の標準Transcript内で選択・コピー・更新中スクロール保持を行う。独自の跨ぎ選択は作らない。目的更新だけで既受信Planを消さず、公開通知にないGoal改訂との対応を推測しない。目標モードの切替は原稿を保持しAPIを呼ばない。受理成功でモードをオフへ戻し、提出時と同じ原稿だけ消す。編集中の別原稿、失敗・受付不明の原稿は保持する。
 
 不足時だけguide/currentを生成して既存内容を保持する。notesは必要時にCodexが作る。書込はmemoryに限定し、原記録はアプリが既存RecordingServiceへ非同期提出する。公開対話はthread/turn/run ID、提出と配送を対応付けるrequest_id、提出時received_at、保存時occurred_atを記録する。本文・公開summary・activityは項目完了または中断時の部分スナップショットを保存し、未送信原稿・秘密入力・内部推論全文を保存しない。

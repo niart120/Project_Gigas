@@ -40,6 +40,8 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `clear_goal()`はGoalを破棄し、実行中ターンの中断も独立して試みます。`stop()`はGoalを保持して一時停止します。どちらも戻り値だけでターン終端と判断せず、公開状態と`SessionStatus`を確認します。active Goalのターン間に`send()`は使えません。paused中の通常会話はGoalを再開せず、製品サービスもゲーム入力を許可しません。
 
+Goalが`complete`になると入力・追加指示・質問への回答受付を閉じ、公開端末を回収します。完了時に実行中だったturnの最終応答は自動中断せず、自然終端と端末の回収確認を待って`ready`に戻ります。完了後に始まった別turnは中断します。待機中にも`stop()`・`clear_goal()`で明示的に中断でき、この場合は終了確認後`stopped`になります。
+
 `select_model(model, effort)`は公開候補を検証し、受理した選択を`ModelSelection`で通知します。通常送信は次の`turn/start`から使用します。Goalがある場合は公開`thread/settings/update`も完了してから選択を通知し、受理後に始まる自律ターンへ適用します。実行中ターンや`steer()`の設定は変えません。
 
 `steer(prompt, expected_turn_id)`は実行中の指定turnへ追加指示を一度だけ送ります。通常送信のthread準備やMCP更新は行わず、質問を回答済みにしたり入力権を再取得したりしません。現在turnが一致しない場合は拒否します。公開成功応答で確認したturn IDを返し、モデルが指示に従ったことは保証しません。明確な拒否は`CodexConnectionError`、送信後の通信断など受付不明は`MessageDeliveryError`です。自動再送はしません。

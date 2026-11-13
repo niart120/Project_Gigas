@@ -1101,6 +1101,49 @@ def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
     assert panel.prompt.toPlainText() == "追加指示"
 
 
+@pytest.mark.parametrize("action", ["natural", "stop", "clear"])
+def test_goal_final_report_wait_remains_interruptible_and_finishes_plan(
+    qtbot: QtBot, action: str
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(3)
+    panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+    panel.handle_result(ServiceResult(3, "connect"))
+    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
+    panel.handle_event(ServiceEvent(3, TurnStarted("auto")))
+    panel.handle_event(ServiceEvent(3, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(3, PlanEvent("auto", (PlanStep("橋まで移動", "inProgress"),))))
+    panel.prompt.setPlainText("次の原稿")
+    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "complete"))))
+    panel.handle_event(ServiceEvent(3, SessionStatus("stopping", "m", "low", True)))
+    assert not panel.send_button.isEnabled()
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.interrupt_button.isEnabled()
+    assert panel.plan_panel.clear_button.isEnabled()
+    requested: list[str] = []
+    panel.interrupt_requested.connect(lambda: requested.append("stop"))
+    panel.goal_clear_requested.connect(lambda: requested.append("clear"))
+    if action == "natural":
+        panel.handle_event(
+            ServiceEvent(3, PlanEvent("auto", (PlanStep("橋まで移動", "completed"),)))
+        )
+        panel.handle_event(ServiceEvent(3, TextEvent("final", "橋に到着しました", replace=True)))
+        panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+        assert panel.plan_panel.status.text() == "完了"
+        assert "橋に到着しました" in panel.transcript.toPlainText()
+        assert not requested
+    else:
+        (panel.interrupt_button if action == "stop" else panel.plan_panel.clear_button).click()
+        assert requested == [action]
+        assert not panel.interrupt_button.isEnabled()
+        panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
+        panel.handle_result(ServiceResult(3, "stop" if action == "stop" else "goal_clear"))
+        assert panel.plan_panel.status.text() == "中断"
+    assert panel.prompt.toPlainText() == "次の原稿"
+    assert panel.send_button.isEnabled()
+
+
 def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
     qtbot: QtBot,
 ) -> None:

@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。最終受入監査で見つかったD05を修正中。実接続受入を継続中で、M3全体は未完了。
+2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。最終受入監査で見つかったD05も修正・固定検証済み。D06と実接続受入を継続中で、M3全体は未完了。
 
 ## 2. 対象範囲
 
@@ -34,7 +34,7 @@
 | refactor-skipped | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合、812件成功、96937c9へコミット |
 | refactor-skipped | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 公開readiness/setupと既存login/終了経路を結合。全832件成功、実新規ログイン・OS準備は本人操作待ち |
 | refactor-skipped | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。859197bで新機能より先に修正 |
-| red | D05 Goal complete後の入力を閉じながら最終応答を中断しない | regression、unit/integration/実接続 | 固定peerで製品自身のinterruptによる最終応答欠落を再現。明示停止と自然完了を既存回収試験で区別する |
+| refactor-skipped | D05 Goal complete後の入力を閉じながら最終応答を中断しない | regression、unit/integration/実接続 | 固定peerで欠落を再現し既存回収試験を改訂。明示停止先行/遅いcomplete、終端/中断RPC競合、UI中断/Plan表示を確認。全843件成功、実モデルは未確認 |
 | todo | D06 Windows準備の公開失敗理由を診断へ保持する | regression、unit/実接続 | 実setup失敗時の理由を既存bool通知変換が破棄していた。既存sandbox試験を改訂し、理由あり/なしを区別する |
 
 ## 7. 設計メモ
@@ -45,7 +45,13 @@
 
 D01は新phaseを作らず、ModelSelectionの候補を保持して無効なmodel/effortだけ空にする。選び直しは既存select_model、catalogのRPC拒否は接続を維持して明示再接続で再取得する。プロトコル不正・transport障害は従来どおり終了する。
 
-D05の決定: Goal completeでは入力・追加指示・要求を閉じて公開端末を回収するが、現在turnへinterruptを送らず最終応答と自然終端を待つ。turn終端でも公開端末が残っていないことを確認してからstoppedにする。待機中の明示stop/clear、pause・block・制限・失敗では従来どおりinterruptを送る。新phaseや継続ループは作らず、公開一覧外の背景子孫の終了保証は拡張しない。
+D05の決定: Goal completeでは入力・追加指示・要求を閉じて公開端末を回収するが、現在turnへinterruptを送らず最終応答と自然終端を待つ。turn終端でも公開端末が残っていないことを確認してから既存のreadyに戻り、Planを自然終了として表示する。待機中の明示stop/clear、pause・block・制限・失敗では従来どおりinterruptを送りstoppedとする。先行した明示停止を遅いcomplete通知で解除しない。新phaseや継続ループは作らず、公開一覧外の背景子孫の終了保証は拡張しない。
+
+D05は完了時のturn IDだけを保持する。先行item/要求で別turnのIDが採用される場合があるため、現在turn IDだけでは自然終了を待つ対象を区別できない。手動停止・終端でこの保持値を消し、端末回収と中断応答は既存owned taskで待つ。UIは既存Goal/turn/手動停止の値から中断可否を決め、新しいphaseや状態管理層を増やさない。
+
+D02: read.ordinaryUsageAllowed=falseと現在turnのwillRetry=falseだけを停止根拠とする。残高ゼロ・使用率・reset時刻で推測しない。疎な更新通知では完全snapshotを再取得し、単一owned taskが処理中の通知を一回分へまとめる。定期poll・再試行はなくcloseで回収する。falseをnull/失敗で解除しない。接続→Codexの非modalポップオーバーは既存Transcriptの選択/コピー/スクロール保持を再利用し、常設表示を増やさない。
+
+D03設計: Windows製品の接続時にreadinessを取得し、未準備/更新必要/取得不能でも接続・認証を維持する。memory書込が必要なthread準備だけreadyを前提にし、read-only利用は変えない。既存Codexメニューの明示準備操作がsetupStart(mode=elevated、cwd省略)を呼ぶ。開始受付とsetupCompleted・再readinessを区別し、待機中も切断可能。切断でOS準備が取消されたとは表示しない。採用版sourceは起動時設定をreadinessへ使用するため、成功後もnotConfiguredなら自動再接続せず再接続必要を通知する。権限モードの自動fallbackなし。
 
 ## 8. 対象ファイル
 
@@ -53,15 +59,49 @@ D05の決定: Goal completeでは入力・追加指示・要求を閉じて公�
 
 ## 9. 検証計画と結果
 
+### 自動検証・表示・文書
+
 単体/結合を変更範囲ごとに実行し、最終にruff format/check、ty、unit/integration、lock check、build、配布物検査、diff checkを実施する。公開型/docstringは対応skillで確認。D03最終変更後も全体gate・配布物検査は成功。実接続受入の完了は別途判定する。
 
 D01: connectionの旧挙動で5件、GUIの暗黙選択/再開許可で3件、診断保持で2件の期待したredを確認。`uv run pytest tests/unit/test_codex_connection.py tests/unit/test_message_composer.py tests/integration/test_codex_gui.py tests/integration/test_codex_service.py tests/integration/test_codex_transport.py tests/integration/test_window_presets.py tests/integration/test_app_settings.py tests/integration/test_ui_control_lifetime.py -q --basetemp=tmp/pytest-u050-d01-final`は285 passed。全体ruff format/check、ty、lock check、diff check成功。文書validatorは912 links/50 units/errorsなし。型追加・ignore/castなし。公開open/set_modelの説明とdocsを照合。新抽象化は不要と判断しrefactorを省略する。
+
+D04: 実通知のtext blockにMCP結果全体のJSONが入り、activity/detailsへ約104万文字のbase64画像等を重複保存した。採用版で観測した一段のMCP結果包みだけを解き、内側のtext blockを抽出して画像・structuredContent・_metaを除外する。既存test_public_progressを直形式/包み形式でparameterizeし、包み形式1 failed→2 passed（`--basetemp=tmp/pytest-u050-mcp-red`/`-green`）。公開表示とDialogueEventは同じActivityEventを使うため両方へ反映する。
+
+D02検証: redは公開イベント/停止処理未実装4 failed、UI入口未実装。`uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d02-full --junitxml=tmp/u06-m3/d02-tests.xml`は812 passed。全体ruff format/check・ty成功。後続描画修正の関連52件も成功。`tmp/u06-m3/account-render/`の通常960×640・800×600、未取得/取得不能/利用不可を目視し、連結改行を修正。`uv run python -X utf8 tmp/u06-m3/account_live.py`は実ChatGPTアカウント識別・利用許可・利用枠1件を製品UIへ表示、接続終了成功（account-live/report.json、popup.png）。実機で利用枠を枯渇させず、停止は固定通知で確認した。
+
+D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤判定する競合を通常/Goal×停止有無の4例でred→green。新規問い合わせ・自動再送は加えず、既存の初回取得taskだけを待つ。停止が先行すればthread/Goalを提出しない。setup完了待ちとcloseの競合も再現し、閉接続へ遅い成功を通知しない。OS処理の取消しを保証する変更ではない。
+
+D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、失敗・error・skipなし（JUnit `tmp/u050-d03-reviewed-all.xml`）。`uv run ruff format --check .`（211 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功。配布物は隔離wheel install、capture worker終了、module/script両入口の起動終了を確認した。公開型/docstring、既存phase・owned task・終了経路をレビュー済み。close競合1例・初回readiness競合4例の指摘を採用して既存試験を改訂し、別状態機械・自動再試行は不要と判断した。
+
+D05最終gate: `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d05-final-all --junitxml=tmp/u050-d05-final-all.xml`は843 passed（62.55秒）。上記ruff format/check・ty・lock check・build・配布物検査・diff checkも全て成功。固定completeの8件でredを確認し、追加レビューで中断RPC応答前のturn終端、手動停止先行のlate complete、UIの中断不能とPlan誤表示を既存試験へ統合して修正した。実モデルの自然最終応答はこの固定試験で代用せず、準備完了後に確認する。
+
+文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。
+
+### 実接続・実機の証拠と限界
 
 `uv run python -X utf8 tmp/u06-m3/api_preflight.py`: ホスト制約内では接続失敗。同じコードを制約外で実行すると既存ChatGPT認証、候補8件、windowsSandbox/readiness=ready、account/rateLimits/readの取得と接続終了に成功。`ordinaryUsageAllowed=true`、primary/credits等を受信。証拠は`tmp/u06-m3/api-preflight/report.json`。新規認証・新規home準備・製品利用枠UIの確認ではない。
 
 `uv run python -X utf8 tmp/u06-m3/live_product_probe.py --mode capture`: `capture-20261113-173343-666130/report.json`でUSB Video Device 1920×1080取得、2秒/5秒後のゲーム画面とサービス/worker終了を確認。初回直後は黒、後続はポケモンセンター前の画面。入力・モデルは未要求。待機は検証だけであり製品観測の最新cache即時応答は変更していない。
 
 開始前の製品ライブラリ列挙でUSB Video Device（DSHOW index1）とCOM8を確認。CH552は使用プロトコルでありWindowsのポート表示名はUSB-SERIAL CH340。日本語キーボードレイアウトは存在するが実IME操作は未確認。Qtの実画面列挙はAW2725QF一台、2560×1440 logical、DPR1.5。複数モニター間のDPI遷移は現構成では実行できず、ユーザーが今回の確認自体を対象外とした。別倍率の固定描画で代替済みとしない。
+
+M3実機途中結果: `goal-20261113-173702-808589/report.json`。実gpt-6.1-sol/low、2自律turn・同run、LEFT100ms/RIGHT100ms各1回、各input_sent/neutral=sent、入力前observe、記録ID、公開Plan3件、Goal complete、サービス・所有PID終了を確認。summary0件、current.md更新未確認。モデルがyielded execのwaitをせずturnを終了した記録があり、権限不備とは断定しない。complete通知直後にprobeがinterruptし、製品も同通知でinterruptすることが後続監査の固定peer再生で判明した。最終応答の欠落をprobeだけの原因とせず、D05修正後に自然終端を再確認する。
+
+D04実記録replay: `tmp/u06-m3/activity-replay-20261113-174341/report.json`。実6件を公開通知→ActivityEvent/DialogueEvent→製品サービス→RecordingService→ProjectWriterへ通し、約104万文字/件からobserve260文字/act326文字へ縮小。画像base64なし、公開textのID/時刻/寸法は維持、元記録SHA256不変。実際の切詰めは画像dataの内側で外側JSONは有効だった。未観測の壊れたJSONを推測で復元する処理は加えない。対象ruff/ty成功。
+
+新規home preflight: `tmp/u06-m3/fresh-home-20261113-173855/report.json`で認証コピーなしの隔離homeからlogin_required、モデル候補9件、readiness=notConfigured、接続終了を確認。その後の本人操作による認証・準備結果は下記に記録する。
+
+追加実モデル検証は`ordinary-20261113-180115-976985/report.json`でsandbox準備判定により送信前停止（turn0、入力0、所有PID回収）。`readiness-diagnosis/report.json`で初回取得完了後もupdateRequiredと確認した。前のready応答や既存Goalの成功から現在も準備済みとは推測しない。取得前競合とは別の実状態として、公開setupによる準備と再接続を確認してから残るモデル検証へ進む。
+
+実機設定/停止: `tmp/u06-m3/settings-stop-20261113-180709/report.json`。USB Video DeviceとCOM8・CH552・9600への設定保存を提出直後にstopし、stop完了後もserial接続・映像適用が完了した。続けて取得要求FPS60→30の保存提出直後にstopしても、映像世代1→2へ再接続・適用が完了した。実FPSの測定ではない。同値serialは同ownerを保持し、再接続した証拠にはしない。ボタン入力要求0・モデル0、接続時の中立状態送信のみ。serial owner、全サービスと映像worker PID33184/58844の回収を確認。Goal active中の検証とは区別する。
+
+本人操作の受入: `tmp/u06-m3/fresh-20261113-180214-566284/report.json`。認証コピーなしの隔離homeで、ログイン開始→ブラウザ認証→account再取得authenticated=true→readyを確認。setupは本人の操作後に失敗通知となったため成功扱いにしない。全サービス・所有PIDを正常回収。`fresh-20261113-181828-460469/report.json`では、本人のIME入力・変換・確定に対応するQt InputMethodイベント14件（未確定文字と4文字/3文字の確定）を受信し、モデル送信0で正常終了した。先行の認証用画面は検証fixtureでMessageを無効化しており、IME受入には用いない。
+
+失敗後の公開API再確認: `post-setup-readiness-20261113-183528/report.json`で同じ新規homeの認証保持とnotConfigured、既定homeの認証保持とupdateRequired、両接続の正常終了を確認。setup再実行・モデル実行・認証ファイル読取は0。保存ログからOS側の失敗原因は復元できない。公開setupCompleted.errorを製品が破棄していたため、D06で理由を保持したうえで次の本人操作を依頼する。
+
+最終受入監査: 実記録74件のevent ID一意、6観測のPNG存在/寸法、2入力完了から観測への参照を独立確認。実モデル設定probeは選択受理だけでは不十分なため、診断のthread/turn IDと実採用model/effortを照合し、診断欠落・不一致では成功にしない。製品には内部診断読取への依存を追加しない。
+
+### 受入判定
 
 | 受入項目 | 必要な証拠 | 現状 |
 |---|---|---|
@@ -89,33 +129,3 @@ APIキーは今回対象外であり再採用時に別途合意する。公開�
 - [ ] 全受入項目の実行結果と残る制約を記録した
 - [ ] 品質gate、型/docstring・公開docs・初期設計・親仕様を整合した
 - [ ] KISSと既存実装の一貫性を再レビューし、論理単位でコミットした
-
-M3実機途中結果: `goal-20261113-173702-808589/report.json`。実gpt-6.1-sol/low、2自律turn・同run、LEFT100ms/RIGHT100ms各1回、各input_sent/neutral=sent、入力前observe、記録ID、公開Plan3件、Goal complete、サービス・所有PID終了を確認。summary0件、current.md更新未確認。モデルがyielded execのwaitをせずturnを終了した記録があり、権限不備とは断定しない。complete通知直後にprobeがinterruptし、製品も同通知でinterruptすることが後続監査の固定peer再生で判明した。最終応答の欠落をprobeだけの原因とせず、D05修正後に自然終端を再確認する。
-
-D04: 実通知のtext blockにMCP結果全体のJSONが入り、activity/detailsへ約104万文字のbase64画像等を重複保存した。採用版で観測した一段のMCP結果包みだけを解き、内側のtext blockを抽出して画像・structuredContent・_metaを除外する。既存test_public_progressを直形式/包み形式でparameterizeし、包み形式1 failed→2 passed（`--basetemp=tmp/pytest-u050-mcp-red`/`-green`）。公開表示とDialogueEventは同じActivityEventを使うため両方へ反映する。
-
-D04実記録replay: `tmp/u06-m3/activity-replay-20261113-174341/report.json`。実6件を公開通知→ActivityEvent/DialogueEvent→製品サービス→RecordingService→ProjectWriterへ通し、約104万文字/件からobserve260文字/act326文字へ縮小。画像base64なし、公開textのID/時刻/寸法は維持、元記録SHA256不変。実際の切詰めは画像dataの内側で外側JSONは有効だった。未観測の壊れたJSONを推測で復元する処理は加えない。対象ruff/ty成功。
-
-D02: read.ordinaryUsageAllowed=falseと現在turnのwillRetry=falseだけを停止根拠とする。残高ゼロ・使用率・reset時刻で推測しない。疎な更新通知では完全snapshotを再取得し、単一owned taskが処理中の通知を一回分へまとめる。定期poll・再試行はなくcloseで回収する。falseをnull/失敗で解除しない。接続→Codexの非modalポップオーバーは既存Transcriptの選択/コピー/スクロール保持を再利用し、常設表示を増やさない。
-
-D02検証: redは公開イベント/停止処理未実装4 failed、UI入口未実装。`uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d02-full --junitxml=tmp/u06-m3/d02-tests.xml`は812 passed。全体ruff format/check・ty成功。後続描画修正の関連52件も成功。`tmp/u06-m3/account-render/`の通常960×640・800×600、未取得/取得不能/利用不可を目視し、連結改行を修正。`uv run python -X utf8 tmp/u06-m3/account_live.py`は実ChatGPTアカウント識別・利用許可・利用枠1件を製品UIへ表示、接続終了成功（account-live/report.json、popup.png）。実機で利用枠を枯渇させず、停止は固定通知で確認した。
-
-D01時点の`uv build`・`uv run python scripts/check_package.py`も成功。最終製品変更後に配布物gateを再実行する。
-
-D03設計: Windows製品の接続時にreadinessを取得し、未準備/更新必要/取得不能でも接続・認証を維持する。memory書込が必要なthread準備だけreadyを前提にし、read-only利用は変えない。既存Codexメニューの明示準備操作がsetupStart(mode=elevated、cwd省略)を呼ぶ。開始受付とsetupCompleted・再readinessを区別し、待機中も切断可能。切断でOS準備が取消されたとは表示しない。採用版sourceは起動時設定をreadinessへ使用するため、成功後もnotConfiguredなら自動再接続せず再接続必要を通知する。権限モードの自動fallbackなし。
-
-新規home preflight: `tmp/u06-m3/fresh-home-20261113-173855/report.json`で認証コピーなしの隔離homeからlogin_required、モデル候補9件、readiness=notConfigured、接続終了を確認。その後の本人操作による認証・準備結果は下記に記録する。
-
-D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤判定する競合を通常/Goal×停止有無の4例でred→green。新規問い合わせ・自動再送は加えず、既存の初回取得taskだけを待つ。停止が先行すればthread/Goalを提出しない。setup完了待ちとcloseの競合も再現し、閉接続へ遅い成功を通知しない。OS処理の取消しを保証する変更ではない。
-
-追加実モデル検証は`ordinary-20261113-180115-976985/report.json`でsandbox準備判定により送信前停止（turn0、入力0、所有PID回収）。`readiness-diagnosis/report.json`で初回取得完了後もupdateRequiredと確認した。前のready応答や既存Goalの成功から現在も準備済みとは推測しない。取得前競合とは別の実状態として、公開setupによる準備と再接続を確認してから残るモデル検証へ進む。
-
-D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、失敗・error・skipなし（JUnit `tmp/u050-d03-reviewed-all.xml`）。`uv run ruff format --check .`（211 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功。配布物は隔離wheel install、capture worker終了、module/script両入口の起動終了を確認した。公開型/docstring、既存phase・owned task・終了経路をレビュー済み。close競合1例・初回readiness競合4例の指摘を採用して既存試験を改訂し、別状態機械・自動再試行は不要と判断した。
-
-文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。
-
-実機設定/停止: `tmp/u06-m3/settings-stop-20261113-180709/report.json`。USB Video DeviceとCOM8・CH552・9600への設定保存を提出直後にstopし、stop完了後もserial接続・映像適用が完了した。続けて取得要求FPS60→30の保存提出直後にstopしても、映像世代1→2へ再接続・適用が完了した。実FPSの測定ではない。同値serialは同ownerを保持し、再接続した証拠にはしない。ボタン入力要求0・モデル0、接続時の中立状態送信のみ。serial owner、全サービスと映像worker PID33184/58844の回収を確認。Goal active中の検証とは区別する。
-
-本人操作の受入: `tmp/u06-m3/fresh-20261113-180214-566284/report.json`。認証コピーなしの隔離homeで、ログイン開始→ブラウザ認証→account再取得authenticated=true→readyを確認。setupは本人の操作後に失敗通知となったため成功扱いにしない。全サービス・所有PIDを正常回収。`fresh-20261113-181828-460469/report.json`では、本人のIME入力・変換・確定に対応するQt InputMethodイベント14件（未確定文字と4文字/3文字の確定）を受信し、モデル送信0で正常終了した。先行の認証用画面は検証fixtureでMessageを無効化しており、IME受入には用いない。
-
-最終受入監査: 実記録74件のevent ID一意、6観測のPNG存在/寸法、2入力完了から観測への参照を独立確認。実モデル設定probeは選択受理だけでは不十分なため、診断のthread/turn IDと実採用model/effortを照合し、診断欠落・不一致では成功にしない。製品には内部診断読取への依存を追加しない。

@@ -440,6 +440,8 @@ class ConnectionPanel(QWidget):
             return
         self._pending.add("goal_clear")
         self._stopping = True
+        if self._active_turn is not None:
+            self.plan_panel.set_plan(self._current_plan, interrupted=True)
         self._expire_requests()
         self._render()
         self.goal_clear_requested.emit()
@@ -525,6 +527,13 @@ class ConnectionPanel(QWidget):
             available and phase == "login_required" and "login" not in self._pending
         )
         goal_active = self._goal is not None and self._goal.status == "active"
+        goal_finishing = (
+            self._goal is not None
+            and self._goal.status == "complete"
+            and phase == "stopping"
+            and self._active_turn is not None
+            and not self._stopping
+        )
         self.sandbox_action.setEnabled(
             available
             and self._connected
@@ -558,7 +567,7 @@ class ConnectionPanel(QWidget):
         self.plan_panel.clear_button.setEnabled(
             available
             and self._connected
-            and phase in {"ready", "running", "waiting", "stopped"}
+            and (phase in {"ready", "running", "waiting", "stopped"} or goal_finishing)
             and self._goal is not None
             and not self._pending
         )
@@ -601,6 +610,7 @@ class ConnectionPanel(QWidget):
                 available
                 and (
                     goal_active
+                    or goal_finishing
                     or phase in {"starting", "running", "waiting"}
                     or bool(self._pending.intersection({"send", "goal_set", "goal_resume"}))
                 )
@@ -613,7 +623,7 @@ class ConnectionPanel(QWidget):
         visible = available and phase == "authenticating" and bool(self.login_url.text())
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
-        self.status.setText(_PHASE_LABELS[phase])
+        self.status.setText("完了処理中" if goal_finishing else _PHASE_LABELS[phase])
         model_available = (
             self._available
             and self._connected

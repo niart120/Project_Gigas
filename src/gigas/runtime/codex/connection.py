@@ -250,6 +250,11 @@ class CodexConnection:
     The callback must return promptly. Authentication remains owned by the runtime;
     this class never reads or copies credential files.
 
+    Goal completion closes input and reaps public terminal commands while the
+    current turn finishes its final response. That turn's completion and a final
+    terminal check precede the ready status. Explicit stop or clear interrupts
+    this wait instead.
+
     Args:
         peer: Transport implementing the actual RPC boundary.
         options: Working directory and requested authentication/model settings.
@@ -293,6 +298,7 @@ class CodexConnection:
         self._mcp_config: JsonObject = {}
         self._user_items = 0
         self._stopping = False
+        self._finishing_goal_turn: str | None = None
         self._terminal_cleanup: asyncio.Task[None] | None = None
         self._requests: dict[str, HumanRequest] = {}
         self._request_tokens: dict[RpcId, str] = {}
@@ -753,6 +759,11 @@ class CodexConnection:
             self._goal = goal
             self._emit(GoalEvent(goal))
             if became_inactive:
+                self._finishing_goal_turn = (
+                    self._turn_id
+                    if goal is not None and goal.status == "complete" and not self._stopping
+                    else None
+                )
                 self._stopping = True
                 self._expire_requests()
                 self._start_terminal_cleanup()
@@ -903,12 +914,13 @@ class CodexConnection:
 
     async def _stop(self, *, clear: bool = False) -> None:
         self._require_open()
+        self._finishing_goal_turn = None
         self._stopping = True
         self._expire_requests()
         self._status("stopping")
         results = await asyncio.gather(
             self._pause_goal(clear=clear),
-            self._start_terminal_cleanup(),
+            self._start_terminal_cleanup(interrupt=True),
             return_exceptions=True,
         )
         if self._turn_id is None and not self._sending:
@@ -921,7 +933,7 @@ class CodexConnection:
         if error is not None:
             raise CodexConnectionError("目標の停止または破棄を確認できない") from error
 
-    def _start_terminal_cleanup(self) -> asyncio.Task[None]:
+    def _start_terminal_cleanup(self, *, interrupt: bool = False) -> asyncio.Task[None]:
         task = self._terminal_cleanup
         if task is None or (
             task.done()
@@ -929,23 +941,43 @@ class CodexConnection:
             and task.exception() is None
             and self._turn_id is not None
         ):
-            task = asyncio.create_task(self._terminate_thread_commands(), name="gigas-codex-stop")
-            self._terminal_cleanup = task
-            self._operations.add(task)
-            task.add_done_callback(self._terminal_cleanup_finished)
+            operation = (
+                self._interrupt_and_cleanup(None)
+                if interrupt
+                else self._terminate_thread_commands()
+            )
+        elif interrupt:
+            operation = self._interrupt_and_cleanup(task)
+        else:
+            return task
+        task = asyncio.create_task(operation, name="gigas-codex-stop")
+        self._terminal_cleanup = task
+        self._operations.add(task)
+        task.add_done_callback(self._terminal_cleanup_finished)
         return task
+
+    async def _interrupt_and_cleanup(self, cleanup: asyncio.Task[None] | None) -> None:
+        results = await asyncio.gather(
+            self._interrupt(close_on_failure=False),
+            cleanup if cleanup is not None else self._terminate_thread_commands(),
+            return_exceptions=True,
+        )
+        error = next((result for result in results if isinstance(result, BaseException)), None)
+        if error is not None:
+            raise error
 
     def _terminal_cleanup_finished(self, task: asyncio.Task[None]) -> None:
         self._operations.discard(task)
-        if not self._closed and self._stopping and self._turn_id is None and not self._sending:
+        if (
+            not self._closed
+            and self._stopping
+            and self._turn_id is None
+            and self._finishing_goal_turn is None
+            and not self._sending
+        ):
             self._status("stopped")
 
     async def _terminate_thread_commands(self) -> None:
-        interruption: CodexConnectionError | None = None
-        try:
-            await self._interrupt(close_on_failure=False)
-        except CodexConnectionError as error:
-            interruption = error
         try:
             await self._terminate_listed_commands()
         except (TransportError, CodexConnectionError) as error:
@@ -953,8 +985,6 @@ class CodexConnection:
             raise CodexConnectionError(
                 "端末処理の終了を確認できない", failure_id=failure_id
             ) from error
-        if interruption is not None:
-            raise interruption
 
     async def _terminate_listed_commands(self) -> None:
         if self._thread_id is None:
@@ -1039,7 +1069,11 @@ class CodexConnection:
 
     async def _interrupt(self, *, close_on_failure: bool = True) -> None:
         turn_id = self._turn_id
-        if turn_id is None or turn_id in self._interrupted_turns:
+        if (
+            turn_id is None
+            or turn_id == self._finishing_goal_turn
+            or turn_id in self._interrupted_turns
+        ):
             return
         self._interrupted_turns.add(turn_id)
         try:
@@ -1426,7 +1460,10 @@ class CodexConnection:
             self._goal_revision += 1
             self._accept_goal(params.get("goal") if event.method.endswith("updated") else None)
             if self._stopping:
-                await self._start_terminal_cleanup()
+                if self._goal is not None and self._goal.status == "complete":
+                    await self._start_terminal_cleanup()
+                else:
+                    await self._stop()
             return
         incoming_turn = params.get("turnId")
         if isinstance(incoming_turn, str):
@@ -1532,8 +1569,12 @@ class CodexConnection:
             and turn.get("status") in {"failed", "interrupted"}
         ):
             self._stopping = True
+        finished_goal = self._finishing_goal_turn == turn_id and turn.get("status") == "completed"
+        self._finishing_goal_turn = None
         if turn.get("status") == "failed":
             self._failure("stopped" if stopped else "ready", "ターンが失敗")
+        elif finished_goal:
+            self._status("ready")
         elif self._stopping or turn.get("status") == "interrupted":
             self._status("stopped")
         else:
