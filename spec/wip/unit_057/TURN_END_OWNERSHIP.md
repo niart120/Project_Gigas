@@ -4,7 +4,7 @@
 
 ### 1.1 目的
 
-状態: **wip（設計確定・実装中）**。整理親仕様のM1として、停止理由、対象、完了判定を一つの終了処理へ集約する。ユーザーのM0承認とM1完遂指示を受け、2026-11-13に着手した。
+状態: **wip（製品実装・局所gate完了、親の実接続受入中）**。整理親仕様のM1として、停止理由、対象、完了判定を一つの終了処理へ集約する。ユーザーのM0承認とM1完遂指示を受け、2026-11-13に着手した。
 
 ### 1.2 起点 / source
 
@@ -82,7 +82,9 @@ D01で停止・自然完了・開始受付の所有を揃える。D02で同owner
 
 接続が現在turn・未解決start一件・終了要求一件を所有する。turnはID・終端結果・中断試行を持ち、未解決startが先行turnを参照する。終了要求は理由・対象・Goal操作・回収結果・stickyな失敗を持つ。動作中だけrunnerを保持する。全完了/中断ID集合、stopping/finishing_goalと回収task履歴の組合せを除去する。
 
-D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag・ローカルsubmittedを開始受付記録へ統合した。使用しなくなった旧回収wrapperも削除した。
+D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag・ローカルsubmittedを開始受付記録へ統合した。使用しなくなった旧回収wrapperも削除した。D02はae9c6a3、D03は87bb64c、独立reviewのD04はf886a97。D02以降は追加の構造変更を必要とせず見送った。
+
+関連integrationの途中で、閉鎖中の旧MCP endpointがWindowsのconnection resetとして応答する実測が一件あった。既存の接続拒否・protocol終了に加えてReadErrorも失効として許容し、正常なtool応答は許容していない。固定sleepの追加や製品の通信再試行はしていない。
 
 終了要求が存在する間の成功状態は終了ownerだけが決める。開始側のfinallyや表示status関数は補正しない。close呼出元と終了runner自身は所有task回収から除き、取消された操作は閉鎖済み接続のcloseを再awaitしない。
 
@@ -90,7 +92,7 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 
 | path | change | 内容 |
 |---|---|---|
-| `src/gigas/runtime/codex/connection.py`、`models.py` | modify | 状態所有・終了・公開docstring |
+| `src/gigas/runtime/codex/connection.py` | modify | 状態所有・終了・公開docstring |
 | `src/gigas/services/codex.py` | modify | 受付記録とshutdown |
 | `tests/unit/test_codex_connection.py`、関連integration | modify | 観測契約の改訂と回帰 |
 | `docs/codex.md`、`docs/codex-gui.md` | modify | 受付・実終了・切断の説明 |
@@ -107,8 +109,12 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 | `uv run pytest tests/unit/test_codex_connection.py -q -k test_queued_turn_start_cannot_restore_terminal_wait_during_close --basetemp=tmp/pytest-u057` | red: 1 failed / green: 1 passed | 配達済みstartedが切断理由を降格し終端待ちへ戻るTimeoutErrorを確認後、close優先で修正 |
 | `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-u057` | 163 passed / 0.43s | 最終回帰前のD04確認 |
 | `uv run pytest tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-u057` | 146 passed / 14.29s | D03関連回帰 |
-| ruff format/check、ty、lock check、build、diff check | not run | 公開API・型・配布gate |
-| 公開docs/docstring読解 | not run | 実装との意味整合 |
+| `uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_transport.py -q --tb=short --basetemp=tmp/pytest-u057` | 309 passed / 15.46s | D04を含む最終回帰 |
+| `uv run ruff format --check .` / `uv run ruff check .` | passed（219 files） / passed | repo全体の形式とlint |
+| `uv run ty check --no-progress` | passed | 公開API・3記録・task所有の型境界。抑制やcastの追加なし |
+| `uv lock --check` / `uv build` | passed / passed | lock整合、sdist・wheel生成 |
+| `git diff --check` | passed | 空白差分。親unit054の同時編集をstageから除外 |
+| 公開docs/docstring読解 | 確認済み | stop/clearのローカル受付、自然完了・失敗の回収、切断の打切り、サービス記録の意味を照合 |
 | 実runtime・実機 | not run | 親担当が製品green後に実施 |
 
 ## 10. 先送り事項
@@ -119,6 +125,6 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを具体化した
-- [ ] 検証結果と未実行理由を記録した
-- [ ] 公開API・型・配布gateを記録した
-- [ ] 実接続受入へ引き渡した
+- [x] 検証結果と未実行理由を記録した
+- [x] 公開API・型・配布gateを記録した
+- [x] 実接続受入へ引き渡した
