@@ -32,7 +32,7 @@ from gigas.runtime.codex.models import (
     TurnStarted,
 )
 from gigas.runtime.codex.transport import JsonObject, RpcNotification
-from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult, _Command
+from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_input_service import Device
@@ -42,7 +42,13 @@ from tests.unit.test_codex_connection import FakePeer, _phase, _question, _termi
 if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
     from gigas.runtime.codex.models import ThreadConfiguration
-    from gigas.services.codex import InputConnectionResult, ServiceEvent, ServiceResult
+    from gigas.services.codex import (
+        InputConnectionResult,
+        ServiceEvent,
+        ServiceResult,
+        _OperationCall,
+        _OperationContext,
+    )
 
 
 def _mcp_endpoint(params: JsonObject) -> tuple[str, dict[str, str]]:
@@ -930,6 +936,43 @@ def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> 
     assert answers[0].answer == AnswerResult("pending", "unknown")
 
 
+def test_queued_answer_copies_mapping_before_worker_starts(qtbot: QtBot, tmp_path: Path) -> None:
+    received: list[dict[str, str]] = []
+    results: list[ServiceResult] = []
+
+    class AnswerConnection(ControlledConnection):
+        async def answer(
+            self,
+            token: str,
+            *,
+            decision: str | None = None,
+            answers: Mapping[str, str] | None = None,
+        ) -> None:
+            assert (token, decision) == ("queued", None)
+            assert answers is not None
+            received.append(dict(answers))
+
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda _options, emit, *_callbacks: AnswerConnection(emit),
+    )
+    service.completed.connect(results.append)
+    service.connect_runtime(ConnectionOptions(tmp_path))
+    answers = {"route": "東"}
+    service.answer("queued", answers=answers)
+    answers["route"] = "西"
+    service.start()
+    try:
+        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
+        answer = next(result for result in results if result.operation == "answer")
+        assert answer.answer == AnswerResult("queued", "sent")
+        assert received == [{"route": "東"}]
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
 @pytest.mark.parametrize("operation", ["answer", "send", "steer"])
 def test_submission_cancelled_before_execution_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
@@ -937,8 +980,8 @@ def test_submission_cancelled_before_execution_reports_not_sent(
     class CancelBeforeRunService(CodexServiceThread):
         """Inject cancellation after task creation but before its first execution."""
 
-        def _dispatch(self, command: "_Command") -> None:
-            super()._dispatch(command)
+        def _start_operation(self, context: "_OperationContext", call: "_OperationCall") -> None:
+            super()._start_operation(context, call)
             for task in self._tasks:
                 task.cancel()
 
@@ -1472,6 +1515,16 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
         service._connection = connection
         await connection.open()
 
+        service._loop = asyncio.get_running_loop()
+        results: list[ServiceResult] = []
+        service.completed.connect(results.append)
+
+        async def submit(call: Callable[[], None]) -> None:
+            count = len(results)
+            call()
+            await asyncio.wait_for(_until(lambda: len(results) > count), 5)
+            assert not results[-1].error
+
         async def notify(turn: str, status: str | None = None) -> None:
             await connection._notification(
                 RpcNotification(
@@ -1504,7 +1557,7 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
                 return response.json()["result"]
 
         try:
-            await service._execute(_Command(0, "goal_set", text="継続目標"))
+            await submit(lambda: service.set_goal("継続目標"))
             grant, endpoint = service._grant, service._mcp
             assert grant is not None
             for turn in ("auto-one", "auto-two"):
@@ -1514,27 +1567,28 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
                 assert service._grant is grant
                 assert service._mcp is endpoint
                 assert (await act())["isError"]
-            await service._execute(_Command(0, "stop"))
+            await submit(service.interrupt)
             await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
             assert service._grant is None
             assert peer.goal is not None
             assert peer.goal["status"] == "paused"
-            await service._execute(_Command(0, "send", text="状況だけ"))
+            await submit(lambda: service.send("状況だけ"))
             assert (await act())["isError"]
             await notify("turn-1", "completed")
-            await service._execute(_Command(0, "goal_resume"))
+            await submit(service.resume_goal)
             assert service._grant is not None
             assert service._grant is not grant
             assert service._mcp is not endpoint
             await notify("auto-three")
             assert not (await act())["isError"]
-            await service._execute(_Command(0, "goal_clear"))
+            await submit(service.clear_goal)
             await notify("auto-three", "interrupted")
             await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
             assert peer.goal is None
             assert service._grant is None
             assert sum(method == "turn/start" for method, _ in peer.calls) == 1
         finally:
+            service._loop = None
             await service._release_connection(connection)
             await service._input.close()
         archives = list((tmp_path / "chats").iterdir())
@@ -1596,16 +1650,23 @@ def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) ->
         )
         service._connection = connection
         await connection.open()
+        service._loop = asyncio.get_running_loop()
+        results: list[ServiceResult] = []
+        inputs: list[InputConnectionResult] = []
+        service.completed.connect(results.append)
+        service.input_changed.connect(inputs.append)
         try:
-            await service._execute(_Command(0, "goal_set", text="goal"))
+            service.set_goal("goal")
+            await asyncio.wait_for(_until(lambda: bool(results)), 5)
+            assert not results[0].error
             gate = asyncio.Event()
             peer.gates["thread/goal/set"] = gate
             config = resolve_serial_config("COM3", "ch552", None)
-            service._dispatch(_Command(0, "input_apply", input_config=config))
-            assert service._input_apply_task is not None
-            await asyncio.wait_for(asyncio.shield(service._input_apply_task), 2)
-            assert service._input_config == config
-            assert service._input.connected
+            service.apply_input(config)
+            await asyncio.wait_for(_until(lambda: bool(inputs)), 2)
+            assert inputs[0].config == config
+            assert inputs[0].connected
+            assert not inputs[0].error
             assert not service._run_input_allowed
             assert peer.goal is not None
             assert peer.goal["status"] == "active"
@@ -1617,6 +1678,7 @@ def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) ->
             assert peer.goal["status"] == "paused"
             assert service._grant is None
         finally:
+            service._loop = None
             if "thread/goal/set" in peer.gates:
                 peer.gates["thread/goal/set"].set()
             await service._release_connection(connection)
