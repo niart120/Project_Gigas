@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（製品実装・局所検証済み、親review・commit待ち）**。[整理親仕様](../unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止する。2026-11-13にユーザーがM0案とM1の実行を承認した。既存文書差分を保持した`codex/kiss-simplification-spec`で作業する。
+状態: **complete（製品実装・局所検証・review完了、実装commit `6d10407`）**。[整理親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止した。2026-11-13にユーザーがM0案とM1の実行を承認した。M1全体の実接続・実機受入は親の後続作業に残る。
 
 Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した原記録先の`memory/`だけをCodexの書込対象にする。コールバック省略時の起動cwd利用、memoryなしのread-only送信、二回目の準備省略は提供しない。
 
@@ -18,7 +18,7 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 
 ## 4. 関連文書・着手条件
 
-- [親の採用設計](../unit_054/KISS_SIMPLIFICATION.md)
+- [親の採用設計](../../wip/unit_054/KISS_SIMPLIFICATION.md)
 - [実行管理](../../initial/02-runtime.md)
 - [記録とmemory](../../initial/04-agent-memory.md)
 - [接続API](../../../docs/codex.md)
@@ -42,13 +42,13 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 
 | status | item | type / layer | 既存試験の扱い |
 |---|---|---|---|
-| green | D01 必須の準備結果からmemoryだけを書込対象にし、次の通常送信も同じthreadで再準備する | behavior / unit | `test_open_validates_catalog_and_delivers_packaged_instructions`で、準備結果のmemoryを使わず原記録先をcwdにする失敗を観測後、製品変更で成功。既存fixtureも必須準備を渡す形へ揃えた |
+| refactor-skipped | D01 必須の準備結果からmemoryだけを書込対象にし、次の通常送信も同じthreadで再準備する | behavior / unit | `test_open_validates_catalog_and_delivers_packaged_instructions`で、準備結果のmemoryを使わず原記録先をcwdにする失敗を観測後、製品変更で成功。既存fixtureも必須準備を渡す形へ揃え、`6d10407`へ記録した |
 
 回帰検証では、未準備・準備待ち停止・準備失敗・権限不一致で実行を開始しないことと、製品サービス・GUIの通常会話・Goalが必須準備を通ることを確認する。readiness・準備失敗・thread設定・サービス・GUI・shutdownの既存試験を使い、新しい振る舞いitemや防御経路は増やさない。
 
 callback省略の失敗を同じ内容で大量に列挙しない。型検査と関数signatureが表す必須引数を、自然言語や内部構造の一致試験へ置き換えない。旧試験が本来確認していた認証・質問・停止は、小さい試験用準備を渡して継続確認する。
 
-refactor review: 今回の枝削除と型縮小はD01の振る舞い変更に含まれる。green後に追加する構造変更は見送った。試験だけの小さい組立関数で準備済みmemoryを提供し、製品に代替モードを残していない。commitを含む最終状態への更新は親担当が行う。
+refactor review: 今回の枝削除と型縮小はD01の振る舞い変更に含まれる。green後に追加する構造変更は見送った。試験だけの小さい組立関数で準備済みmemoryを提供し、製品に代替モードを残していない。親担当も差分と検証・公開説明を確認した。
 
 ## 7. 設計メモ
 
@@ -89,4 +89,4 @@ refactor review: 今回の枝削除と型縮小はD01の振る舞い変更に含
 - [x] 最初の振る舞いとTDD Test Listを具体化した
 - [x] 実装開始条件を確認した
 - [x] 対象試験と型・docstring・配布gateを記録した
-- [x] 親担当のreview・commitへ引き渡した
+- [x] 親担当のreviewとcommitを完了し、同unitをcompleteへ移した
