@@ -2,6 +2,8 @@
 
 [文書一覧](README.md)
 
+2026-11-13の[契約整理M0](../wip/unit_054/KISS_SIMPLIFICATION.md)で入力検証の所有を縮小しました。以下の検証分担は採用設計であり、unit_054 M2で実装します。U05の既存検証結果は、変更後の実装を確認済みとする根拠にはしません。
+
 ゲームI/Oは、実機の映像取得と有限時間のコントローラー入力を担当します。画像の意味、攻略上の成功、次に必要な行動はCodexが判断します。本書のMCP名とJSONの項目名は初期実装設計として定めます。公開する機能と観測の意味は採用仕様です。
 
 U01で実装した映像取得元・シリアルポートの設定保存は、機器の識別・接続・有効性を確認する機能ではありません。映像取得をU03、観測画像の非同期保存・MCP公開をU04 M2で実装しました。U04は固定Frameの実モデル試験に加え、WindowsのUSB Video Deviceを使う実映像の観測・保存と実画面での応答性を確認しました。ゲーム入力はU05で扱います。2026-11-11に改訂した工程の依存関係は[05](05-implementation.md)を正本とします。
@@ -39,6 +41,8 @@ U04では観測だけを接続し、U05で操作後観測を追加します。�
 これは形式を示す例で、ゲームの確定手順ではありません。`press`は列挙したボタンを同時に押し、指定時間後に解除します。`wait`はニュートラル状態で待ちます。各要素をまたいで押下を持ち越しません。末尾の待機で、操作後の演出を待つ時間を表現できます。
 
 press/waitとも正の整数ms、1要素以上の有限配列です。内部APIは入力時間・要素数・合計時間の固定上限を設けず、ループや期限なしholdを受け付けません。開始前に列全体と機器の能力を検査し、未対応ボタンや無効時間があれば最初の入力も送らず拒否します。長い待機も途中停止で残りを破棄し解除します。ゲームが1 msの押下を認識する保証ではありません。writeの完了時間にも固定上限を設けません。公開は同期MCPを使い、Codexのtool_timeout_secとGigas側のact_and_observeの待機期限を300秒にします。内部入力の上限とは分け、暗黙の分割・dynamic tool・非同期受付・ポーリングは採用しません。詳細は[08](08-sdk-compatibility.md)を参照します。
+
+外部JSONは`parse_sequence(value)`で全列の形式・共通値域・重複・反対方向・press/wait条件を検査します。parserはprotocolを受け取らず、選択機器の能力は`InputService.act`が列全体へ一度検査します。`InputState`/`InputStep`は検証済みの不変な内部値として扱い、直接構築・単独encoder・低水準送信へ不正値を渡した場合の拒否保証は提供しません。serviceでの要素型の再検査、encoderでの能力再検査、dataclassでの防御は重ねません。MCPはこのparserと入力サービスを必ず通し、全列の検査前に物理入力を送りません。
 
 入力は名前付きボタン・方向キーに加え、省略可能な左右stick（各軸整数-100〜100、右/下が正）と3DS用touch（320×240座標）を一つの完全状態として扱います。CH552/PokeCon/3DS S2/T3 New Firmwareの能力差、neutralとbyte変換、protocol別baudは[U05 M0](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で確定し、[M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)で内部APIへ実装しました。COMポート名や通信bytesをCodexの引数へ含めません。期限なしhold、keyboard、3DS管理コマンドは対象外です。Bluetoothの追加時も有限列・停止とtransportの変換を分けます。GUI・MCPとの結合とシリアル実機受入はM2です。内部APIの利用方法は[入力API](../../docs/input-api.md)を参照します。
 
@@ -134,7 +138,7 @@ MCP公開部は、要求の検査、内部の操作型への変換、加工・�
 
 GameIoMcpServer(observations, inputs, protocol)がobserveとact_and_observeを公開します。act_and_observeのツール説明は適用中のプロトコルと対応入力を示し、入力未接続なら入力不可と明記します。各通常送信のprepare_turn(prompt, thread_id)で新endpointを準備し、runの固定Grantをbind_grantで一度だけ結び付けます。
 
-HTTPサーバーは127.0.0.1のOS割当ポートへ束縛し、runごとにMCP名とBearer値を作ります。初回はthread/start.configへ渡し、次の明示送信では旧処理収束後にthread/unsubscribe→同IDのthread/resumeで新endpointを読み込みます。停止・通常turn終端でGrantを失効させ、observeは開いているendpointで継続利用できます。公開経路の根拠は[08](08-sdk-compatibility.md)、製品の結合検証は[M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)に置きます。HTTP認証情報をモデル向け指示や原記録へ保存せず、他の実行や整理用threadへゲーム入力を開放しません。
+HTTPサーバーは127.0.0.1のOS割当ポートへ束縛し、runごとにMCP名とBearer値を作ります。初回はthread/start.configへ渡し、次の明示送信では旧処理収束後にthread/unsubscribe→同IDのthread/resumeで新endpointを読み込みます。停止・通常turn終端でGrantを失効させ、observeは開いているendpointで継続利用できます。公開経路の根拠は[08](08-sdk-compatibility.md)、製品の結合検証は[M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)に置きます。HTTP認証情報をモデル向け指示や原記録へ保存せず、他の実行へゲーム入力を開放しません。
 
 クライアントとサーバーの計時開始点は異なるため、期限内の結果配送や実機解除を保証しません。HTTP切断・cancel通知が入力停止へ届くことも前提にせず、GUIから入力所有者へ直接停止を届けます。期限時の入力結果・解除結果は不明となる場合があり、観測して状態を確認します。
 
