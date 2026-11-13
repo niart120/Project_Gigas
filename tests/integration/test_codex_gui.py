@@ -2,18 +2,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QLineEdit
+from PySide6.QtCore import QPoint, QUrl
+from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtWidgets import QApplication, QLineEdit, QTextBrowser
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.models import (
+    ActivityEvent,
     ConnectionOptions,
     HumanRequest,
     LoginEvent,
+    PlanEvent,
+    PlanStep,
     Question,
     QuestionOption,
+    ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
@@ -22,9 +27,218 @@ from gigas.runtime.codex.models import (
 from gigas.services.codex import CodexServiceThread, MessageResult, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
+from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from gigas.ui.notifications import Notice
+
+
+def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    assert panel.plan.isHidden()
+    assert panel.plan_heading.isHidden()
+    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.handle_event(
+        ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),), "入口を確認"))
+    )
+    assert "調査" in panel.plan.toPlainText()
+    assert panel.plan_heading.isVisible()
+    assert "入口を確認" in panel.transcript.toPlainText()
+    panel.handle_event(ServiceEvent(1, PlanEvent("old", ())))
+    assert panel.plan.isHidden()
+    assert panel.plan_heading.isHidden()
+    panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),))))
+    panel.handle_event(ServiceEvent(1, ReasoningEvent("old", "shared", ("公開要約",))))
+    panel.handle_event(
+        ServiceEvent(
+            1, ActivityEvent("old", "shared", "mcpToolCall", "gigas/observe", "inProgress")
+        )
+    )
+    panel.handle_event(
+        ServiceEvent(
+            1,
+            ActivityEvent("old", "shared", "mcpToolCall", "gigas/observe", "completed", "観測済み"),
+        )
+    )
+    history = panel.transcript.toPlainText()
+    assert history.count("gigas/observe") == 1
+    assert "観測済み" in history
+    assert "公開要約" in history
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    assert "調査" in panel.plan.toPlainText()
+    panel.handle_event(ServiceEvent(1, TurnStarted("new")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    assert panel.plan.isHidden()
+    panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
+    panel.handle_event(ServiceEvent(1, ReasoningEvent("new", "shared", ("新しい要約",))))
+    panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("旧計画の訂正", "completed"),))))
+    assert "移動" in panel.plan.toPlainText()
+    assert "旧計画の訂正" not in panel.plan.toPlainText()
+    assert "旧計画の訂正" in panel.transcript.toPlainText()
+    assert "新しい要約" in panel.transcript.toPlainText()
+    assert "公開要約" in panel.transcript.toPlainText()
+    panel.handle_event(ServiceEvent(1, ReasoningEvent("old", "shared", ())))
+    assert "公開要約" not in panel.transcript.toPlainText()
+    assert "新しい要約" in panel.transcript.toPlainText()
+    panel.interrupt()
+    panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("停止後の通知", "completed"),))))
+    assert "移動" in panel.plan.toPlainText()
+    assert "停止後の通知" in panel.transcript.toPlainText()
+    panel.activate(2)
+    panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("旧接続", "pending"),))))
+    assert panel.transcript.toPlainText() == ""
+    assert panel.plan.isHidden()
+    assert panel.plan_heading.isHidden()
+
+
+def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.resize(500, 600)
+    panel.show()
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    steps = (
+        PlanStep("入口を観測", "completed"),
+        PlanStep("経路を確認", "inProgress"),
+        *(PlanStep(f"計画 {index}", "pending") for index in range(40)),
+    )
+    panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
+    plan = panel.plan
+    assert "✓ 入口を観測" in plan.toPlainText()
+    assert "▶ 経路を確認" in plan.toPlainText()
+    assert "• 計画 20" in plan.toPlainText()
+    assert plan.document().find("経路を確認").charFormat().fontWeight() == QFont.Weight.Bold
+    assert plan.document().find("計画 20").charFormat().fontWeight() == QFont.Weight.Normal
+    plan.setTextCursor(plan.document().find("計画 20"))
+    plan.ensureCursorVisible()
+    visible = plan.cursorForPosition(QPoint(0, 0))
+    visible_y = plan.cursorRect(visible).top()
+    panel.handle_event(ServiceEvent(1, PlanEvent("turn", steps)))
+    panel.handle_event(
+        ServiceEvent(
+            1, PlanEvent("turn", (PlanStep("入口をもう一度観測", "completed"), *steps[1:]))
+        )
+    )
+    assert plan.textCursor().selectedText() == "計画 20"
+    assert abs(plan.cursorRect(visible).top() - visible_y) <= 1
+    plan.copy()
+    assert QApplication.clipboard().text() == "計画 20"
+
+
+def test_history_item_updates_preserve_reverse_selection_and_viewport(qtbot: QtBot) -> None:
+    history = Transcript()
+    qtbot.addWidget(history)
+    history.resize(420, 300)
+    history.show()
+    assert isinstance(history, QTextBrowser)
+    assert not history.openExternalLinks()
+    assert not history.openLinks()
+    history.update_item("user", "最初の指示 <b>文字</b>\r\n次行", kind="user")
+    for index in range(100):
+        history.update_item(str(index), f"本文 {index} 😀\n続き")
+    qtbot.waitUntil(lambda: history.verticalScrollBar().maximum() > 0)
+    target = history.document().find("本文 50 😀")
+    target.setPosition(target.selectionEnd())
+    target.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    history.setTextCursor(target)
+    history.ensureCursorVisible()
+    visible = history.cursorForPosition(QPoint(0, 0))
+    visible_y = history.cursorRect(visible).top()
+    history.update_item("0", "以前の本文を差し替え\n追加行\n😀")
+    history.update_item("99", "\n受信中の追記", append=True)
+    assert history.textCursor().selectedText() == "本文 50 😀"
+    assert history.textCursor().anchor() > history.textCursor().position()
+    assert abs(history.cursorRect(visible).top() - visible_y) <= 1
+    history.copy()
+    assert QApplication.clipboard().text() == "本文 50 😀"
+    unselected = history.textCursor()
+    unselected.clearSelection()
+    history.setTextCursor(unselected)
+    visible = history.cursorForPosition(QPoint(0, 0))
+    visible_y = history.cursorRect(visible).top()
+    history.update_item("0", "さらに前方で行数が変わる\n" * 5)
+    history.update_item("99", "\n末尾の次の追記", append=True)
+    qtbot.wait(1)  # Include the following event-loop pass, not only synchronous layout.
+    assert abs(history.cursorRect(visible).top() - visible_y) <= 1
+    assert history.verticalScrollBar().value() < history.verticalScrollBar().maximum()
+    assert "<b>文字</b>" in history.toPlainText()
+    user = history.document().find("最初の指示")
+    assistant = history.document().find("本文 1 😀")
+    assert user.blockFormat().background() != assistant.blockFormat().background()
+
+
+def test_history_replacement_keeps_unicode_boundaries_and_follows_only_unselected_tail(
+    qtbot: QtBot,
+) -> None:
+    history = Transcript()
+    qtbot.addWidget(history)
+    history.resize(400, 180)
+    history.show()
+    history.update_item("first", "abcde\r\n硬い改行\u2028柔らかい改行\u00a0空白")
+    selected = history.document().find("bc")
+    history.setTextCursor(selected)
+    history.update_item("first", "a😀e\r\n硬い改行\u2028柔らかい改行\u00a0空白")
+    assert history.textCursor().selectedText() == "😀"
+    history.copy()
+    assert QApplication.clipboard().text() == "😀"
+    assert "硬い改行\u2028柔らかい改行\u00a0空白" in history.document().toRawText()
+    selected = history.textCursor()
+    selected.clearSelection()
+    selected.movePosition(QTextCursor.MoveOperation.End)
+    history.setTextCursor(selected)
+    history.verticalScrollBar().setValue(history.verticalScrollBar().maximum())
+    history.update_item("tail", "\n".join(f"追記 {index}" for index in range(60)))
+    assert history.verticalScrollBar().value() == history.verticalScrollBar().maximum()
+    history.clear()
+    history.update_item("first", "新しい履歴\r")
+    history.update_item("first", "\n次行", append=True)
+    assert "a😀e" not in history.toPlainText()
+    assert history.toPlainText().count("新しい履歴") == 1
+    assert "新しい履歴\n次行" in history.toPlainText()
+
+
+def test_hidden_reasoning_is_not_copied_and_receives_updates(qtbot: QtBot) -> None:
+    history = Transcript()
+    qtbot.addWidget(history)
+    history.update_item("before", "前の応答")
+    history.update_item("summary", "公開要約 😀", kind="reasoning")
+    history.update_item("after", "後の応答")
+    history.setTextCursor(history.document().find("公開要約"))
+    history.set_reasoning_visible(False)
+    assert not history.textCursor().hasSelection()
+    assert history.textCursor().position() == history.document().find("Codex", 1).selectionStart()
+    history.update_item("summary", "更新された要約", kind="reasoning")
+    history.selectAll()
+    history.copy()
+    assert "要約" not in QApplication.clipboard().text()
+    assert "前の応答" in QApplication.clipboard().text()
+    assert "後の応答" in QApplication.clipboard().text()
+    history.setTextCursor(history.document().find("後の応答"))
+    history.set_reasoning_visible(True)
+    assert history.textCursor().selectedText() == "後の応答"
+    assert "更新された要約" in history.toPlainText()
+    assert "公開要約" not in history.toPlainText()
+    history.resize(400, 180)
+    history.show()
+    history.set_reasoning_visible(False)
+    history.update_item("before", "前の応答\n" * 20)
+    history.update_item("after", "後の応答\n" * 30)
+    visible = history.document().find("Codex", 1)
+    visible.setPosition(visible.selectionStart())
+    history.setTextCursor(visible)
+    history.ensureCursorVisible()
+    bar = history.verticalScrollBar()
+    bar.setValue(bar.value() + history.cursorRect(visible).top())
+    visible_y = history.cursorRect(visible).top()
+    history.set_reasoning_visible(True)
+    assert abs(history.cursorRect(visible).top() - visible_y) <= 1
 
 
 def test_start_notification_keeps_draft_until_acceptance_result(qtbot: QtBot) -> None:

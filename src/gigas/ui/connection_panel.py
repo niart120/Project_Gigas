@@ -1,4 +1,4 @@
-"""Codex connection controls and plain-text conversation rendering."""
+"""Codex connection controls and item-based conversation rendering."""
 
 from typing import TYPE_CHECKING
 
@@ -15,8 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from gigas.runtime.codex.models import (
+    ActivityEvent,
     HumanRequest,
     LoginEvent,
+    PlanEvent,
+    ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
@@ -84,7 +87,6 @@ class ConnectionPanel(QWidget):
         self._settings_ready = True
         self._status = SessionStatus("closed")
         self._pending: set[str] = set()
-        self._texts: dict[str, tuple[str, str]] = {}
         self._submitted = ""
         self._active_turn: str | None = None
         self._error = ""
@@ -108,6 +110,14 @@ class ConnectionPanel(QWidget):
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
         layout.addLayout(login)
+        self.plan_heading = QLabel("Plan", self)
+        layout.addWidget(self.plan_heading)
+        self.plan = Transcript(self, show_headings=False)
+        self.plan.setMaximumHeight(120)
+        layout.addWidget(self.plan)
+        self._clear_plan()
+        self.history_heading = QLabel("History", self)
+        layout.addWidget(self.history_heading)
         self.transcript = Transcript(self)
         layout.addWidget(self.transcript, 3)
         self.requests = QScrollArea(self)
@@ -154,8 +164,8 @@ class ConnectionPanel(QWidget):
             card.deleteLater()
         self.cards.clear()
         self.requests.hide()
-        self._texts.clear()
         self.transcript.clear()
+        self._clear_plan()
         self.login_url.clear()
         self._render()
 
@@ -197,6 +207,8 @@ class ConnectionPanel(QWidget):
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, TurnStarted):
+            if event.turn_id != self._active_turn and not self._stopping:
+                self._clear_plan()
             self._active_turn = event.turn_id
             for token, card in tuple(self.cards.items()):
                 if card.request.turn_id != event.turn_id and card.is_settled:
@@ -209,16 +221,41 @@ class ConnectionPanel(QWidget):
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
                 self.login_url.setText(event.url)
         elif isinstance(event, TextEvent):
-            previous = self._texts.get(event.item_id, (event.role, ""))[1]
-            self._texts[event.item_id] = (
-                event.role,
-                event.text if event.replace else previous + event.text,
+            self.transcript.update_item(
+                f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
             )
-            self.transcript.set_text(
-                "\n\n".join(
-                    f"{'Codex' if role == 'assistant' else 'あなた'}\n{text}"
-                    for role, text in self._texts.values()
-                )
+        elif isinstance(event, PlanEvent):
+            self.transcript.update_plan(f"plan:{event.turn_id}", event.steps, event.explanation)
+            if (
+                event.turn_id == self._active_turn
+                and not self._stopping
+                and self._status.phase != "stopping"
+                and "disconnect" not in self._pending
+            ):
+                self.plan.update_plan("current", event.steps)
+                self.plan.setVisible(bool(event.steps))
+                self.plan_heading.setVisible(bool(event.steps))
+        elif isinstance(event, ReasoningEvent):
+            self.transcript.update_item(
+                f"reasoning:{(event.turn_id, event.item_id)!r}",
+                "\n\n".join(event.summary),
+                kind="reasoning",
+            )
+        elif isinstance(event, ActivityEvent):
+            statuses = {
+                "inProgress": "実行中",
+                "completed": "完了",
+                "failed": "失敗",
+                "declined": "拒否",
+            }
+            self.transcript.update_item(
+                f"activity:{(event.turn_id, event.item_id)!r}",
+                "\n".join(
+                    value
+                    for value in (f"{statuses[event.status]} · {event.title}", event.details)
+                    if value
+                ),
+                kind="activity",
             )
         elif isinstance(event, HumanRequest):
             if (
@@ -319,6 +356,11 @@ class ConnectionPanel(QWidget):
         for card in self.cards.values():
             card.invalidate()
             card.mark_unconfirmed()
+
+    def _clear_plan(self) -> None:
+        self.plan.clear()
+        self.plan.hide()
+        self.plan_heading.hide()
 
     def _notify_failure(
         self, detail: str, failure_id: int | None = None, *, operation: str = ""

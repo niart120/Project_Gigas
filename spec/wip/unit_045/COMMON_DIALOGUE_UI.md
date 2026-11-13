@@ -25,7 +25,7 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 | 入力・状態 | 期待する振る舞い |
 |---|---|
 | 通常メッセージ・実行中の追加指示 | 共通欄と送信/Ctrl+Enterを使う。待機時はturn/start、対象turnが実行中ならexpectedTurnId付きsteer。明確な受付前に下書きを消さず、拒否・受付不明で自動再送しない |
-| 複数質問 | (要求token, question ID)ごとに下書きを保持。送信先選択で共通欄を切替え、選択中要求の必須回答を一つのanswersへ送る。選択肢、自由回答、秘密回答を区別し、質問間・追加指示へ本文を自動転用しない |
+| 複数質問 | (要求token, question ID)ごとに下書きを保持。送信先選択で共通欄を切替え、選択中要求の必須回答を一つのanswersへ送る。選択肢、自由回答、秘密回答を区別し、質問間・追加指示へ本文を自動転用しない。送信結果で原稿を消すときは提出本文と送信先キーを照合し、別送信先の同文原稿を消さない |
 | 承認・要求失効 | 許可/拒否/取消しは公開要求の明示ボタンだけ。要求本文と配送状態は履歴に残し、操作部は未解決時だけ表示。AnswerResultの送信証拠とresolved通知を区別する |
 | Plan/summary/activity | 採用thread/turn/itemへ対応付ける。Planは全一覧置換、新turnで現在欄を消す。公開summaryだけを表示し、生reasoningは扱わない。activityは公開itemの対象・結果を一項目へ更新する |
 | 履歴更新 | リッチテキストをエスケープし、外部資源を無条件に開かない。itemの更新で選択方向・文字境界・閲覧位置を保ち、選択なしの末尾だけ追従する。隠すsummary内の選択は解除し次項目へ移す |
@@ -41,8 +41,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | D01 対象turnの公開Plan・reasoning summary・activityを受け取り、旧turn/生reasoningと区別する | new | unit/integration | `0db14a4`。既存開始順序試験へPlanを統合。red 4 failed/69 passed→green 73 passed |
-| green | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | 接続87、サービス/終了回帰149、UI/要求寿命/停止27 passed。受付前消去・実行中送信不可を改訂 |
-| todo | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | test_codex_guiへ代表条件を統合 |
+| refactor-skipped | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | `6cfc3c9`。接続87、サービス/終了回帰149、UI/要求寿命/停止27 passed。受付前消去・実行中送信不可を改訂 |
+| green | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | GUI 24、関連回帰37 passed。既存test_codex_guiへ代表条件を統合 |
 | todo | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
 | todo | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | 既存設定保存・適用試験へ統合 |
 | todo | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | 既存レイアウト/停止試験、製品画面で確認 |
@@ -67,6 +67,8 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D01回帰・静的確認 | 接続unit＋サービスintegration 112 passed、全体`ty check --no-progress`、担当ruff check/format、diff check: pass | 型境界とdocstring、書式。追加の構造整理は不要 |
 | D02 | 接続unit: red 16 failed/70 passed→green 87 passed。サービスの受付選択試験: red 12 failed。接続＋service＋shutdown回帰149 passed。UI＋answer_lifecycle＋ui_control_lifetime: red 2 failed→green 27 passed | `--basetemp=tmp/pytest-u06-runtime`と`tmp/pytest-u06-ui`を使用。送信受付、拒否/不明、取消し・旧世代、質問中steerで入力停止維持、再MCPなし、下書き保持を確認 |
 | D02静的・独立レビュー | 全体ty、担当ruff check/format、diff check: pass。独立UIレビュー指摘2条件を既存試験へ統合 | 中断後の遅い通知で配送を再開しないことと、新turn IDへの明示送信。追加の構造整理は不要 |
+| D03 | `uv run pytest tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-u06-qt`: red 4 failed/19 passed→green 23 passed。Plan/閲覧端の追加red 2 failed/22 passed→最終24 passed。要求寿命・停止・shutdownとの回帰37 passed | UTF-16逆向き選択、標準コピー、既存item更新、選択対象内置換、末尾/過去閲覧、非表示summaryと再表示、Plan全一覧の選択保持 |
+| D03レビュー・描画 | 担当ruff check/format、全体ty、diff check: pass。`tmp/u06/qt/d03_view.py`の合成イベント画像を目視 | Planの位置・チェック/印太字/箇条書き、literal HTML、ユーザー背景、要約字下げ。Plan全置換による選択消失とsummary再表示の41pxずれを採用指摘として修正。描画共有は必要な挙動変更の範囲で、追加refactorなし |
 
 全体gate・製品画面は各項目の結合後に実施する。
 
