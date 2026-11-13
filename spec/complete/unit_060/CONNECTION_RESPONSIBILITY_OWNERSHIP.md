@@ -4,13 +4,13 @@
 
 ### 1.1 目的
 
-着手中の子仕様。質問・承認、モデル候補、Windows環境準備、認証・利用枠の状態を、それぞれの操作と寿命を持つ担当へ移す。会話・Goal・開始・終了・公開phaseとtransportの寿命はCodexConnectionへ残す。公開契約を変えない構造整理をD01〜D04で行い、確認中に見つけた起動途中の利用枠取得をD05の回帰修正として分ける。
+完了した子仕様。質問・承認、モデル候補、Windows環境準備、認証・利用枠の状態を、それぞれの操作と寿命を持つ担当へ移した。会話・Goal・開始・終了・公開phaseとtransportの寿命はCodexConnectionへ残した。構造整理後に、到達が確認された初期化中の利用枠通知をD05で修正した。
 
 ### 1.2 起点 / source
 
 | source | 内容 | path |
 |---|---|---|
-| user request | 巨大クラスを、状態と振る舞いの帰属から分ける | [親仕様5.9](../unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
+| user request | 巨大クラスを、状態と振る舞いの帰属から分ける | [親仕様5.9](../../wip/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
 | preceding unit | サービスの資源と入力runの所有を分離 | [unit059](../../complete/unit_059/SERVICE_RESPONSIBILITY_OWNERSHIP.md) |
 | adopted contract | 通知寿命と単一の終了所有 | [unit056](../../complete/unit_056/TURN_NOTIFICATION_LIFETIME.md)、[unit057](../../complete/unit_057/TURN_END_OWNERSHIP.md) |
 
@@ -122,7 +122,7 @@ D05の親レビューでは、内部flagを直接操作せずcatalog保留と実
 | `src/gigas/runtime/codex/_account_session.py` | new | 認証・login・利用枠 |
 | `src/gigas/runtime/codex/transport.py` | modify | RpcPeer定義 |
 | `tests/unit/test_codex_connection.py`、関連integration | modify if needed | 公開動作による回帰確認 |
-| `spec/wip/unit_060/CONNECTION_RESPONSIBILITY_OWNERSHIP.md` | new | 検証と判断 |
+| `spec/complete/unit_060/CONNECTION_RESPONSIBILITY_OWNERSHIP.md` | new | 検証と判断 |
 
 ## 9. 検証
 
@@ -149,11 +149,33 @@ D05の親レビューでは、内部flagを直接操作せずcatalog保留と実
 | D05後のrepo `ruff format --check .` / `ruff check .` / `ty check --no-progress` / `uv lock --check` / `uv build` / `git diff --check` | passed | 最終sourceの形式・型・lock・配布物・空白 |
 | `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u060-final-full --tb=short` | 847 passed / 62.78s | D05を含む最終全unit/integration |
 | 最終の`uv run python -X utf8 tmp/u054/validate_docs.py ef469a4` | 5 documents / 53 local_links / 60 units、errors=0 | 子仕様と親が訂正中の文書を含む。内容レビューとは区別 |
-| 実runtime | not run | 親の受入待ち |
+| 実runtime | passed（9.1の修正済み検証器による再実行） | 既存認証・実準備状態・停止回収・同接続再開・自然終端・終端前close |
+
+### 9.1 最終コードの実runtime受入と検証器の訂正
+
+製品の最終変更はD05 `a40edfa`。親担当がD04配線とD05の公開状態・初期取得の回帰を読み、追加独立レビューも阻害指摘なし。D05の試験は合法な通知順序から問題を再現し、内部状態の直接書換えや新しい状態を追加していない。
+
+最初の再検証`tmp/u054/m1-neutral-20261113-233531-642800/report.json`と`m1-close-wait-20261113-233723-295920/report.json`には、`status: passed`と`error: Serial neutral send was not observed`が併存していた。非入力modeにも中立送出観測を要求し、その失敗で先に設定したpassedを戻していなかった検証器の不備である。これらの合格表示は最終受入へ数えない。同じ不備がunit_057時点の2実行にもあったため、原記録を保持して同仕様9.2へ訂正を追記した。実入力modeは押下後の中立を観測しており、該当errorはない。
+
+検証器は非入力modeへの余分なassertを除き、通常例外時に必ずfailedへ戻すよう修正した。input枝の押下後中立・送出回数・途中停止の検査は残す。独立レビューで通常例外、cleanup失敗、不成立の判定を確認した。成功判定はreport単独でなく、プロセス終了コード0、トップレベルerror/errors/cleanup_errorなし、全cleanup成功、所有PID残存0を合わせて確認する。再実行にCtrl+Cや人手介入はなかった。
+
+```powershell
+$m1Settings = 'C:/Users/train/AppData/Local/GIGAS/settings.toml'
+$m1Home = 'E:/documents/VSCodeWorkspace/Project_Gigas/tmp/u06-m3/fresh-20261113-180214-566284/home'
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode neutral --settings $m1Settings --codex-home $m1Home
+uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode close-wait --settings $m1Settings --codex-home $m1Home
+```
+
+| 最終結果資料（`tmp/u054/`配下） | 観測結果 |
+|---|---|
+| `m1-neutral-20261113-234151-792876/report.json` | passed・終了コード0・errorなし。stop受付265714.203→終端265714.671→stopped 265714.734。1ページ列挙・1件終了・空再確認。有限書込8行で停止後1秒と同接続/同thread再開後も不変。自然最終応答を受信し、終端265735.250→ready 265735.281、空sweepで再中断なし |
+| `m1-close-wait-20261113-234304-913559/report.json` | passed・終了コード0・errorなし。公開stop直後にdisconnect。close入口で対象turn終端は未受信、約0.547秒で終了。有限書込7行で切断後1秒も不変。通知遅延の注入や検証器からのterminateなし |
+
+両実行ともruntime 0.167.0、gpt-6.1-sol / low、既存の認証・準備済み隔離homeで確認した。入力要求・非中立送出は0、service/settings/capture/serialを回収し、shutdown errorなし・所有PID残存0。新規login・sandbox setup・質問や承認の実要求はこの再検証では行っておらず、それらの相関は既存固定試験の確認範囲である。短いCH552実入力の受入は、入力側を変更した[unit_059の9.1](../unit_059/SERVICE_RESPONSIBILITY_OWNERSHIP.md#91-実runtime実機受入)と区別する。
 
 ## 10. 先送り事項
 
-M2の保存・入力契約は[親仕様](../unit_054/KISS_SIMPLIFICATION.md)に残す。この子は初期契約や公開利用形態を追加しない。
+M2の保存・入力契約は[親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)に残す。この子は初期契約や公開利用形態を追加しない。長時間運転・別機器は今回の受入外。
 
 ## 11. チェックリスト
 
@@ -162,3 +184,4 @@ M2の保存・入力契約は[親仕様](../unit_054/KISS_SIMPLIFICATION.md)に�
 - [x] 検証結果または未実行理由を記録した
 - [x] 公開API・型・package gateを記録した
 - [x] 独立レビューと親の実runtime受入へ引き渡した
+- [x] 親の実runtime受入と検証器の訂正を記録した

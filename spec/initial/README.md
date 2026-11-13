@@ -29,7 +29,7 @@
 
 [U02の接続・通常ターン](../complete/unit_007/CODEX_CONNECTION.md)は完了しています。[U03の映像取得](../complete/unit_008/VIDEO_CAPTURE.md)も人間レビューによるUI・読み取り境界の見直しと再検証を完了しました。U03はLive Gamer 4K 2.1で実映像の取得・プレビュー・切断・再接続・表示中のアプリ終了を確認しました。物理抜去と入力から表示までの光学的な遅延は未検証です。調査・実装・実機検証の詳細は各親仕様に記録します。
 
-[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)では表示名選択・4段階表示・読み取り専用境界を確認しました。[U04の記録付き観測](../complete/unit_009/RECORDED_OBSERVATION.md)、U05のゲーム入力、U06の共通対話UI・Goal・公開会話記録は対象構成の受入まで完了しました。次は[契約整理](../wip/unit_054/KISS_SIMPLIFICATION.md)のM1で接続・停止・表示・サービスを改訂します。保存・入力のM2は採用設計・未実装、U07・U08・U10は後続工程、U09は初期版対象外です。依存の詳細と推奨順は05を正本とします。
+[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)では表示名選択・4段階表示・読み取り専用境界を確認しました。[U04の記録付き観測](../complete/unit_009/RECORDED_OBSERVATION.md)、U05のゲーム入力、U06の共通対話UI・Goal・公開会話記録は対象構成の受入まで完了しました。[契約整理](../wip/unit_054/KISS_SIMPLIFICATION.md)のM1で接続・停止・表示・サービスを改訂し、対象構成の受入を確認しました。保存・入力のM2は採用設計・未実装、U07・U08・U10は後続工程、U09は初期版対象外です。依存の詳細と推奨順は05を正本とします。
 
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 

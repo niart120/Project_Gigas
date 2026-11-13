@@ -115,7 +115,7 @@ D01はde3956eで振る舞いを変更し、ce7fd75で重複する送信中flag�
 | `uv lock --check` / `uv build` | passed / passed | lock整合、sdist・wheel生成 |
 | `git diff --check` | passed | 空白差分。親unit054の同時編集をstageから除外 |
 | 公開docs/docstring読解 | 確認済み | stop/clearのローカル受付、自然完了・失敗の回収、切断の打切り、サービス記録の意味を照合 |
-| 実runtime・実機 | passed（下記3実行） | 停止・自然完了・終端前切断、CH552の短い入力と中立送出を確認 |
+| 実runtime・実機 | 当時の報告はpassed（9.2に判定の訂正） | 停止・自然完了・終端前切断の原観測と、CH552の短い入力・中立送出を9.1へ記録 |
 
 ### 9.1 実接続・実機受入（2026-11-13）
 
@@ -140,6 +140,12 @@ uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode input --directi
 入力実行の`before.png`・`after-stop.png`・`after-resume.png`を目視した。主人公が入口の右へ一マス移動し、停止後から約20秒後の再開完了時も同じ位置である。NPCは移動しており、停止画面の再利用ではない。313msは送出完了の観測間隔で、機器の解除ACKや最悪応答時間の測定ではない。3実行ともサービス・映像・設定・serialが終了し、観測した所有PIDの残存は0だった。
 
 最初のneutral実行`m1-neutral-20261113-222024-125928/report.json`は検証器の誤りで失敗した。観測用`traced_notify`が省略可能なparamsを必須にし、製品の`notify("initialized")`を受けられなかった。initialize成功の後で停止し、thread/Goal/turn・書込・入力は未実行、所有PIDの残存は0。引数を`params=None`へ直して再実行した。この失敗は製品停止の検証結果に数えない。
+
+### 9.2 後続の最終確認で判明した検証器の訂正
+
+同日のunit_060受入後にreport全体を読み直し、上記neutral・close-waitのreportにも`error: Serial neutral send was not observed`と`status: passed`が併存していたと確認した。入力を送らないmodeにも中立送出観測を要求していたことと、例外時に先に設定したpassedをfailedへ戻していなかったことが検証器の誤りである。これら2実行の最終合格表示を受入の根拠にはしない。書込・通知・回収・close時刻の原観測は保持するが、中立送出を確認した記録ではない。
+
+input実行にはこのerrorがなく、押下後の中立送出を個別に観測している。検証器を修正し、最終コードでneutralとclose-waitを再実行して成功した結果は[unit_060](../unit_060/CONNECTION_RESPONSIBILITY_OWNERSHIP.md)へ記録した。古いreportは書き換えない。
 
 ## 10. 先送り事項
 
