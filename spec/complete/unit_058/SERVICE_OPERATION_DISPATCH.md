@@ -4,13 +4,13 @@
 
 ### 1.1 目的
 
-着手中の子仕様。unit054 M1 のサービス操作受付を、操作文脈と束縛した関数へ整理する。任意 payload を持つ `_Command` と `_perform` の操作名分岐を取り除く。
+状態: **complete（配送構造・終了中拒否の修正と局所gate完了）**。unit054 M1 のサービス操作受付を、操作文脈と束縛した関数へ整理し、任意 payload を持つ `_Command` と `_perform` の操作名分岐を取り除いた。サービス本体の責務・状態所有の分離は後続へ残す。
 
 ### 1.2 起点 / source
 
 | source | 内容 | path |
 |---|---|---|
-| user request | KISS に沿った契約削減と責務整理 | [親仕様](../unit_054/KISS_SIMPLIFICATION.md) |
+| user request | KISS に沿った契約削減と責務整理 | [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md) |
 | preceding unit | 停止の受付結果、終了の単一所有 | [unit057](../../complete/unit_057/TURN_END_OWNERSHIP.md) |
 
 ### 1.3 use case
@@ -35,7 +35,7 @@
 
 ## 4. 関連 docs
 
-- [親仕様](../unit_054/KISS_SIMPLIFICATION.md)
+- [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)
 - [Codex 利用手順](../../../docs/codex.md)
 - [品質規約](../../initial/README.md)
 
@@ -89,7 +89,7 @@ D01 は `df794a7` で記録した。contract_audit の追加独立レビュー�
 | `src/gigas/services/codex.py` | modify | 操作配送と loop 境界 |
 | `tests/integration/test_codex_service.py` | modify | 公開入口と境界回帰 |
 | `docs/codex-gui.md` | modify | 終了受付後の拒否結果を保存しない範囲 |
-| `spec/wip/unit_058/SERVICE_OPERATION_DISPATCH.md` | new | 契約・検証・判断 |
+| `spec/complete/unit_058/SERVICE_OPERATION_DISPATCH.md` | new | 契約・検証・判断 |
 
 ## 9. 検証
 
@@ -113,7 +113,7 @@ D01 は `df794a7` で記録した。contract_audit の追加独立レビュー�
 
 公開サービス API の引数・DTO は維持した。class docstring と `docs/codex-gui.md` に終了受付後の拒否結果を保存しない制約を追加し、送信の not_sent、停止の accepted、shutdown の直接 close と照合した。型の ignore / cast、追加依存、互換層は導入していない。変更文書は内容レビューとローカルリンク 9 件の参照先・仮テキスト検査を完了した。実 runtime・機器の再実行は本単位の対象外であり、本単位で成功したと報告しない。
 
-D02 の contract_audit 独立レビューでは、GUI 拒否だけの保存抑止、loop 内の拒否・取消しの記録維持、close 待機中の再現性、公開文書との一致に修正必須の指摘なし。子の製品変更と gate は完了し、unit058 は親の最終レビュー・complete 移動待ちで wip に残す。
+D02 の contract_audit 独立レビューでは、GUI 拒否だけの保存抑止、loop 内の拒否・取消しの記録維持、close 待機中の再現性、公開文書との一致に修正必須の指摘なし。親担当もD01のloop・世代・相関・回答保留とD02の変更範囲を確認し、子の製品変更とgateを完了とした。実装commitは`df794a7`・`f18124f`。
 
 ## 10. 先送り事項
 
@@ -125,4 +125,4 @@ D02 の contract_audit 独立レビューでは、GUI 拒否だけの保存抑�
 - [x] TDD Test List を更新した
 - [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる場合の gate を記録した
-- [ ] 親の最終レビューを受けた
+- [x] 親の最終レビューを受けた
