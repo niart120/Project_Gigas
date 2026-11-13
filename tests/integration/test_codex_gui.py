@@ -946,7 +946,11 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     assert composer.model_button.text() == "未接続"
 
 
-def test_goal_mode_only_submits_when_sent_and_keeps_draft(qtbot: QtBot) -> None:
+@pytest.mark.parametrize("outcome", ["accepted", "not_sent", "unknown"])
+@pytest.mark.parametrize("edited", [False, True])
+def test_goal_mode_only_submits_when_sent_and_keeps_draft(
+    qtbot: QtBot, outcome: str, *, edited: bool
+) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(7)
@@ -965,8 +969,29 @@ def test_goal_mode_only_submits_when_sent_and_keeps_draft(qtbot: QtBot) -> None:
     panel.send_button.click()
     assert submitted == ["橋まで進む"]
     assert panel.prompt.toPlainText() == "橋まで進む"
-    panel.handle_result(ServiceResult(7, "goal_set", message=MessageResult("accepted")))
-    assert panel.prompt.toPlainText() == ""
+    assert not panel.composer.goal_mode.isEnabled()
+    if edited:
+        panel.prompt.setPlainText("次の原稿")
+    result = {
+        "accepted": MessageResult("accepted"),
+        "not_sent": MessageResult("not_sent"),
+        "unknown": MessageResult("unknown"),
+    }[outcome]
+    panel.handle_result(ServiceResult(7, "goal_set", message=result))
+    expected = "次の原稿" if edited else "" if outcome == "accepted" else "橋まで進む"
+    assert panel.prompt.toPlainText() == expected
+    assert panel.composer.goal_mode.isChecked() == (outcome != "accepted")
+    assert submitted == ["橋まで進む"]
+    if outcome == "accepted":
+        panel.handle_event(ServiceEvent(7, GoalEvent(GoalState("橋まで進む", "active"))))
+        panel.handle_event(ServiceEvent(7, TurnStarted("auto-1")))
+        panel.handle_event(ServiceEvent(7, SessionStatus("running", "m", "low", True)))
+        instructions: list[tuple[str, str]] = []
+        panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+        panel.prompt.setPlainText("次の原稿")
+        panel.send_button.click()
+        assert instructions == [("次の原稿", "auto-1")]
+        assert submitted == ["橋まで進む"]
 
 
 def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:

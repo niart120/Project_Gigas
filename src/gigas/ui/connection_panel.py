@@ -311,11 +311,12 @@ class ConnectionPanel(QWidget):
             and result.operation in self._pending
             and result.message is not None
             and result.message.outcome == "accepted"
-            and self._message_draft == self._submitted
-            and not self.prompt.is_composing
         ):
-            self._message_draft = ""
-            self.prompt.clear()
+            if result.operation == "goal_set":
+                self.composer.goal_mode.setChecked(False)
+            if self._message_draft == self._submitted and not self.prompt.is_composing:
+                self._message_draft = ""
+                self.prompt.clear()
         self._pending.discard(result.operation)
         self._error = result.error
         if result.error:
