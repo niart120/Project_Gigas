@@ -3,7 +3,7 @@ from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-from gigas.runtime.codex.models import PlanEvent, PlanStep
+from gigas.runtime.codex.models import GoalState, PlanEvent, PlanStep
 from gigas.ui.plan_panel import PlanPanel
 
 
@@ -16,7 +16,7 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     assert panel.view.toPlainText()
     assert panel.goal_heading.isVisible()
     assert panel.goal_value.isVisible()
-    goal_text = panel.goal_value.text()
+    goal_text = panel.goal_value.toPlainText()
     assert goal_text == "—"
     assert panel.goal_heading.geometry().bottom() < panel.goal_value.geometry().top()
     assert panel.goal_value.geometry().bottom() < panel.heading.geometry().top()
@@ -34,7 +34,7 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     for step in event.steps:
         assert step.step in view.toPlainText()
     assert event.explanation in view.toPlainText()
-    assert panel.goal_value.text() == goal_text
+    assert panel.goal_value.toPlainText() == goal_text
     found = view.document().find("橋🙂へ移動")
     assert found.charFormat().fontWeight() == QFont.Weight.Bold
 
@@ -61,7 +61,7 @@ def test_plan_keeps_its_place_and_last_public_steps_after_turn_end(qtbot: QtBot)
     assert not panel.status.text()
     assert panel.goal_heading.isVisible()
     assert panel.goal_value.isVisible()
-    assert panel.goal_value.text() == goal_text
+    assert panel.goal_value.toPlainText() == goal_text
 
 
 def test_plan_update_preserves_reverse_selection_copy_and_reading_position(qtbot: QtBot) -> None:
@@ -95,3 +95,29 @@ def test_plan_update_preserves_reverse_selection_copy_and_reading_position(qtbot
 
     panel.resize(380, 200)
     assert view.textCursor().selectedText() == selected
+
+
+def test_goal_text_retains_selection_and_scroll_when_plan_changes(qtbot: QtBot) -> None:
+    panel = PlanPanel()
+    qtbot.addWidget(panel)
+    panel.resize(460, 260)
+    panel.show()
+    objective = "\n".join(f"確認箇所 {i} 日本語🙂" for i in range(25))
+    panel.set_goal(GoalState(objective, "active"))
+    view = panel.goal_value
+    cursor = view.document().find("確認箇所 15 日本語🙂")
+    view.setTextCursor(cursor)
+    view.ensureCursorVisible()
+    selected = cursor.selectedText()
+    scroll = view.verticalScrollBar().value()
+    panel.set_plan(PlanEvent("auto", (PlanStep("確認", "inProgress"),)))
+    panel.set_goal(GoalState(objective, "paused"))
+    assert view.textCursor().selectedText() == selected
+    assert view.verticalScrollBar().value() == scroll
+    view.copy()
+    assert QApplication.clipboard().text() == selected
+    assert "確認" in panel.view.toPlainText()
+    assert panel.goal_status.text() == "一時停止"
+    panel.set_goal(GoalState(objective + "\n新しい制約", "paused"))
+    assert view.textCursor().selectedText() == selected
+    assert view.verticalScrollBar().value() == scroll

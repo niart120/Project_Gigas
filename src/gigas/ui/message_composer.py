@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QStyleOptionButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -127,6 +128,11 @@ class MessageComposer(QFrame):
         layout.addWidget(self.prompt)
         actions = QHBoxLayout()
         actions.setSpacing(6)
+        self.goal_mode = QToolButton(self)
+        self.goal_mode.setText("目標")
+        self.goal_mode.setCheckable(True)
+        self.goal_mode.setAccessibleName("目標として送信")
+        actions.addWidget(self.goal_mode)
         actions.addStretch()
         self.model_button = _ModelButton(self)
         self.model_button.setFlat(True)

@@ -13,6 +13,8 @@ from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.models import (
     ActivityEvent,
     ConnectionOptions,
+    GoalEvent,
+    GoalState,
     HumanRequest,
     LoginEvent,
     ModelChoice,
@@ -942,3 +944,82 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     assert not composer.model_button.isEnabled()
     assert composer.model_button.text() == "未接続"
+
+
+def test_goal_mode_only_submits_when_sent_and_keeps_draft(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(7)
+    panel.handle_event(ServiceEvent(7, SessionStatus("ready", "m", "low", True)))
+    panel.handle_result(ServiceResult(7, "connect"))
+    submitted: list[str] = []
+    panel.goal_requested.connect(submitted.append)
+    panel.prompt.setPlainText("橋まで進む")
+    panel.composer.goal_mode.click()
+    panel.handle_event(ServiceEvent(7, TurnStarted("ordinary")))
+    panel.handle_event(ServiceEvent(7, SessionStatus("running", "m", "low", True)))
+    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(7, SessionStatus("ready", "m", "low", True)))
+    assert submitted == []
+    assert panel.prompt.toPlainText() == "橋まで進む"
+    panel.send_button.click()
+    assert submitted == ["橋まで進む"]
+    assert panel.prompt.toPlainText() == "橋まで進む"
+    panel.handle_result(ServiceResult(7, "goal_set", message=MessageResult("accepted")))
+    assert panel.prompt.toPlainText() == ""
+
+
+def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(3)
+    panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+    panel.handle_result(ServiceResult(3, "connect"))
+    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
+    panel.prompt.setPlainText("追加指示")
+    assert not panel.send_button.isEnabled()
+    assert panel.interrupt_button.isEnabled()
+    assert not panel.plan_panel.resume_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, TurnStarted("auto-1")))
+    panel.handle_event(ServiceEvent(3, SessionStatus("running", "m", "low", True)))
+    assert panel.send_button.isEnabled()
+    panel.interrupt()
+    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "paused"))))
+    assert not panel.plan_panel.resume_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
+    panel.handle_result(ServiceResult(3, "stop"))
+    assert panel.plan_panel.resume_button.isEnabled()
+    assert panel.send_button.isEnabled()
+    resumed: list[bool] = []
+    panel.goal_resume_requested.connect(lambda: resumed.append(True))
+    panel.plan_panel.resume_button.click()
+    assert resumed == [True]
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.prompt.toPlainText() == "追加指示"
+    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
+    panel.handle_result(ServiceResult(3, "goal_resume"))
+    assert not panel.send_button.isEnabled()
+    panel.plan_panel.clear_button.click()
+    panel.handle_event(ServiceEvent(3, GoalEvent(None)))
+    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
+    panel.handle_result(ServiceResult(3, "goal_clear"))
+    assert panel.plan_panel.goal_value.toPlainText() == "—"
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.prompt.toPlainText() == "追加指示"
+
+
+def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
+    qtbot: QtBot,
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(8)
+    panel.handle_event(ServiceEvent(8, SessionStatus("ready", "m", "low", True)))
+    panel.handle_result(ServiceResult(8, "connect"))
+    panel.handle_event(ServiceEvent(8, GoalEvent(GoalState("保持する目標", "paused"))))
+    assert panel.plan_panel.clear_button.isEnabled()
+    panel.handle_result(ServiceResult(8, "disconnect"))
+    assert not panel.plan_panel.clear_button.isEnabled()
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.plan_panel.goal_value.toPlainText() == "保持する目標"

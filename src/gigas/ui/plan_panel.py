@@ -2,22 +2,21 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
-    from gigas.runtime.codex.models import PlanEvent
+    from gigas.runtime.codex.models import GoalState, PlanEvent
 
 
 class PlanPanel(QFrame):
     """Display the current turn's published work without inferring a Goal.
 
     Goal and current-work headings remain present without received content.
-    The Goal value stays empty until Goal integration is provided. The plan's
-    single document retains selection and the visible passage across updates.
+    Goal and Plan each use a document retaining selection and the visible passage
+    across updates. Selection belongs to its document, not both panes.
 
     Args:
         parent: Owning right-hand pane.
@@ -28,15 +27,26 @@ class PlanPanel(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(self)
+        goal_heading = QHBoxLayout()
         self.goal_heading = QLabel("目標", self)
-        layout.addWidget(self.goal_heading)
-        self.goal_value = QLabel("—", self)
+        goal_heading.addWidget(self.goal_heading)
+        goal_heading.addStretch()
+        self.goal_status = QLabel(self)
+        goal_heading.addWidget(self.goal_status)
+        self.resume_button = QToolButton(self)
+        self.resume_button.setText("再開")
+        self.clear_button = QToolButton(self)
+        self.clear_button.setText("破棄")
+        goal_heading.addWidget(self.resume_button)
+        goal_heading.addWidget(self.clear_button)
+        layout.addLayout(goal_heading)
+        self.goal_value = Transcript(self, show_headings=False)
         self.goal_value.setAccessibleName("目標")
-        self.goal_value.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-            | Qt.TextInteractionFlag.TextSelectableByKeyboard
-        )
+        self.goal_value.setFrameShape(QFrame.Shape.NoFrame)
+        self.goal_value.setMaximumHeight(100)
+        self.goal_value.setMinimumHeight(35)
         layout.addWidget(self.goal_value)
+        self.set_goal(None)
         layout.addSpacing(6)
         heading = QHBoxLayout()
         self.heading = QLabel("今回の作業", self)
@@ -51,8 +61,30 @@ class PlanPanel(QFrame):
         palette = self.view.palette()
         palette.setColor(QPalette.ColorRole.Base, self.palette().color(QPalette.ColorRole.Window))
         self.view.setPalette(palette)
+        self.goal_value.setPalette(palette)
         layout.addWidget(self.view, 1)
         self.set_plan(None)
+
+    def set_goal(self, goal: "GoalState | None") -> None:
+        """Render the confirmed public objective without changing the turn plan.
+
+        Args:
+            goal: Current public Goal, or None after confirmed clearing.
+        """
+        labels = {
+            "active": "進行中",
+            "paused": "一時停止",
+            "blocked": "停止",
+            "usageLimited": "利用制限",
+            "budgetLimited": "予算上限",
+            "complete": "完了",
+        }
+        self.goal_status.setText(labels.get(goal.status, goal.status) if goal else "")
+        self.goal_value.update_item("goal", goal.objective if goal else "—", kind="plan")
+        self.resume_button.setVisible(
+            goal is not None and goal.status not in {"active", "complete"}
+        )
+        self.clear_button.setVisible(goal is not None)
 
     def set_plan(
         self,

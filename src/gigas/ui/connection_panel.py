@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from gigas.runtime.codex.models import (
     ActivityEvent,
+    GoalEvent,
     HumanRequest,
     LoginEvent,
     ModelSelection,
@@ -36,6 +37,8 @@ from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from gigas.runtime.codex.models import GoalState
 
 
 _PHASE_LABELS = {
@@ -70,6 +73,9 @@ class ConnectionPanel(QWidget):
     disconnect_requested = Signal()
     login_requested = Signal()
     model_requested = Signal(str, str)
+    goal_requested = Signal(str)
+    goal_resume_requested = Signal()
+    goal_clear_requested = Signal()
     send_requested = Signal(str)
     steer_requested = Signal(str, str)
     interrupt_requested = Signal()
@@ -89,6 +95,7 @@ class ConnectionPanel(QWidget):
         self._connected = False
         self._available = True
         self._settings_ready = True
+        self._goal: GoalState | None = None
         self._status = SessionStatus("closed")
         self._pending: set[str] = set()
         self._submitted = ""
@@ -123,6 +130,9 @@ class ConnectionPanel(QWidget):
         layout.addWidget(self.transcript, 1)
         self.composer = MessageComposer(self)
         self.composer.model_selected.connect(self._select_model)
+        self.composer.goal_mode.toggled.connect(self._render)
+        self.plan_panel.resume_button.clicked.connect(self._resume_goal)
+        self.plan_panel.clear_button.clicked.connect(self._clear_goal)
         self.prompt = self.composer.prompt
         self.send_button = self.composer.send_button
         self.interrupt_button = self.composer.interrupt_button
@@ -145,6 +155,8 @@ class ConnectionPanel(QWidget):
     def activate(self, generation: int) -> None:
         """Reset the view for a newly submitted connection generation."""
         self.composer.set_choices(None)
+        self._goal = None
+        self.plan_panel.set_goal(None)
         self._generation = generation
         self._failure_ids.clear()
         self._connected = True
@@ -193,7 +205,10 @@ class ConnectionPanel(QWidget):
         if not isinstance(envelope, ServiceEvent) or envelope.generation != self._generation:
             return
         event = envelope.event
-        if isinstance(event, ModelSelection):
+        if isinstance(event, GoalEvent):
+            self._goal = event.goal
+            self.plan_panel.set_goal(event.goal)
+        elif isinstance(event, ModelSelection):
             self.composer.set_choices(event)
         elif isinstance(event, SessionStatus):
             self._error = ""
@@ -292,7 +307,7 @@ class ConnectionPanel(QWidget):
                 record.finish_submission(result.answer.outcome)
                 self._request_changed(record)
         if (
-            result.operation in {"send", "steer"}
+            result.operation in {"send", "steer", "goal_set"}
             and result.operation in self._pending
             and result.message is not None
             and result.message.outcome == "accepted"
@@ -350,6 +365,13 @@ class ConnectionPanel(QWidget):
             return
         self._submitted = self._message_draft
         self._error = ""
+        if self.composer.goal_mode.isChecked():
+            self._pending.add("goal_set")
+            if self._goal is None or self._goal.status == "complete":
+                self._stopping = False
+            self._render()
+            self.goal_requested.emit(self._submitted)
+            return
         steering = self._status.phase in {"running", "waiting"}
         self._pending.add("steer" if steering else "send")
         if not steering:
@@ -359,6 +381,23 @@ class ConnectionPanel(QWidget):
             self.steer_requested.emit(self._submitted, self._active_turn)
         else:
             self.send_requested.emit(self._submitted)
+
+    def _resume_goal(self) -> None:
+        if not self.plan_panel.resume_button.isEnabled():
+            return
+        self._pending.add("goal_resume")
+        self._stopping = False
+        self._render()
+        self.goal_resume_requested.emit()
+
+    def _clear_goal(self) -> None:
+        if not self.plan_panel.clear_button.isEnabled():
+            return
+        self._pending.add("goal_clear")
+        self._stopping = True
+        self._expire_requests()
+        self._render()
+        self.goal_clear_requested.emit()
 
     def _add_request(self, request: HumanRequest) -> None:
         record = RequestRecord(request, len(self.requests) + 1)
@@ -427,6 +466,30 @@ class ConnectionPanel(QWidget):
         self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
+        goal_active = self._goal is not None and self._goal.status == "active"
+        goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
+        goal_mode = self.composer.goal_mode.isChecked()
+        settled = phase in {"ready", "stopped"} and self._active_turn is None
+        self.composer.goal_mode.setEnabled(
+            available
+            and not goal_pending
+            and not self._pending.intersection({"send", "steer"})
+            and not any(record.state in {"waiting", "sending"} for record in self.requests.values())
+        )
+        self.plan_panel.resume_button.setEnabled(
+            available
+            and settled
+            and not self._pending
+            and self._goal is not None
+            and self._goal.status not in {"active", "complete"}
+        )
+        self.plan_panel.clear_button.setEnabled(
+            available
+            and self._connected
+            and phase in {"ready", "running", "waiting", "stopped"}
+            and self._goal is not None
+            and not self._pending
+        )
         ready = (
             available
             and (
@@ -437,19 +500,37 @@ class ConnectionPanel(QWidget):
                     and not self._stopping
                 )
             )
-            and not self._pending.intersection({"send", "steer"})
+            and not self._pending.intersection(
+                {"send", "steer", "goal_set", "goal_resume", "goal_clear"}
+            )
         )
+        if goal_active and self._active_turn is None and not goal_mode:
+            ready = False
+        if goal_mode and (self._goal is None or self._goal.status == "complete") and not settled:
+            ready = False
+        if "stop" in self._pending or phase == "stopping":
+            ready = False
         self.prompt.setReadOnly(not available)
         for view in self.request_views.values():
             view.refresh(available=available and not self._stopping)
-        running = phase in {"starting", "running", "waiting", "stopping"} or bool(
-            self._pending.intersection({"send", "stop"})
+        running = (
+            goal_active
+            or phase in {"starting", "running", "waiting", "stopping"}
+            or bool(
+                self._pending.intersection(
+                    {"send", "stop", "goal_set", "goal_resume", "goal_clear"}
+                )
+            )
         )
         self.composer.render_actions(
             send_enabled=ready and bool(self._message_draft.strip()),
             interrupt_enabled=(
                 available
-                and (phase in {"starting", "running", "waiting"} or "send" in self._pending)
+                and (
+                    goal_active
+                    or phase in {"starting", "running", "waiting"}
+                    or bool(self._pending.intersection({"send", "goal_set", "goal_resume"}))
+                )
                 and "stop" not in self._pending
                 and not self._stopping
             ),
