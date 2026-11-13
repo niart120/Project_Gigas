@@ -76,7 +76,7 @@ unit059は`ef469a4`でcompleteへ移動済み。開始時branchは`codex/kiss-si
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | D01 質問・承認・回答・失効を維持 | characterization | unit / integration | baseline 310 passed。抽出後のconnection・answer・GUI 219 passed |
-| green | D02 次ターン選択とGoal設定を維持 | characterization | unit / integration | baseline 310 passed。確定snapshot一件にする |
+| refactor-done | D02 次ターン選択とGoal設定を維持 | characterization | unit / integration | 抽出後6ファイル310 passed。確定snapshot一件とRpcPeerの再公開 |
 | green | D03 環境準備の先行通知・受付不明・切断を維持 | characterization | unit / integration | baseline 310 passed。初期取得とsetup completionを所有 |
 | green | D04 認証・利用枠・close後の通知抑止を維持 | characterization | unit / integration | baseline 310 passed。ログイン操作のtaskは接続側 |
 
@@ -91,6 +91,8 @@ ModelCatalogのproposeは検証済みModelSelectionを返す。接続が必要�
 Connection.closeの同期部で子の背景taskとsetup completionを取り消す。既存cleanupで操作・通知消費・終了処理と子の背景taskを回収し、transportをfinallyで閉じる。子に第二のclose taskを作らない。open/loginのawait後は接続側でclosedを確認してからusage取得を始め、close受付後の再生成を防ぐ。
 
 子の不正値は局所ValueError、I/OはTransportError/RpcErrorを用い、公開CodexConnectionErrorとfailure IDは接続で扱う。用途固有の受付不明・準備失敗・秘密値拒否を維持し、共有例外moduleを追加しない。
+
+D01は`ab74e25`で記録した。独立レビューでは所属/end判定後の受付、invalid IDの消費、回答検証後の消費、file承認の一件ずつの失効とRPC順に阻害指摘なし。候補tupleを返すdocstringを実体に合わせた。D02は候補・model・effortをModelSelection一件へ寄せ、設定RPCの後だけcommitする。RpcPeerはtransportへ移し、従来のconnectionからのimportを明示的な再公開で維持した。
 
 ## 8. 対象ファイル
 
@@ -114,6 +116,8 @@ Connection.closeの同期部で子の背景taskとsetup completionを取り消�
 | `uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_transport.py -q --basetemp=tmp/pytest-u060-baseline --tb=short` | 310 passed / 15.13s | 製品変更前の基準 |
 | `uv run pytest tests/unit/test_codex_connection.py tests/integration/test_answer_lifecycle.py tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-u060-human --tb=short` | 219 passed | D01。秘密値・承認内容・同turn重複・回答配送・GUI |
 | D01対象2ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress`、`git diff --check` | passed | 要求担当の抽出。JSON field不正をValueErrorへ揃える2箇所はTRY004の局所説明を付記 |
+| baselineと同じ6ファイル、`--basetemp=tmp/pytest-u060-catalog` | 310 passed / 15.06s | D02。選択・Goal設定・transport公開境界を含む |
+| D02対象3ファイルの`ruff check` / `ruff format --check`、`uv run ty check --no-progress` | passed | 新snapshot所有とProtocolの移動。ignore/cast追加なし |
 | 段階別・最終gate | not run | 実装後に実行 |
 | 実runtime | not run | 親の受入待ち |
 

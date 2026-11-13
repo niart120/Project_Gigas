@@ -8,7 +8,7 @@ import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Protocol, override
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -84,6 +84,38 @@ class TransportClosed:
 
 
 type TransportEvent = RpcNotification | ServerRequest | TransportClosed
+
+
+class RpcPeer(Protocol):
+    """The single asynchronous I/O boundary owned by a Codex connection."""
+
+    async def start(self) -> None:
+        """Start the underlying transport."""
+        ...
+
+    async def request(self, method: str, params: "JsonObject | None") -> "JsonValue":
+        """Send one RPC and return its result without retrying."""
+        ...
+
+    async def notify(self, method: str, params: "JsonObject | None" = None) -> None:
+        """Send a notification."""
+        ...
+
+    async def respond(self, request_id: "RpcId", result: "JsonValue") -> None:
+        """Answer a server request using its original ID."""
+        ...
+
+    async def reject(self, request_id: "RpcId", code: int, message: str) -> None:
+        """Reject an unsupported server request."""
+        ...
+
+    async def next_event(self) -> "TransportEvent":
+        """Receive the next request, notification or closure."""
+        ...
+
+    async def close(self) -> None:
+        """Wait for owned transport tasks and the child process to finish."""
+        ...
 
 
 def _json_value(value: object) -> JsonValue:

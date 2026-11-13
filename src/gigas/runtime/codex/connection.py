@@ -5,18 +5,17 @@ import json
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib import resources
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
 from gigas.runtime.codex._human_requests import HumanRequests
+from gigas.runtime.codex._model_catalog import ModelCatalog
 from gigas.runtime.codex._notifications import TurnContent
 from gigas.runtime.codex.models import (
     AccountInfo,
     GoalEvent,
     GoalState,
     LoginEvent,
-    ModelChoice,
-    ModelSelection,
     RateLimitWindow,
     RequestResolved,
     SandboxEvent,
@@ -34,6 +33,9 @@ from gigas.runtime.codex.transport import (
     TransportClosed,
     TransportError,
 )
+from gigas.runtime.codex.transport import (
+    RpcPeer as RpcPeer,  # noqa: PLC0414 -- Preserve the existing public import boundary.
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -44,7 +46,7 @@ if TYPE_CHECKING:
         ConnectionPhase,
         ThreadConfiguration,
     )
-    from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, TransportEvent
+    from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
 class CodexConnectionError(RuntimeError):
@@ -72,38 +74,6 @@ class MessageDeliveryError(CodexConnectionError):
 
 class _ThreadPreparationError(Exception):
     """A host preparation failure that does not invalidate runtime authentication."""
-
-
-class RpcPeer(Protocol):
-    """The single asynchronous I/O boundary owned by a Codex connection."""
-
-    async def start(self) -> None:
-        """Start the underlying transport."""
-        ...
-
-    async def request(self, method: str, params: "JsonObject | None") -> "JsonValue":
-        """Send one RPC and return its result without retrying."""
-        ...
-
-    async def notify(self, method: str, params: "JsonObject | None" = None) -> None:
-        """Send a notification."""
-        ...
-
-    async def respond(self, request_id: "RpcId", result: "JsonValue") -> None:
-        """Answer a server request using its original ID."""
-        ...
-
-    async def reject(self, request_id: "RpcId", code: int, message: str) -> None:
-        """Reject an unsupported server request."""
-        ...
-
-    async def next_event(self) -> "TransportEvent":
-        """Receive the next request, notification or closure."""
-        ...
-
-    async def close(self) -> None:
-        """Wait for owned transport tasks and the child process to finish."""
-        ...
 
 
 def read_play_instructions() -> str:
@@ -245,9 +215,7 @@ class CodexConnection:
         self._opened = False
         self._closed = False
         self._authenticated = False
-        self._model = ""
-        self._effort = ""
-        self._choices: tuple[ModelChoice, ...] = ()
+        self._catalog = ModelCatalog(peer, emit)
         self._phase: ConnectionPhase = "connecting"
         self._thread_id: str | None = None
         self._turn: _Turn | None = None
@@ -483,8 +451,8 @@ class CodexConnection:
         if (
             not self._authenticated
             or self._usage.ordinary_usage_allowed is False
-            or not self._model
-            or not self._effort
+            or not self._catalog.snapshot.model
+            or not self._catalog.snapshot.effort
             or self._phase not in {"ready", "stopped"}
             or not prompt.strip()
             or self._start is not None
@@ -510,8 +478,8 @@ class CodexConnection:
                     {
                         "threadId": self._thread_id,
                         "input": [{"type": "text", "text": prompt}],
-                        "model": self._model,
-                        "effort": self._effort,
+                        "model": self._catalog.snapshot.model,
+                        "effort": self._catalog.snapshot.effort,
                     },
                 )
             )
@@ -592,8 +560,8 @@ class CodexConnection:
         if (
             not self._authenticated
             or self._usage.ordinary_usage_allowed is False
-            or not self._model
-            or not self._effort
+            or not self._catalog.snapshot.model
+            or not self._catalog.snapshot.effort
             or self._start is not None
             or self._phase not in {"ready", "stopped", "running", "waiting"}
             or (objective is not None and not objective.strip())
@@ -625,7 +593,11 @@ class CodexConnection:
                         await self._goal_request("thread/goal/clear", {})
                     await self._peer.request(
                         "thread/settings/update",
-                        {"threadId": self._thread_id, "model": self._model, "effort": self._effort},
+                        {
+                            "threadId": self._thread_id,
+                            "model": self._catalog.snapshot.model,
+                            "effort": self._catalog.snapshot.effort,
+                        },
                     )
                     if self._end is not None:
                         return False
@@ -1148,7 +1120,7 @@ class CodexConnection:
         )
         params: JsonObject = {
             "cwd": str(memory),
-            "model": self._model,
+            "model": self._catalog.snapshot.model,
             "developerInstructions": instructions,
             "sandbox": "workspace-write",
             "approvalPolicy": "on-request",
@@ -1183,7 +1155,7 @@ class CodexConnection:
         if (
             result.get("approvalPolicy") != "on-request"
             or result.get("approvalsReviewer") != "user"
-            or result.get("model") != self._model
+            or result.get("model") != self._catalog.snapshot.model
             or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
             or result.get("cwd") != str(memory)
         ):
@@ -1211,7 +1183,14 @@ class CodexConnection:
     ) -> None:
         self._phase = phase
         self._emit(
-            SessionStatus(phase, self._model, self._effort, self._authenticated, detail, failure_id)
+            SessionStatus(
+                phase,
+                self._catalog.snapshot.model,
+                self._catalog.snapshot.effort,
+                self._authenticated,
+                detail,
+                failure_id,
+            )
         )
 
     async def _read_account(self) -> None:
@@ -1270,70 +1249,10 @@ class CodexConnection:
                         self._failure("error", "利用制限による停止を確認できない")
 
     async def _read_models(self) -> str:
-        self._model, self._effort, self._choices = "", "", ()
-        models: list[JsonObject] = []
-        cursor: str | None = None
-        visited: set[str] = set()
-        while True:
-            try:
-                response = _object(await self._peer.request("model/list", {"cursor": cursor}))
-            except RpcError:
-                self._emit(ModelSelection((), "", ""))
-                return "モデル一覧を取得できない"
-            data = response.get("data")
-            if not isinstance(data, list):
-                message = "モデル一覧が不正"
-                raise CodexConnectionError(message)
-            models.extend(_object(model) for model in data)
-            next_cursor = response.get("nextCursor")
-            if next_cursor is None:
-                break
-            cursor = _text(next_cursor)
-            if cursor in visited:
-                message = "モデル一覧のページが重複"
-                raise CodexConnectionError(message)
-            visited.add(cursor)
-        choices = []
-        for model in models:
-            levels = model.get("supportedReasoningEfforts")
-            if isinstance(levels, list):
-                choices.append(
-                    ModelChoice(
-                        _text(model.get("model")),
-                        tuple(_text(_object(level).get("reasoningEffort")) for level in levels),
-                        _text(model.get("defaultReasoningEffort")),
-                    )
-                )
-        self._choices = tuple(choices)
-        selected = next(
-            (
-                model
-                for model in models
-                if (
-                    model.get("model") == self._options.model
-                    if self._options.model
-                    else model.get("isDefault") is True
-                )
-            ),
-            None,
-        )
-        detail = ""
-        if selected is None:
-            detail = "指定モデルを利用できない"
-        else:
-            self._model = _text(selected.get("model"))
-            effort = self._options.effort or _text(selected.get("defaultReasoningEffort"))
-            efforts = selected.get("supportedReasoningEfforts")
-            if not isinstance(efforts, list) or not any(
-                isinstance(option, dict) and option.get("reasoningEffort") == effort
-                for option in efforts
-            ):
-                detail = "指定推論レベルを利用できない"
-            else:
-                self._effort = effort
-
-        self._emit(ModelSelection(self._choices, self._model, self._effort))
-        return detail
+        try:
+            return await self._catalog.load(self._options.model, self._options.effort)
+        except ValueError as error:
+            raise CodexConnectionError(str(error)) from error
 
     async def select_model(self, model: str, effort: str) -> None:
         """Select validated values for future turns without changing an active turn.
@@ -1349,14 +1268,12 @@ class CodexConnection:
             CodexConnectionError: Selection is unavailable or not in the catalog.
         """
         self._require_open()
-        if (
-            self._start is not None
-            or not self._authenticated
-            or not any(
-                choice.model == model and effort in choice.efforts for choice in self._choices
-            )
-        ):
+        if self._start is not None or not self._authenticated:
             raise CodexConnectionError("モデル・推論レベルを選択できない状態")
+        try:
+            selection = self._catalog.propose(model, effort)
+        except ValueError as error:
+            raise CodexConnectionError(str(error)) from error
         if self._thread_id is not None and self._goal is not None:
             try:
                 await self._peer.request(
@@ -1365,8 +1282,7 @@ class CodexConnection:
                 )
             except TransportError as error:
                 raise CodexConnectionError("次ターン設定の反映を確認できない") from error
-        self._model, self._effort = model, effort
-        self._emit(ModelSelection(self._choices, model, effort))
+        self._catalog.commit(selection)
         self._status(self._phase)
 
     async def _consume_events(self) -> None:
