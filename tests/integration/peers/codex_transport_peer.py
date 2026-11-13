@@ -344,7 +344,10 @@ def dialogue() -> None:
         },
     )
     notice("turn/completed", {"turn": {"id": turn_id, "status": "completed"}})
-    sys.stdin.buffer.read()
+    for raw in sys.stdin.buffer:
+        request = json.loads(raw)
+        assert request["method"] == "thread/backgroundTerminals/list"
+        send({"id": request["id"], "result": {"data": [], "nextCursor": None}})
 
 
 if __name__ == "__main__":

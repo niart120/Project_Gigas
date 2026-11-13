@@ -76,6 +76,7 @@ class FakePeer:
         self.close_calls = 0
         self.respond_gate: asyncio.Event | None = None
         self.goal: JsonObject | None = None
+        self.terminals: list[str] = []
 
     async def start(self) -> None:
         """Record process startup."""
@@ -139,6 +140,16 @@ class FakePeer:
         if method == "thread/goal/clear":
             self.goal = None
             return {"cleared": True}
+        if method == "thread/backgroundTerminals/list":
+            start = int(str(params.get("cursor", "0"))) if params else 0
+            return {
+                "data": [{"processId": item} for item in self.terminals[start : start + 1]],
+                "nextCursor": str(start + 1) if start + 1 < len(self.terminals) else None,
+            }
+        if method == "thread/backgroundTerminals/terminate":
+            assert params is not None
+            self.terminals.remove(str(params["processId"]))
+            return {"terminated": True}
         if method == "thread/unsubscribe":
             return {"status": "unsubscribed"}
         if method == "turn/start":
@@ -188,9 +199,9 @@ def _run(scenario: Coroutine[object, object, None]) -> None:
 
 
 async def _events_processed() -> None:
-    # FakePeer RPCs finish immediately; let the event consumer drain its queue.
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    # FakePeer RPCs finish immediately; also drain the shared stop task and its callback.
+    for _ in range(5):
+        await asyncio.sleep(0)
 
 
 def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Path) -> None:
@@ -1686,14 +1697,23 @@ def test_changed_file_patch_invalidates_previously_presented_approval(tmp_path: 
     _run(scenario())
 
 
-def test_cancel_decision_disables_other_answers_before_write_and_terminal(tmp_path: Path) -> None:
+@pytest.mark.parametrize("goal", [False, True])
+def test_cancel_decision_disables_other_answers_before_write_and_terminal(
+    tmp_path: Path, *, goal: bool
+) -> None:
     async def scenario() -> None:
         peer = FakePeer()
         peer.respond_gate = asyncio.Event()
         events: list[ConnectionEvent] = []
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
-        await connection.send("開始")
+        if goal:
+            await connection.set_goal("開始")
+            await connection._notification(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
+        else:
+            await connection.send("開始")
         peer.events.put_nowait(_question())
         peer.events.put_nowait(
             ServerRequest(
@@ -1719,13 +1739,18 @@ def test_cancel_decision_disables_other_answers_before_write_and_terminal(tmp_pa
         assert events[-1].phase == "stopping"
         with pytest.raises(CodexConnectionError):
             await connection.answer(question.token, answers={"route": "東"})
-        peer.events.put_nowait(_terminal())
+        peer.terminals = ["writer"]
+        peer.events.put_nowait(_terminal("interrupted"))
         await _events_processed()
         peer.respond_gate.set()
         await answer
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "stopped"
         assert peer.replies == [("approval", {"decision": "cancel"})]
+        assert not peer.terminals
+        if goal:
+            assert peer.goal is not None
+            assert peer.goal["status"] == "paused"
         await connection.close()
 
     _run(scenario())
@@ -2029,11 +2054,14 @@ def test_goal_stop_interrupts_even_when_pause_fails_and_rejects_late_turn_input(
         )
         if fail_pause:
             peer.rpc_errors["thread/goal/set"] = -32600
+        peer.terminals = ["writer"]
+        if fail_pause:
             with pytest.raises(CodexConnectionError):
                 await connection.stop()
         else:
             await connection.stop()
         assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "auto-1"}) in peer.calls
+        assert not peer.terminals
         await connection._notification(
             RpcNotification(
                 "turn/completed",
@@ -2211,5 +2239,137 @@ def test_cleared_goal_still_interrupts_a_late_autonomous_turn(tmp_path: Path) ->
         )
         assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "late"}) in peer.calls
         await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("trigger", ["pause", "clear", "inactive", "failed"])
+def test_goal_stop_waits_for_terminal_cleanup_before_new_execution(
+    tmp_path: Path, trigger: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("goal")
+        await connection._notification(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto"}})
+        )
+        peer.terminals = ["writer-1", "writer-2"]
+        gate = peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
+        if trigger == "pause":
+            stopping = asyncio.create_task(connection.stop())
+        elif trigger == "clear":
+            stopping = asyncio.create_task(connection.clear_goal())
+        elif trigger == "inactive":
+            assert peer.goal is not None
+            stopping = asyncio.create_task(
+                connection._notification(
+                    RpcNotification(
+                        "thread/goal/updated",
+                        {"threadId": "thread-1", "goal": {**peer.goal, "status": "blocked"}},
+                    )
+                )
+            )
+        else:
+            stopping = asyncio.create_task(
+                connection._notification(
+                    RpcNotification(
+                        "turn/completed",
+                        {"threadId": "thread-1", "turn": {"id": "auto", "status": "failed"}},
+                    )
+                )
+            )
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not stopping.done()
+        if trigger != "failed":
+            terminal = asyncio.create_task(
+                connection._notification(
+                    RpcNotification(
+                        "turn/completed",
+                        {"threadId": "thread-1", "turn": {"id": "auto", "status": "interrupted"}},
+                    )
+                )
+            )
+            await _events_processed()
+        else:
+            terminal = stopping
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopping"
+        with pytest.raises(CodexConnectionError):
+            await connection.resume_goal()
+        with pytest.raises(CodexConnectionError):
+            await connection.set_goal("new")
+        with pytest.raises(CodexConnectionError):
+            await connection.send("chat")
+        gate.set()
+        await stopping
+        await terminal
+        await _events_processed()
+        assert not peer.terminals
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "stopped"
+        terminated = [params for method, params in peer.calls if method.endswith("/terminate")]
+        assert terminated == [
+            {"threadId": "thread-1", "processId": "writer-1"},
+            {"threadId": "thread-1", "processId": "writer-2"},
+        ]
+        terminal_calls = [method for method, _ in peer.calls if "/backgroundTerminals/" in method]
+        assert terminal_calls[-1] == "thread/backgroundTerminals/list"
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["rejected", "rpc", "remains"])
+def test_unconfirmed_terminal_cleanup_keeps_execution_closed(tmp_path: Path, failure: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.set_goal("goal")
+        peer.terminals = ["writer"]
+        if failure == "rejected":
+            peer.responses["thread/backgroundTerminals/terminate"] = {"terminated": False}
+        elif failure == "rpc":
+            peer.rpc_errors["thread/backgroundTerminals/terminate"] = -32600
+        else:
+            peer.responses["thread/backgroundTerminals/terminate"] = {"terminated": True}
+        with pytest.raises(CodexConnectionError):
+            await connection.stop()
+        for operation in (
+            connection.resume_goal(),
+            connection.send("chat"),
+            connection.set_goal("new"),
+        ):
+            with pytest.raises(CodexConnectionError):
+                await operation
+        assert len([method for method, _ in peer.calls if method.endswith("/terminate")]) == 1
+        assert isinstance(events[-1], SessionStatus)
+        assert events[-1].phase == "error"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_close_collects_pending_terminal_cleanup(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        await connection.open()
+        await connection.set_goal("goal")
+        peer.terminals = ["writer"]
+        peer.gates["thread/backgroundTerminals/terminate"] = asyncio.Event()
+        stopping = asyncio.create_task(connection.stop())
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not stopping.done()
+        await connection.close()
+        await asyncio.gather(stopping, return_exceptions=True)
+        assert peer.closed
+        assert not any(task.get_name() == "gigas-codex-stop" for task in asyncio.all_tasks())
 
     _run(scenario())

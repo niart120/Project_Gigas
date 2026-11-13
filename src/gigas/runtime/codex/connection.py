@@ -211,9 +211,10 @@ class CodexConnection:
         peer: Transport implementing the actual RPC boundary.
         options: Working directory and requested authentication/model settings.
         emit: Callback receiving typed application events, never raw RPC frames.
-        prepare_turn: Optional async host preparation for each ordinary send,
-            receiving its prompt and the confirmed thread ID, or None initially.
-            Its configuration starts or resumes the thread before the turn.
+        prepare_turn: Optional async host preparation for an ordinary send,
+            new Goal, or explicit Goal resume, receiving the prompt/objective and
+            confirmed thread ID, or None initially. Its configuration starts or
+            resumes the thread; autonomous turns and objective updates reuse it.
             None uses options.cwd and leaves an existing thread subscribed.
         on_thread_started: Optional async host recording of the confirmed thread ID.
             Completion is required before accepting the thread or starting a turn.
@@ -249,6 +250,7 @@ class CodexConnection:
         self._mcp_config: JsonObject = {}
         self._user_items = 0
         self._stopping = False
+        self._terminal_cleanup: asyncio.Task[None] | None = None
         self._requests: dict[str, HumanRequest] = {}
         self._request_tokens: dict[RpcId, str] = {}
         self._request_items: dict[str, str] = {}
@@ -390,6 +392,7 @@ class CodexConnection:
             raise CodexConnectionError(message)
         self._status("starting")
         self._stopping = False
+        self._terminal_cleanup = None
         self._sending = True
         submitted = False
         accepted_turn: str | None = None
@@ -415,7 +418,7 @@ class CodexConnection:
                 )
             )
             turn = _object(result.get("turn"))
-            active = self._accept_start_response(turn)
+            active = await self._accept_start_response(turn)
             accepted_turn = _text(turn.get("id"))
             if not active:
                 return accepted_turn
@@ -477,7 +480,8 @@ class CodexConnection:
             True after acceptance; False if stopped before submission.
 
         Raises:
-            CodexConnectionError: No resumable Goal or a turn is still active.
+            CodexConnectionError: No resumable Goal, an active turn, preparation
+                failure, or explicit RPC rejection.
             MessageDeliveryError: Resume acceptance is unknown.
         """
         return await self._operate(self._set_goal(None, resume=True))
@@ -487,18 +491,22 @@ class CodexConnection:
         if (
             not self._authenticated
             or self._sending
+            or self._phase not in {"ready", "stopped", "running", "waiting"}
             or (objective is not None and not objective.strip())
         ):
             raise CodexConnectionError("目標を変更できない状態")
         fresh = self._goal is None or self._goal.status == "complete"
         if resume and (fresh or self._goal is None or self._goal.status == "active"):
             raise CodexConnectionError("再開できる目標がない")
-        if (fresh or resume) and self._turn_id is not None:
+        if (fresh or resume) and (
+            self._turn_id is not None or self._phase not in {"ready", "stopped"}
+        ):
             raise CodexConnectionError("ターンの終了を待つ必要がある")
         submitted = False
         self._sending = True
         if fresh or resume:
             self._stopping = False
+            self._terminal_cleanup = None
             self._goal_starting = True
             self._status("starting")
         try:
@@ -563,10 +571,11 @@ class CodexConnection:
                 self._status("stopped")
 
     async def clear_goal(self) -> None:
-        """Remove the Goal and independently interrupt its current turn.
+        """Remove the Goal and stop its turn and publicly listed terminal commands.
 
         Raises:
-            CodexConnectionError: Removal or interruption could not be confirmed.
+            CodexConnectionError: Removal, interruption, or terminal cleanup was
+                not confirmed; new execution remains unavailable.
         """
         await self._operate(self._stop(clear=True))
 
@@ -598,6 +607,7 @@ class CodexConnection:
             if became_inactive:
                 self._stopping = True
                 self._expire_requests()
+                self._start_terminal_cleanup()
                 self._status("stopping" if self._turn_id is not None else "stopped")
 
     async def _read_retained_goal(self) -> None:
@@ -730,13 +740,16 @@ class CodexConnection:
         self._update_waiting()
 
     async def stop(self) -> None:
-        """Disable answers immediately and request interruption of the active turn.
+        """Disable answers, pause the Goal, and stop its turn and terminal commands.
 
-        Returning confirms only the interrupt RPC, not turn completion. Questions
-        receive no synthetic empty answer or JSON-RPC error during stopping.
+        Goal pause and turn/terminal cleanup are attempted independently. Returning
+        confirms applicable RPCs and an empty public terminal list, not turn
+        completion or the end of processes outside that public list.
+        Questions receive no synthetic empty answer or JSON-RPC error during stopping.
 
         Raises:
-            CodexConnectionError: The interrupt request failed.
+            CodexConnectionError: Goal pause, interruption, or terminal cleanup was
+                not confirmed; new execution remains unavailable.
         """
         await self._operate(self._stop())
 
@@ -747,7 +760,7 @@ class CodexConnection:
         self._status("stopping")
         results = await asyncio.gather(
             self._pause_goal(clear=clear),
-            self._interrupt(close_on_failure=False),
+            self._start_terminal_cleanup(),
             return_exceptions=True,
         )
         if self._turn_id is None and not self._sending:
@@ -759,6 +772,73 @@ class CodexConnection:
             raise error
         if error is not None:
             raise CodexConnectionError("目標の停止または破棄を確認できない") from error
+
+    def _start_terminal_cleanup(self) -> asyncio.Task[None]:
+        task = self._terminal_cleanup
+        if task is None or (
+            task.done()
+            and not task.cancelled()
+            and task.exception() is None
+            and self._turn_id is not None
+        ):
+            task = asyncio.create_task(self._terminate_thread_commands(), name="gigas-codex-stop")
+            self._terminal_cleanup = task
+            self._operations.add(task)
+            task.add_done_callback(self._terminal_cleanup_finished)
+        return task
+
+    def _terminal_cleanup_finished(self, task: asyncio.Task[None]) -> None:
+        self._operations.discard(task)
+        if not self._closed and self._stopping and self._turn_id is None and not self._sending:
+            self._status("stopped")
+
+    async def _terminate_thread_commands(self) -> None:
+        interruption: CodexConnectionError | None = None
+        try:
+            await self._interrupt(close_on_failure=False)
+        except CodexConnectionError as error:
+            interruption = error
+        try:
+            await self._terminate_listed_commands()
+        except (TransportError, CodexConnectionError) as error:
+            failure_id = self._failure("error", "端末処理の終了を確認できない")
+            raise CodexConnectionError(
+                "端末処理の終了を確認できない", failure_id=failure_id
+            ) from error
+        if interruption is not None:
+            raise interruption
+
+    async def _terminate_listed_commands(self) -> None:
+        if self._thread_id is None:
+            return
+        for process_id in await self._list_thread_commands():
+            result = _object(
+                await self._peer.request(
+                    "thread/backgroundTerminals/terminate",
+                    {"threadId": self._thread_id, "processId": process_id},
+                )
+            )
+            if result.get("terminated") is not True:
+                raise CodexConnectionError("端末処理の終了を確認できない")
+        if await self._list_thread_commands():
+            raise CodexConnectionError("スレッドに端末処理が残っている")
+
+    async def _list_thread_commands(self) -> list[str]:
+        process_ids: list[str] = []
+        cursor: str | None = None
+        while True:
+            params: JsonObject = {"threadId": self._thread_id}
+            if cursor is not None:
+                params["cursor"] = cursor
+            result = _object(await self._peer.request("thread/backgroundTerminals/list", params))
+            data = result.get("data")
+            if not isinstance(data, list):
+                raise CodexConnectionError("端末一覧の応答形式が不正")
+            process_ids.extend(_text(_object(item).get("processId")) for item in data)
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None:
+                return process_ids
+            cursor = _text(next_cursor)
 
     async def close(self) -> None:
         """Wait for owned operations, event consumer and peer to close.
@@ -963,6 +1043,12 @@ class CodexConnection:
     def _status(
         self, phase: "ConnectionPhase", detail: str = "", *, failure_id: int | None = None
     ) -> None:
+        if self._stopping and phase in {"ready", "stopped"}:
+            task = self._terminal_cleanup
+            if task is not None and (task.cancelled() or (task.done() and task.exception())):
+                phase, detail = "error", "端末処理の終了を確認できない"
+            elif (task is not None and not task.done()) or self._goal_lock.locked():
+                phase = "stopping"
         self._phase = phase
         self._emit(
             SessionStatus(phase, self._model, self._effort, self._authenticated, detail, failure_id)
@@ -1032,7 +1118,10 @@ class CodexConnection:
         self._emit(ModelSelection(self._choices, self._model, self._effort))
 
     async def select_model(self, model: str, effort: str) -> None:
-        """Select validated values for future ordinary turns without changing an active turn.
+        """Select validated values for future turns without changing an active turn.
+
+        A retained Goal also receives the public thread settings update before
+        the selection is acknowledged. Ordinary turns use their next start parameters.
 
         Args:
             model: Model from this connection's catalog.
@@ -1095,7 +1184,7 @@ class CodexConnection:
             self._goal_revision += 1
             self._accept_goal(params.get("goal") if event.method.endswith("updated") else None)
             if self._stopping:
-                await self._interrupt()
+                await self._start_terminal_cleanup()
             return
         incoming_turn = params.get("turnId")
         if isinstance(incoming_turn, str):
@@ -1118,16 +1207,19 @@ class CodexConnection:
                 return
             if event.method == "turn/completed":
                 stop_goal = (
-                    not self._stopping
+                    self._terminal_cleanup is None
                     and self._goal is not None
                     and self._goal.status == "active"
                     and turn.get("status") in {"failed", "interrupted"}
                 )
-                self._complete_turn(turn)
+                await self._complete_turn(turn)
                 if stop_goal:
                     await self._stop()
+                elif self._stopping:
+                    await self._start_terminal_cleanup()
             elif self._stopping:
                 await self._interrupt()
+                await self._start_terminal_cleanup()
             else:
                 self._update_waiting()
         elif self._turn_id is not None and params.get("turnId") == self._turn_id:
@@ -1158,7 +1250,7 @@ class CodexConnection:
             self._turn_id = turn_id
             self._emit(TurnStarted(turn_id))
 
-    def _accept_start_response(self, turn: "JsonObject") -> bool:
+    async def _accept_start_response(self, turn: "JsonObject") -> bool:
         turn_id = _text(turn.get("id"))
         self._adopt_turn(turn_id)
         if turn_id in self._completed_turns:
@@ -1167,19 +1259,30 @@ class CodexConnection:
             message = "ターンIDが不一致"
             raise CodexConnectionError(message)
         if turn.get("status") in {"completed", "interrupted", "failed"}:
-            self._complete_turn(turn)
+            await self._complete_turn(turn)
             return False
         return True
 
-    def _complete_turn(self, turn: "JsonObject") -> None:
+    async def _complete_turn(self, turn: "JsonObject") -> None:
         turn_id = _text(turn.get("id"))
         if turn_id != self._turn_id:
             return
+        stopped = (
+            self._stopping
+            or turn.get("status") == "interrupted"
+            or (self._goal is not None and self._goal.status == "active")
+        )
+        if self._stopping or turn.get("status") in {"failed", "interrupted"}:
+            self._stopping = True
+            self._start_terminal_cleanup()
         self._flush_dialogue(turn_id)
         self._completed_turns.add(turn_id)
         self._expire_requests()
         self._turn_id = None
         self._file_details.clear()
+        if self._stopping:
+            self._status("stopping")
+            await self._start_terminal_cleanup()
         if (
             self._goal is not None
             and self._goal.status == "active"
@@ -1187,7 +1290,7 @@ class CodexConnection:
         ):
             self._stopping = True
         if turn.get("status") == "failed":
-            self._failure("stopped" if self._stopping else "ready", "ターンが失敗")
+            self._failure("stopped" if stopped else "ready", "ターンが失敗")
         elif self._stopping or turn.get("status") == "interrupted":
             self._status("stopped")
         else:
