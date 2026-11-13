@@ -8,22 +8,18 @@ from importlib import resources
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
+from gigas.runtime.codex._notifications import TurnContent, file_change_details
 from gigas.runtime.codex.models import (
     AccountInfo,
-    ActivityEvent,
-    DialogueEvent,
     GoalEvent,
     GoalState,
     HumanRequest,
     LoginEvent,
     ModelChoice,
     ModelSelection,
-    PlanEvent,
-    PlanStep,
     Question,
     QuestionOption,
     RateLimitWindow,
-    ReasoningEvent,
     RequestResolved,
     SandboxEvent,
     SessionStatus,
@@ -221,32 +217,6 @@ def _questions(value: "JsonValue") -> tuple[Question, ...]:
     return tuple(questions)
 
 
-def _file_changes(value: "JsonValue") -> str:
-    if not isinstance(value, list) or not value:
-        message = "ファイル変更の確認対象が不足"
-        raise CodexConnectionError(message)
-    details: list[str] = []
-    for raw in value:
-        change = _object(raw)
-        path = _text(change.get("path"))
-        diff = change.get("diff")
-        kind = _object(change.get("kind"))
-        action = kind.get("type")
-        target = kind.get("move_path")
-        if (
-            action not in ("add", "delete", "update")
-            or not isinstance(diff, str)
-            or (target is not None and not isinstance(target, str))
-        ):
-            message = "ファイル変更の形式に未対応"
-            raise CodexConnectionError(message)
-        details.append(f"{action}: {path}")
-        if isinstance(target, str):
-            details.append(f"移動先: {target}")
-        details.append(diff)
-    return "\n".join(details)
-
-
 class CodexConnection:
     """Own account validation and one conversation over a single RPC peer.
 
@@ -308,7 +278,7 @@ class CodexConnection:
         self._request_items: dict[str, str] = {}
         self._seen_requests: set[RpcId] = set()
         self._file_details: dict[str, str] = {}
-        self._summaries: dict[tuple[str, str], dict[int, str]] = {}
+        self._content: TurnContent | None = None
         self._operations: set[asyncio.Task[object]] = set()
         self._cleanup: asyncio.Task[None] | None = None
         self._opening = False
@@ -323,7 +293,6 @@ class CodexConnection:
         self._goal_lock = asyncio.Lock()
         self._goal_starting = False
         self._goal_revision = 0
-        self._dialogue: dict[tuple[str, str], JsonObject] = {}
         self._usage = UsageEvent()
         self._usage_read: asyncio.Task[None] | None = None
         self._usage_refresh_pending = False
@@ -1459,10 +1428,6 @@ class CodexConnection:
                 else:
                     await self._stop()
             return
-        incoming_turn = params.get("turnId")
-        if isinstance(incoming_turn, str) and incoming_turn == self._turn_id:
-            with suppress(CodexConnectionError):
-                self._public_notification(event.method, params, incoming_turn)
         if event.method == "serverRequest/resolved":
             request_id = params.get("requestId")
             if isinstance(request_id, str | int) and not isinstance(request_id, bool):
@@ -1520,6 +1485,7 @@ class CodexConnection:
             and turn_id not in self._completed_turns
         ):
             self._turn_id = turn_id
+            self._content = TurnContent(turn_id)
             self._emit(TurnStarted(turn_id))
 
     async def _accept_start_response(self, turn: "JsonObject") -> bool:
@@ -1547,7 +1513,7 @@ class CodexConnection:
         if self._stopping or turn.get("status") in {"failed", "interrupted"}:
             self._stopping = True
             self._start_terminal_cleanup()
-        self._flush_dialogue(turn_id)
+        self._flush_dialogue()
         self._completed_turns.add(turn_id)
         self._expire_requests()
         self._seen_requests.clear()
@@ -1574,186 +1540,31 @@ class CodexConnection:
             self._status("ready")
 
     async def _item_notification(self, method: str, params: "JsonObject") -> None:
-        if method == "item/agentMessage/delta":
-            delta = params.get("delta")
-            if isinstance(delta, str):
-                item_id = _text(params.get("itemId"))
-                self._emit(TextEvent(item_id, delta))
-                if self._turn_id is not None:
-                    key = (self._turn_id, item_id)
-                    previous = self._dialogue.get(key, {}).get("text", "")
-                    self._dialogue[key] = {
-                        "item_id": item_id,
-                        "kind": "message",
-                        "text": str(previous) + delta,
-                    }
-        elif method == "item/fileChange/patchUpdated":
+        if self._content is not None:
+            try:
+                events = tuple(self._content.accept(method, params))
+            except ValueError as error:
+                raise CodexConnectionError(str(error)) from error
+            for event in events:
+                self._emit(event)
+        if method == "item/fileChange/patchUpdated":
             await self._update_file_changes(_text(params.get("itemId")), params.get("changes"))
         elif method in {"item/started", "item/completed"}:
             item = _object(params.get("item"))
-            if item.get("type") == "agentMessage" and method == "item/completed":
-                text = item.get("text")
-                if isinstance(text, str):
-                    item_id = _text(item.get("id"))
-                    self._emit(TextEvent(item_id, text, replace=True))
-                    if self._turn_id is not None:
-                        self._finish_dialogue(
-                            self._turn_id,
-                            item_id,
-                            {"item_id": item_id, "kind": "message", "text": text},
-                        )
-            elif item.get("type") == "fileChange":
+            if item.get("type") == "fileChange":
                 await self._update_file_changes(_text(item.get("id")), item.get("changes"))
 
-    def _public_notification(self, method: str, params: "JsonObject", turn_id: str) -> None:
-        if method == "turn/plan/updated":
-            plan = params.get("plan")
-            if not isinstance(plan, list):
-                return
-            steps: list[PlanStep] = []
-            for raw in plan:
-                step = _object(raw)
-                status = step.get("status")
-                if not isinstance(status, str) or status not in (
-                    "pending",
-                    "inProgress",
-                    "completed",
-                ):
-                    return
-                steps.append(PlanStep(_text(step.get("step")), status))
-            explanation = params.get("explanation")
-            self._emit(
-                PlanEvent(
-                    turn_id, tuple(steps), explanation if isinstance(explanation, str) else ""
-                )
-            )
-        elif method == "item/reasoning/summaryTextDelta":
-            index, delta = params.get("summaryIndex"), params.get("delta")
-            if type(index) is not int or index < 0 or not isinstance(delta, str):
-                return
-            item_id = _text(params.get("itemId"))
-            summary = self._summaries.setdefault((turn_id, item_id), {})
-            summary[index] = summary.get(index, "") + delta
-            self._emit(ReasoningEvent(turn_id, item_id, tuple(summary[i] for i in sorted(summary))))
-            self._dialogue[turn_id, item_id] = {
-                "item_id": item_id,
-                "kind": "reasoning",
-                "summary": [summary[i] for i in sorted(summary)],
-            }
-        elif method in {"item/started", "item/completed"}:
-            item = _object(params.get("item"))
-            item_id = _text(item.get("id"))
-            if item.get("type") == "reasoning" and method == "item/completed":
-                raw_summary = item.get("summary", [])
-                if not isinstance(raw_summary, list):
-                    return
-                summary = {}
-                for index, paragraph in enumerate(raw_summary):
-                    if not isinstance(paragraph, str):
-                        return
-                    summary[index] = paragraph
-                self._summaries[turn_id, item_id] = summary
-                self._emit(ReasoningEvent(turn_id, item_id, tuple(summary.values())))
-                self._finish_dialogue(
-                    turn_id,
-                    item_id,
-                    {"item_id": item_id, "kind": "reasoning", "summary": list(summary.values())},
-                )
-            elif (activity := self._activity(turn_id, item_id, item)) is not None:
-                self._emit(activity)
-                snapshot: JsonObject = {
-                    "item_id": item_id,
-                    "kind": "activity",
-                    "type": activity.kind,
-                    "title": activity.title,
-                    "status": activity.status,
-                    "details": activity.details,
-                }
-                if method == "item/completed":
-                    self._finish_dialogue(turn_id, item_id, snapshot)
-                else:
-                    self._dialogue[turn_id, item_id] = snapshot
-
-    def _finish_dialogue(self, turn_id: str, item_id: str, payload: "JsonObject") -> None:
-        self._dialogue.pop((turn_id, item_id), None)
-        self._emit(DialogueEvent(str(payload["kind"]), {**payload, "partial": False}, turn_id))
-
-    def _flush_dialogue(self, turn_id: str | None = None) -> None:
-        self._summaries.clear()
-        for key, payload in tuple(self._dialogue.items()):
-            if turn_id is None or key[0] == turn_id:
-                self._dialogue.pop(key)
-                self._emit(
-                    DialogueEvent(str(payload["kind"]), {**payload, "partial": True}, key[0])
-                )
-
-    @staticmethod
-    def _mcp_text(text: str) -> str:
-        # The pinned runtime can wrap the whole MCP result in a text block.
-        # Unwrap that single wire envelope, retaining only its text content.
-        try:
-            result = json.loads(text)
-        except (ValueError, RecursionError):
-            return text
-        if (
-            isinstance(result, dict)
-            and isinstance(result.get("content"), list)
-            and type(result.get("isError")) is bool
-        ):
-            return "\n".join(
-                block["text"]
-                for block in result["content"]
-                if isinstance(block, dict)
-                and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-            )
-        return text
-
-    @staticmethod
-    def _activity(turn_id: str, item_id: str, item: "JsonObject") -> ActivityEvent | None:
-        kind, status = item.get("type"), item.get("status")
-        if (
-            not isinstance(kind, str)
-            or not isinstance(status, str)
-            or kind not in ("commandExecution", "fileChange", "mcpToolCall")
-            or status not in ("inProgress", "completed", "failed", "declined")
-        ):
-            return None
-        details: list[str] = []
-        if kind == "commandExecution":
-            title = _text(item.get("command"))
-            for key in ("cwd", "aggregatedOutput"):
-                value = item.get(key)
-                if isinstance(value, str) and value:
-                    details.append(value)
-            exit_code = item.get("exitCode")
-            if type(exit_code) is int:
-                details.append(f"終了コード: {exit_code}")
-        elif kind == "fileChange":
-            changes = item.get("changes")
-            if not isinstance(changes, list):
-                return None
-            details.append(_file_changes(changes))
-            title = "\n".join(_text(_object(change).get("path")) for change in changes)
-        else:
-            title = f"{_text(item.get('server'))}/{_text(item.get('tool'))}"
-            result = item.get("result")
-            if isinstance(result, dict) and isinstance(content := result.get("content"), list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text")
-                        if isinstance(text, str):
-                            details.append(CodexConnection._mcp_text(text))
-            error = item.get("error")
-            if isinstance(error, dict) and isinstance(message := error.get("message"), str):
-                details.append(message)
-        return ActivityEvent(turn_id, item_id, kind, title, status, "\n".join(details))
+    def _flush_dialogue(self) -> None:
+        content, self._content = self._content, None
+        if content is not None:
+            for event in content.finish():
+                self._emit(event)
 
     async def _update_file_changes(self, item_id: str, changes: "JsonValue") -> None:
         previous = self._file_details.pop(item_id, None)
         try:
-            details = _file_changes(changes)
-        except CodexConnectionError:
+            details = file_change_details(changes)
+        except ValueError:
             details = None
         if details is not None:
             self._file_details[item_id] = details

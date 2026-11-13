@@ -3036,13 +3036,14 @@ def test_dialogue_snapshots_flush_pending_text_once_on_interruption(tmp_path: Pa
         assert not any(isinstance(event, DialogueEvent) for event in events)
         await connection.stop()
         await connection._notification(_terminal(status="interrupted"))
-        for method, fields in (
+        late_notifications: tuple[tuple[str, JsonObject], ...] = (
             ("item/agentMessage/delta", {"itemId": "answer", "delta": " late"}),
             (
                 "item/completed",
                 {"item": {"type": "agentMessage", "id": "answer", "text": "late final"}},
             ),
-        ):
+        )
+        for method, fields in late_notifications:
             await connection._notification(
                 RpcNotification(method, {"threadId": "thread-1", "turnId": "turn-1", **fields})
             )
