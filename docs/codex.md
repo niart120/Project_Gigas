@@ -18,6 +18,12 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `AccountInfo`は公開アカウント情報、`UsageEvent`は利用枠の取得結果です。`UsageEvent.available`は直近取得の成否、`ordinary_usage_allowed`は通常利用の明示的許可を表します。取得失敗後の`buckets`は最後の取得値です。利用不能を確認済みなら、不明値・取得失敗で許可へ戻しません。利用枠の取得は受信処理を塞がない所有タスクで行い、切断時に回収します。部分更新通知から値を推測せず、完全な情報を再取得します。
 
+`SandboxEvent(readiness, setting_up, detail)`はWindows実行環境の状態です。`readiness`は`ready`、`notConfigured`、`updateRequired`、取得不能の`None`です。接続後に非同期で取得し、認証や候補の取得とは分けます。`setup_windows_sandbox()`は、ターンとactive Goalがない接続で明示的に準備を開始します。認証は不要です。管理者権限での準備をruntimeへ依頼し、Windowsの確認操作は利用者が行います。
+
+同メソッドは開始受付だけでは完了せず、完了通知と準備状態の再取得を待ちます。準備失敗・状態取得不能・再取得で非readyの場合は`CodexConnectionError`を返し、接続は維持します。準備後も非readyなら明示的に切断・再接続してください。受付不明のときは`setting_up=True`と理由を通知し、自動再送せず完了通知を待ちます。待機中も`close()`できますが、切断をWindows側の準備処理の取消しとは扱いません。
+
+`memory_dir`付きの新規送信・Goal開始・再開は、実行環境が`ready`でなければ開始前に拒否します。初回の状態取得中なら既存の取得だけを待ち、その間に停止された場合はthreadやGoalを提出しません。追加問い合わせや自動再試行はしません。読み取り専用の送信、既存Goalの目的更新、途中指示、回答・承認、停止にはこの条件を追加しません。`ready`の確認後もthread応答の書込範囲を検証します。
+
 `send()` は配布物内の `play.md` を開発者指示として配送し、人間による承認・永続スレッドで通常ターンを開始します。書込範囲は下記の`ThreadConfiguration.memory_dir`で指定し、省略時は読み取り専用です。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。本文・公開計画・公開推論要約・ツール活動を型付きイベントへ変換し、生のプロトコル応答やstderrを表示イベントへ流しません。
 
 `prepare_turn(prompt, thread_id)`は通常の`send()`、新規Goal開始、保持Goalの明示再開で呼ぶasyncコールバックです。自律ターンごとやGoalの目的更新では呼びません。`prompt`は依頼または再開する目的、`thread_id`は初回に`None`、以後は採用済みの実thread IDです。`models.ThreadConfiguration(cwd, mcp_config, memory_dir=None)`を返し、`cwd`には原記録先の準備済み絶対パスを指定します。`memory_dir`は既存の絶対パスで、厳密に`cwd / "memory"`を指定します。指定するとthreadのcwdと作業領域をそこへ限定して書込を許可し、追加書込先・一時領域・ネットワークは許可しません。応答の設定が一致しない場合は開始を拒否します。製品サービスは原記録先の`memory/`を指定し、プロセスの`ConnectionOptions.cwd`とは分離します。コールバック省略時は起動用cwdで読み取り専用です。接続・ログイン時には呼ばないため、保存先の準備失敗で認証は失われません。

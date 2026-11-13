@@ -25,6 +25,7 @@ from gigas.runtime.codex.models import (
     RateLimitWindow,
     ReasoningEvent,
     RequestResolved,
+    SandboxEvent,
     SessionStatus,
     TextEvent,
     ThreadConfiguration,
@@ -317,6 +318,9 @@ class CodexConnection:
         self._usage = UsageEvent()
         self._usage_read: asyncio.Task[None] | None = None
         self._usage_refresh_pending = False
+        self._sandbox = SandboxEvent()
+        self._sandbox_read: asyncio.Task[None] | None = None
+        self._sandbox_setup: asyncio.Future[bool] | None = None
 
     async def open(self) -> None:
         """Initialize authentication and obtain model choices without starting a thread.
@@ -368,6 +372,11 @@ class CodexConnection:
             self._opened = True
             self._status("ready" if self._authenticated else "login_required", selection_detail)
             self._refresh_usage()
+            self._sandbox_read = asyncio.create_task(
+                self._read_sandbox(), name="gigas-codex-sandbox"
+            )
+            self._operations.add(self._sandbox_read)
+            self._sandbox_read.add_done_callback(self._operations.discard)
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
@@ -386,6 +395,91 @@ class CodexConnection:
             CodexConnectionError: Login is unavailable, already pending or failed.
         """
         await self._operate(self._login())
+
+    async def setup_windows_sandbox(self) -> None:
+        """Explicitly prepare the elevated Windows sandbox and confirm readiness.
+
+        Setup does not require login and never grants the runtime cwd as a workspace.
+        A lost start response keeps waiting for completion without resending. Closing
+        this connection cancels only local waiting; no OS setup cancellation is claimed.
+
+        Raises:
+            CodexConnectionError: Setup is unavailable, rejected, failed, or its
+                completion does not establish readiness in this connection. A fresh
+                connection may be required after a successful initial setup.
+        """
+        await self._operate(self._setup_windows_sandbox())
+
+    async def _setup_windows_sandbox(self) -> None:
+        self._require_open()
+        if (
+            self._sandbox_setup is not None
+            or self._sending
+            or self._turn_id is not None
+            or self._phase not in {"ready", "stopped", "login_required"}
+            or (self._goal is not None and self._goal.status == "active")
+        ):
+            raise CodexConnectionError("実行環境の準備を開始できない状態")
+        completion = asyncio.get_running_loop().create_future()
+        self._sandbox_setup = completion
+        self._sandbox = SandboxEvent(self._sandbox.readiness, True)
+        self._emit(self._sandbox)
+        try:
+            await self._run_sandbox_setup(completion)
+        except CodexConnectionError as error:
+            self._sandbox = SandboxEvent(self._sandbox.readiness, False, str(error))
+            if not self._closed:
+                self._emit(self._sandbox)
+            raise
+        else:
+            if self._closed:
+                raise asyncio.CancelledError
+            self._sandbox = SandboxEvent("ready")
+            self._emit(self._sandbox)
+        finally:
+            self._sandbox_setup = None
+
+    async def _run_sandbox_setup(self, completion: asyncio.Future[bool]) -> None:
+        if self._sandbox_read is not None:
+            await self._sandbox_read
+        self._require_open()
+        try:
+            response = await self._peer.request("windowsSandbox/setupStart", {"mode": "elevated"})
+        except RpcError:
+            raise CodexConnectionError("実行環境の準備開始が拒否された") from None
+        except TransportError:
+            response = None
+        if self._closed:
+            raise asyncio.CancelledError
+        if isinstance(response, dict) and response.get("started") is False:
+            raise CodexConnectionError("実行環境の準備が開始されなかった")
+        if not isinstance(response, dict) or response.get("started") is not True:
+            self._sandbox = SandboxEvent(
+                self._sandbox.readiness, True, "準備開始の受付結果を確認できない"
+            )
+            self._emit(self._sandbox)
+        if not await completion:
+            raise CodexConnectionError("実行環境の準備に失敗")
+        await self._read_sandbox()
+        if self._sandbox.readiness is None:
+            raise CodexConnectionError("準備後の実行環境を確認できない")
+        if self._sandbox.readiness != "ready":
+            raise CodexConnectionError("準備後の再接続が必要")
+
+    async def _read_sandbox(self) -> None:
+        try:
+            result = _object(await self._peer.request("windowsSandbox/readiness", {}))
+        except (TransportError, CodexConnectionError):
+            result = {}
+        readiness = result.get("status")
+        if isinstance(readiness, str) and readiness in {"ready", "notConfigured", "updateRequired"}:
+            self._sandbox = SandboxEvent(readiness, self._sandbox_setup is not None)
+        else:
+            self._sandbox = SandboxEvent(
+                None, self._sandbox_setup is not None, "実行環境の準備状態を取得できない"
+            )
+        if not self._closed:
+            self._emit(self._sandbox)
 
     async def _login(self) -> None:
         self._require_open()
@@ -986,6 +1080,15 @@ class CodexConnection:
                 raise _ThreadPreparationError(message)
         if self._stopping:
             return
+        if context.memory_dir is not None:
+            if self._sandbox_read is not None:
+                await self._sandbox_read
+            if self._stopping:
+                return
+            if self._sandbox.readiness != "ready":
+                raise _ThreadPreparationError(
+                    "実行環境の準備が必要です。Codexメニューから準備してください。"
+                )
         instructions = read_play_instructions()
         if not instructions.strip():
             message = "共通指示が空"
@@ -1283,6 +1386,17 @@ class CodexConnection:
 
     async def _notification(self, event: RpcNotification) -> None:
         params = event.params or {}
+        if event.method == "windowsSandbox/setupCompleted":
+            success = params.get("success")
+            if (
+                not self._closed
+                and self._sandbox_setup is not None
+                and not self._sandbox_setup.done()
+                and params.get("mode") == "elevated"
+                and isinstance(success, bool)
+            ):
+                self._sandbox_setup.set_result(success)
+            return
         if event.method == "account/login/completed":
             login_id = params.get("loginId")
             if isinstance(login_id, str):

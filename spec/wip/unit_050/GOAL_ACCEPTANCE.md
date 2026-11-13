@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。現時点は調査中、実装・実機受入は未完了。
+2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01・D02・D04を実装・検証・コミット済み、D03の最終検証と実接続受入を継続中。M3全体は未完了。
 
 ## 2. 対象範囲
 
@@ -31,9 +31,8 @@
 | 状態 | item | 種別・層 | 既存試験への反映 |
 |---|---|---|---|
 | refactor-skipped | D01 無効既定値でも認証・候補選択ができ、有効選択まで送信しない | regression、unit/integration | connection・GUI・serviceの既存認証/候補試験を改訂。下記285件成功、dadc31fへコミット |
-| green | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合、812件成功。コミット後に完了更新 |
-| todo | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 既存login/launch/終了経路を優先。調査で必要と確認した差分だけ実装 |
-
+| refactor-skipped | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合、812件成功、96937c9へコミット |
+| refactor-skipped | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 公開readiness/setupと既存login/終了経路を結合。全832件成功、実新規ログイン・OS準備は本人操作待ち |
 | refactor-skipped | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。859197bで新機能より先に修正 |
 
 ## 7. 設計メモ
@@ -50,7 +49,7 @@ D01は新phaseを作らず、ModelSelectionの候補を保持して無効なmode
 
 ## 9. 検証計画と結果
 
-単体/結合を変更範囲ごとに実行し、最終にruff format/check、ty、unit/integration、lock check、build、配布物検査、diff checkを実施する。公開型/docstringは対応skillで確認。全体gate・配布物はまだnot run。
+単体/結合を変更範囲ごとに実行し、最終にruff format/check、ty、unit/integration、lock check、build、配布物検査、diff checkを実施する。公開型/docstringは対応skillで確認。D03最終変更後も全体gate・配布物検査は成功。実接続受入の完了は別途判定する。
 
 D01: connectionの旧挙動で5件、GUIの暗黙選択/再開許可で3件、診断保持で2件の期待したredを確認。`uv run pytest tests/unit/test_codex_connection.py tests/unit/test_message_composer.py tests/integration/test_codex_gui.py tests/integration/test_codex_service.py tests/integration/test_codex_transport.py tests/integration/test_window_presets.py tests/integration/test_app_settings.py tests/integration/test_ui_control_lifetime.py -q --basetemp=tmp/pytest-u050-d01-final`は285 passed。全体ruff format/check、ty、lock check、diff check成功。文書validatorは912 links/50 units/errorsなし。型追加・ignore/castなし。公開open/set_modelの説明とdocsを照合。新抽象化は不要と判断しrefactorを省略する。
 
@@ -62,16 +61,16 @@ D01: connectionの旧挙動で5件、GUIの暗黙選択/再開許可で3件、�
 
 | 受入項目 | 必要な証拠 | 現状 |
 |---|---|---|
-| 無効設定・認証分離、新規ログイン | 固定RPC/Qtと新規ブラウザ認証の実接続 | 未確認 |
-| sandbox初回準備 | 未準備homeから準備、memory書込と原記録保全 | 未確認 |
-| 利用制限 | 実取得、固定通知/失敗の停止確認。意図的課金超過なし | 未確認 |
-| Goal開始・目的更新・複数turn・完了・pause/resume/clear | 実モデル・実機の通知と操作記録 | 未確認 |
-| 介入・質問・承認・配送競合 | 実要求と回答、固定競合試験、遅い応答の失効 | 未確認 |
-| 操作権・観測・停止・再公開 | USB Video Device、COM8・CH552・9600 baud。再開初回observe、旧権限失効、入力解除 | 未確認 |
-| 次turnモデル/推論レベル、機器設定と停止 | 通常/自律turn、現在turn不変、提出済み機器設定適用の継続 | 未確認 |
-| 記憶書込中断・公開記録 | 実機停止と書込停止、再開、対話/input/observeのID対応と非同期保存 | 未確認 |
-| 実応答UI | 実summary/Plan/応答、選択コピー/更新中スクロール、実IME（モニター間DPI遷移は対象外） | 未確認 |
-| 実接続終了 | 切断/アプリ終了、所有処理回収。M2中間版の終了timeoutを再確認 | 未確認 |
+| 無効設定・認証分離、新規ログイン | 固定RPC/Qtと新規ブラウザ認証の実接続 | 無効値/候補/既存認証は確認済み。新規ログインは本人操作待ち |
+| sandbox初回準備 | 未準備homeから準備、memory書込と原記録保全 | 固定受付/完了/失敗/切断を確認。新規homeはnotConfigured、OS準備は本人操作待ち |
+| 利用制限 | 実取得、固定通知/失敗の停止確認。意図的課金超過なし | 実アカウント/利用枠UI、固定通知による利用不能停止を確認済み |
+| Goal開始・目的更新・複数turn・完了・pause/resume/clear | 実モデル・実機の通知と操作記録 | 実2自律turnとcomplete通知を確認。目的更新/pause/resume/clear・自然最終応答は未確認 |
+| 介入・質問・承認・配送競合 | 実要求と回答、固定競合試験、遅い応答の失効 | 固定通知/競合試験は既存実績。今回の実要求は未確認 |
+| 操作権・観測・停止・再公開 | USB Video Device、COM8・CH552・9600 baud。再開初回observe、旧権限失効、入力解除 | 同runの初回observe・各入力解除を確認。実機再開/再公開は未確認 |
+| 次turnモデル/推論レベル、機器設定と停止 | 通常/自律turn、現在turn不変、提出済み機器設定適用の継続 | M0実API/M2模擬結合を維持。製品実モデルの再確認はreadiness更新必要で送信前停止 |
+| 記憶書込中断・公開記録 | 実機停止と書込停止、再開、対話/input/observeのID対応と非同期保存 | 実記録ID・画像非複製のreplayを確認。実モデルのmemory書込/中断は未確認 |
+| 実応答UI | 実summary/Plan/応答、選択コピー/更新中スクロール、実IME | 実Plan3件、summary未受信。閲覧保持は既存固定試験、実IMEは本人操作待ち |
+| 実接続終了 | 切断/アプリ終了、所有処理回収。M2中間版の終了timeoutを再確認 | 実Goal/実アカウント/新規home接続のサービス終了と所有PID回収を確認済み |
 
 ## 10. 先送り事項
 
@@ -80,7 +79,7 @@ APIキーは今回対象外であり再採用時に別途合意する。公開�
 ## 11. チェックリスト
 
 - [x] 合意範囲とAPIキー除外を記録した
-- [ ] D01〜D03の必要な実装と既存試験改訂を完了した
+- [x] D01〜D03の必要な実装と既存試験改訂を完了した
 - [ ] 全受入項目の実行結果と残る制約を記録した
 - [ ] 品質gate、型/docstring・公開docs・初期設計・親仕様を整合した
 - [ ] KISSと既存実装の一貫性を再レビューし、論理単位でコミットした
@@ -96,3 +95,15 @@ D02: read.ordinaryUsageAllowed=falseと現在turnのwillRetry=falseだけを停�
 D02検証: redは公開イベント/停止処理未実装4 failed、UI入口未実装。`uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d02-full --junitxml=tmp/u06-m3/d02-tests.xml`は812 passed。全体ruff format/check・ty成功。後続描画修正の関連52件も成功。`tmp/u06-m3/account-render/`の通常960×640・800×600、未取得/取得不能/利用不可を目視し、連結改行を修正。`uv run python -X utf8 tmp/u06-m3/account_live.py`は実ChatGPTアカウント識別・利用許可・利用枠1件を製品UIへ表示、接続終了成功（account-live/report.json、popup.png）。実機で利用枠を枯渇させず、停止は固定通知で確認した。
 
 D01時点の`uv build`・`uv run python scripts/check_package.py`も成功。最終製品変更後に配布物gateを再実行する。
+
+D03設計: Windows製品の接続時にreadinessを取得し、未準備/更新必要/取得不能でも接続・認証を維持する。memory書込が必要なthread準備だけreadyを前提にし、read-only利用は変えない。既存Codexメニューの明示準備操作がsetupStart(mode=elevated、cwd省略)を呼ぶ。開始受付とsetupCompleted・再readinessを区別し、待機中も切断可能。切断でOS準備が取消されたとは表示しない。採用版sourceは起動時設定をreadinessへ使用するため、成功後もnotConfiguredなら自動再接続せず再接続必要を通知する。権限モードの自動fallbackなし。
+
+新規home preflight: `tmp/u06-m3/fresh-home-20261113-173855/report.json`で認証コピーなしの隔離homeからlogin_required、モデル候補9件、readiness=notConfigured、接続終了を確認。本人の新規ログインとOS準備はまだ未実施。
+
+D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤判定する競合を通常/Goal×停止有無の4例でred→green。新規問い合わせ・自動再送は加えず、既存の初回取得taskだけを待つ。停止が先行すればthread/Goalを提出しない。setup完了待ちとcloseの競合も再現し、閉接続へ遅い成功を通知しない。OS処理の取消しを保証する変更ではない。
+
+追加実モデル検証は`ordinary-20261113-180115-976985/report.json`でsandbox準備判定により送信前停止（turn0、入力0、所有PID回収）。`readiness-diagnosis/report.json`で初回取得完了後もupdateRequiredと確認した。前のready応答や既存Goalの成功から現在も準備済みとは推測しない。取得前競合とは別の実状態として、公開setupによる準備と再接続を確認してから残るモデル検証へ進む。
+
+D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、失敗・error・skipなし（JUnit `tmp/u050-d03-reviewed-all.xml`）。`uv run ruff format --check .`（211 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功。配布物は隔離wheel install、capture worker終了、module/script両入口の起動終了を確認した。公開型/docstring、既存phase・owned task・終了経路をレビュー済み。close競合1例・初回readiness競合4例の指摘を採用して既存試験を改訂し、別状態機械・自動再試行は不要と判断した。
+
+文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。

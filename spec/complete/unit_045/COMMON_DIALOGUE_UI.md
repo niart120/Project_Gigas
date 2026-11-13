@@ -1,5 +1,7 @@
 # U06 M1 共通対話UI
 
+2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../wip/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
+
 ## 1. 目的・状態・起点
 
 状態: **complete、M1実装・検証完了**。[U06親仕様](../../wip/unit_011/GOAL_EXECUTION.md)のM1を担当する。2026-11-13の依頼に従い、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で確認した公開APIとQtの契約を通常turnへ結合し、実装・検証・コミットまで行った。

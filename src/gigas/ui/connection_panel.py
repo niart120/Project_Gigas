@@ -24,6 +24,7 @@ from gigas.runtime.codex.models import (
     PlanEvent,
     ReasoningEvent,
     RequestResolved,
+    SandboxEvent,
     SessionStatus,
     TextEvent,
     TurnStarted,
@@ -75,6 +76,7 @@ class ConnectionPanel(QWidget):
     connect_requested = Signal()
     disconnect_requested = Signal()
     login_requested = Signal()
+    sandbox_requested = Signal()
     model_requested = Signal(str, str)
     goal_requested = Signal(str)
     goal_resume_requested = Signal()
@@ -99,6 +101,7 @@ class ConnectionPanel(QWidget):
         self._available = True
         self._settings_ready = True
         self._usage_blocked = False
+        self._sandbox = SandboxEvent()
         self._goal: GoalState | None = None
         self._status = SessionStatus("closed")
         self._pending: set[str] = set()
@@ -116,6 +119,7 @@ class ConnectionPanel(QWidget):
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
         self.login_action = QAction("ログイン", self)
+        self.sandbox_action = QAction("実行環境を準備", self)
         self.account_action = QAction("アカウント・利用状況", self)
         self.account_popup = AccountPopup(self)
         self.account_action.triggered.connect(self.account_popup.show_values)
@@ -147,6 +151,7 @@ class ConnectionPanel(QWidget):
         self.connect_action.triggered.connect(self.connect_requested)
         self.disconnect_action.triggered.connect(self._disconnect)
         self.login_action.triggered.connect(self._login)
+        self.sandbox_action.triggered.connect(self._setup_sandbox)
         self.open_login_button.clicked.connect(self._open_login)
         self.send_button.clicked.connect(self._send)
         self.prompt.submit_requested.connect(self.send_button.click)
@@ -164,6 +169,7 @@ class ConnectionPanel(QWidget):
         self.composer.set_choices(None)
         self.account_popup.reset()
         self._usage_blocked = False
+        self._sandbox = SandboxEvent()
         self._goal = None
         self.plan_panel.set_goal(None)
         self._generation = generation
@@ -216,6 +222,12 @@ class ConnectionPanel(QWidget):
         event = envelope.event
         if isinstance(event, AccountInfo):
             self.account_popup.set_account(event)
+        elif isinstance(event, SandboxEvent):
+            previous_detail = self._sandbox.detail
+            self._sandbox = event
+            self.account_popup.set_sandbox(event)
+            if event.setting_up and event.detail and event.detail != previous_detail:
+                self._notify_failure(event.detail, operation="setup_windows_sandbox")
         elif isinstance(event, UsageEvent):
             self._usage_blocked = event.ordinary_usage_allowed is False
             self.account_popup.set_usage(event)
@@ -386,6 +398,13 @@ class ConnectionPanel(QWidget):
         if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
             self._open_url(url)
 
+    def _setup_sandbox(self) -> None:
+        if not self.sandbox_action.isEnabled():
+            return
+        self._pending.add("setup_windows_sandbox")
+        self._render()
+        self.sandbox_requested.emit()
+
     def _send(self) -> None:
         if not self.send_button.isEnabled():
             return
@@ -488,6 +507,12 @@ class ConnectionPanel(QWidget):
                 "ログイン状態と候補を確認し、選び直してください。"
                 "候補を取得できない場合は、切断して再接続してください。"
             )
+        elif operation == "setup_windows_sandbox":
+            explanation = (
+                "実行環境の準備完了を確認できません。Windowsの確認画面と実行環境の状態を確認してください。"
+                "準備後も利用できない場合は、切断して再接続してください。"
+                "切断だけではWindowsの準備処理の終了を確認できません。"
+            )
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
 
     def _render(self) -> None:
@@ -500,6 +525,15 @@ class ConnectionPanel(QWidget):
             available and phase == "login_required" and "login" not in self._pending
         )
         goal_active = self._goal is not None and self._goal.status == "active"
+        self.sandbox_action.setEnabled(
+            available
+            and self._connected
+            and phase in {"ready", "stopped", "login_required"}
+            and not goal_active
+            and not self._pending
+            and not self._sandbox.setting_up
+            and self._sandbox.readiness != "ready"
+        )
         goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
         goal_mode = self.composer.goal_mode.isChecked()
         settled = phase in {"ready", "stopped"} and self._active_turn is None

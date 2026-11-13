@@ -120,6 +120,7 @@ class ApplicationShell(QObject):
         panel.connect_requested.connect(self.connect_codex)
         panel.disconnect_requested.connect(self.service.disconnect_runtime)
         panel.login_requested.connect(self.service.login)
+        panel.sandbox_requested.connect(self.service.setup_windows_sandbox)
         panel.model_requested.connect(self.service.select_model)
         panel.goal_requested.connect(self.service.set_goal)
         panel.goal_resume_requested.connect(self.service.resume_goal)

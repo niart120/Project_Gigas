@@ -27,6 +27,7 @@ from gigas.runtime.codex.models import (
     RateLimitWindow,
     ReasoningEvent,
     RequestResolved,
+    SandboxEvent,
     SessionStatus,
     TextEvent,
     TurnStarted,
@@ -1180,3 +1181,52 @@ def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
     panel.handle_event(ServiceEvent(1, account))
     assert account.email not in panel.account_popup.view.toPlainText()
     assert panel.prompt.toPlainText() == "次の依頼"
+
+
+def test_explicit_sandbox_setup_remains_disconnectable_and_reports_unknown_acceptance(
+    qtbot: QtBot,
+) -> None:
+    window = MainWindow()
+    window.allow_close = True
+    qtbot.addWidget(window)
+    panel = window.connection
+    assert panel.sandbox_action in window.codex_menu.actions()
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.handle_event(ServiceEvent(1, SandboxEvent("notConfigured")))
+    assert panel.login_action.isEnabled()
+    requested: list[bool] = []
+    failures: list[Notice] = []
+    panel.sandbox_requested.connect(lambda: requested.append(True))
+    panel.failed.connect(failures.append)
+    panel.sandbox_action.trigger()
+    panel.sandbox_action.trigger()
+    assert requested == [True]
+    assert not panel.sandbox_action.isEnabled()
+    assert panel.disconnect_action.isEnabled()
+    unknown = SandboxEvent(None, True, "setup-acceptance-unknown-fixture")
+    panel.handle_event(ServiceEvent(1, unknown))
+    panel.handle_event(ServiceEvent(1, unknown))
+    assert len(failures) == 1
+    assert failures[0].details == unknown.detail
+    panel.handle_event(ServiceEvent(1, SandboxEvent("ready")))
+    panel.handle_result(ServiceResult(1, "setup_windows_sandbox"))
+    assert not panel.sandbox_action.isEnabled()
+    panel.handle_event(ServiceEvent(1, SandboxEvent("updateRequired")))
+    assert panel.sandbox_action.isEnabled()
+    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    assert not panel.sandbox_action.isEnabled()
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("自律継続中", "active"))))
+    assert not panel.sandbox_action.isEnabled()
+    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持中", "paused"))))
+    panel.sandbox_action.trigger()
+    failed = SandboxEvent(None, False, "setup-failed-fixture")
+    panel.handle_event(ServiceEvent(1, failed))
+    assert len(failures) == 1
+    panel.handle_result(ServiceResult(1, "setup_windows_sandbox", failed.detail))
+    assert len(failures) == 2
+    assert failures[-1].details == failed.detail
+    assert panel.sandbox_action.isEnabled()
+    assert panel.disconnect_action.isEnabled()

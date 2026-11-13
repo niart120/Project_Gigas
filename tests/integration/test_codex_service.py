@@ -27,6 +27,7 @@ from gigas.runtime.codex.models import (
     GoalEvent,
     GoalState,
     HumanRequest,
+    SandboxEvent,
     SessionStatus,
     TurnStarted,
 )
@@ -95,6 +96,9 @@ class ControlledConnection:
     async def login(self) -> None:
         """Provide the login surface."""
 
+    async def setup_windows_sandbox(self) -> None:
+        """Provide the explicit environment-setup surface."""
+
     async def send(self, prompt: str) -> str | None:
         """Hold one operation until shutdown cancels it."""
         assert prompt == "hello"
@@ -148,6 +152,66 @@ class WaitingAnswerConnection(ControlledConnection):
         assert (token, decision, answers) == ("pending", "accept", None)
         self.sending.set()
         await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "disconnect"])
+def test_sandbox_setup_awaits_completion_without_blocking_disconnect(
+    qtbot: QtBot, tmp_path: Path, outcome: str
+) -> None:
+    entered, finish = Event(), Event()
+    connections: list[ControlledConnection] = []
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+
+    class SetupConnection(ControlledConnection):
+        async def setup_windows_sandbox(self) -> None:
+            entered.set()
+            self.emit(SandboxEvent("notConfigured", True))
+            assert await asyncio.to_thread(finish.wait, 5)
+            if self.closed.is_set() or outcome == "failure":
+                raise CodexConnectionError("setup-failed-fixture")
+            self.emit(SandboxEvent("ready"))
+
+        async def close(self) -> None:
+            await super().close()
+            finish.set()
+
+    def factory(
+        _options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        _prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
+        _started: Callable[[str], Awaitable[None]],
+    ) -> SetupConnection:
+        connection = SetupConnection(emit)
+        connections.append(connection)
+        return connection
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.setup_windows_sandbox()
+        qtbot.waitUntil(entered.is_set)
+        qtbot.waitUntil(lambda: any(isinstance(event.event, SandboxEvent) for event in events))
+        assert not any(result.operation == "setup_windows_sandbox" for result in results)
+        if outcome == "disconnect":
+            service.disconnect_runtime()
+            qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+            assert connections[0].closed.is_set()
+        else:
+            finish.set()
+            qtbot.waitUntil(
+                lambda: any(result.operation == "setup_windows_sandbox" for result in results)
+            )
+            result = next(item for item in results if item.operation == "setup_windows_sandbox")
+            assert bool(result.error) == (outcome == "failure")
+    finally:
+        finish.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
 
 
 @pytest.mark.parametrize("selected", [False, True])

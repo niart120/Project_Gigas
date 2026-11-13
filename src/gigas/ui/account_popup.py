@@ -12,7 +12,7 @@ from gigas.ui.transcript import Transcript
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
-    from gigas.runtime.codex.models import AccountInfo, RateLimitWindow, UsageEvent
+    from gigas.runtime.codex.models import AccountInfo, RateLimitWindow, SandboxEvent, UsageEvent
 
 
 def _window_text(window: "RateLimitWindow") -> str:
@@ -60,6 +60,7 @@ class AccountPopup(QFrame):
         self.hide()
         self.view.clear()
         self.view.update_item("account", "アカウント —\n\n")
+        self.view.update_item("sandbox", "実行環境 未確認\n\n")
         self.view.update_item("usage", "利用枠 未取得")
 
     def show_values(self) -> None:
@@ -107,3 +108,18 @@ class AccountPopup(QFrame):
         if usage.available and not usage.buckets:
             lines.append("—")
         self.view.update_item("usage", "\n".join(lines))
+
+    def set_sandbox(self, sandbox: "SandboxEvent") -> None:
+        """Show runtime readiness separately from setup request acceptance."""
+        state = (
+            "準備中"
+            if sandbox.setting_up
+            else {
+                "ready": "準備済み",
+                "notConfigured": "未準備",
+                "updateRequired": "更新が必要",
+                None: "未確認",
+            }[sandbox.readiness]
+        )
+        detail = f"\n{sandbox.detail}" if sandbox.detail else ""
+        self.view.update_item("sandbox", f"実行環境 {state}{detail}\n\n")

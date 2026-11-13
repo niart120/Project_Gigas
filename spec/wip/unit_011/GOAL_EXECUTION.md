@@ -79,7 +79,7 @@ M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe�
 |---|---|
 | 小画面、選択箇所自体の更新、IME、実summary | M1修正で通常フォント条件の大小画面と閲覧保持を検証済み。文字拡大専用の受入は廃止。実IME・実summaryはM3へ残す。モニター間DPI遷移確認は追加合意で対象外 |
 | Goal開始/再開/完了/制限と要求・停止・設定変更の競合、初回observe、memory書込 | M2で固定通知・実runtime/模擬機器の製品結合を確認。初回observeの実モデル遵守、実機と全認証/利用制限はM3。公開API単体の成功を製品結合の成功にしない |
-| 独立runtime起動環境 | M2で製品起動と書込範囲を確認。Windows sandbox未準備のhomeは設定不一致で拒否し、新規home準備はM3へ残す。desktop由来の2つのCODEX_WINDOWS_*起動変数でsandbox内書込が失敗し、子プロセスから除去すると成立した根拠に従う |
+| 独立runtime起動環境 | M2で製品起動と書込範囲を確認。M3で公開readinessと明示setupを結合し、memory付き開始だけをreadyまで拒否する。受付と完了、再接続が必要な状態を分け、実新規homeの受入結果はM3子に記録する。起動時の2つのCODEX_WINDOWS_*変数除去と書込範囲検証は維持 |
 | 新規ブラウザ認証/利用不能時 | M3。既存ChatGPT認証の成功と区別する |
 | 計画的終了/再起動復旧/記憶整理/長時間 | [U07](../../planned/unit_012/PLANNED_STOP.md)・[U08](../../planned/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)・[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)。共通配送/停止/保持Goalと記録を入口とし、U06では実装しない |
 

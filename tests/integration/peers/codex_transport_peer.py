@@ -155,6 +155,8 @@ def dialogue() -> None:
             result = {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": True}
         elif method == "account/rateLimits/read":
             result = {"rateLimits": {}, "ordinaryUsageAllowed": True}
+        elif method == "windowsSandbox/readiness":
+            result = {"status": "ready"}
         elif method == "config/read":
             result = {"config": {"mcp_servers": {}}}
         elif method == "model/list":

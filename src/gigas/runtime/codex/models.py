@@ -235,6 +235,22 @@ class UsageEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class SandboxEvent:
+    """Windows sandbox readiness and an explicitly requested setup operation.
+
+    Attributes:
+        readiness: Last public readiness result, or None when unavailable.
+        setting_up: Whether this connection is awaiting setup acceptance/completion.
+            Closing the connection ends local waiting, not the OS-owned setup.
+        detail: Application-owned error reason, empty when no failure is known.
+    """
+
+    readiness: Literal["ready", "notConfigured", "updateRequired"] | None = None
+    setting_up: bool = False
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class QuestionOption:
     """One model-provided choice with its description."""
 
@@ -365,6 +381,7 @@ class DialogueEvent:
 type ConnectionEvent = (
     AccountInfo
     | UsageEvent
+    | SandboxEvent
     | GoalEvent
     | DialogueEvent
     | ModelSelection

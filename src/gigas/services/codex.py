@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 type ServiceOperation = Literal[
     "connect",
     "login",
+    "setup_windows_sandbox",
     "send",
     "steer",
     "answer",
@@ -90,6 +91,10 @@ class ServiceConnection(Protocol):
 
     async def login(self) -> None:
         """Begin explicit login."""
+        ...
+
+    async def setup_windows_sandbox(self) -> None:
+        """Await explicit environment setup and its readiness confirmation."""
         ...
 
     async def send(self, prompt: str) -> str | None:
@@ -383,6 +388,14 @@ class CodexServiceThread(QThread):
         """Queue an explicit ChatGPT login request."""
         self._submit(_Command(self._generation, "login"))
 
+    def setup_windows_sandbox(self) -> None:
+        """Queue explicit Windows environment setup without blocking disconnect.
+
+        Completion reports setup completion, not just acceptance of its start.
+        Disconnecting does not assert cancellation of Windows setup itself.
+        """
+        self._submit(_Command(self._generation, "setup_windows_sandbox"))
+
     def send(self, prompt: str) -> None:
         """Queue a user turn; completion does not mean the turn has finished.
 
@@ -567,6 +580,9 @@ class CodexServiceThread(QThread):
             self._reject_submission(command)
 
     def _reject_submission(self, command: _Command) -> None:
+        if command.operation == "setup_windows_sandbox":
+            self._complete(command, "実行環境の準備を開始していない", "not_sent")
+            return
         if command.operation in {
             "answer",
             "send",
@@ -664,6 +680,9 @@ class CodexServiceThread(QThread):
             goal_accepted = result is True
             turn_id = result if isinstance(result, str) else None
         except asyncio.CancelledError:
+            if command.operation == "setup_windows_sandbox":
+                self._complete(command, "実行環境の準備完了を確認できない", "unknown")
+                return
             if command.operation in {
                 "answer",
                 "send",
@@ -718,6 +737,8 @@ class CodexServiceThread(QThread):
             return None
         connection = self._connection
         if connection is None or command.generation != self._active_generation:
+            if command.operation == "setup_windows_sandbox":
+                raise CodexConnectionError("この接続では実行環境の準備を受け付けない")
             if command.operation in {
                 "answer",
                 "send",
@@ -772,6 +793,8 @@ class CodexServiceThread(QThread):
                 await connection.select_model(command.model, command.effort)
             case "login":
                 await connection.login()
+            case "setup_windows_sandbox":
+                await connection.setup_windows_sandbox()
             case "send":
                 return await connection.send(command.text)
             case "steer":

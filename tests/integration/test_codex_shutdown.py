@@ -39,6 +39,9 @@ class LifetimeConnection:
     async def login(self) -> None:
         """Provide the connection interface."""
 
+    async def setup_windows_sandbox(self) -> None:
+        """Provide the explicit environment-setup interface."""
+
     async def send(self, prompt: str) -> str | None:
         """Accept a turn without completing it."""
         assert prompt

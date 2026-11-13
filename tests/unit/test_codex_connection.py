@@ -26,6 +26,7 @@ from gigas.runtime.codex.models import (
     PlanStep,
     ReasoningEvent,
     RequestResolved,
+    SandboxEvent,
     SessionStatus,
     TextEvent,
     ThreadConfiguration,
@@ -107,6 +108,10 @@ class FakePeer:
             }
         if method == "account/rateLimits/read":
             return {"rateLimits": {}, "ordinaryUsageAllowed": True}
+        if method == "windowsSandbox/readiness":
+            return {"status": "ready"}
+        if method == "windowsSandbox/setupStart":
+            return {"started": True}
         if method == "config/read":
             return {"config": {"mcp_servers": {"existing": {"enabled": True}}}}
         if method == "model/list":
@@ -225,6 +230,7 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
             "model/list",
             "model/list",
             "account/rateLimits/read",
+            "windowsSandbox/readiness",
         ]
         status = [event for event in events if isinstance(event, SessionStatus)][-1]
         assert (status.phase, status.model, status.effort, status.authenticated) == (
@@ -276,8 +282,8 @@ def test_login_is_explicit_and_completion_rechecks_account(tmp_path: Path) -> No
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         assert not any(method == "account/login/start" for method, _ in peer.calls)
-        assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "login_required"
+        status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+        assert status.phase == "login_required"
         with pytest.raises(CodexConnectionError):
             await connection.send("未認証")
         await connection.login()
@@ -692,6 +698,277 @@ def test_usage_denial_during_goal_preparation_prevents_submission(tmp_path: Path
     _run(scenario())
 
 
+@pytest.mark.parametrize("early_completion", [True, False])
+def test_explicit_sandbox_setup_preserves_login_and_handles_early_completion(
+    tmp_path: Path, early_completion: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.authenticated = False
+        peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            assert SandboxEvent("notConfigured") in events
+            assert not any(method == "windowsSandbox/setupStart" for method, _ in peer.calls)
+            peer.gates["windowsSandbox/setupStart"] = asyncio.Event()
+            setting_up = asyncio.create_task(connection.setup_windows_sandbox())
+            await _events_processed()
+            assert ("windowsSandbox/setupStart", {"mode": "elevated"}) in peer.calls
+            with pytest.raises(CodexConnectionError):
+                await connection.setup_windows_sandbox()
+            if not early_completion:
+                peer.gates["windowsSandbox/setupStart"].set()
+                await _events_processed()
+            peer.responses["windowsSandbox/readiness"] = {"status": "ready"}
+            peer.events.put_nowait(
+                RpcNotification(
+                    "windowsSandbox/setupCompleted", {"mode": "elevated", "success": True}
+                )
+            )
+            await _events_processed()
+            peer.gates["windowsSandbox/setupStart"].set()
+            await setting_up
+            assert next(
+                event for event in reversed(events) if isinstance(event, SandboxEvent)
+            ) == SandboxEvent("ready")
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+            assert status.phase == "login_required"
+            assert not peer.closed
+            await connection.login()
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("outcome", ["failed", "not_ready", "read_failed"])
+def test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmation(
+    tmp_path: Path, outcome: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            setting_up = asyncio.create_task(connection.setup_windows_sandbox())
+            await _events_processed()
+            if outcome == "read_failed":
+                peer.failure = "windowsSandbox/readiness"
+            peer.events.put_nowait(
+                RpcNotification(
+                    "windowsSandbox/setupCompleted",
+                    {
+                        "mode": "elevated",
+                        "success": outcome != "failed",
+                        "error": "PRIVATE-SETUP-ERROR",
+                    },
+                )
+            )
+            with pytest.raises(CodexConnectionError):
+                await setting_up
+            event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))
+            assert not event.setting_up
+            assert event.readiness != "ready"
+            assert event.detail
+            assert not peer.closed
+            assert "PRIVATE-SETUP-ERROR" not in repr(events)
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_unknown_sandbox_setup_acceptance_waits_without_retry_and_disconnects(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.failure = "windowsSandbox/setupStart"
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        setting_up = asyncio.create_task(connection.setup_windows_sandbox())
+        await _events_processed()
+        event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))
+        assert event.setting_up
+        assert event.detail
+        with pytest.raises(CodexConnectionError):
+            await connection.setup_windows_sandbox()
+        assert sum(method == "windowsSandbox/setupStart" for method, _ in peer.calls) == 1
+        await connection.close()
+        with pytest.raises(asyncio.CancelledError):
+            await setting_up
+        before = list(events)
+        peer.events.put_nowait(
+            RpcNotification("windowsSandbox/setupCompleted", {"mode": "elevated", "success": True})
+        )
+        await _events_processed()
+        assert events == before
+        assert peer.closed
+
+    _run(scenario())
+
+
+def test_close_before_setup_readiness_reply_does_not_publish_setup_completion(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        closing: asyncio.Task[None] | None = None
+
+        class CloseBeforeReadinessPeer(FakePeer):
+            reads = 0
+
+            async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+                nonlocal closing
+                result = await super().request(method, params)
+                if method == "windowsSandbox/readiness":
+                    self.reads += 1
+                    if self.reads == 2:
+                        closing = asyncio.create_task(connection.close())
+                        await asyncio.sleep(0)
+                return result
+
+        peer = CloseBeforeReadinessPeer()
+        peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        setting_up = asyncio.create_task(connection.setup_windows_sandbox())
+        await _events_processed()
+        peer.responses["windowsSandbox/readiness"] = {"status": "ready"}
+        peer.events.put_nowait(
+            RpcNotification("windowsSandbox/setupCompleted", {"mode": "elevated", "success": True})
+        )
+        outcomes = await asyncio.gather(setting_up, return_exceptions=True)
+        assert isinstance(outcomes[0], asyncio.CancelledError)
+        assert closing is not None
+        await closing
+        assert peer.closed
+        assert SandboxEvent("ready") not in events
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("rpc_rejection", [True, False])
+def test_rejected_sandbox_start_does_not_accept_unrelated_completion(
+    tmp_path: Path, rpc_rejection: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        if rpc_rejection:
+            peer.rpc_errors["windowsSandbox/setupStart"] = -32600
+        else:
+            peer.responses["windowsSandbox/setupStart"] = {"started": False}
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            with pytest.raises(CodexConnectionError):
+                await connection.setup_windows_sandbox()
+            event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))
+            assert not event.setting_up
+            assert event.detail
+            before = list(events)
+            peer.events.put_nowait(
+                RpcNotification(
+                    "windowsSandbox/setupCompleted", {"mode": "elevated", "success": True}
+                )
+            )
+            await _events_processed()
+            assert events == before
+            assert sum(method == "windowsSandbox/setupStart" for method, _ in peer.calls) == 1
+            await connection.send("既存の読取専用接続を維持")
+            assert not peer.closed
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("readiness", ["notConfigured", "updateRequired", None])
+def test_memory_preparation_requires_confirmed_sandbox_without_closing_connection(
+    tmp_path: Path, readiness: str | None
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        if readiness is None:
+            peer.failure = "windowsSandbox/readiness"
+        else:
+            peer.responses["windowsSandbox/readiness"] = {"status": readiness}
+        memory = tmp_path / "memory"
+        memory.mkdir()
+
+        async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
+            return ThreadConfiguration(tmp_path, memory_dir=memory)
+
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
+        )
+        try:
+            await connection.open()
+            await _events_processed()
+            for operation in (connection.send, connection.set_goal):
+                with pytest.raises(CodexConnectionError):
+                    await operation("準備前に開始しない")
+            assert not any(method == "thread/start" for method, _ in peer.calls)
+            assert not peer.closed
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("goal", [True, False])
+@pytest.mark.parametrize("stop", [True, False])
+def test_memory_start_waits_for_initial_readiness_and_can_be_stopped(
+    tmp_path: Path, goal: bool, stop: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["windowsSandbox/readiness"] = asyncio.Event()
+        memory = tmp_path / "memory"
+        memory.mkdir()
+
+        async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
+            return ThreadConfiguration(tmp_path, memory_dir=memory)
+
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
+        )
+        await connection.open()
+        operation = connection.set_goal if goal else connection.send
+        starting = asyncio.create_task(operation("最初の準備状態を待って開始"))
+        stopping: asyncio.Task[None] | None = None
+        try:
+            await _events_processed()
+            assert not starting.done()
+            assert not any(method == "thread/start" for method, _ in peer.calls)
+            if stop:
+                stopping = asyncio.create_task(connection.stop())
+                await _events_processed()
+            peer.gates["windowsSandbox/readiness"].set()
+            result = await starting
+            if stopping is not None:
+                await stopping
+            assert result == ((False if goal else None) if stop else (True if goal else "turn-1"))
+            assert any(method == "thread/start" for method, _ in peer.calls) is not stop
+            assert sum(method == "windowsSandbox/readiness" for method, _ in peer.calls) == 1
+        finally:
+            await connection.close()
+            await asyncio.gather(starting, return_exceptions=True)
+            if stopping is not None:
+                await asyncio.gather(stopping, return_exceptions=True)
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize("will_retry", [True, False])
 def test_only_current_final_error_stops_execution(tmp_path: Path, will_retry: bool) -> None:
     async def scenario() -> None:
@@ -773,7 +1050,7 @@ def test_login_failures_correlate_with_results_and_distinguish_retries(tmp_path:
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
-            initial = events[-1]
+            initial = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(initial, SessionStatus)
             assert initial.phase == "login_required"
             assert initial.failure_id is None

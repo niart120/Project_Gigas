@@ -141,7 +141,7 @@ Goal開始前に永続thread・通知購読・操作権を用意します。採�
 
 # 5. 認証・モデル・利用制限
 
-公開app-serverの `account/login/start`・`account/read`・`model/list` を使います。既存ChatGPT認証とモデル/effort一覧は実行確認済みで、新規ログイン・APIキー実接続はU06 M3に残ります。認証とモデル妥当性を分離し、特定モデル名やeffortの全種類を固定しません。
+公開app-serverの `account/login/start`・`account/read`・`model/list` を使います。既存ChatGPT認証とモデル/effort一覧は実行確認済みで、新規ChatGPTログインの受入結果はU06 M3で区別して記録します。APIキー認証は2026-11-13の合意で今回対象外です。認証とモデル妥当性を分離し、特定モデル名やeffortの全種類を固定しません。
 
 app-server の利用枠情報は ChatGPT 利用枠が対象です。取得できた使用率や回復予定時刻を表示します。API キー利用時の課金残高やクレジット上限を、同じ通知から必ず取得できるとはしません。
 
@@ -198,7 +198,7 @@ U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確�
 | --- | --- | --- |
 | 起動・版・通常ターン | Windows配布runtime、公開API、受信と子プロセス終了の所有者 | U02で版を固定し、通常ターンの開始・応答・中断・終了をWindowsで確認済み |
 | 質問・承認 | 公開経路での保留・回答・失効 | U02で通常turnの受信・停止・失効を確認済み。共通MessageはU06 M1、Goalとの競合はM2の固定通知で確認、実モデル受入はM3 |
-| 認証・モデル | ChatGPT/APIキーの経路、資格情報の保管責任、利用可能モデルと設定値の検証 | U02はChatGPTで最小接続を確認。APIキーを含む初期版の認証範囲はU06完了までに確認。設定文字列の保存で代用しない |
+| 認証・モデル | ChatGPTの経路、資格情報の保管責任、利用可能モデルと設定値の検証 | U02はChatGPTで最小接続を確認。新規ChatGPT認証をU06で確認。APIキーはM3対象外。設定文字列の保存で代用しない |
 | MCPと画像 | U02で設定経路を調査し、U04冒頭でサーバと画像応答形式を決定 | U04 M2で固定Frame・USB Video Deviceの実映像の実モデル受信、保存画像・観測IDとの対応と実画面の応答性を確認。固定Frameの同接続で次ターンの保存PNG参照、再起動後の会話読込も確認 |
 | MCP接続と実行世代 | 新endpoint/Grantと同threadの設定再読込 | U05の製品で停止後の旧要求拒否を確認済み。Goalの自律turnと同run保持・新MCPでの再開はU06 M0の模擬条件で確認、製品結合はM2で確認、実機受入はM3 |
 | Goalの継続 | 複数ターン、目的更新、pause/resume/clearとinterrupt | U06 M0で実モデルの限定確認済み。Goal達成と質問/承認・停止の競合はM2固定試験、実runtime製品結合もM2確認。実モデル/実機はM3 |
@@ -286,3 +286,5 @@ U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確�
 追加の実runtime検証で、thread内の同期`exec_command`によるmemory書込が同turnの公開interrupted後も継続した。公開`thread/backgroundTerminals/list`・`terminate`を停止経路へ結合し、最終`tmp/u06-m2-runtime/memory-product-20261113-170826/report.json`では製品停止後1秒と同Goal再開後も3 bytes不変、公開一覧が空であること、サービスと検証プロセスの終了を確認した。[採用版のAPI実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server/src/request_processors/thread_processor.rs)と[端末終了実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/unified_exec/process_manager.rs)を照合し、schemaだけの可能性と実呼出しの成功を区別した。公開一覧外の背景子孫や外部書込の全終了は保証しない。自律継続・設定・MCPの最終再確認はrun-20261113-170939/report.jsonに記録した。
 
 製品launchと分離したprocess cwd/runtime・archive/memory構成でmemory書込、親原記録読取/書込拒否を確認した。Windows sandbox未準備の隔離homeでは要求がreadOnlyへ縮退し製品は拒否する。成功条件はWindows sandboxの有効な環境で、新規home準備はM3の受入項目とする。M2はホストモデル・実機・新規認証・長時間の検証ではない。
+
+M3の製品契約は公開`windowsSandbox/readiness`と`windowsSandbox/setupStart(mode=elevated)`、`windowsSandbox/setupCompleted`を使う。初回状態取得は認証と独立し、準備は明示操作に限る。開始受付だけでは成功とせず、完了通知後にreadinessを再取得する。非readyなら明示再接続を求め、受付不明時は再送せず切断可能な待機を維持する。memory付き開始のready確認とthread応答の書込範囲検証を別に行い、read-only送信は準備状態で拒否しない。schema・固定通知試験と新規homeの実受入は区別し、結果は[M3子仕様](../wip/unit_050/GOAL_ACCEPTANCE.md)に記録する。
