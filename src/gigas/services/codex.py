@@ -995,7 +995,7 @@ class CodexServiceThread(QThread):
                     self._recording.on_failure = lambda error: self.recording_failed.emit(
                         "", str(writer.path), _recording_reason(error)
                     )
-                memory_dir = await self._recording.ensure_memory()
+                await self._recording.ensure_memory()
                 if self._observations is None:
                     self._observations = ObservationService(
                         self._reader,
@@ -1030,7 +1030,6 @@ class CodexServiceThread(QThread):
                         prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
                         prefix + "tools.act_and_observe.approval_mode": "approve",
                     },
-                    memory_dir=memory_dir,
                 )
             except Exception as error:
                 path = self._writer.path if self._writer is not None else self._data_root / "chats"

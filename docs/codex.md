@@ -12,7 +12,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 ## Python API
 
-`gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None, prepare_turn=None, on_thread_started=None)` は接続を作成します。`options` は `models.ConnectionOptions`、`emit` は `models.ConnectionEvent` を受け取る短い同期コールバックです。作成時にプロセスは起動しません。
+`gigas.runtime.codex.launch.create_connection(options, emit, *, prepare_turn, on_thread_started, codex_home=None)` はアプリ用の接続を作成します。`options` は `models.ConnectionOptions`、`emit` は `models.ConnectionEvent` を受け取る短い同期コールバックです。準備と初回thread対応のコールバックは必須です。作成時にプロセスは起動しません。
 
 同じasyncioループで `open()`、必要なら明示的に `login()`、認証後に `send(prompt)` を呼びます。`open()` は初期化・認証状態・モデル一覧を確認します。未認証時の `LoginEvent.url` は `login()` の開始後にだけ届き、ブラウザを開く操作は利用側で行います。`account/login/completed` とアカウントの再取得によって認証結果を確認します。
 
@@ -22,13 +22,13 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 同メソッドは開始受付だけでは完了せず、完了通知と準備状態の再取得を待ちます。準備失敗・状態取得不能の場合は`CodexConnectionError`を返し、接続は維持します。ランタイムが公開した準備失敗の理由は例外と`SandboxEvent.detail`へ保持し、通知詳細から再確認できます。理由が返らない場合は原因を補いません。準備成功後に取得できた状態が非readyなら、例外ではなく`reconnect_required=True`を通知して正常に戻ります。明示的に切断・再接続してください。受付不明のときは`setting_up=True`と理由を通知し、自動再送せず完了通知を待ちます。待機中も`close()`できますが、切断をWindows側の準備処理の取消しとは扱いません。
 
-`memory_dir`付きの新規送信・Goal開始・再開は、実行環境が`ready`でなければ開始前に拒否します。初回の状態取得中なら既存の取得だけを待ち、その間に停止された場合はthreadやGoalを提出しません。追加問い合わせや自動再試行はしません。読み取り専用の送信、既存Goalの目的更新、途中指示、回答・承認、停止にはこの条件を追加しません。`ready`の確認後もthread応答の書込範囲を検証します。
+新規送信・Goal開始・再開は、実行環境が`ready`でなければ開始前に拒否します。初回の状態取得中なら既存の取得だけを待ち、その間に停止された場合はthreadやGoalを提出しません。追加問い合わせや自動再試行はしません。既存Goalの目的更新、途中指示、回答・承認、停止にはこの条件を追加しません。`ready`の確認後もthread応答の書込範囲を検証します。
 
-`send()` は配布物内の `play.md` を開発者指示として配送し、人間による承認・永続スレッドで通常ターンを開始します。書込範囲は下記の`ThreadConfiguration.memory_dir`で指定し、省略時は読み取り専用です。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。本文・公開計画・公開推論要約・ツール活動を型付きイベントへ変換し、生のプロトコル応答やstderrを表示イベントへ流しません。
+`send()` は配布物内の `play.md` を開発者指示として配送し、人間による承認・永続スレッドで通常ターンを開始します。書込先は準備した記録先の`memory/`に固定します。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。本文・公開計画・公開推論要約・ツール活動を型付きイベントへ変換し、生のプロトコル応答やstderrを表示イベントへ流しません。
 
-`prepare_turn(prompt, thread_id)`は通常の`send()`、新規Goal開始、保持Goalの明示再開で呼ぶasyncコールバックです。自律ターンごとやGoalの目的更新では呼びません。`prompt`は依頼または再開する目的、`thread_id`は初回に`None`、以後は採用済みの実thread IDです。`models.ThreadConfiguration(cwd, mcp_config, memory_dir=None)`を返し、`cwd`には原記録先の準備済み絶対パスを指定します。`memory_dir`は既存の絶対パスで、厳密に`cwd / "memory"`を指定します。指定するとthreadのcwdと作業領域をそこへ限定して書込を許可し、追加書込先・一時領域・ネットワークは許可しません。応答の設定が一致しない場合は開始を拒否します。製品サービスは原記録先の`memory/`を指定し、プロセスの`ConnectionOptions.cwd`とは分離します。コールバック省略時は起動用cwdで読み取り専用です。接続・ログイン時には呼ばないため、保存先の準備失敗で認証は失われません。
+`prepare_turn(prompt, thread_id)`は通常の`send()`、新規Goal開始、保持Goalの明示再開で呼ぶasyncコールバックです。自律ターンごとやGoalの目的更新では呼びません。`prompt`は依頼または再開する目的、`thread_id`は初回に`None`、以後は採用済みの実thread IDです。`models.ThreadConfiguration(cwd, mcp_config)`を返し、`cwd`には原記録先の準備済み絶対パスを指定します。`cwd / "memory"`も事前に作成しておきます。threadのcwdと作業領域はこのmemoryへ限定し、追加書込先・一時領域・ネットワークは許可しません。応答の設定が一致しない場合は開始を拒否します。プロセスの`ConnectionOptions.cwd`とは分離します。接続・ログイン時には呼ばないため、保存先の準備失敗で認証は失われません。
 
-コールバックから得た設定は、初回には`thread/start`へ渡します。次の送信では`thread/unsubscribe`の完了後に同じIDを`thread/resume`し、その設定を読み込みます。返されたID・モデル・承認設定・sandboxを確認してから`turn/start`へ進みます。アプリはこの経路で[ゲームI/O MCP](observation-mcp.md)の公開情報を更新し、プロトコル切替後も同じ会話を維持します。コールバック省略時は、初回に作ったthreadをそのまま使います。
+コールバックから得た設定は、初回には`thread/start`へ渡します。次の送信では`thread/unsubscribe`の完了後に同じIDを`thread/resume`し、その設定を読み込みます。返されたID・モデル・承認設定・sandboxを確認してから`turn/start`へ進みます。アプリはこの経路で[ゲームI/O MCP](observation-mcp.md)の公開情報を更新し、プロトコル切替後も同じ会話を維持します。
 
 `on_thread_started(thread_id)`は初回に返されたthread IDをアプリへ渡すasyncコールバックです。アプリはIDを採用し、記録を非同期投入してからrunを開始します。永続化の完了をturn/startの条件にせず、保存失敗は通知へ残します。再開時には呼びません。
 

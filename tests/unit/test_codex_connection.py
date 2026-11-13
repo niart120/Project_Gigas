@@ -46,6 +46,8 @@ from gigas.runtime.codex.transport import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from _pytest.monkeypatch import MonkeyPatch
 
     from gigas.runtime.codex.models import ConnectionEvent
@@ -126,9 +128,7 @@ class FakePeer:
                 "approvalsReviewer": params["approvalsReviewer"],
                 "model": params["model"],
                 "cwd": params["cwd"],
-                "sandbox": {"type": "readOnly"}
-                if params["sandbox"] == "read-only"
-                else {
+                "sandbox": {
                     "type": "workspaceWrite",
                     "writableRoots": [],
                     "networkAccess": False,
@@ -215,13 +215,58 @@ async def _events_processed() -> None:
         await asyncio.sleep(0)
 
 
+def _connection(
+    peer: FakePeer,
+    options: ConnectionOptions,
+    emit: "Callable[[ConnectionEvent], None]",
+    *,
+    prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]] | None" = None,
+    on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
+) -> CodexConnection:
+    (options.cwd / "memory").mkdir(exist_ok=True)
+
+    async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
+        return ThreadConfiguration(options.cwd)
+
+    async def started(_thread_id: str) -> None:
+        pass
+
+    return CodexConnection(
+        peer,
+        options,
+        emit,
+        prepare_turn=prepare_turn or prepare,
+        on_thread_started=on_thread_started or started,
+    )
+
+
 def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Path) -> None:
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        preparations: list[tuple[str, str | None]] = []
+        recorded: list[str] = []
+        memory = tmp_path / "memory"
+
+        async def prepare(prompt: str, thread_id: str | None) -> ThreadConfiguration:
+            preparations.append((prompt, thread_id))
+            memory.mkdir(exist_ok=True)
+            return ThreadConfiguration(tmp_path)
+
+        async def started(thread_id: str) -> None:
+            recorded.append(thread_id)
+
+        connection = CodexConnection(
+            peer,
+            ConnectionOptions(tmp_path),
+            events.append,
+            prepare_turn=prepare,
+            on_thread_started=started,
+        )
         await connection.open()
         assert peer.started
+        assert not preparations
+        assert not memory.exists()
         assert [method for method, _ in peer.calls] == [
             "initialize",
             "initialized",
@@ -245,14 +290,25 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
         ]
         start = next(params for method, params in peer.calls if method == "thread/start")
         assert start is not None
-        assert start["developerInstructions"] == resources.files("gigas.prompts").joinpath(
-            "play.md"
-        ).read_text(encoding="utf-8")
-        assert start["sandbox"] == "read-only"
+        assert start["cwd"] == str(memory)
+        assert start["runtimeWorkspaceRoots"] == [str(memory)]
+        instructions = start["developerInstructions"]
+        assert isinstance(instructions, str)
+        assert instructions.startswith(
+            resources.files("gigas.prompts").joinpath("play.md").read_text(encoding="utf-8")
+        )
+        assert str(tmp_path) in instructions
+        assert start["sandbox"] == "workspace-write"
         assert start["approvalsReviewer"] == "user"
         assert start["approvalPolicy"] == "on-request"
         assert start["ephemeral"] is False
-        assert start["config"] == {"mcp_servers.existing.enabled": False}
+        assert start["config"] == {
+            "mcp_servers.existing.enabled": False,
+            "sandbox_workspace_write.writable_roots": [],
+            "sandbox_workspace_write.network_access": False,
+            "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+            "sandbox_workspace_write.exclude_slash_tmp": True,
+        }
         turn = next(params for method, params in peer.calls if method == "turn/start")
         assert turn == {
             "threadId": "thread-1",
@@ -265,9 +321,13 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
         peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "inProgress"}}
         await connection.send("続けて確認")
         assert sum(method == "thread/start" for method, _ in peer.calls) == 1
-        assert not any(
-            method in {"thread/unsubscribe", "thread/resume"} for method, _ in peer.calls
-        )
+        assert [method for method, _ in peer.calls][-3:] == [
+            "thread/unsubscribe",
+            "thread/resume",
+            "turn/start",
+        ]
+        assert preparations == [("確認だけ", None), ("続けて確認", "thread-1")]
+        assert recorded == ["thread-1"]
         await connection.close()
         assert peer.closed
 
@@ -279,7 +339,7 @@ def test_login_is_explicit_and_completion_rechecks_account(tmp_path: Path) -> No
         peer = FakePeer()
         peer.authenticated = False
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         assert not any(method == "account/login/start" for method, _ in peer.calls)
         status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
@@ -311,9 +371,7 @@ def test_invalid_defaults_preserve_login_and_allow_selection_before_sending(
         peer = FakePeer()
         peer.authenticated = authenticated
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(
-            peer, ConnectionOptions(tmp_path, model, effort), events.append
-        )
+        connection = _connection(peer, ConnectionOptions(tmp_path, model, effort), events.append)
         try:
             await connection.open()
             assert not peer.closed
@@ -368,7 +426,7 @@ def test_catalog_rpc_failure_before_login_does_not_block_login(tmp_path: Path) -
         peer.authenticated = False
         peer.rpc_errors["model/list"] = -32000
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
@@ -405,7 +463,7 @@ def test_catalog_rejection_after_login_preserves_authenticated_connection(tmp_pa
         peer = FakePeer()
         peer.authenticated = False
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await connection.login()
@@ -460,7 +518,7 @@ def test_account_usage_is_public_and_zero_credits_do_not_block_included_usage(
             "ordinaryUsageAllowed": True,
         }
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -491,7 +549,7 @@ def test_usage_refresh_is_nonblocking_and_sparse_notifications_refetch_full_snap
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -549,7 +607,7 @@ def test_usage_denial_stops_goal_and_requires_confirmed_recovery_and_explicit_re
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -619,7 +677,7 @@ def test_usage_read_failure_does_not_stop_or_retry_execution(
         if initial_failure:
             peer.failure = "account/rateLimits/read"
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -649,7 +707,7 @@ def test_close_cancels_pending_usage_read_without_late_publication(tmp_path: Pat
         peer = FakePeer()
         peer.gates["account/rateLimits/read"] = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await _events_processed()
         assert ("account/rateLimits/read", {}) in peer.calls
@@ -668,7 +726,7 @@ def test_usage_denial_during_goal_preparation_prevents_submission(tmp_path: Path
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -707,7 +765,7 @@ def test_explicit_sandbox_setup_preserves_login_and_handles_early_completion(
         peer.authenticated = False
         peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -761,7 +819,7 @@ def test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmat
         peer = FakePeer()
         peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -812,7 +870,7 @@ def test_unknown_sandbox_setup_acceptance_waits_without_retry_and_disconnects(
         peer = FakePeer()
         peer.failure = "windowsSandbox/setupStart"
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         setting_up = asyncio.create_task(connection.setup_windows_sandbox())
         await _events_processed()
@@ -858,7 +916,7 @@ def test_close_before_setup_readiness_reply_does_not_publish_setup_completion(
         peer = CloseBeforeReadinessPeer()
         peer.responses["windowsSandbox/readiness"] = {"status": "notConfigured"}
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         setting_up = asyncio.create_task(connection.setup_windows_sandbox())
         await _events_processed()
@@ -887,7 +945,7 @@ def test_rejected_sandbox_start_does_not_accept_unrelated_completion(
         else:
             peer.responses["windowsSandbox/setupStart"] = {"started": False}
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await _events_processed()
@@ -905,7 +963,7 @@ def test_rejected_sandbox_start_does_not_accept_unrelated_completion(
             await _events_processed()
             assert events == before
             assert sum(method == "windowsSandbox/setupStart" for method, _ in peer.calls) == 1
-            await connection.send("既存の読取専用接続を維持")
+            await connection.send("既存接続を維持")
             assert not peer.closed
         finally:
             await connection.close()
@@ -927,9 +985,9 @@ def test_memory_preparation_requires_confirmed_sandbox_without_closing_connectio
         memory.mkdir()
 
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
-            return ThreadConfiguration(tmp_path, memory_dir=memory)
+            return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
         )
         try:
@@ -958,9 +1016,9 @@ def test_memory_start_waits_for_initial_readiness_and_can_be_stopped(
         memory.mkdir()
 
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
-            return ThreadConfiguration(tmp_path, memory_dir=memory)
+            return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
         )
         await connection.open()
@@ -995,7 +1053,7 @@ def test_only_current_final_error_stops_execution(tmp_path: Path, will_retry: bo
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await connection.send("開始")
@@ -1032,7 +1090,7 @@ def test_empty_packaged_instructions_do_not_start_a_thread(
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         await connection.open()
         monkeypatch.setattr(
             "gigas.runtime.codex.connection.read_play_instructions", lambda: contents
@@ -1050,7 +1108,7 @@ def test_initialization_failure_closes_peer_without_leaking_diagnostics(tmp_path
         peer = FakePeer()
         peer.failure = "initialize"
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         with pytest.raises(CodexConnectionError) as error:
             await connection.open()
         assert "PRIVATE" not in str(error.value)
@@ -1068,7 +1126,7 @@ def test_login_failures_correlate_with_results_and_distinguish_retries(tmp_path:
         peer = FakePeer()
         peer.authenticated = False
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             initial = next(event for event in reversed(events) if isinstance(event, SessionStatus))
@@ -1098,7 +1156,7 @@ def test_failed_login_completion_has_a_failure_without_exposing_remote_text(tmp_
         peer = FakePeer()
         peer.authenticated = False
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await connection.login()
@@ -1133,11 +1191,11 @@ def test_turn_operation_failures_share_status_id_with_exception(
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
             return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer,
             ConnectionOptions(tmp_path),
             events.append,
-            prepare_turn=prepare if refreshing else None,
+            prepare_turn=prepare,
         )
         try:
             await connection.open()
@@ -1173,7 +1231,7 @@ def test_invalid_server_requests_report_distinct_failures_without_changing_phase
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
             await connection.send("開始")
@@ -1220,7 +1278,7 @@ def test_invalid_server_requests_report_distinct_failures_without_changing_phase
 def test_unimplemented_auth_method_is_explicit(tmp_path: Path) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path, auth_method="api_key"), lambda _: None
         )
         with pytest.raises(CodexConnectionError):
@@ -1239,7 +1297,7 @@ def test_unreadable_instructions_never_reach_thread_start(
 
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         await connection.open()
         monkeypatch.setattr("gigas.runtime.codex.connection.read_play_instructions", unavailable)
         with pytest.raises(CodexConnectionError) as error:
@@ -1259,6 +1317,7 @@ def test_unreadable_instructions_never_reach_thread_start(
         ("thread/resume", {"approvalPolicy": "never"}),
         ("thread/resume", {"model": "other"}),
         ("thread/resume", {"sandbox": {"type": "workspaceWrite"}}),
+        ("thread/resume", {"cwd": "unexpected-workspace"}),
         ("thread/resume", {"thread": {"id": "different-thread"}}),
     ],
 )
@@ -1271,7 +1330,7 @@ def test_unconfirmed_thread_settings_do_not_start_a_turn(
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
             return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path), lambda _: None, prepare_turn=prepare
         )
         await connection.open()
@@ -1284,7 +1343,14 @@ def test_unconfirmed_thread_settings_do_not_start_a_turn(
             "model": "catalog-default",
             "approvalPolicy": "on-request",
             "approvalsReviewer": "user",
-            "sandbox": {"type": "readOnly"},
+            "cwd": str(tmp_path / "memory"),
+            "sandbox": {
+                "type": "workspaceWrite",
+                "writableRoots": [],
+                "networkAccess": False,
+                "excludeTmpdirEnvVar": True,
+                "excludeSlashTmp": True,
+            },
             **override,
         }
         with pytest.raises(CodexConnectionError):
@@ -1332,7 +1398,7 @@ def test_answer_transport_failure_is_distinct_from_validation_rejection(tmp_path
     async def scenario() -> None:
         peer = FailedWritePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(_question())
@@ -1364,7 +1430,7 @@ def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: P
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(_question(7))
@@ -1393,7 +1459,7 @@ def test_approvals_require_explicit_supported_decision(tmp_path: Path, kind: str
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(
@@ -1467,7 +1533,7 @@ def test_resolved_completed_or_stopped_question_rejects_late_answers(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         goal_terminal = terminal in {"complete", "blocked", "usageLimited", "budgetLimited"}
         if goal_terminal:
@@ -1546,7 +1612,7 @@ def test_unknown_and_unsupported_mcp_requests_are_explicitly_rejected(tmp_path: 
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(ServerRequest(1, "future/unknown", {}))
@@ -1590,11 +1656,11 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
             return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer,
             ConnectionOptions(tmp_path),
             events.append,
-            prepare_turn=prepare if resuming else None,
+            prepare_turn=prepare,
         )
         await connection.open()
         if resuming:
@@ -1632,7 +1698,7 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         peer = FakePeer()
         peer.gates["turn/start"] = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         send = asyncio.create_task(connection.send("開始"))
         await _events_processed()
@@ -1722,7 +1788,7 @@ def test_steer_targets_one_turn_and_preserves_waiting_request(
             preparations.append(prompt)
             return ThreadConfiguration(tmp_path)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path), events.append, prepare_turn=prepare
         )
         await connection.open()
@@ -1770,7 +1836,7 @@ def test_steer_targets_one_turn_and_preserves_waiting_request(
 def test_stale_or_invalid_steer_never_sends_to_another_turn(tmp_path: Path, case: str) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         await connection.open()
         await connection.send("開始")
         if case == "stopped":
@@ -1797,7 +1863,7 @@ def test_message_rejection_is_distinct_from_unknown_acceptance(
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         await connection.open()
         if method == "turn/steer":
             await connection.send("開始")
@@ -1837,7 +1903,7 @@ def test_start_acceptance_survives_subsequent_interrupt_failure(tmp_path: Path) 
         peer = FakePeer()
         peer.gates["turn/start"] = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         sending = asyncio.create_task(connection.send("開始"))
         await _events_processed()
@@ -1859,7 +1925,7 @@ def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_pat
         peer.authenticated = False
         peer.gates["account/login/start"] = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         login = asyncio.create_task(connection.login())
         await _events_processed()
@@ -1888,7 +1954,7 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
 
@@ -2061,7 +2127,19 @@ def test_launch_enables_public_plan_tool(tmp_path: Path, monkeypatch: "MonkeyPat
         return FakePeer()
 
     monkeypatch.setattr(launch, "StdioTransport", transport)
-    launch.create_connection(ConnectionOptions(tmp_path), lambda _: None)
+
+    async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
+        return ThreadConfiguration(tmp_path)
+
+    async def started(_thread_id: str) -> None:
+        pass
+
+    launch.create_connection(
+        ConnectionOptions(tmp_path),
+        lambda _: None,
+        prepare_turn=prepare,
+        on_thread_started=started,
+    )
     assert "tools.update_plan.enabled=true" in commands[0]
 
 
@@ -2069,7 +2147,7 @@ def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) ->
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(_question())
@@ -2095,7 +2173,7 @@ def test_cancelled_operation_closes_owned_peer(tmp_path: Path, method: str) -> N
     async def scenario() -> None:
         peer = FakePeer()
         peer.gates[method] = asyncio.Event()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         if method == "initialize":
             operation = asyncio.create_task(connection.open())
         else:
@@ -2120,7 +2198,7 @@ def test_close_is_shared_and_survives_caller_cancellation(tmp_path: Path) -> Non
     async def scenario() -> None:
         peer = FakePeer()
         peer.close_gate = asyncio.Event()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _: None)
         await connection.open()
         first = asyncio.create_task(connection.close())
         await _events_processed()
@@ -2144,7 +2222,7 @@ def test_close_cancels_login_and_never_emits_a_late_url(tmp_path: Path, pending:
         peer = FakePeer()
         peer.authenticated = False
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         if pending:
             peer.gates["account/login/start"] = asyncio.Event()
@@ -2175,7 +2253,7 @@ def test_terminal_while_answer_write_waits_does_not_restore_running(
         peer = FakePeer()
         peer.respond_gate = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         if goal_status is None:
             await connection.send("開始")
@@ -2228,7 +2306,7 @@ def test_terminal_status_and_late_text_do_not_masquerade_as_success(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         if stopping:
@@ -2280,7 +2358,7 @@ def test_unsupported_or_incomplete_approvals_cannot_be_accepted(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         params: JsonObject = {
@@ -2329,7 +2407,7 @@ def test_file_approval_preserves_change_type_and_move_target(tmp_path: Path) -> 
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(
@@ -2380,7 +2458,7 @@ def test_changed_file_patch_invalidates_previously_presented_approval(tmp_path: 
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("開始")
         peer.events.put_nowait(
@@ -2438,7 +2516,7 @@ def test_cancel_decision_disables_other_answers_before_write_and_terminal(
         peer = FakePeer()
         peer.respond_gate = asyncio.Event()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         if goal:
             await connection.set_goal("開始")
@@ -2509,7 +2587,7 @@ def test_chat_preparation_failure_keeps_login_and_requires_explicit_retry(
             if fail and stage == "record":
                 raise OSError("PRIVATE-STORAGE-DETAIL")
 
-        connection = CodexConnection(
+        connection = _connection(
             peer,
             ConnectionOptions(tmp_path),
             events.append,
@@ -2546,7 +2624,7 @@ def test_thread_preparation_and_recording_precede_turn_and_allow_stop(
 ) -> None:
     async def scenario() -> None:
         archive = tmp_path / "chat"
-        archive.mkdir()
+        (archive / "memory").mkdir(parents=True)
         peer = FakePeer()
         events: list[ConnectionEvent] = []
         entered, release = asyncio.Event(), asyncio.Event()
@@ -2575,7 +2653,7 @@ def test_thread_preparation_and_recording_precede_turn_and_allow_stop(
                 await release.wait()
             recorded.append(thread_id)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer,
             ConnectionOptions(tmp_path),
             events.append,
@@ -2607,12 +2685,16 @@ def test_thread_preparation_and_recording_precede_turn_and_allow_stop(
         if stage != "prepare" or not stopping:
             start = next(params for method, params in peer.calls if method == "thread/start")
             assert start is not None
-            assert start["cwd"] == str(archive)
+            assert start["cwd"] == str(archive / "memory")
             assert start["ephemeral"] is False
             assert start["config"] == {
                 "mcp_servers.existing.enabled": False,
                 "mcp_servers.archive_external.enabled": False,
                 **config.mcp_config,
+                "sandbox_workspace_write.writable_roots": [],
+                "sandbox_workspace_write.network_access": False,
+                "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+                "sandbox_workspace_write.exclude_slash_tmp": True,
             }
             assert recorded == ["thread-1"]
         if not stopping:
@@ -2652,7 +2734,7 @@ def test_each_send_refreshes_mcp_on_the_same_thread_before_starting_turn(
         async def record(thread_id: str) -> None:
             recorded.append(thread_id)
 
-        connection = CodexConnection(
+        connection = _connection(
             peer,
             ConnectionOptions(tmp_path),
             events.append,
@@ -2683,9 +2765,13 @@ def test_each_send_refreshes_mcp_on_the_same_thread_before_starting_turn(
         assert resumed["config"] == {
             "mcp_servers.existing.enabled": False,
             "mcp_servers.gigas_2": {"url": "http://127.0.0.1:12002/mcp"},
+            "sandbox_workspace_write.writable_roots": [],
+            "sandbox_workspace_write.network_access": False,
+            "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+            "sandbox_workspace_write.exclude_slash_tmp": True,
         }
         assert resumed["model"] == "catalog-default"
-        assert resumed["sandbox"] == "read-only"
+        assert resumed["sandbox"] == "workspace-write"
         assert resumed["approvalPolicy"] == "on-request"
         assert resumed["approvalsReviewer"] == "user"
         assert "ephemeral" not in resumed
@@ -2703,7 +2789,7 @@ def test_each_send_refreshes_mcp_on_the_same_thread_before_starting_turn(
 def test_next_turn_selection_preserves_running_turn(tmp_path: Path) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _event: None)
         await connection.open()
         await connection.send("first")
         before = list(peer.calls)
@@ -2741,7 +2827,7 @@ def test_goal_continues_updates_and_pauses_without_starting_extra_turn(tmp_path:
             "timeUsedSeconds": 3,
         }
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         assert await connection.set_goal("first")
         for turn_id in ("auto-1", "auto-2"):
@@ -2779,7 +2865,7 @@ def test_goal_stop_interrupts_even_when_pause_fails_and_rejects_late_turn_input(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("goal")
         await connection._notification(
@@ -2820,7 +2906,7 @@ def test_goal_start_pause_race_is_serialized_without_duplicate_start(tmp_path: P
     async def scenario() -> None:
         peer = FakePeer()
         peer.gates["thread/goal/set"] = asyncio.Event()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _event: None)
         await connection.open()
         starting = asyncio.create_task(connection.set_goal("goal"))
         await _events_processed()
@@ -2845,10 +2931,10 @@ def test_memory_sandbox_and_goal_settings_use_current_selection(tmp_path: Path) 
         memory.mkdir()
 
         async def prepare(_prompt: str, _thread_id: str | None) -> ThreadConfiguration:
-            return ThreadConfiguration(tmp_path, memory_dir=memory)
+            return ThreadConfiguration(tmp_path)
 
         peer = FakePeer()
-        connection = CodexConnection(
+        connection = _connection(
             peer, ConnectionOptions(tmp_path), lambda _event: None, prepare_turn=prepare
         )
         await connection.open()
@@ -2878,7 +2964,7 @@ def test_dialogue_snapshots_flush_pending_text_once_on_interruption(tmp_path: Pa
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.send("start")
         for delta in ("one", " two"):
@@ -2913,7 +2999,7 @@ def test_goal_update_rejection_preserves_active_turn_and_objective(tmp_path: Pat
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("original")
         await connection._notification(
@@ -2939,7 +3025,7 @@ def test_autonomous_turn_failure_pauses_goal_before_further_input(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("goal")
         await connection._notification(
@@ -2962,7 +3048,7 @@ def test_autonomous_turn_failure_pauses_goal_before_further_input(
 def test_cleared_goal_still_interrupts_a_late_autonomous_turn(tmp_path: Path) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _event: None)
         await connection.open()
         await connection.set_goal("goal")
         await connection.clear_goal()
@@ -2984,7 +3070,7 @@ def test_completed_goal_preserves_final_reply_or_accepts_manual_stop(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("goal")
         await connection._notification(
@@ -3103,7 +3189,7 @@ def test_goal_stop_waits_for_terminal_cleanup_before_new_execution(
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("goal")
         await connection._notification(
@@ -3214,7 +3300,7 @@ def test_unconfirmed_terminal_cleanup_keeps_execution_closed(tmp_path: Path, fai
     async def scenario() -> None:
         peer = FakePeer()
         events: list[ConnectionEvent] = []
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
         await connection.open()
         await connection.set_goal("goal")
         peer.terminals = ["writer"]
@@ -3244,7 +3330,7 @@ def test_unconfirmed_terminal_cleanup_keeps_execution_closed(tmp_path: Path, fai
 def test_close_collects_pending_terminal_cleanup(tmp_path: Path) -> None:
     async def scenario() -> None:
         peer = FakePeer()
-        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _event: None)
+        connection = _connection(peer, ConnectionOptions(tmp_path), lambda _event: None)
         await connection.open()
         await connection.set_goal("goal")
         peer.terminals = ["writer"]

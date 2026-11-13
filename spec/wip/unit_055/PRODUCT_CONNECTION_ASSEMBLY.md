@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（仕様・TDD準備、製品実装前）**。[整理親仕様](../unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止する。2026-11-13にユーザーがM0案とM1の実行を承認した。既存文書差分を保持した`codex/kiss-simplification-spec`で作業する。
+状態: **wip（製品実装・局所検証済み、親review・commit待ち）**。[整理親仕様](../unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止する。2026-11-13にユーザーがM0案とM1の実行を承認した。既存文書差分を保持した`codex/kiss-simplification-spec`で作業する。
 
 Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した原記録先の`memory/`だけをCodexの書込対象にする。コールバック省略時の起動cwd利用、memoryなしのread-only送信、二回目の準備省略は提供しない。
 
@@ -42,11 +42,13 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 
 | status | item | type / layer | 既存試験の扱い |
 |---|---|---|---|
-| todo | D01 必須の準備結果からmemoryだけを書込対象にし、次の通常送信も同じthreadで再準備する | behavior / unit | `test_open_validates_catalog_and_delivers_packaged_instructions`を小さい準備fixtureへ変更し、read-only・二回目準備省略の期待を置き換える。この一件を先にred→greenし、同じAPI変更に必要な既存fixtureを揃える |
+| green | D01 必須の準備結果からmemoryだけを書込対象にし、次の通常送信も同じthreadで再準備する | behavior / unit | `test_open_validates_catalog_and_delivers_packaged_instructions`で、準備結果のmemoryを使わず原記録先をcwdにする失敗を観測後、製品変更で成功。既存fixtureも必須準備を渡す形へ揃えた |
 
 回帰検証では、未準備・準備待ち停止・準備失敗・権限不一致で実行を開始しないことと、製品サービス・GUIの通常会話・Goalが必須準備を通ることを確認する。readiness・準備失敗・thread設定・サービス・GUI・shutdownの既存試験を使い、新しい振る舞いitemや防御経路は増やさない。
 
 callback省略の失敗を同じ内容で大量に列挙しない。型検査と関数signatureが表す必須引数を、自然言語や内部構造の一致試験へ置き換えない。旧試験が本来確認していた認証・質問・停止は、小さい試験用準備を渡して継続確認する。
+
+refactor review: 今回の枝削除と型縮小はD01の振る舞い変更に含まれる。green後に追加する構造変更は見送った。試験だけの小さい組立関数で準備済みmemoryを提供し、製品に代替モードを残していない。commitを含む最終状態への更新は親担当が行う。
 
 ## 7. 設計メモ
 
@@ -68,13 +70,13 @@ callback省略の失敗を同じ内容で大量に列挙しない。型検査と
 
 | command / review | result | 範囲 |
 |---|---|---|
-| D01対象pytest | not run | 実装開始通知後にred→green |
-| `uv run pytest tests/unit/test_codex_connection.py --basetemp=tmp/pytest-u055` | not run | 新旧接続契約の回帰 |
-| `uv run pytest tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py --basetemp=tmp/pytest-u055` | not run | サービス・GUI・終了の組立 |
-| `uv run ruff format --check .` / `uv run ruff check .` | not run | 変更後の形式・lint |
-| `uv run ty check --no-progress` | not run | 必須コールバックと削除属性の型境界 |
-| `uv lock --check` / `uv build` | not run | 公開APIを含む配布物 |
-| `git diff --check` / 文書・docstring読解 | not run | 差分・公開説明 |
+| `uv run pytest tests/unit/test_codex_connection.py -q -k test_open_validates_catalog_and_delivers_packaged_instructions --basetemp=tmp/pytest-u055` | red: 1 failed / green: 1 passed（各162 deselected） | 期待するcwdがmemoryであるのに原記録先を返す失敗を先に確認 |
+| `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-u055` | 164 passed / 0.59s | 新旧接続契約の回帰。設定不一致fixtureをworkspace-writeの正常応答へ更新し、cwd不一致も検証 |
+| `uv run pytest tests/integration/test_codex_service.py tests/integration/test_codex_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u055` | 119 passed / 13.26s | サービス・GUI・終了の組立。実接続を作るfixtureも製品サービスの必須準備を使用 |
+| `uv run ruff format --check .` / `uv run ruff check .` | passed（216 files） / passed | 変更後の形式・lint |
+| `uv run ty check --no-progress` | passed | 必須コールバックと削除属性の型境界。互換用Optionalや型抑制の追加なし |
+| `uv lock --check` / `uv build` | passed / passed | lock整合とsdist・wheelの生成 |
+| `git diff --check` / 文書・docstring読解 | passed / 確認済み | 必須callback・固定memory・readiness・準備タイミングの説明と実装の整合。独立reviewで阻害指摘なし。旧read-onlyを示す試験promptの残存は修正 |
 | 実runtime・実機 | not run | 本子では既存採用経路を固定試験。親の終了整理後に必要な実接続を行う |
 
 ## 10. 先送り事項
@@ -85,6 +87,6 @@ callback省略の失敗を同じ内容で大量に列挙しない。型検査と
 
 - [x] 対象範囲・対象外と既存呼出元を確認した
 - [x] 最初の振る舞いとTDD Test Listを具体化した
-- [ ] 実装開始条件を確認した
-- [ ] 対象試験と型・docstring・配布gateを記録した
-- [ ] 親担当のreview・commitへ引き渡した
+- [x] 実装開始条件を確認した
+- [x] 対象試験と型・docstring・配布gateを記録した
+- [x] 親担当のreview・commitへ引き渡した

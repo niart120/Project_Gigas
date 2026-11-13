@@ -173,7 +173,7 @@ def dialogue() -> None:
                 "nextCursor": None,
             }
         elif method == "thread/start":
-            assert params["sandbox"] in {"read-only", "workspace-write"}
+            assert params["sandbox"] == "workspace-write"
             assert params["approvalPolicy"] == "on-request"
             assert params["approvalsReviewer"] == "user"
             result = {
@@ -188,9 +188,7 @@ def dialogue() -> None:
                     "networkAccess": False,
                     "excludeTmpdirEnvVar": True,
                     "excludeSlashTmp": True,
-                }
-                if params["sandbox"] == "workspace-write"
-                else {"type": "readOnly"},
+                },
             }
         else:
             assert method == "turn/start"

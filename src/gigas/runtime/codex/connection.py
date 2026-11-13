@@ -28,7 +28,6 @@ from gigas.runtime.codex.models import (
     SandboxEvent,
     SessionStatus,
     TextEvent,
-    ThreadConfiguration,
     TurnStarted,
     UsageBucket,
     UsageCredits,
@@ -45,7 +44,12 @@ from gigas.runtime.codex.transport import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
 
-    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ConnectionPhase
+    from gigas.runtime.codex.models import (
+        ConnectionEvent,
+        ConnectionOptions,
+        ConnectionPhase,
+        ThreadConfiguration,
+    )
     from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, TransportEvent
 
 
@@ -259,12 +263,11 @@ class CodexConnection:
         peer: Transport implementing the actual RPC boundary.
         options: Working directory and requested authentication/model settings.
         emit: Callback receiving typed application events, never raw RPC frames.
-        prepare_turn: Optional async host preparation for an ordinary send,
+        prepare_turn: Async host archive/memory/MCP preparation for an ordinary send,
             new Goal, or explicit Goal resume, receiving the prompt/objective and
             confirmed thread ID, or None initially. Its configuration starts or
             resumes the thread; autonomous turns and objective updates reuse it.
-            None uses options.cwd and leaves an existing thread subscribed.
-        on_thread_started: Optional async host recording of the confirmed thread ID.
+        on_thread_started: Async host recording of the confirmed thread ID.
             Completion is required before accepting the thread or starting a turn.
             Callback errors preserve authentication and permit an explicit retry.
     """
@@ -275,8 +278,8 @@ class CodexConnection:
         options: "ConnectionOptions",
         emit: "Callable[[ConnectionEvent], None]",
         *,
-        prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]] | None" = None,
-        on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
+        prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
+        on_thread_started: "Callable[[str], Awaitable[None]]",
     ) -> None:
         """Store connection dependencies without performing I/O."""
         self._peer = peer
@@ -551,8 +554,7 @@ class CodexConnection:
         submitted = False
         accepted_turn: str | None = None
         try:
-            if self._thread_id is None or self._prepare_turn is not None:
-                await self._configure_thread(prompt)
+            await self._configure_thread(prompt)
             if self._stopping:
                 self._status("stopped")
                 return None
@@ -1104,43 +1106,42 @@ class CodexConnection:
             raise CodexConnectionError(message)
 
     async def _configure_thread(self, prompt: str) -> None:
-        context = ThreadConfiguration(self._options.cwd)
-        if self._prepare_turn is not None:
-            try:
-                context = await self._prepare_turn(prompt, self._thread_id)
-                valid_directory = context.cwd.is_absolute() and context.cwd.is_dir()
-            except Exception as error:
-                message = "チャットの実行準備に失敗"
-                raise _ThreadPreparationError(message) from error
-            if not valid_directory:
-                message = "チャットの記録先が無効"
-                raise _ThreadPreparationError(message)
+        try:
+            context = await self._prepare_turn(prompt, self._thread_id)
+            memory = context.cwd / "memory"
+            valid_directory = context.cwd.is_absolute() and memory.is_dir()
+        except Exception as error:
+            message = "チャットの実行準備に失敗"
+            raise _ThreadPreparationError(message) from error
+        if not valid_directory:
+            message = "チャットの記録先または記憶の準備が不正"
+            raise _ThreadPreparationError(message)
         if self._stopping:
             return
-        if context.memory_dir is not None:
-            if self._sandbox_read is not None:
-                await self._sandbox_read
-            if self._stopping:
-                return
-            if self._sandbox.readiness != "ready":
-                message = (
-                    "サンドボックス環境の準備が必要です。"
-                    "設定 → Codex → サンドボックス環境から設定・更新してください。"
-                )
-                raise _ThreadPreparationError(message)
+        if self._sandbox_read is not None:
+            await self._sandbox_read
+        if self._stopping:
+            return
+        if self._sandbox.readiness != "ready":
+            message = (
+                "サンドボックス環境の準備が必要です。"
+                "設定 → Codex → サンドボックス環境から設定・更新してください。"
+            )
+            raise _ThreadPreparationError(message)
         instructions = read_play_instructions()
         if not instructions.strip():
             message = "共通指示が空"
             raise CodexConnectionError(message)
-        if self._prepare_turn is not None:
-            instructions += (
-                f"\n\n観測の記録先: {context.cwd}\n"
-                "observeが返す観測IDの画像はobservations/<観測ID>.png、"
-                "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
-                "返された画像と保存画像は同じPNGです。保存は非同期なので、"
-                "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
-                "必要な過去画像は保存されている場合に参照してください。"
-            )
+        instructions += (
+            f"\n\n観測の記録先: {context.cwd}\n"
+            "observeが返す観測IDの画像はobservations/<観測ID>.png、"
+            "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
+            "返された画像と保存画像は同じPNGです。保存は非同期なので、"
+            "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
+            "必要な過去画像は保存されている場合に参照してください。"
+            "\n案内は ../guide.md、現状メモは current.md、知識は notes/。"
+            "書込はこのmemory内だけに限定し、親の原記録は編集しない。"
+        )
         config = dict(self._mcp_config)
         if context.cwd != self._options.cwd:
             result = _object(
@@ -1155,33 +1156,24 @@ class CodexConnection:
         config.update(context.mcp_config)
         if self._stopping:
             return
-        memory = context.memory_dir
-        if memory is not None:
-            if not memory.is_absolute() or not memory.is_dir() or memory != context.cwd / "memory":
-                raise CodexConnectionError("記憶の書込先が不正")
-            config.update(
-                {
-                    "sandbox_workspace_write.writable_roots": [],
-                    "sandbox_workspace_write.network_access": False,
-                    "sandbox_workspace_write.exclude_tmpdir_env_var": True,
-                    "sandbox_workspace_write.exclude_slash_tmp": True,
-                }
-            )
-            instructions += (
-                "\n案内は ../guide.md、現状メモは current.md、知識は notes/。"
-                "書込はこのmemory内だけに限定し、親の原記録は編集しない。"
-            )
+        config.update(
+            {
+                "sandbox_workspace_write.writable_roots": [],
+                "sandbox_workspace_write.network_access": False,
+                "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+                "sandbox_workspace_write.exclude_slash_tmp": True,
+            }
+        )
         params: JsonObject = {
-            "cwd": str(memory or context.cwd),
+            "cwd": str(memory),
             "model": self._model,
             "developerInstructions": instructions,
-            "sandbox": "workspace-write" if memory is not None else "read-only",
+            "sandbox": "workspace-write",
             "approvalPolicy": "on-request",
             "approvalsReviewer": "user",
             "config": config,
+            "runtimeWorkspaceRoots": [str(memory)],
         }
-        if memory is not None:
-            params["runtimeWorkspaceRoots"] = [str(memory)]
         if self._thread_id is None:
             params["ephemeral"] = False
             method = "thread/start"
@@ -1199,23 +1191,19 @@ class CodexConnection:
             method = "thread/resume"
         result = _object(await self._peer.request(method, params))
         sandbox = _object(result.get("sandbox"))
-        expected_sandbox: JsonObject = (
-            {"type": "readOnly"}
-            if memory is None
-            else {
-                "type": "workspaceWrite",
-                "writableRoots": [],
-                "networkAccess": False,
-                "excludeTmpdirEnvVar": True,
-                "excludeSlashTmp": True,
-            }
-        )
+        expected_sandbox: JsonObject = {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": False,
+            "excludeTmpdirEnvVar": True,
+            "excludeSlashTmp": True,
+        }
         if (
             result.get("approvalPolicy") != "on-request"
             or result.get("approvalsReviewer") != "user"
             or result.get("model") != self._model
             or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
-            or (memory is not None and result.get("cwd") != str(memory))
+            or result.get("cwd") != str(memory)
         ):
             message = "Codexの実行設定が要求と不一致"
             raise CodexConnectionError(message)
@@ -1223,7 +1211,7 @@ class CodexConnection:
         if self._thread_id is not None and thread_id != self._thread_id:
             message = "CodexのチャットIDが要求と不一致"
             raise CodexConnectionError(message)
-        if self._thread_id is None and self._on_thread_started is not None:
+        if self._thread_id is None:
             try:
                 await self._on_thread_started(thread_id)
             except Exception as error:

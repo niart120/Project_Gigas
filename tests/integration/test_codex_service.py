@@ -1402,11 +1402,14 @@ def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path:
     results: list[ServiceResult] = []
 
     def factory(
-        options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
+        options: ConnectionOptions,
+        emit: Callable[[ConnectionEvent], None],
+        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
+        started: Callable[[str], Awaitable[None]],
     ) -> CodexConnection:
         peer = FakePeer()
         peers.append(peer)
-        return CodexConnection(peer, options, emit)
+        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
 
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)

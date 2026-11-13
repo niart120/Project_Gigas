@@ -28,8 +28,8 @@ class ConnectionOptions:
     """Settings for one Codex connection.
 
     Attributes:
-        cwd: Existing absolute directory for the runtime process, separate from source code.
-            Also used by threads when no preparation callback supplies an archive.
+        cwd: Existing absolute directory for the runtime process, separate from source code
+            and the prepared chat archive.
         model: Catalog model name, or empty to select the catalog default.
         effort: Catalog reasoning effort, or empty to select the model default.
         auth_method: Authentication preference. Only chatgpt is currently supported.
@@ -46,16 +46,14 @@ class ThreadConfiguration:
     """Prepared chat location and application-owned MCP overrides.
 
     Attributes:
-        cwd: Existing absolute archive directory, independent of the process cwd.
+        cwd: Prepared absolute archive directory, independent of the process cwd.
+            Its existing memory subdirectory is the thread's workspace and only write root.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
-        memory_dir: Existing absolute cwd / "memory" directory for exclusive runtime
-            writes, or None for read-only operation.
     """
 
     cwd: "Path"
     mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
-    memory_dir: "Path | None" = None
 
 
 @dataclass(frozen=True, slots=True)
