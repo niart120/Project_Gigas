@@ -389,6 +389,8 @@ class ApplicationShell(QObject):
             return
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
+            self.dialog.codex_form.insertRow(0, self.window.connection.codex_settings)
+            self.window.connection.codex_settings.show()
             self.dialog.save_button.clicked.connect(lambda _checked: self.apply_settings())
             self.dialog.ok_button.clicked.connect(lambda: self.apply_settings(close_after=True))
             self.dialog.changed.connect(self._render)

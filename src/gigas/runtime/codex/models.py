@@ -242,6 +242,7 @@ class SandboxEvent:
         readiness: Last public readiness result, or None when unavailable.
         setting_up: Whether this connection is awaiting setup acceptance/completion.
             Closing the connection ends local waiting, not the OS-owned setup.
+        reconnect_required: Setup succeeded but this connection must be reopened.
         detail: Public setup failure or application-owned readiness error reason;
             empty when no failure is known.
     """
@@ -249,6 +250,7 @@ class SandboxEvent:
     readiness: Literal["ready", "notConfigured", "updateRequired"] | None = None
     setting_up: bool = False
     detail: str = ""
+    reconnect_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)

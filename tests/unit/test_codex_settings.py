@@ -9,13 +9,13 @@ from gigas.runtime.codex.models import (
     UsageCredits,
     UsageEvent,
 )
-from gigas.ui.account_popup import AccountPopup
+from gigas.ui.codex_settings import CodexSettings
 
 
 def test_usage_values_do_not_invent_missing_windows_or_credit_balances(qtbot: QtBot) -> None:
     owner = QWidget()
     qtbot.addWidget(owner)
-    popup = AccountPopup(owner)
+    popup = CodexSettings(owner)
     popup.set_account(AccountInfo("player@example.test", "plus", "Game room", True))
     reset = 1_800_000_000
     popup.set_usage(
@@ -36,9 +36,9 @@ def test_usage_values_do_not_invent_missing_windows_or_credit_balances(qtbot: Qt
     assert "27%" in text
     assert "36%" in text
     assert "8.50" in text
-    assert "7日" in text
-    assert popup.view.document().find("Game room").block().text().endswith("Game room")
-    assert QDateTime.fromSecsSinceEpoch(reset).toLocalTime().toString("MM/dd HH:mm t") in text
+    assert "一週間" in text
+    assert popup.account.document().find("Game room").block().text().endswith("Game room")
+    assert QDateTime.fromSecsSinceEpoch(reset).toLocalTime().toString("MM/dd HH:mm") in text
     popup.set_usage(UsageEvent((UsageBucket("codex"),), available=True))
     assert "27%" not in popup.view.toPlainText()
     assert "0%" not in popup.view.toPlainText()

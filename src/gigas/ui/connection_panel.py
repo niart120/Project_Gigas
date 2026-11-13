@@ -31,7 +31,7 @@ from gigas.runtime.codex.models import (
     UsageEvent,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
-from gigas.ui.account_popup import AccountPopup
+from gigas.ui.codex_settings import CodexSettings
 from gigas.ui.message_composer import MessageComposer
 from gigas.ui.notifications import Notice
 from gigas.ui.plan_panel import PlanPanel
@@ -119,10 +119,11 @@ class ConnectionPanel(QWidget):
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
         self.login_action = QAction("ログイン", self)
-        self.sandbox_action = QAction("実行環境を準備", self)
-        self.account_action = QAction("アカウント・利用状況", self)
-        self.account_popup = AccountPopup(self)
-        self.account_action.triggered.connect(self.account_popup.show_values)
+        self.sandbox_action = QAction("設定する", self)
+        self.codex_settings = CodexSettings(self)
+        self.codex_settings.action_button(self.login_action, 0)
+        self.server_button = self.codex_settings.action_button(self.connect_action, 2)
+        self.codex_settings.action_button(self.sandbox_action, 3)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.hide()
@@ -132,7 +133,7 @@ class ConnectionPanel(QWidget):
         self.open_login_button = QPushButton("ブラウザで開く", self)
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
-        layout.addLayout(login)
+        self.codex_settings.rows.addLayout(login, 1, 1, 1, 2)
         self.plan_panel = PlanPanel(self)
         self.plan_panel.hide()  # MainWindow places this in the right pane.
         self.transcript = Transcript(self)
@@ -167,7 +168,7 @@ class ConnectionPanel(QWidget):
     def activate(self, generation: int) -> None:
         """Reset the view for a newly submitted connection generation."""
         self.composer.set_choices(None)
-        self.account_popup.reset()
+        self.codex_settings.reset()
         self._usage_blocked = False
         self._sandbox = SandboxEvent()
         self._goal = None
@@ -221,16 +222,16 @@ class ConnectionPanel(QWidget):
             return
         event = envelope.event
         if isinstance(event, AccountInfo):
-            self.account_popup.set_account(event)
+            self.codex_settings.set_account(event)
         elif isinstance(event, SandboxEvent):
             previous_detail = self._sandbox.detail
             self._sandbox = event
-            self.account_popup.set_sandbox(event)
+            self.codex_settings.set_sandbox(event)
             if event.setting_up and event.detail and event.detail != previous_detail:
                 self._notify_failure(event.detail, operation="setup_windows_sandbox")
         elif isinstance(event, UsageEvent):
             self._usage_blocked = event.ordinary_usage_allowed is False
-            self.account_popup.set_usage(event)
+            self.codex_settings.set_usage(event)
         elif isinstance(event, GoalEvent):
             self._goal = event.goal
             self.plan_panel.set_goal(event.goal)
@@ -243,7 +244,7 @@ class ConnectionPanel(QWidget):
             if event.phase in {"closed", "error"}:
                 self.composer.set_choices(None)
             if event.phase == "closed":
-                self.account_popup.reset()
+                self.codex_settings.reset()
             if event.failure_id is not None or (event.phase == "error" and event.detail):
                 self._notify_failure(event.detail, event.failure_id)
             elif (
@@ -364,7 +365,7 @@ class ConnectionPanel(QWidget):
         if result.operation == "disconnect" and not result.error:
             self._connected = False
             self._status = SessionStatus("closed")
-            self.account_popup.reset()
+            self.codex_settings.reset()
         self._render()
 
     def interrupt(self) -> None:
@@ -522,7 +523,17 @@ class ConnectionPanel(QWidget):
         phase = self._status.phase
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_action.setEnabled(available and self._connected)
-        self.account_action.setEnabled(available and self._connected)
+        server_action = self.disconnect_action if self._connected else self.connect_action
+        if self.server_button.defaultAction() is not server_action:
+            self.server_button.removeAction(self.server_button.defaultAction())
+            self.server_button.setDefaultAction(server_action)
+        self.server_button.setToolTip("")
+        self.codex_settings.connection.setText(
+            "接続中" if phase == "connecting" else "接続済み" if self._connected else "未接続"
+        )
+        self.sandbox_action.setText(
+            "更新する" if self._sandbox.readiness == "updateRequired" else "設定する"
+        )
         self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
@@ -540,6 +551,7 @@ class ConnectionPanel(QWidget):
             and phase in {"ready", "stopped", "login_required"}
             and not goal_active
             and not self._pending
+            and not self._sandbox.reconnect_required
             and not self._sandbox.setting_up
             and self._sandbox.readiness != "ready"
         )

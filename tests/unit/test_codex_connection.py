@@ -779,6 +779,14 @@ def test_sandbox_setup_failure_preserves_connection_and_requires_ready_confirmat
                     },
                 )
             )
+            if outcome == "not_ready":
+                await setting_up
+                event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))
+                assert event.reconnect_required
+                assert not event.setting_up
+                assert not event.detail
+                assert not peer.closed
+                return
             with pytest.raises(CodexConnectionError) as failure:
                 await setting_up
             event = next(event for event in reversed(events) if isinstance(event, SandboxEvent))

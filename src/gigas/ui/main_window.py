@@ -187,9 +187,6 @@ class MainWindow(QMainWindow):
         for action in (
             self.connection.connect_action,
             self.connection.disconnect_action,
-            self.connection.login_action,
-            self.connection.sandbox_action,
-            self.connection.account_action,
         ):
             self.codex_menu.addAction(action)
         self.video_menu.addSeparator()

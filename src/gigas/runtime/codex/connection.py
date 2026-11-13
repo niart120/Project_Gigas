@@ -409,11 +409,12 @@ class CodexConnection:
         A lost start response keeps waiting for completion without resending. Closing
         this connection cancels only local waiting; no OS setup cancellation is claimed.
         Public setup failure reasons remain available in the exception and event detail.
+        Successful setup requiring a fresh connection returns normally and emits
+        SandboxEvent.reconnect_required; it does not make this connection ready.
 
         Raises:
-            CodexConnectionError: Setup is unavailable, rejected, failed, or its
-                completion does not establish readiness in this connection. A fresh
-                connection may be required after a successful initial setup.
+            CodexConnectionError: Setup is unavailable, rejected, failed, or readiness
+                cannot be retrieved.
         """
         await self._operate(self._setup_windows_sandbox())
 
@@ -441,7 +442,9 @@ class CodexConnection:
         else:
             if self._closed:
                 raise asyncio.CancelledError
-            self._sandbox = SandboxEvent("ready")
+            self._sandbox = SandboxEvent(
+                self._sandbox.readiness, reconnect_required=self._sandbox.readiness != "ready"
+            )
             self._emit(self._sandbox)
         finally:
             self._sandbox_setup = None
@@ -471,8 +474,6 @@ class CodexConnection:
         await self._read_sandbox()
         if self._sandbox.readiness is None:
             raise CodexConnectionError("準備後の実行環境を確認できない")
-        if self._sandbox.readiness != "ready":
-            raise CodexConnectionError("準備後の再接続が必要")
 
     async def _read_sandbox(self) -> None:
         try:

@@ -45,6 +45,7 @@ from gigas.services.codex import (
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.main_window import MainWindow
 from gigas.ui.request_card import AnswerSubmission
+from gigas.ui.settings_dialog import SettingsDialog
 from gigas.ui.transcript import Transcript
 from tests.integration.test_codex_transport import PEER_COMMAND
 
@@ -590,9 +591,24 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         shell.open_settings()
         assert shell.dialog is not None
         shell.dialog.model.setText("unsaved")
-        shell.window.connection.connect_action.trigger()
+        assert not snapshots
+        shell.dialog.tabs.setCurrentIndex(shell.dialog.codex_tab)
+        shell.window.connection.server_button.setFocus()
+        qtbot.keyClick(shell.window.connection.server_button, Qt.Key.Key_Return)
         assert len(snapshots) == 1
         assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")
+        panel = shell.window.connection
+        panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
+        panel.handle_result(ServiceResult(1, "connect"))
+        shell.dialog.close_button.click()
+        assert not shell.dialog.isVisible()
+        panel.handle_event(
+            ServiceEvent(1, AccountInfo("returned@example.test", "plus", None, True))
+        )
+        shell.open_settings()
+        assert shell.dialog.model.text() != "unsaved"
+        assert "returned@example.test" in panel.codex_settings.account.toPlainText()
+        assert len(snapshots) == 1
     finally:
         assert shell.dialog is not None
         shell.dialog.set_values(shell.baseline)
@@ -1160,7 +1176,7 @@ def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
     assert panel.plan_panel.goal_value.toPlainText() == "保持する目標"
 
 
-def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
+def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resume(
     qtbot: QtBot,
 ) -> None:
     window = MainWindow()
@@ -1169,8 +1185,7 @@ def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
     window.resize(800, 600)
     window.show()
     panel = window.connection
-    assert panel.account_action in window.codex_menu.actions()
-    assert not panel.account_action.isEnabled()
+    assert window.codex_menu.actions() == [panel.connect_action, panel.disconnect_action]
     panel.activate(1)
     panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
     panel.handle_result(ServiceResult(1, "connect"))
@@ -1181,15 +1196,13 @@ def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
             1, UsageEvent((UsageBucket("codex", primary=RateLimitWindow(25, 300)),), True, True)
         )
     )
-    assert not panel.account_popup.isVisible()
-    panel.account_action.trigger()
-    assert panel.account_popup.isVisible()
-    assert (
-        panel.account_popup.screen()
-        .availableGeometry()
-        .contains(panel.account_popup.frameGeometry())
-    )
-    view = panel.account_popup.view
+    dialog = SettingsDialog(Path("settings.toml"), window)
+    dialog.codex_form.insertRow(0, panel.codex_settings)
+    panel.codex_settings.show()
+    dialog.close_requested.connect(dialog.hide)
+    dialog.tabs.setCurrentIndex(dialog.codex_tab)
+    dialog.show()
+    view = panel.codex_settings.account
     assert account.email is not None
     view.setTextCursor(view.document().find(account.email))
     panel.handle_event(
@@ -1200,7 +1213,7 @@ def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
     assert view.textCursor().selectedText() == account.email
     view.copy()
     assert QApplication.clipboard().text() == account.email
-    assert "30%" in view.toPlainText()
+    assert "30%" in panel.codex_settings.view.toPlainText()
     panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
     panel.prompt.setPlainText("次の依頼")
     panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False, available=True)))
@@ -1218,11 +1231,16 @@ def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
     assert requests == []
     panel.handle_event(ServiceEvent(1, UsageEvent()))
     assert panel.send_button.isEnabled()
-    qtbot.keyClick(panel.account_popup, Qt.Key.Key_Escape)
-    assert not panel.account_popup.isVisible()
+    qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible()
+    panel.handle_event(ServiceEvent(1, SandboxEvent("notConfigured", reconnect_required=True)))
+    dialog.show()
+    assert panel.codex_settings.isVisible()
+    assert not panel.sandbox_action.isEnabled()
+    assert panel.disconnect_action.isEnabled()
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, account))
-    assert account.email not in panel.account_popup.view.toPlainText()
+    assert account.email not in panel.codex_settings.account.toPlainText()
     assert panel.prompt.toPlainText() == "次の依頼"
 
 
@@ -1233,7 +1251,7 @@ def test_explicit_sandbox_setup_remains_disconnectable_and_reports_unknown_accep
     window.allow_close = True
     qtbot.addWidget(window)
     panel = window.connection
-    assert panel.sandbox_action in window.codex_menu.actions()
+    assert panel.sandbox_action not in window.codex_menu.actions()
     panel.activate(1)
     panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
     panel.handle_result(ServiceResult(1, "connect"))

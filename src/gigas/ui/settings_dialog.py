@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -152,6 +153,8 @@ class SettingsDialog(QDialog):
         controller_form.addRow("通信速度", self.serial_baudrate)
         agent_form = self._tab("Codex")
         self.codex_tab = self.tabs.count() - 1
+        self.codex_form = agent_form
+        agent_form = self._group(agent_form, "接続時の既定値")
         self.model = self._text_field()
         self.effort = self._text_field()
         self.model.setPlaceholderText("既定")
@@ -206,7 +209,7 @@ class SettingsDialog(QDialog):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             event.accept()
             focused = self.focusWidget()
-            if isinstance(focused, QPushButton) and focused.isEnabled():
+            if isinstance(focused, QAbstractButton) and focused.isEnabled():
                 focused.click()
             return
         super().keyPressEvent(event)
