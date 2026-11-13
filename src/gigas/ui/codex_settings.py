@@ -1,14 +1,23 @@
 """Compact account and usage values from public Codex events."""
 
+from math import ceil
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QDateTime, Qt
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QToolButton
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+)
 
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
+    from PySide6.QtCore import QSizeF
     from PySide6.QtWidgets import QWidget
 
     from gigas.runtime.codex.models import AccountInfo, RateLimitWindow, SandboxEvent, UsageEvent
@@ -42,47 +51,65 @@ class CodexSettings(QFrame):
     def __init__(self, parent: "QWidget") -> None:
         """Prepare connection values for embedding in the settings dialog."""
         super().__init__(parent)
-        self.rows = QGridLayout(self)
-        self.rows.setContentsMargins(0, 0, 0, 0)
-        self.rows.setColumnStretch(1, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.rows.setVerticalSpacing(14)
-        self.account = Transcript(self, show_headings=False)
-        self.sandbox = Transcript(self, show_headings=False)
-        self.view = Transcript(self, show_headings=False)
-        self.connection = QLabel("未接続", self)
-        self.connection.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        for row, title, view in (
-            (0, "ChatGPTアカウント", self.account),
-            (2, "Codex App Server", self.connection),
-            (3, "Codexサンドボックス", self.sandbox),
-            (4, "利用状況", self.view),
+        connection_group = QGroupBox(self)
+        self.rows = QGridLayout(connection_group)
+        self.rows.setColumnStretch(1, 1)
+        self.rows.setVerticalSpacing(12)
+        layout.addWidget(connection_group)
+        self.connection = self._value("未接続")
+        self.sandbox = self._value("—")
+        self.account = self._value("—")
+        self.server_button = self._button("接続")
+        self.sandbox_button = self._button("設定する")
+        self.account_button = self._button("ログイン")
+        for row, title, value, button in (
+            (0, "Codex App Server", self.connection, self.server_button),
+            (1, "サンドボックス環境", self.sandbox, self.sandbox_button),
+            (2, "認証", self.account, self.account_button),
         ):
-            self.rows.addWidget(QLabel(title, self), row, 0)
-            self.rows.addWidget(view, row, 1)
-            view.setAccessibleName(title)
-        for view, height in ((self.account, 48), (self.sandbox, 42), (self.view, 100)):
-            view.setFrameShape(QFrame.Shape.NoFrame)
-            view.setStyleSheet("QTextBrowser { background: transparent; }")
-            view.setMinimumHeight(height)
-            view.setMaximumHeight(height)
+            self.rows.addWidget(QLabel(title, self), row, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.rows.addWidget(value, row, 1, Qt.AlignmentFlag.AlignVCenter)
+            self.rows.addWidget(button, row, 2, Qt.AlignmentFlag.AlignVCenter)
+            value.setAccessibleName(title)
+        usage = QGroupBox("利用状況", self)
+        usage_layout = QVBoxLayout(usage)
+        self.view = Transcript(usage, show_headings=False)
+        self.view.setAccessibleName("利用状況")
+        self.view.setFrameShape(QFrame.Shape.NoFrame)
+        self.view.setStyleSheet("QTextBrowser { background: transparent; }")
+        self.view.document().documentLayout().documentSizeChanged.connect(self._fit_usage)
+        usage_layout.addWidget(self.view)
+        layout.addWidget(usage)
         self.reset()
         self.hide()
 
-    def action_button(self, action: QAction, row: int) -> QToolButton:
-        """Bind a settings button to an existing connection action."""
-        button = QToolButton(self)
-        button.setDefaultAction(action)
-        button.setToolTip("")
-        self.rows.addWidget(button, row, 2)
+    def _value(self, text: str) -> QLabel:
+        label = QLabel(text, self)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        label.setWordWrap(True)
+        return label
+
+    def _button(self, text: str) -> QPushButton:
+        button = QPushButton(text, self)
+        button.setAutoDefault(False)
         return button
+
+    def _fit_usage(self, size: "QSizeF") -> None:
+        self.view.setFixedHeight(min(160, ceil(size.height()) + 2))
 
     def reset(self) -> None:
         """Discard values when their connection generation is replaced or closed."""
-        for view in (self.account, self.sandbox, self.view):
-            view.clear()
-        self.account.update_item("account", "未確認")
-        self.sandbox.update_item("sandbox", "未確認")
+        self.view.clear()
+        self.account.setText("—")
+        self.sandbox.setText("—")
         self.view.update_item("usage", "未取得")
 
     def set_account(self, account: "AccountInfo") -> None:
@@ -93,7 +120,8 @@ class CodexSettings(QFrame):
                 text += f"\n{account.workspace_name}"
         else:
             text = "未ログイン"
-        self.account.update_item("account", text)
+        if self.account.text() != text:
+            self.account.setText(text)
 
     def set_usage(self, usage: "UsageEvent") -> None:
         """Replace the connection's merged usage snapshot, retaining reader selection."""
@@ -137,4 +165,6 @@ class CodexSettings(QFrame):
         if sandbox.reconnect_required:
             state = "再接続が必要"
         detail = f"\n{sandbox.detail}" if sandbox.detail else ""
-        self.sandbox.update_item("sandbox", f"{state}{detail}")
+        text = f"{state}{detail}"
+        if self.sandbox.text() != text:
+            self.sandbox.setText(text)

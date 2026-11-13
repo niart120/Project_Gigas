@@ -593,13 +593,22 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         shell.dialog.model.setText("unsaved")
         assert not snapshots
         shell.dialog.tabs.setCurrentIndex(shell.dialog.codex_tab)
-        shell.window.connection.server_button.setFocus()
-        qtbot.keyClick(shell.window.connection.server_button, Qt.Key.Key_Return)
+        panel = shell.window.connection
+        assert not panel.account_button.isEnabled()
+        panel.account_button.click()
+        assert not snapshots
+        panel.server_button.setFocus()
+        qtbot.keyClick(panel.server_button, Qt.Key.Key_Return)
         assert len(snapshots) == 1
         assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")
-        panel = shell.window.connection
         panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
         panel.handle_result(ServiceResult(1, "connect"))
+        logins: list[bool] = []
+        panel.login_requested.connect(lambda: logins.append(True))
+        panel.account_button.click()
+        panel.account_button.click()
+        assert logins == [True]
+        assert len(snapshots) == 1
         shell.dialog.close_button.click()
         assert not shell.dialog.isVisible()
         panel.handle_event(
@@ -607,7 +616,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         )
         shell.open_settings()
         assert shell.dialog.model.text() != "unsaved"
-        assert "returned@example.test" in panel.codex_settings.account.toPlainText()
+        assert "returned@example.test" in panel.codex_settings.account.text()
         assert len(snapshots) == 1
     finally:
         assert shell.dialog is not None
@@ -1204,14 +1213,14 @@ def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resu
     dialog.show()
     view = panel.codex_settings.account
     assert account.email is not None
-    view.setTextCursor(view.document().find(account.email))
+    view.setSelection(view.text().index(account.email), len(account.email))
     panel.handle_event(
         ServiceEvent(
             1, UsageEvent((UsageBucket("codex", primary=RateLimitWindow(30)),), True, True)
         )
     )
-    assert view.textCursor().selectedText() == account.email
-    view.copy()
+    assert view.selectedText() == account.email
+    qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     assert QApplication.clipboard().text() == account.email
     assert "30%" in panel.codex_settings.view.toPlainText()
     panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
@@ -1240,7 +1249,7 @@ def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resu
     assert panel.disconnect_action.isEnabled()
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, account))
-    assert account.email not in panel.codex_settings.account.toPlainText()
+    assert account.email not in panel.codex_settings.account.text()
     assert panel.prompt.toPlainText() == "次の依頼"
 
 

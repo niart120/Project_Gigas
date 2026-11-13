@@ -121,9 +121,17 @@ class ConnectionPanel(QWidget):
         self.login_action = QAction("ログイン", self)
         self.sandbox_action = QAction("設定する", self)
         self.codex_settings = CodexSettings(self)
-        self.codex_settings.action_button(self.login_action, 0)
-        self.server_button = self.codex_settings.action_button(self.connect_action, 2)
-        self.codex_settings.action_button(self.sandbox_action, 3)
+        self.account_button = self.codex_settings.account_button
+        self.server_button = self.codex_settings.server_button
+        self.account_button.clicked.connect(self.login_action.trigger)
+        self.server_button.clicked.connect(
+            lambda: (
+                self.disconnect_action.trigger()
+                if self._connected
+                else self.connect_action.trigger()
+            )
+        )
+        self.codex_settings.sandbox_button.clicked.connect(self.sandbox_action.trigger)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.hide()
@@ -133,7 +141,7 @@ class ConnectionPanel(QWidget):
         self.open_login_button = QPushButton("ブラウザで開く", self)
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
-        self.codex_settings.rows.addLayout(login, 1, 1, 1, 2)
+        self.codex_settings.rows.addLayout(login, 3, 0, 1, 3)
         self.plan_panel = PlanPanel(self)
         self.plan_panel.hide()  # MainWindow places this in the right pane.
         self.transcript = Transcript(self)
@@ -524,10 +532,8 @@ class ConnectionPanel(QWidget):
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_action.setEnabled(available and self._connected)
         server_action = self.disconnect_action if self._connected else self.connect_action
-        if self.server_button.defaultAction() is not server_action:
-            self.server_button.removeAction(self.server_button.defaultAction())
-            self.server_button.setDefaultAction(server_action)
-        self.server_button.setToolTip("")
+        self.server_button.setText(server_action.text())
+        self.server_button.setEnabled(server_action.isEnabled())
         self.codex_settings.connection.setText(
             "接続中" if phase == "connecting" else "接続済み" if self._connected else "未接続"
         )
@@ -555,6 +561,9 @@ class ConnectionPanel(QWidget):
             and not self._sandbox.setting_up
             and self._sandbox.readiness != "ready"
         )
+        self.account_button.setEnabled(self.login_action.isEnabled())
+        self.codex_settings.sandbox_button.setText(self.sandbox_action.text())
+        self.codex_settings.sandbox_button.setEnabled(self.sandbox_action.isEnabled())
         goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
         goal_mode = self.composer.goal_mode.isChecked()
         settled = phase in {"ready", "stopped"} and self._active_turn is None
