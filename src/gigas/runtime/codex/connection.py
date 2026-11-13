@@ -1123,9 +1123,11 @@ class CodexConnection:
             if self._stopping:
                 return
             if self._sandbox.readiness != "ready":
-                raise _ThreadPreparationError(
-                    "実行環境の準備が必要です。Codexメニューから準備してください。"
+                message = (
+                    "サンドボックス環境の準備が必要です。"
+                    "設定 → Codex → サンドボックス環境から設定・更新してください。"
                 )
+                raise _ThreadPreparationError(message)
         instructions = read_play_instructions()
         if not instructions.strip():
             message = "共通指示が空"

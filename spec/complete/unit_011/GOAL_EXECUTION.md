@@ -75,13 +75,30 @@ M3の実機はUSB Video Device、COM8・CH552・9600 baud。入力・memory書�
 
 ## 10. 制約・後続への引継ぎ
 
-| 事項 | 担当・期限 |
-|---|---|
-| 公開表示と承認候補 | 表示/非表示・選択/コピー/閲覧保持は固定通知、Plan/応答とIMEは実受入済み。非空summaryは今回の提供範囲では0件、実要求のdeclineは未提供。モデルや条件全体へ一般化しない。文字拡大専用受入とモニター間DPI遷移は対象外 |
-| 操作権・再開・書込停止 | 対象実機で本人手動後の初回observe、旧Grant拒否・旧MCP終了、公開端末回収、自然完了とclearを確認。初回observeはモデルへの指示でありAPI保証ではない。公開一覧外の背景子孫の終了保証は含めない。機器ACKは取得していない。他機器・300秒実待機・長時間はU10の未検証範囲 |
-| 独立runtime起動環境 | 公開readinessと明示setupを結合し、memory付き開始だけをreadyまで拒否する。新規homeで本人の準備成功後、同接続では再接続を要求し、再接続後readyを確認。最初の準備失敗の原因は復元できず、後の成功から推定しない。起動時の2つのCODEX_WINDOWS_*変数除去と書込範囲検証を維持 |
-| 認証/利用不能時 | 新規homeの本人ログインと実利用枠取得を確認。ordinaryUsageAllowed=falseまたは現在turnの最終失敗による停止は固定試験。残高・使用率・reset時刻で停止/回復を推定せず自動再開しない。意図的な課金超過とAPIキーは対象外 |
-| 計画的終了/再起動復旧/記憶整理/長時間 | [U07](../../planned/unit_012/PLANNED_STOP.md)・[U08](../../planned/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)・[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)。共通配送/停止/保持Goalと記録を入口とし、U06では実装しない |
+2026-11-13の最終レビューで、未確認事項、既知の制約、合意済み対象外を次のとおり整理した。M3の実証を設定UI整理後の実操作や他環境へ広げない。
+
+### 未確認事項と確認する工程
+
+| 事項 | 確認済み範囲・残件 | 担当・判断時点 |
+|---|---|---|
+| 非空の公開summary・承認decline | 今回の実モデル条件では未提供。表示・配送・閲覧保持は固定通知で確認済み。実提供時の結合確認は残る | U10 M0で条件を選び、実提供された場合にM1で確認。未提供なら未確認のまま記録し、全モデルの非対応としない |
+| 実利用制限による停止 | 実アカウント・利用枠取得を確認。ordinaryUsageAllowed=falseと最終失敗による停止は固定試験。実上限到達は未検証 | U10 M0で検証条件を決める。意図的な課金超過は行わず、未発生なら固定試験と実取得の証拠を維持 |
+| 物理解除・他機器・長時間 | USB Video Device、COM8・CH552・9600 baudで中立送出・画面停止・本人手動後の再開を確認。機器ACK・瞬間の解除時間、PokeCon/3DS実機、300秒実待機、長時間の履歴・記録量・資源使用は未検証 | U10 M0で対象と測定方法を限定しM1/M2へ割り当てる。PC送出間隔を物理解除時間としない |
+| 既定homeの準備状態 | M3時点ではupdateRequired。本人準備・再接続readyの実証はfresh homeに限定。現在の既定homeは再確認していない。最初の準備失敗原因も復元不能 | U07以降の次の実接続前に対象homeでreadinessを確認。必要時は本人の明示setupと再接続を行い、readyまでmemory付き開始を拒否する |
+| 設定UI整理後の実操作 | unit_051〜053でQt描画・固定イベント・統合試験を確認。配置変更後の実ログイン・Windows準備操作は再実行していない | U07以降の次の実接続時に最新設定画面の導線と状態反映を確認。実施まではM3の旧配置の実証と区別する |
+
+### 既知の制約
+
+- 再開後の初回observeは共通指示に従った実測であり、APIによる順序保証ではない。最新cacheの利用可否はアプリが確認するが、新Frameや保存完了は待たない。
+- 停止時の回収は公開backgroundTerminals一覧の範囲。そこに属さない背景子孫や任意の外部書込の終了保証は含めない。監視・OS PID終了・自動復旧で補わない。
+- 利用率・残高・reset時刻から利用不能や回復を推定しない。明示許可が戻ってもGoalは自動再開しない。
+- 採用runtimeは0.167.0。公開experimental設定経路の変更時は採用版・要件を再確認し、独自継続ループを追加しない。起動時のCODEX_WINDOWS_*二変数の除去とmemory書込範囲検証を維持する。
+
+### 後続工程と対象外
+
+[U07](../../planned/unit_012/PLANNED_STOP.md)は追加指示による計画的終了、[U08](../../planned/unit_013/RESUME.md)は保存参照・アプリ再起動後の復旧、[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)は記憶の整理・保守、[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)は上表の運転条件と長時間受入を所有する。共通配送・停止・同一セッションの保持Goal・原記録を入口とし、U06ではこれらを実装しない。
+
+APIキー認証、アプリ内ログアウト・アカウント切替、モニター間DPI遷移、文字拡大専用の受入は今回の合意済み対象外であり、未完のU06項目へ戻さない。旧api_key設定をChatGPTへ明示変更するUIは、APIキー認証の対応を意味しない。
 
 ## 11. 完了チェックリスト
 
@@ -90,4 +107,17 @@ M3の実機はUSB Video Device、COM8・CH552・9600 baud。入力・memory書�
 - [x] 工程全体の実機/GUI受入を完了した
 - [x] 利用手順と後続引継ぎを更新し、親をcompleteへ移した
 
-M1最終修正は[通常turnのモデル選択](../../complete/unit_048/NEXT_TURN_MODEL.md)、M2の固定試験・模擬機器による製品結合は[unit_049](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)、M3の品質ゲート・実接続・実機受入は[unit_050](../unit_050/GOAL_ACCEPTANCE.md)を正本とする。認証・準備・利用状況のUI再整理はM3の先送り事項とし、後続工程へは着手しない。
+M1最終修正は[通常turnのモデル選択](../../complete/unit_048/NEXT_TURN_MODEL.md)、M2の固定試験・模擬機器による製品結合は[unit_049](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)、M3の品質ゲート・実接続・実機受入は[unit_050](../unit_050/GOAL_ACCEPTANCE.md)を正本とする。認証・準備・利用状況の設定集約は[unit_051](../unit_051/CODEX_SETTINGS_UI.md)、配置・利用状況・見出しの修正は[unit_052](../unit_052/CODEX_SETTINGS_LAYOUT_FIX.md)、認証行への集約と旧設定の明示変更は[unit_053](../unit_053/AUTH_ROW_CONSOLIDATION.md)で完了した。U07以降には未着手。
+
+## 12. 最終レビューの追従修正（2026-11-13）
+
+起点6576a5f、作業ツリーclean。サンドボックス未準備時のエラー案内を現在の設定画面へ変更し、接続API文書の撤去済みメニュー案内と残割合の説明、親仕様の設定UI先送り表記を修正した。未準備の通常送信・Goal開始で旧案内が出ることは修正前に固定RPCで再現済み。Goal・停止・認証の制御処理、API、型、依存は変更しない。KISSレビューでは追加の抽象化・継続ループ・自動復旧は不要と判断した。
+
+検証:
+
+- `uv run pytest tests/unit/test_codex_connection.py -q -k 'sandbox or memory_preparation or memory_start' --basetemp=tmp/u06-final-review-tests`: 18 passed。未準備・状態取得待ち・停止競合・準備失敗の既存契約を確認。
+- 固定RPCによる通常送信・Goal開始の手動再現で、両方のエラーが「設定 → Codex → サンドボックス環境」を案内することを確認。自然言語の完全一致テストは追加せず、実際の文言と現在の画面配置を照合した。
+- `uv run ruff format --check .`、`uv run ruff check .`、`uv run python tmp/u06-m1/validate_docs.py`、`git diff --check`: 成功。撤去済み導線の残存検索も実施。
+- U07の旧ボタン表現を現行の中断・破棄へ揃え、U07/U10の前提から本引継ぎ表へ参照を追加した。両工程はplannedのままであり、着手・検証済みとはしない。
+
+直前の製品全体検証はunit_053の847 passed。本修正は案内文字列と仕様・手順だけの変更のため、全体テスト・型検査・lock/build・実ログイン・実機は再実行していない。未確認事項の記録を実確認の代替にはしない。
