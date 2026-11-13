@@ -318,10 +318,11 @@ class RequestResolved:
 
 @dataclass(frozen=True, slots=True)
 class TurnStarted:
-    """One ordinary turn whose identity was accepted from the runtime.
+    """An ordinary or autonomous turn accepted from a start notification or response.
 
     Emitted once, before events for that turn, even when completion precedes the
-    start response. A submitted or canceled start request alone does not emit it.
+    start response. Unknown item, question and completion notifications do not
+    establish a turn. A submitted or canceled start request alone does not emit it.
 
     Attributes:
         turn_id: Runtime turn identity within this connection's conversation.

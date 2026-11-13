@@ -66,7 +66,7 @@ Goalが`complete`になると入力・追加指示・質問への回答受付を
 
 `ReasoningEvent(turn_id, item_id, summary)`は公開要約の段落だけを持つ全置換イベントです。生のreasoning本文は含みません。`ActivityEvent(turn_id, item_id, kind, title, status, details)`はコマンド・ファイル変更・MCP呼出しの公開対象とテキスト結果を持ち、MCPの引数・画像・メタデータは含みません。結果はruntimeによって切り詰められる場合があります。本文・Plan・公開要約・活動の表示と記録は`turn/completed`受信で締め、同turnの後続更新は無視します。受信済み履歴は残しますが、遅い活動の最終状態は補いません。表示通知自体はゲーム入力の許可や成功を意味しません。
 
-`TurnStarted(turn_id)`は、通常ターンまたは同じthreadの自律ターンのIDをランタイムから受理したときに一度届きます。そのターンの質問や完了の通知に先行します。開始応答より先に質問・完了が届く場合も同じです。開始要求の提出だけでは届かず、ターンの成功や継続中であることを保証する通知ではありません。
+`TurnStarted(turn_id)`は、通常ターンまたは同じthreadの自律ターンを`turn/started`または自分の`turn/start`成功応答から採用したときに一度届きます。開始通知→質問・本文・終端→開始応答の順でも処理します。未知turnのitem・質問・終端だけでは採用せず、表示・要求を発行しません。開始要求の提出だけでは届かず、ターンの成功や継続中であることを保証する通知ではありません。要求IDの重複は同turn内で抑止し、終端でその記録を破棄します。
 
 `GoalEvent(goal)`は公開Goalの確定値です。`goal`は`GoalState(objective, status, tokens_used, time_used_seconds)`、破棄後は`None`です。完了・休止・制限停止はターン終端と区別してください。`DialogueEvent(kind, payload, turn_id)`は保存向けの公開項目スナップショットです。項目完了時には`partial=False`、turn終端・切断時の未確定部分には`partial=True`が入り、一度だけ確定します。内部推論全文や未送信原稿は含みません。
 

@@ -1460,11 +1460,9 @@ class CodexConnection:
                     await self._stop()
             return
         incoming_turn = params.get("turnId")
-        if isinstance(incoming_turn, str):
-            self._adopt_turn(incoming_turn)
-            if incoming_turn == self._turn_id:
-                with suppress(CodexConnectionError):
-                    self._public_notification(event.method, params, incoming_turn)
+        if isinstance(incoming_turn, str) and incoming_turn == self._turn_id:
+            with suppress(CodexConnectionError):
+                self._public_notification(event.method, params, incoming_turn)
         if event.method == "serverRequest/resolved":
             request_id = params.get("requestId")
             if isinstance(request_id, str | int) and not isinstance(request_id, bool):
@@ -1474,7 +1472,8 @@ class CodexConnection:
                     self._update_waiting()
         elif event.method in {"turn/started", "turn/completed"}:
             turn = _object(params.get("turn"))
-            self._adopt_turn(_text(turn.get("id")))
+            if event.method == "turn/started":
+                self._adopt_turn(_text(turn.get("id")))
             if turn.get("id") != self._turn_id:
                 return
             if event.method == "turn/completed":
@@ -1551,6 +1550,7 @@ class CodexConnection:
         self._flush_dialogue(turn_id)
         self._completed_turns.add(turn_id)
         self._expire_requests()
+        self._seen_requests.clear()
         self._turn_id = None
         self._file_details.clear()
         if self._stopping:
@@ -1774,15 +1774,7 @@ class CodexConnection:
         if event.method not in methods:
             await self._peer.reject(event.id, -32601, "Unsupported request")
             return
-        if event.id in self._seen_requests:
-            return
-        self._seen_requests.add(event.id)
         params = event.params or {}
-        incoming_turn = params.get("turnId")
-        if params.get("threadId") == self._thread_id and isinstance(incoming_turn, str):
-            self._adopt_turn(incoming_turn)
-            if self._stopping:
-                await self._interrupt()
         if (
             self._stopping
             or params.get("threadId") != self._thread_id
@@ -1790,6 +1782,9 @@ class CodexConnection:
             or self._turn_id is None
         ):
             return
+        if event.id in self._seen_requests:
+            return
+        self._seen_requests.add(event.id)
         try:
             request = self._decode_request(event, params)
         except CodexConnectionError as error:

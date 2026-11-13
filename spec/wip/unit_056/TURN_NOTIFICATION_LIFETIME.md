@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（D01 green、D02未着手）**。[整理親仕様](../unit_054/KISS_SIMPLIFICATION.md)のM1第二子として、現在turnの公開通知だけを表示・記録し、終端後の差分保持をなくす。2026-11-13のM0承認とM1実行指示に基づく。
+状態: **wip（D01 commit済み、D02 green、構造整理前）**。[整理親仕様](../unit_054/KISS_SIMPLIFICATION.md)のM1第二子として、現在turnの公開通知だけを表示・記録し、終端後の差分保持をなくす。2026-11-13のM0承認とM1実行指示に基づく。
 
 Intent Delta: 完了済みturnへの表示・記録更新と、任意のitem・質問・終端通知からのturn採用を廃止する。開始通知が開始RPC応答より先に届く経路と、受信済み履歴・部分記録を維持する。
 
@@ -41,8 +41,8 @@ unit_055の実装commit `6d10407`、完了移動commit `d950569`とclean treeを
 
 | status | item | type / layer | 既存試験の扱い |
 |---|---|---|---|
-| green | D01 終端で表示・記録を締め、受信済み部分を一度確定し、次turnへ要約を混ぜない | behavior / unit・integration | 公開通知試験の旧turn更新期待を撤去。途中本文とGUI履歴保持の試験を改訂する |
-| todo | D02 started/start応答だけを採用元とし、先行通知を保持し、要求重複抑止を現在turnへ限定する | behavior / unit | started無し質問からの採用期待を撤去。未知item・質問・終端と、同turn内重複・次turnでの要求受付を確認する |
+| refactor-skipped | D01 終端で表示・記録を締め、受信済み部分を一度確定し、次turnへ要約を混ぜない | behavior / unit・integration | 公開通知試験の旧turn更新期待を撤去。途中本文とGUI履歴保持の試験を改訂する |
+| green | D02 started/start応答だけを採用元とし、先行通知を保持し、要求重複抑止を現在turnへ限定する | behavior / unit | started無し質問からの採用期待を撤去。未知item・質問・終端と、同turn内重複・次turnでの要求受付を確認する |
 
 各itemはred→greenの検証後に別commitとする。両itemのgreen後に、通知変換・小さい蓄積担当の抽出を振る舞い不変の別commitで行う。UIへ二重の締切状態を追加せず、終端後イベントを直接注入して更新を保証するfixtureを撤去する。
 
@@ -62,12 +62,18 @@ unit_055の実装commit `6d10407`、完了移動commit `d950569`とclean treeを
 
 局所pytestは`--basetemp=tmp/pytest-u056`で実行する。各itemのred/green、通知・要求・承認とGUIの回帰、ruff・ty、公開API契約に対応するlock check・build、差分と文書の意味確認を行う。実runtimeと実機は親M1の結合受入へ残し、模擬試験を代用にしない。
 
-### D01実行結果
+### D01実行結果（commit `d1321aa`）
 
 - `uv run pytest tests/unit/test_codex_connection.py -q -k 'public_progress or dialogue_snapshots' --basetemp=tmp/pytest-u056`: redは2 failed・1 passed。終端後の旧turnから5件の表示・記録が発行されるため失敗した。同じcommandのgreenは3 passed・161 deselected。
 - `uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_gui.py -q --basetemp=tmp/pytest-u056 --tb=short`: 213 passed。秘密値除外、途中本文一回確定、同item IDの次turn、受信済みGUI履歴を確認した。
 - 対象4 Pythonファイルの`ruff check`・`ruff format --check`、`git diff --check`: 成功。
 - 構造抽出はD02 green後の別commitへ残す。ty・lock・buildと全体のsource/docs reviewは子の最終gateで行う。
+
+### D02実行結果
+
+- `uv run pytest tests/unit/test_codex_connection.py -q -k 'unrecognized_turn or notifications_before_start_response or question_is_answered_once' --basetemp=tmp/pytest-u056 --tb=short`: redは2 failed・1 passed。未知質問からTurnStartedが発行されることと、次turnの質問が前turnの要求IDで抑止されることで失敗した。greenは3 passed・161 deselected。
+- connection・GUIの同じ回帰command: 213 passed。開始通知→質問/本文/終端→開始応答と、同turn内で回答済みの質問を再提示しないことを確認した。
+- 対象Pythonファイルのruff check・format: 成功。test_answer_lifecycle.pyのunit側への誤指定は0件実行で、検証成功に数えない。実際のintegration側を最終gateへ含める。
 
 ## 10. 先送り事項
 

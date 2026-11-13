@@ -1449,6 +1449,22 @@ def test_question_is_answered_once_and_preserves_original_request_id(tmp_path: P
         with pytest.raises(CodexConnectionError):
             await connection.answer(request.token, answers={"route": "東"})
         assert RequestResolved(request.token) in events
+        peer.events.put_nowait(_question(7))
+        await _events_processed()
+        assert [event for event in events if isinstance(event, HumanRequest)] == [request]
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "inProgress"}}
+        await connection.send("次へ")
+        next_question = _question(7)
+        assert next_question.params is not None
+        next_question.params["turnId"] = "turn-2"
+        peer.events.put_nowait(next_question)
+        await _events_processed()
+        requests = [event for event in events if isinstance(event, HumanRequest)]
+        assert len(requests) == 2
+        assert requests[-1].turn_id == "turn-2"
+        assert requests[-1].token != request.token
         await connection.close()
 
     _run(scenario())
@@ -1689,10 +1705,8 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
     _run(scenario())
 
 
-@pytest.mark.parametrize("started_notice", [True, False])
 def test_notifications_before_start_response_preserve_text_requests_and_completion(
     tmp_path: Path,
-    started_notice: bool,
 ) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -1702,10 +1716,9 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         await connection.open()
         send = asyncio.create_task(connection.send("開始"))
         await _events_processed()
-        if started_notice:
-            peer.events.put_nowait(
-                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
-            )
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+        )
         peer.events.put_nowait(_question())
         peer.events.put_nowait(
             RpcNotification(
@@ -1770,6 +1783,42 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
             TurnStarted("turn-1"),
             TurnStarted("turn-2"),
         ]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_unrecognized_turn_events_do_not_adopt_or_consume_request_id(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["turn/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = _connection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        send = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        before = len(events)
+        for event in (
+            _question(),
+            RpcNotification(
+                "item/agentMessage/delta",
+                {"threadId": "thread-1", "turnId": "turn-1", "itemId": "a", "delta": "未採用"},
+            ),
+            _terminal(),
+        ):
+            peer.events.put_nowait(event)
+            await _events_processed()
+            assert events[before:] == []
+        peer.events.put_nowait(
+            RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+        )
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        assert request.turn_id == "turn-1"
+        assert events.count(TurnStarted("turn-1")) == 1
+        peer.gates["turn/start"].set()
+        assert await send == "turn-1"
         await connection.close()
 
     _run(scenario())
