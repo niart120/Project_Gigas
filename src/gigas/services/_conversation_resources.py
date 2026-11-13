@@ -164,7 +164,7 @@ class ConversationResources:
             )
 
     def report_failure(self, error: BaseException) -> None:
-        """Report a run cleanup failure with the current archive, when available."""
+        """Report a failure with the current archive, when available."""
         path = str(self._writer.path) if self._writer is not None else ""
         self._failed("", path, recording_reason(error))
 

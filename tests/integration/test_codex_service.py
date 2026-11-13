@@ -1708,7 +1708,6 @@ def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) ->
             assert inputs[0].config == config
             assert inputs[0].connected
             assert not inputs[0].error
-            assert not service._run_input_allowed
             assert peer.goal is not None
             assert peer.goal["status"] == "active"
             gate.set()

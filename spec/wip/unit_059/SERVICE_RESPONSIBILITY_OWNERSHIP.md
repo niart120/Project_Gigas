@@ -72,7 +72,7 @@ unit058 は `3cf71c3` で complete へ移動済み。着手時は clean、branch
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | D01 保存資源と thread ID を所有者へ統合 | characterization | integration | baseline 311 → 旧直接状態試験を HTTP 試験へ統合して 310 passed。人工的な red は作らない |
-| todo | D02 run 許可と終端の単独所有 | characterization | integration | 公開 HTTP・記録・配送結果と既存故障注入で確認 |
+| refactor-done | D02 run 許可と終端の単独所有 | characterization | integration | 公開 HTTP・記録・配送結果、既存の入力 close / 保存失敗境界を維持 |
 
 ## 7. 設計メモ
 
@@ -81,6 +81,12 @@ Resources の準備は ThreadConfiguration と準備済み Observation / Recordi
 状態の削除は独立 thread ID と service の run task 登録、縮小は GoalState → status。writer / recording / observation / MCP、Grant、発行前の停止意思、質問待ち、配送不明は必要な状態として操作と一緒に移す。非blocking質問でもゲーム入力を保留するため waiting_answers は running phase から導出できない。unit058 後のプロセス内実験では、この条件だけを除いた既存 HTTP 試験が入力を再許可して失敗した。
 
 D01 では、保存資源を Resources へ移し、サービスの独立 thread ID を削除した。初回 `record_thread` は Observation / Recording を返し、同じ service lock 内で run を開始して MCP へ bind する。`test_goal_keeps_one_run_across_turns_and_stops_on_pause` の直接状態・手作り phase 期待は、`test_goal_service_pause_conversation_resume_and_recording` の実 CodexConnection・保留した Goal 応答・HTTP 入力・run ID 記録へ統合した。thread 保存失敗の試験も公開 send と保存 failure signal / run_started 記録へ変更し、旧 private 属性の代替取得口は作らなかった。
+
+D01 は `7b04abf` に記録し、独立レビューで Resources の逆参照、lock を外れた組立、thread ID の消失、終了順の阻害指摘なし。D02 では Run.prepare を同期処理にし、準備の await 前に許可の初期値を決める。その後の stop を後続準備が上書きしない。Run.begin の戻り値だけを Resources.bind へ渡し、サービスに Grant を保持しない。
+
+run 終端 task は Run にのみ保持し、次の準備・切断・サービス最終終了で drain する。独立レビュー時に終端 task へ例外を注入する追加試験と、例外専用の回収拡張を検討したが不採用とした。実 InputService.finish_run は入力/観測の失敗を `gather(return_exceptions=True)` で回収し、保存は RecordingService の別 task へ渡す。通常の入力・符号化・保存障害が finish task の例外になる経路はなく、他所有者からの task 取消しもない。専用の `_failed` / `_finished` callback を撤去し、予期せぬプログラム上の例外は必要な drain でそのまま顕在化させる。InputService.close の実機器 close 失敗と、RecordingService の保存失敗通知は維持した。到達根拠のない D03 や故障組合せ試験は作っていない。
+
+AST で `3cf71c3` と最終コードを比較した結果、CodexServiceThread は class 本体 896 → 673 行、初期属性 39 → 22。Resources は 193 行 / 9 属性、Run は 148 行 / 11 属性となった。属性数は依存参照を含み、所有者参照・依存参照が加わるため全体の属性総数削減とは扱わない。実際に消した状態は独立 thread ID と GoalState 全体の複製、二重の task 登録であり、残る資源・入力政策は操作と寿命を一緒に移した。サービスから所有者の private 属性を参照する箇所は 0 件で、返り値の Observation / Recording / Grant をサービス属性へ再保持していない。
 
 ## 8. 対象ファイル
 
@@ -102,6 +108,17 @@ D01 では、保存資源を Resources へ移し、サービスの独立 thread 
 | `uv run pytest tests/integration/test_codex_service.py -q --basetemp=tmp/pytest-u059-resources --tb=short` | 64 passed / 11.92s | D01 のサービス・資源境界 |
 | baseline と同じ 6 ファイル、`--basetemp=tmp/pytest-u059-resources-regression --tb=short` | 310 passed / 14.78s | D01 後。1 試験は重複する状態確認を HTTP/記録へ統合 |
 | 対象 Python の `ruff format` / `ruff check`、`uv run ty check --no-progress` / `git diff --check` | passed | D01 の形式・型・差分 |
+| `uv run pytest tests/integration/test_codex_service.py -q --basetemp=tmp/pytest-u059-run --tb=short` | 64 passed / 12.00s | D02 の run 組立・入力保留・終了 |
+| baseline と同じ 6 ファイル、`--basetemp=tmp/pytest-u059-run-regression --tb=short` | 310 passed / 14.95s | D02 抽出後。終端専用 callback の削除前 |
+| `uv run ruff format --check .` / `uv run ruff check .` / `uv run ty check --no-progress` | passed | Python 223 ファイル、型境界 |
+| `uv lock --check` / `uv build` / `git diff --check` | passed | lock 整合、sdist / wheel、空白 |
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u059-full --tb=short` | 846 passed / 60.91s | callback 撤去後の最終コード。project / input / observation / recording / MCP を含む全体回帰 |
+
+公開 API の引数・戻り値・DTO は維持し、公開 DTO の移動は行わなかった。必要な戻り値型を private 所有者の境界へ明示し、型の ignore / cast / Any、追加依存、互換層は導入していない。公開 docstring と docs/codex.md・docs/codex-gui.md・docs/recorded-observation.md の所有・配送・停止・保存・終了順を読み、公開説明を変える差分がないことを確認した。
+
+製品コードを固定して親へ引き渡し、親担当が実機 input 受入を実行する。結果は親が追記し、受入前に本単位を complete へ移さない。
+
+最終の connection_audit 独立レビューで阻害指摘なし。Run の依存は InputService だけで、Resources への例外 callback・task 二重登録・他所有者の private 属性参照はない。必要点での drain、機器 close 失敗を扱う既存 finally、保存資源の回収を確認した。文書の参照先・仮テキストと public API / docs の整合は実装担当が確認し、実機記録と最終 complete 移動は親担当へ引き渡す。
 
 ## 10. 先送り事項
 
@@ -110,8 +127,8 @@ D01 では、保存資源を Resources へ移し、サービスの独立 thread 
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test List を更新した
-- [ ] 削除と移動、所有者と終了順を確認した
-- [ ] 検証結果と未実行範囲を記録した
-- [ ] 公開境界・型・package gate を確認した
+- [x] TDD Test List を更新した
+- [x] 削除と移動、所有者と終了順を確認した
+- [x] 検証結果と未実行範囲を記録した
+- [x] 公開境界・型・package gate を確認した
 - [ ] 親の最終レビューを受けた
