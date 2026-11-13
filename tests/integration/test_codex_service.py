@@ -19,6 +19,7 @@ from gigas.runtime.codex.connection import (
     AnswerDeliveryError,
     CodexConnection,
     CodexConnectionError,
+    MessageDeliveryError,
 )
 from gigas.runtime.codex.models import (
     ConnectionEvent,
@@ -27,7 +28,7 @@ from gigas.runtime.codex.models import (
     SessionStatus,
 )
 from gigas.runtime.codex.transport import JsonObject, RpcNotification
-from gigas.services.codex import AnswerResult, CodexServiceThread
+from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_input_service import Device
@@ -91,7 +92,7 @@ class ControlledConnection:
     async def login(self) -> None:
         """Provide the login surface."""
 
-    async def send(self, prompt: str) -> None:
+    async def send(self, prompt: str) -> str | None:
         """Hold one operation until shutdown cancels it."""
         assert prompt == "hello"
         self.sending.set()
@@ -99,6 +100,12 @@ class ControlledConnection:
             await asyncio.Event().wait()
         finally:
             self.cancelled.set()
+
+    async def steer(self, prompt: str, expected_turn_id: str) -> str:
+        """Hold an in-turn submission until cancellation."""
+        assert expected_turn_id == "turn-1"
+        await self.send(prompt)
+        return expected_turn_id
 
     async def answer(
         self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None
@@ -367,6 +374,12 @@ def test_turn_completion_revokes_input_and_next_send_republishes_same_thread(
             loops[0].call_soon_threadsafe(peer.gates["thread/start"].set)
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         assert not results[-1].error
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        service.steer("門の前で止まる", "turn-1")
+        qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        assert sum(method == "thread/start" for method, _ in peer.calls) == 1
+        assert not any(method == "thread/resume" for method, _ in peer.calls)
         initial = next(params for method, params in peer.calls if method == "thread/start")
         assert initial is not None
         archive = Path(str(initial["cwd"]))
@@ -532,6 +545,10 @@ def test_human_answer_keeps_input_suspended_until_delivery_without_reviving_stop
             loops[0].call_soon_threadsafe(peer.events.put_nowait, _question(blocking=blocking))
             qtbot.waitUntil(lambda: any(isinstance(event.event, HumanRequest) for event in events))
             request = next(event.event for event in events if isinstance(event.event, HumanRequest))
+            service.steer("回答後も門の前で止まる", "turn-1")
+            qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
+            assert results[-1].message == MessageResult("accepted", "turn-1")
+            assert not peer.replies
             suspended = _call_game_tool(client, url, "act_and_observe", arguments).json()["result"]
             assert suspended["isError"]
             assert json.loads(suspended["content"][0]["text"])["code"] == "INPUT_DISABLED"
@@ -762,34 +779,57 @@ def test_shutdown_stop_failure_preserves_correlation_and_still_closes(
         assert status.failure_id == stopped[0].failure_id
 
 
-def test_answer_without_connection_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+def _submit_delivery(service: CodexServiceThread, operation: str, text: str) -> None:
+    if operation == "answer":
+        service.answer(text, decision="accept")
+    elif operation == "send":
+        service.send(text)
+    else:
+        service.steer(text, "turn-1")
+
+
+def _not_sent(result: "ServiceResult", token: str) -> bool:
+    return (
+        result.answer == AnswerResult(token, "not_sent")
+        if result.operation == "answer"
+        else result.message == MessageResult("not_sent")
+    )
+
+
+@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+def test_submission_without_connection_reports_not_sent(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
     try:
-        service.answer("missing", decision="accept")
+        _submit_delivery(service, operation, "missing")
         qtbot.waitUntil(lambda: bool(results))
         result = results[0]
         assert result.error
-        assert result.answer == AnswerResult("missing", "not_sent")
+        assert _not_sent(result, "missing")
         assert result.failure_id is None
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_answer_discarded_before_start_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+def test_submission_discarded_before_start_reports_not_sent(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
-    service.answer("queued", decision="accept")
+    _submit_delivery(service, operation, "queued")
     service.shutdown()
     service.start()
     qtbot.waitUntil(lambda: service.wait(0))
     assert len(results) == 1
     result = results[0]
-    assert result.answer == AnswerResult("queued", "not_sent")
+    assert _not_sent(result, "queued")
 
 
 def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> None:
@@ -819,7 +859,10 @@ def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> 
     assert answers[0].answer == AnswerResult("pending", "unknown")
 
 
-def test_answer_cancelled_before_execution_reports_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+def test_submission_cancelled_before_execution_reports_not_sent(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
     class CancelBeforeRunService(CodexServiceThread):
         """Inject cancellation after task creation but before its first execution."""
 
@@ -833,10 +876,10 @@ def test_answer_cancelled_before_execution_reports_not_sent(qtbot: QtBot, tmp_pa
     service.completed.connect(results.append)
     service.start()
     try:
-        service.answer("before-run", decision="accept")
+        _submit_delivery(service, operation, "before-run")
         qtbot.waitUntil(lambda: bool(results))
         assert len(results) == 1
-        assert results[0].answer == AnswerResult("before-run", "not_sent")
+        assert _not_sent(results[0], "before-run")
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
@@ -899,7 +942,10 @@ def test_answer_completion_preserves_delivery_evidence(
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_answer_for_inactive_generation_is_not_success(qtbot: QtBot, tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+def test_submission_for_inactive_generation_is_not_success(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
     results: list[ServiceResult] = []
     service = CodexServiceThread(
         tmp_path,
@@ -913,32 +959,35 @@ def test_answer_for_inactive_generation_is_not_success(qtbot: QtBot, tmp_path: P
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         second = service.connect_runtime(ConnectionOptions(tmp_path))
         qtbot.waitUntil(lambda: any(result.generation == second for result in results))
-        service.answer("wrong-generation", decision="accept")
-        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
-        result = next(result for result in results if result.operation == "answer")
+        _submit_delivery(service, operation, "wrong-generation")
+        qtbot.waitUntil(lambda: any(result.operation == operation for result in results))
+        result = next(result for result in results if result.operation == operation)
         assert result.generation == second != first
         assert result.error
-        assert result.answer is not None
-        assert result.answer.outcome == "not_sent"
+        assert _not_sent(result, "wrong-generation")
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_answer_after_service_shutdown_is_reported_not_sent(qtbot: QtBot, tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+def test_submission_after_service_shutdown_is_reported_not_sent(
+    qtbot: QtBot, tmp_path: Path, operation: str
+) -> None:
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
     service.shutdown()
     qtbot.waitUntil(lambda: service.wait(0))
-    service.answer("late", decision="accept")
+    _submit_delivery(service, operation, "late")
     assert len(results) == 1
-    assert results[0].answer == AnswerResult("late", "not_sent")
+    assert _not_sent(results[0], "late")
 
 
-def test_worker_owns_connection_and_interrupts_while_send_waits(
-    qtbot: QtBot, tmp_path: Path
+@pytest.mark.parametrize("operation", ["send", "steer"])
+def test_worker_owns_connection_and_interrupts_while_message_waits(
+    qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
     connections: list[ControlledConnection] = []
     events: list[ServiceEvent] = []
@@ -966,7 +1015,7 @@ def test_worker_owns_connection_and_interrupts_while_send_waits(
         connection = connections[0]
         assert connection.thread != QThread.currentThread()
         assert events[0].generation == generation
-        service.send("hello")
+        _submit_delivery(service, operation, "hello")
         qtbot.waitUntil(connection.sending.is_set)
         service.interrupt()
         qtbot.waitUntil(connection.stopped.is_set)
@@ -979,6 +1028,65 @@ def test_worker_owns_connection_and_interrupts_while_send_waits(
     assert connection.closed.is_set()
     assert connection.cancelled.is_set()
     assert any(result.operation == "stop" and not result.error for result in results)
+    messages = [result for result in results if result.operation == operation]
+    assert len(messages) == 1
+    assert messages[0].message == MessageResult("unknown")
+
+
+@pytest.mark.parametrize("operation", ["send", "steer"])
+@pytest.mark.parametrize("case", ["accepted", "not_sent", "unknown", "unexpected"])
+def test_message_completion_preserves_acceptance(
+    qtbot: QtBot, tmp_path: Path, operation: str, case: str
+) -> None:
+    class MessageConnection(ControlledConnection):
+        """Expose accepted, rejected, and uncertain message outcomes."""
+
+        async def send(self, prompt: str) -> str | None:
+            """Return only confirmed public acceptance."""
+            assert prompt == "hello"
+            if case == "not_sent":
+                return None
+            if case == "unknown":
+                raise MessageDeliveryError("送信結果を確認できない")
+            if case == "unexpected":
+                raise OSError("PRIVATE-MESSAGE-ERROR")
+            return "turn-1"
+
+        async def steer(self, prompt: str, expected_turn_id: str) -> str:
+            """Reject locally or return the confirmed target turn."""
+            assert expected_turn_id == "turn-1"
+            result = await self.send(prompt)
+            if result is None:
+                raise CodexConnectionError("このturnへの追加指示は受け付けない")
+            return result
+
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda _options, emit, *_callbacks: MessageConnection(emit),
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        _submit_delivery(service, operation, "hello")
+        qtbot.waitUntil(lambda: any(result.operation == operation for result in results))
+        result = next(result for result in results if result.operation == operation)
+        assert (
+            result.message
+            == {
+                "accepted": MessageResult("accepted", "turn-1"),
+                "not_sent": MessageResult("not_sent"),
+                "unknown": MessageResult("unknown"),
+                "unexpected": MessageResult("unknown"),
+            }[case]
+        )
+        assert "PRIVATE" not in result.error
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
 
 
 def test_shutdown_before_start_and_factory_failure_leave_no_worker(

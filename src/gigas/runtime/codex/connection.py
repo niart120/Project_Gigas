@@ -24,6 +24,7 @@ from gigas.runtime.codex.models import (
     TurnStarted,
 )
 from gigas.runtime.codex.transport import (
+    RpcError,
     RpcNotification,
     ServerRequest,
     TransportClosed,
@@ -54,6 +55,10 @@ class CodexConnectionError(RuntimeError):
 
 class AnswerDeliveryError(CodexConnectionError):
     """An answer write failed without confirming whether the peer received it."""
+
+
+class MessageDeliveryError(CodexConnectionError):
+    """A submitted message has no confirmed runtime acceptance; never retry it automatically."""
 
 
 class _ThreadPreparationError(Exception):
@@ -242,7 +247,7 @@ class CodexConnection:
         self._seen_requests: set[RpcId] = set()
         self._file_details: dict[str, str] = {}
         self._summaries: dict[tuple[str, str], dict[int, str]] = {}
-        self._operations: set[asyncio.Task[None]] = set()
+        self._operations: set[asyncio.Task[object]] = set()
         self._cleanup: asyncio.Task[None] | None = None
         self._opening = False
         self._sending = False
@@ -342,19 +347,24 @@ class CodexConnection:
             self._login_starting = False
             self._login_completions.clear()
 
-    async def send(self, prompt: str) -> None:
+    async def send(self, prompt: str) -> str | None:
         """Prepare the thread's current configuration and start one ordinary turn.
 
         Args:
             prompt: Nonempty user text. Calls are not retried after unknown acceptance.
 
-        Raises:
-            CodexConnectionError: The connection is not ready, instructions fail,
-                runtime policy differs, or the request fails.
-        """
-        await self._operate(self._send(prompt))
+        Returns:
+            Turn ID confirmed by the public success response, even if the turn has
+            already ended. None means stopping prevented submission during preparation.
 
-    async def _send(self, prompt: str) -> None:
+        Raises:
+            MessageDeliveryError: A submitted turn has no confirmed acceptance.
+            CodexConnectionError: Preparation failed, the connection is not ready,
+                or the runtime explicitly rejected the request.
+        """
+        return await self._operate(self._send(prompt))
+
+    async def _send(self, prompt: str) -> str | None:
         self._require_open()
         if (
             not self._authenticated
@@ -367,15 +377,18 @@ class CodexConnection:
         self._status("starting")
         self._stopping = False
         self._sending = True
+        submitted = False
+        accepted_turn: str | None = None
         try:
             if self._thread_id is None or self._prepare_turn is not None:
                 await self._configure_thread(prompt)
             if self._stopping:
                 self._status("stopped")
-                return
+                return None
             self._starting_turn = True
             self._user_items += 1
             self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
+            submitted = True
             result = _object(
                 await self._peer.request(
                     "turn/start",
@@ -388,8 +401,10 @@ class CodexConnection:
                 )
             )
             turn = _object(result.get("turn"))
-            if not self._accept_start_response(turn):
-                return
+            active = self._accept_start_response(turn)
+            accepted_turn = _text(turn.get("id"))
+            if not active:
+                return accepted_turn
             if self._stopping:
                 await self._interrupt()
             else:
@@ -397,16 +412,87 @@ class CodexConnection:
         except _ThreadPreparationError as error:
             failure_id = self._failure("stopped" if self._stopping else "ready", str(error))
             raise CodexConnectionError(str(error), failure_id=failure_id) from None
+        except RpcError as error:
+            if not submitted:
+                await self.close()
+            message = f"ターン開始が拒否された (RPC {error.code})"
+            phase = "error" if self._closed else "stopped" if self._stopping else "ready"
+            failure_id = self._failure(phase, message)
+            raise CodexConnectionError(message, failure_id=failure_id) from None
+        except asyncio.CancelledError:
+            if accepted_turn is None:
+                raise
+            await self.close()
+            return accepted_turn
         except (TransportError, CodexConnectionError, OSError, UnicodeError) as error:
             await self.close()
+            if accepted_turn is not None:
+                return accepted_turn
             if isinstance(error, CodexConnectionError) and error.failure_id is not None:
                 raise
             message = "ターン開始に失敗"
             failure_id = self._failure("error", message)
+            if submitted:
+                raise MessageDeliveryError(message, failure_id=failure_id) from None
             raise CodexConnectionError(message, failure_id=failure_id) from None
+        else:
+            return accepted_turn
         finally:
             self._sending = False
             self._starting_turn = False
+
+    async def steer(self, prompt: str, expected_turn_id: str) -> str:
+        """Submit an instruction to exactly the turn selected by the caller.
+
+        Args:
+            prompt: Nonempty text, submitted once without preparing another turn.
+            expected_turn_id: Active turn identity captured when the user submits.
+
+        Returns:
+            Turn ID confirmed by the public success reply. Acceptance does not
+            resolve questions, interrupt input, or guarantee instruction compliance.
+
+        Raises:
+            MessageDeliveryError: Runtime acceptance could not be confirmed.
+            CodexConnectionError: The target is stale, stopping, invalid, or rejected.
+        """
+        return await self._operate(self._steer(prompt, expected_turn_id))
+
+    async def _steer(self, prompt: str, expected_turn_id: str) -> str:
+        self._require_open()
+        if (
+            not prompt.strip()
+            or not expected_turn_id
+            or self._turn_id != expected_turn_id
+            or self._stopping
+        ):
+            message = "このターンは追加指示を受け付けない"
+            raise CodexConnectionError(message)
+        self._user_items += 1
+        self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
+        try:
+            result = _object(
+                await self._peer.request(
+                    "turn/steer",
+                    {
+                        "threadId": self._thread_id,
+                        "expectedTurnId": expected_turn_id,
+                        "input": [{"type": "text", "text": prompt}],
+                    },
+                )
+            )
+        except RpcError as error:
+            message = f"追加指示が拒否された (RPC {error.code})"
+            raise CodexConnectionError(message) from None
+        except (TransportError, CodexConnectionError):
+            pass
+        else:
+            if result.get("turnId") == expected_turn_id:
+                return expected_turn_id
+        await self.close()
+        message = "追加指示の受付結果を確認できない"
+        failure_id = self._failure("error", message)
+        raise MessageDeliveryError(message, failure_id=failure_id) from None
 
     async def answer(
         self,
@@ -512,11 +598,11 @@ class CodexConnection:
         await self._peer.close()
         self._status("closed")
 
-    async def _operate(self, operation: "Coroutine[object, object, None]") -> None:
+    async def _operate[T](self, operation: "Coroutine[object, object, T]") -> T:
         task = asyncio.create_task(operation, name="gigas-codex-operation")
         self._operations.add(task)
         try:
-            await task
+            return await task
         except asyncio.CancelledError:
             if not self._closed:
                 await self.close()

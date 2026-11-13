@@ -19,12 +19,88 @@ from gigas.runtime.codex.models import (
     TextEvent,
     TurnStarted,
 )
-from gigas.services.codex import CodexServiceThread, ServiceEvent, ServiceResult
+from gigas.services.codex import CodexServiceThread, MessageResult, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.request_card import AnswerSubmission
 
 if TYPE_CHECKING:
     from gigas.ui.notifications import Notice
+
+
+def test_start_notification_keeps_draft_until_acceptance_result(qtbot: QtBot) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    panel.prompt.setPlainText("受付を確認する原稿")
+    panel.send_button.click()
+    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
+    assert panel.prompt.toPlainText() == "受付を確認する原稿"
+    panel.handle_result(ServiceResult(1, "send", message=MessageResult("accepted", "turn")))
+    assert panel.prompt.toPlainText() == ""
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "not_sent", "unknown"])
+@pytest.mark.parametrize("edited", [False, True])
+def test_running_turn_accepts_one_targeted_instruction(
+    qtbot: QtBot, outcome: str, *, edited: bool
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.prompt.setPlainText("補給後に現在地を確認する")
+    assert panel.send_button.isEnabled()
+    instructions: list[tuple[str, str]] = []
+    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.send_button.click()
+    panel.send_button.click()
+    assert instructions == [("補給後に現在地を確認する", "turn")]
+    if edited:
+        panel.prompt.setPlainText("次の原稿")
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    result = {
+        "accepted": MessageResult("accepted", "turn"),
+        "not_sent": MessageResult("not_sent"),
+        "unknown": MessageResult("unknown"),
+    }[outcome]
+    panel.handle_result(ServiceResult(1, "steer", message=result))
+    expected = "次の原稿" if edited else "" if outcome == "accepted" else "補給後に現在地を確認する"
+    assert panel.prompt.toPlainText() == expected
+    assert instructions == [("補給後に現在地を確認する", "turn")]
+
+
+def test_late_turn_notifications_after_stop_do_not_reopen_instruction_delivery(
+    qtbot: QtBot,
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    instructions: list[tuple[str, str]] = []
+    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.prompt.setPlainText("現在地を確認")
+    panel.send_button.click()
+    panel.interrupt()
+    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.handle_result(ServiceResult(1, "steer", message=MessageResult("unknown")))
+    assert panel.prompt.toPlainText() == "現在地を確認"
+    assert not panel.send_button.isEnabled()
+    panel.handle_result(ServiceResult(1, "stop"))
+    panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
+    panel.send_button.click()
+    panel.handle_event(ServiceEvent(1, TurnStarted("new")))
+    panel.handle_result(ServiceResult(1, "send", message=MessageResult("accepted", "new")))
+    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.prompt.setPlainText("次の指示")
+    panel.send_button.click()
+    assert instructions == [("現在地を確認", "old"), ("次の指示", "new")]
 
 
 @pytest.mark.parametrize("edited_draft", [False, True])
@@ -74,7 +150,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
     if edited_draft:
         panel.prompt.setPlainText("次の原稿")
     panel.handle_event(ServiceEvent(1, TurnStarted("accepted-turn")))
-    assert panel.prompt.toPlainText() == ("次の原稿" if edited_draft else "")
+    assert panel.prompt.toPlainText() == ("次の原稿" if edited_draft else "hello")
     panel.disconnect_action.trigger()
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     assert not panel.connect_action.isEnabled()

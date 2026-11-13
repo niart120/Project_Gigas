@@ -40,8 +40,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | D01 対象turnの公開Plan・reasoning summary・activityを受け取り、旧turn/生reasoningと区別する | new | unit/integration | 既存開始順序試験へPlanを統合。red 4 failed/69 passed→green 73 passed |
-| todo | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | connection/service既存送信・停止試験を改訂 |
+| refactor-skipped | D01 対象turnの公開Plan・reasoning summary・activityを受け取り、旧turn/生reasoningと区別する | new | unit/integration | `0db14a4`。既存開始順序試験へPlanを統合。red 4 failed/69 passed→green 73 passed |
+| green | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | 接続87、サービス/終了回帰149、UI/要求寿命/停止27 passed。受付前消去・実行中送信不可を改訂 |
 | todo | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | test_codex_guiへ代表条件を統合 |
 | todo | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
 | todo | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | 既存設定保存・適用試験へ統合 |
@@ -65,6 +65,8 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | 開始 | `uv sync --dev` / `uv lock --check`: pass | 採用lockと環境の同期 |
 | D01 | `uv run pytest tests/unit/test_codex_connection.py -q --basetemp=tmp/pytest-u06-runtime`: red 4 failed/69 passed→green 73 passed | 公開イベント欠落とPlan無効のred。thread/turn、summary置換、MCP画像等の非公開対象除外を確認 |
 | D01回帰・静的確認 | 接続unit＋サービスintegration 112 passed、全体`ty check --no-progress`、担当ruff check/format、diff check: pass | 型境界とdocstring、書式。追加の構造整理は不要 |
+| D02 | 接続unit: red 16 failed/70 passed→green 87 passed。サービスの受付選択試験: red 12 failed。接続＋service＋shutdown回帰149 passed。UI＋answer_lifecycle＋ui_control_lifetime: red 2 failed→green 27 passed | `--basetemp=tmp/pytest-u06-runtime`と`tmp/pytest-u06-ui`を使用。送信受付、拒否/不明、取消し・旧世代、質問中steerで入力停止維持、再MCPなし、下書き保持を確認 |
+| D02静的・独立レビュー | 全体ty、担当ruff check/format、diff check: pass。独立UIレビュー指摘2条件を既存試験へ統合 | 中断後の遅い通知で配送を再開しないことと、新turn IDへの明示送信。追加の構造整理は不要 |
 
 全体gate・製品画面は各項目の結合後に実施する。
 

@@ -10,7 +10,11 @@ from PySide6.QtCore import QThread, Signal
 
 from gigas.game_io.input.serial import SerialInput, list_serial_ports
 from gigas.mcp.game_io import TOOL_TIMEOUT_SECONDS, GameIoMcpServer
-from gigas.runtime.codex.connection import AnswerDeliveryError, CodexConnectionError
+from gigas.runtime.codex.connection import (
+    AnswerDeliveryError,
+    CodexConnectionError,
+    MessageDeliveryError,
+)
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.models import (
     HumanRequest,
@@ -34,7 +38,7 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
     from gigas.services.input import InputDevice, InputGrant
 
-type ServiceOperation = Literal["connect", "login", "send", "answer", "stop", "disconnect"]
+type ServiceOperation = Literal["connect", "login", "send", "steer", "answer", "stop", "disconnect"]
 type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
 type _Operation = (
     ServiceOperation
@@ -53,8 +57,12 @@ class ServiceConnection(Protocol):
         """Begin explicit login."""
         ...
 
-    async def send(self, prompt: str) -> None:
-        """Submit one turn without retrying unknown acceptance."""
+    async def send(self, prompt: str) -> str | None:
+        """Return the acknowledged turn ID, or None if stopped before submission."""
+        ...
+
+    async def steer(self, prompt: str, expected_turn_id: str) -> str:
+        """Return the acknowledged target turn without resolving pending questions."""
         ...
 
     async def answer(
@@ -144,6 +152,21 @@ class AnswerResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageResult:
+    """Runtime acceptance evidence for one ordinary message or in-turn instruction.
+
+    Attributes:
+        outcome: accepted means a successful public reply; not_sent means no
+            submission or an explicit rejection; unknown must not be retried automatically.
+        turn_id: Turn confirmed by the successful reply, otherwise None.
+            Acceptance does not assert turn completion or compliance with the instruction.
+    """
+
+    outcome: Literal["accepted", "not_sent", "unknown"]
+    turn_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ServiceResult:
     """Operation completion; empty error means the call returned successfully.
 
@@ -153,6 +176,8 @@ class ServiceResult:
     rejected or cancelled calls. The generation still identifies the connection.
     failure_id correlates this result with an already emitted SessionStatus from
     that generation. None identifies an uncorrelated result, not a successful call.
+    Message operations include public acceptance evidence in message; a returned
+    call without submission is not acceptance.
     """
 
     generation: int
@@ -160,6 +185,7 @@ class ServiceResult:
     error: str = ""
     answer: AnswerResult | None = None
     failure_id: int | None = None
+    message: MessageResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +200,7 @@ class _Command:
     path: "Path | None" = None
     resolution: "ObservationResolution | None" = None
     input_config: "SerialConfig | None" = None
+    expected_turn_id: str = ""
 
 
 class CodexServiceThread(QThread):
@@ -303,6 +330,20 @@ class CodexServiceThread(QThread):
         """
         self._submit(_Command(self._generation, "send", text=prompt))
 
+    def steer(self, prompt: str, expected_turn_id: str) -> None:
+        """Queue one instruction for the selected active turn, without retrying.
+
+        Args:
+            prompt: User text passed unchanged to the connection.
+            expected_turn_id: Turn identity captured when the user submits.
+
+        The completed signal carries MessageResult for acceptance, rejection, or
+        uncertainty. It does not assert that the model followed the instruction.
+        """
+        self._submit(
+            _Command(self._generation, "steer", text=prompt, expected_turn_id=expected_turn_id)
+        )
+
     def answer(
         self, token: str, *, decision: str | None = None, answers: "Mapping[str, str] | None" = None
     ) -> None:
@@ -343,7 +384,7 @@ class CodexServiceThread(QThread):
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._signal_shutdown)
         for command in queued:
-            self._reject_answer(command)
+            self._reject_submission(command)
 
     def run(self) -> None:
         """Run and finally close the private asyncio loop on this QThread."""
@@ -366,7 +407,7 @@ class CodexServiceThread(QThread):
                 else:
                     self._loop.call_soon_threadsafe(self._dispatch, command)
         if ending:
-            self._reject_answer(command)
+            self._reject_submission(command)
 
     async def _serve(self) -> None:
         self._done = asyncio.Event()
@@ -423,7 +464,7 @@ class CodexServiceThread(QThread):
 
     def _dispatch(self, command: _Command) -> None:
         if self._ending:
-            self._reject_answer(command)
+            self._reject_submission(command)
             return
         if command.operation in {"stop", "disconnect"}:
             self._stop_input()
@@ -455,11 +496,11 @@ class CodexServiceThread(QThread):
         self._tasks.discard(task)
         if task.cancelled():
             # _execute handles cancellation once entered; this call never started.
-            self._reject_answer(command)
+            self._reject_submission(command)
 
-    def _reject_answer(self, command: _Command) -> None:
-        if command.operation == "answer":
-            self._complete(command, "回答は送信されていない", "not_sent")
+    def _reject_submission(self, command: _Command) -> None:
+        if command.operation in {"answer", "send", "steer"}:
+            self._complete(command, "送信されていない", "not_sent")
 
     def _complete(
         self,
@@ -467,6 +508,7 @@ class CodexServiceThread(QThread):
         error: str,
         outcome: AnswerOutcome,
         failure_id: int | None = None,
+        turn_id: str | None = None,
     ) -> None:
         if command.operation in {
             "project_create",
@@ -477,8 +519,18 @@ class CodexServiceThread(QThread):
         }:
             return
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
+        message = None
+        if command.operation in {"send", "steer"}:
+            if outcome == "sent":
+                message = (
+                    MessageResult("accepted", turn_id)
+                    if turn_id is not None
+                    else MessageResult("not_sent")
+                )
+            else:
+                message = MessageResult(outcome)
         self.completed.emit(
-            ServiceResult(command.generation, command.operation, error, answer, failure_id)
+            ServiceResult(command.generation, command.operation, error, answer, failure_id, message)
         )
 
     async def _apply_input(self) -> None:
@@ -503,13 +555,14 @@ class CodexServiceThread(QThread):
         error = ""
         failure_id: int | None = None
         outcome: AnswerOutcome = "sent"
+        turn_id: str | None = None
         try:
-            await self._perform(command)
+            turn_id = await self._perform(command)
         except asyncio.CancelledError:
-            if command.operation == "answer":
-                self._complete(command, "回答の送信結果を確認できない", "unknown")
+            if command.operation in {"answer", "send", "steer"}:
+                self._complete(command, "送信結果を確認できない", "unknown")
             return
-        except AnswerDeliveryError as failure:
+        except (AnswerDeliveryError, MessageDeliveryError) as failure:
             error = str(failure)
             outcome = "unknown"
             failure_id = failure.failure_id
@@ -520,9 +573,9 @@ class CodexServiceThread(QThread):
         except Exception:  # noqa: BLE001 -- sanitize the service/GUI boundary
             error = "Codex操作に失敗"
             outcome = "unknown"
-        self._complete(command, error, outcome, failure_id)
+        self._complete(command, error, outcome, failure_id, turn_id)
 
-    async def _perform(self, command: _Command) -> None:
+    async def _perform(self, command: _Command) -> str | None:
         if command.operation == "input_ports":
             try:
                 ports = await asyncio.to_thread(list_serial_ports)
@@ -530,7 +583,7 @@ class CodexServiceThread(QThread):
                 self.input_ports.emit((), str(error))
             else:
                 self.input_ports.emit(ports, "")
-            return
+            return None
         if command.operation == "connect":
             async with self._resources_lock:
                 if self._connection is not None or command.options is None:
@@ -546,18 +599,20 @@ class CodexServiceThread(QThread):
                     self._thread_started,
                 )
             await self._connection.open()
-            return
+            return None
         connection = self._connection
         if connection is None or command.generation != self._active_generation:
-            if command.operation == "answer":
-                message = "この接続では回答を受け付けない"
+            if command.operation in {"answer", "send", "steer"}:
+                message = "この接続では送信を受け付けない"
                 raise CodexConnectionError(message)
-            return
+            return None
         match command.operation:
             case "login":
                 await connection.login()
             case "send":
-                await connection.send(command.text)
+                return await connection.send(command.text)
+            case "steer":
+                return await connection.steer(command.text, command.expected_turn_id)
             case "answer":
                 self._sending_answers.add(command.token)
                 try:
@@ -577,6 +632,7 @@ class CodexServiceThread(QThread):
                 await connection.stop()
             case "disconnect":
                 await self._close_connection()
+        return None
 
     def _receive(self, generation: int, event: "ConnectionEvent") -> None:
         if generation == self._active_generation:

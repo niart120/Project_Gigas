@@ -121,6 +121,7 @@ class ApplicationShell(QObject):
         panel.disconnect_requested.connect(self.service.disconnect_runtime)
         panel.login_requested.connect(self.service.login)
         panel.send_requested.connect(self.service.send)
+        panel.steer_requested.connect(self.service.steer)
         panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)

@@ -8,7 +8,7 @@
 
 設定保存の処理中や失敗後も、キャンセル・Escで閉じて主画面の「中断」「切断」へ戻れます。中断しても提出済みの設定保存・接続適用は継続します。新しいCodex接続は設定を正常に読み込んでから行います。
 
-下部の入力欄から「送信」または`Ctrl+Enter`で通常ターンを開始します。Enter単独は改行に使い、IME変換中の`Ctrl+Enter`では送信しません。「中断」は入力を先に止めてターンの中断を要求し、「停止」表示まで終端確認を待ちます。「切断」は入力を止めてruntime接続を終了します。実行中の追加指示は未対応です。受理前の中断や送信失敗では原稿を残し、ターン開始を確認したときにだけ送信時と同じ原稿を消します。送信後に編集した原稿は残します。受付結果が不明な要求を自動再送しません。ターン失敗の終端を確認できた場合は通知に理由を残し、接続を維持して次の明示的な送信を受け付けます。
+下部の入力欄から「送信」または`Ctrl+Enter`で通常ターンを開始し、実行中はそのturnへ追加指示を送ります。Enter単独は改行に使い、IME変換中の`Ctrl+Enter`では送信しません。「中断」は入力を先に止めてターンの中断を要求し、「停止」表示まで終端確認を待ちます。「切断」は入力を止めてruntime接続を終了します。公開の送信成功応答を確認したときにだけ送信時と同じ原稿を消し、受理前の中断・失敗・受付不明や送信後に編集した原稿は残します。追加指示がturn切替と競合して拒否されても、別turnへ自動転送しません。ターン失敗の終端を確認できた場合は通知に理由を残し、接続を維持して次の明示的な送信を受け付けます。
 
 接続に失敗した場合は「通知」から説明と診断を確認できます。「切断」でその接続の終了を確認してから再び「接続」します。自動再接続はしません。同じ失敗が状態通知と操作結果の両方から届いても1回だけ表示し、別の試行が同じ理由で失敗した場合は再度通知します。
 
@@ -68,7 +68,9 @@ Codexには記録先と観測IDから画像を参照する方法を渡します�
 
 切断中は`create_project(path)`と`open_project(path)`で保存先の選択を予約できます。`project_completed`の`ProjectResult(path, error)`が結果を返し、空の`error`だけが成功です。失敗時は選択済みの保存先を保持します。`set_observation_resolution(value)`は以後の観測へ設定を適用します。`recording_failed(identifier, path, reason)`は観測保存・チャット準備・thread対応記録の失敗を通知し、観測成功や会話開始の成功と混同しないでください。
 
-GUIスレッドから`login()`、`send(prompt)`、`answer(token, decision=..., answers=...)`、`interrupt()`、`disconnect_runtime()`を呼べます。呼出しは処理を予約して戻ります。`completed`は操作呼出しの終了を通知し、ターン終端は`SessionStatus`で判定します。`interrupt()`の完了だけではターン終了を意味しません。
+GUIスレッドから`login()`、`send(prompt)`、`steer(prompt, expected_turn_id)`、`answer(token, decision=..., answers=...)`、`interrupt()`、`disconnect_runtime()`を呼べます。呼出しは処理を予約して戻ります。`completed`は操作呼出しの終了を通知し、ターン終端は`SessionStatus`で判定します。`interrupt()`の完了だけではターン終了を意味しません。
+
+送信・追加指示の`ServiceResult.message`は`MessageResult(outcome, turn_id)`です。`accepted`は公開応答での受付、`not_sent`は未配送または明確な拒否、`unknown`は受付不明を表します。`accepted`の場合だけ確認したturn IDが入り、turnの完了・指示の遵守を意味しません。
 
 回答の`ServiceResult.answer`は`AnswerResult(token, outcome)`です。`outcome`は`sent`（通信への書込完了）、`not_sent`（送信前の拒否）、`unknown`（送信結果不明）のいずれかです。世代とtokenの両方を照合してください。`RequestResolved`は回答受付の終了を表し、送信成功の根拠にはなりません。終了中の未処理回答にも結果を通知します。
 

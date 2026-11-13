@@ -64,6 +64,7 @@ class ConnectionPanel(QWidget):
     disconnect_requested = Signal()
     login_requested = Signal()
     send_requested = Signal(str)
+    steer_requested = Signal(str, str)
     interrupt_requested = Signal()
     answer_requested = Signal(object)
     failed = Signal(object)
@@ -85,6 +86,7 @@ class ConnectionPanel(QWidget):
         self._pending: set[str] = set()
         self._texts: dict[str, tuple[str, str]] = {}
         self._submitted = ""
+        self._active_turn: str | None = None
         self._error = ""
         self._stopping = False
         self._failure_ids: set[int] = set()
@@ -145,6 +147,7 @@ class ConnectionPanel(QWidget):
         self._error = ""
         self._pending = {"connect"}
         self._stopping = False
+        self._active_turn = None
         for card in self.cards.values():
             card.invalidate()
             self._request_layout.removeWidget(card)
@@ -189,11 +192,12 @@ class ConnectionPanel(QWidget):
                 self._notify_failure(event.detail, event.failure_id)
             if event.phase in {"stopping", "stopped", "closed", "error"}:
                 self._expire_requests()
+            if event.phase in {"ready", "stopped", "closed", "error"}:
+                self._active_turn = None
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, TurnStarted):
-            if self.prompt.toPlainText() == self._submitted:
-                self.prompt.clear()
+            self._active_turn = event.turn_id
             for token, card in tuple(self.cards.items()):
                 if card.request.turn_id != event.turn_id and card.is_settled:
                     self._request_layout.removeWidget(card)
@@ -248,6 +252,14 @@ class ConnectionPanel(QWidget):
             card = self.cards.get(result.answer.token)
             if card is not None:
                 card.finish_submission(result.answer.outcome)
+        if (
+            result.operation in {"send", "steer"}
+            and result.operation in self._pending
+            and result.message is not None
+            and result.message.outcome == "accepted"
+            and self.prompt.toPlainText() == self._submitted
+        ):
+            self.prompt.clear()
         self._pending.discard(result.operation)
         self._error = result.error
         if result.error:
@@ -289,14 +301,19 @@ class ConnectionPanel(QWidget):
             self._open_url(url)
 
     def _send(self) -> None:
-        if "send" in self._pending:
+        if not self.send_button.isEnabled():
             return
         self._submitted = self.prompt.toPlainText()
         self._error = ""
-        self._stopping = False
-        self._pending.add("send")
+        steering = self._status.phase in {"running", "waiting"}
+        self._pending.add("steer" if steering else "send")
+        if not steering:
+            self._stopping = False
         self._render()
-        self.send_requested.emit(self._submitted)
+        if steering and self._active_turn is not None:
+            self.steer_requested.emit(self._submitted, self._active_turn)
+        else:
+            self.send_requested.emit(self._submitted)
 
     def _expire_requests(self) -> None:
         for card in self.cards.values():
@@ -339,11 +356,18 @@ class ConnectionPanel(QWidget):
         ready = (
             available
             and not requesting
-            and phase in {"ready", "stopped"}
-            and "send" not in self._pending
+            and (
+                phase in {"ready", "stopped"}
+                or (
+                    phase in {"running", "waiting"}
+                    and self._active_turn is not None
+                    and not self._stopping
+                )
+            )
+            and not self._pending.intersection({"send", "steer"})
         )
         self.send_button.setEnabled(ready and bool(self.prompt.toPlainText().strip()))
-        self.prompt.setReadOnly(not ready)
+        self.prompt.setReadOnly(not available)
         self.interrupt_button.setEnabled(
             available
             and (phase in {"starting", "running", "waiting"} or "send" in self._pending)

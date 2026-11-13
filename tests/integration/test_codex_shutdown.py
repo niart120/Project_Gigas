@@ -39,11 +39,17 @@ class LifetimeConnection:
     async def login(self) -> None:
         """Provide the connection interface."""
 
-    async def send(self, prompt: str) -> None:
+    async def send(self, prompt: str) -> str | None:
         """Accept a turn without completing it."""
         assert prompt
         self.sends += 1
         self.emit(SessionStatus("running", "model", "high", True))
+        return f"turn-{self.sends}"
+
+    async def steer(self, prompt: str, expected_turn_id: str) -> str:
+        """Acknowledge an instruction for the selected turn."""
+        assert prompt
+        return expected_turn_id
 
     async def answer(
         self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None

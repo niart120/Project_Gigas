@@ -11,6 +11,7 @@ from gigas.runtime.codex.connection import (
     AnswerDeliveryError,
     CodexConnection,
     CodexConnectionError,
+    MessageDeliveryError,
 )
 from gigas.runtime.codex.models import (
     ActivityEvent,
@@ -29,6 +30,7 @@ from gigas.runtime.codex.models import (
 from gigas.runtime.codex.transport import (
     JsonObject,
     JsonValue,
+    RpcError,
     RpcId,
     RpcNotification,
     ServerRequest,
@@ -67,6 +69,7 @@ class FakePeer:
         self.authenticated = True
         self.failure: str | None = None
         self.responses: dict[str, JsonValue] = {}
+        self.rpc_errors: dict[str, int] = {}
         self.gates: dict[str, asyncio.Event] = {}
         self.close_gate: asyncio.Event | None = None
         self.close_calls = 0
@@ -84,6 +87,8 @@ class FakePeer:
         if method == self.failure:
             message = "PRIVATE-UPSTREAM-TEXT"
             raise TransportError(message)
+        if method in self.rpc_errors:
+            raise RpcError(self.rpc_errors[method], method)
         if method in self.responses:
             return self.responses[method]
         if method == "initialize":
@@ -113,6 +118,9 @@ class FakePeer:
             return {"status": "unsubscribed"}
         if method == "turn/start":
             return {"turn": {"id": "turn-1", "status": "inProgress", "items": []}}
+        if method == "turn/steer":
+            assert params is not None
+            return {"turnId": params["expectedTurnId"]}
         if method == "account/login/start":
             return {"type": "chatgpt", "loginId": "login-1", "authUrl": "https://auth.openai.com/"}
         if method == "account/login/cancel":
@@ -788,7 +796,7 @@ def test_stop_before_start_response_never_resurrects_turn(tmp_path: Path, method
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "stopping"
         peer.gates[method].set()
-        await send
+        assert await send == ("turn-1" if method == "turn/start" else None)
         if method != "turn/start":
             assert sum(name == "turn/start" for name, _ in peer.calls) == int(resuming)
             assert sum(isinstance(event, TurnStarted) for event in events) == int(resuming)
@@ -852,7 +860,7 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         peer.events.put_nowait(_terminal())
         await _events_processed()
         peer.gates["turn/start"].set()
-        await send
+        assert await send == "turn-1"
         request = next(event for event in events if isinstance(event, HumanRequest))
         assert [event for event in events if isinstance(event, TurnStarted)] == [
             TurnStarted("turn-1")
@@ -880,12 +888,156 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         )
         await _events_processed()
         peer.gates["turn/start"].set()
-        await second
+        assert await second == "turn-2"
         assert [event for event in events if isinstance(event, TurnStarted)] == [
             TurnStarted("turn-1"),
             TurnStarted("turn-2"),
         ]
         await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("completed_before_reply", [False, True])
+def test_steer_targets_one_turn_and_preserves_waiting_request(
+    tmp_path: Path, *, completed_before_reply: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        preparations: list[str] = []
+
+        async def prepare(prompt: str, _thread: str | None) -> ThreadConfiguration:
+            preparations.append(prompt)
+            return ThreadConfiguration(tmp_path)
+
+        connection = CodexConnection(
+            peer, ConnectionOptions(tmp_path), events.append, prepare_turn=prepare
+        )
+        await connection.open()
+        assert await connection.send("開始") == "turn-1"
+        peer.events.put_nowait(_question())
+        await _events_processed()
+        request = next(event for event in events if isinstance(event, HumanRequest))
+        peer.gates["turn/steer"] = asyncio.Event()
+        steering = asyncio.create_task(connection.steer("門の前で止まる", "turn-1"))
+        await _events_processed()
+        assert not steering.done()
+        assert RequestResolved(request.token) not in events
+        assert [event for event in events if isinstance(event, SessionStatus)][
+            -1
+        ].phase == "waiting"
+        assert preparations == ["開始"]
+        assert [params for method, params in peer.calls if method == "turn/steer"] == [
+            {
+                "threadId": "thread-1",
+                "expectedTurnId": "turn-1",
+                "input": [{"type": "text", "text": "門の前で止まる"}],
+            }
+        ]
+        if completed_before_reply:
+            peer.events.put_nowait(_terminal())
+            await _events_processed()
+        peer.gates["turn/steer"].set()
+        assert await steering == "turn-1"
+        if not completed_before_reply:
+            assert RequestResolved(request.token) not in events
+            await connection.answer(request.token, answers={"route": "東"})
+        assert len([event for event in events if isinstance(event, TurnStarted)]) == 1
+        assert [
+            event.text for event in events if isinstance(event, TextEvent) and event.role == "user"
+        ] == [
+            "開始",
+            "門の前で止まる",
+        ]
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("case", ["mismatch", "stopped", "completed", "empty"])
+def test_stale_or_invalid_steer_never_sends_to_another_turn(tmp_path: Path, case: str) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        await connection.send("開始")
+        if case == "stopped":
+            await connection.stop()
+        elif case == "completed":
+            peer.events.put_nowait(_terminal())
+            await _events_processed()
+            peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "inProgress"}}
+            await connection.send("次へ")
+        with pytest.raises(CodexConnectionError):
+            await connection.steer(
+                "" if case == "empty" else "追加", "old" if case == "mismatch" else "turn-1"
+            )
+        assert not any(method == "turn/steer" for method, _ in peer.calls)
+        await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("method", ["turn/start", "turn/steer"])
+@pytest.mark.parametrize("failure", ["rpc", "transport", "malformed"])
+def test_message_rejection_is_distinct_from_unknown_acceptance(
+    tmp_path: Path, method: str, failure: str
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), lambda _: None)
+        await connection.open()
+        if method == "turn/steer":
+            await connection.send("開始")
+        if failure == "rpc":
+            peer.rpc_errors[method] = -32600
+        elif failure == "transport":
+            peer.failure = method
+        else:
+            peer.responses[method] = {}
+        expected = CodexConnectionError if failure == "rpc" else MessageDeliveryError
+        operation = (
+            connection.steer("追加", "turn-1")
+            if method == "turn/steer"
+            else connection.send("開始")
+        )
+        with pytest.raises(expected) as caught:
+            await operation
+        assert isinstance(caught.value, MessageDeliveryError) == (failure != "rpc")
+        assert "PRIVATE" not in str(caught.value)
+        assert sum(name == method for name, _ in peer.calls) == 1
+        assert peer.closed == (failure != "rpc")
+        if failure == "rpc":
+            peer.rpc_errors.clear()
+            accepted = (
+                await connection.steer("明示再送", "turn-1")
+                if method == "turn/steer"
+                else await connection.send("明示再送")
+            )
+            assert accepted == "turn-1"
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_start_acceptance_survives_subsequent_interrupt_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["turn/start"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        sending = asyncio.create_task(connection.send("開始"))
+        await _events_processed()
+        await connection.stop()
+        peer.failure = "turn/interrupt"
+        peer.gates["turn/start"].set()
+        assert await sending == "turn-1"
+        assert peer.closed
+        assert any(
+            isinstance(event, SessionStatus) and event.failure_id is not None for event in events
+        )
 
     _run(scenario())
 
@@ -1109,7 +1261,7 @@ def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) ->
     _run(scenario())
 
 
-@pytest.mark.parametrize("method", ["initialize", "turn/start"])
+@pytest.mark.parametrize("method", ["initialize", "turn/start", "turn/steer"])
 def test_cancelled_operation_closes_owned_peer(tmp_path: Path, method: str) -> None:
     async def scenario() -> None:
         peer = FakePeer()
@@ -1119,7 +1271,11 @@ def test_cancelled_operation_closes_owned_peer(tmp_path: Path, method: str) -> N
             operation = asyncio.create_task(connection.open())
         else:
             await connection.open()
-            operation = asyncio.create_task(connection.send("開始"))
+            if method == "turn/steer":
+                await connection.send("開始")
+                operation = asyncio.create_task(connection.steer("追加", "turn-1"))
+            else:
+                operation = asyncio.create_task(connection.send("開始"))
         await _events_processed()
         operation.cancel()
         with pytest.raises(asyncio.CancelledError):
