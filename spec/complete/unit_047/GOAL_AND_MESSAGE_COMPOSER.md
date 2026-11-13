@@ -4,6 +4,8 @@
 
 U06 M1の追加修正。利用者の2026-11-13の指示を起点に、目標と今回の作業を別見出しで常設し、空欄時のMessageプレースホルダーを入力枠内へ置く。一体型入力欄は通常送信と途中指示の既存配送を使う。
 
+状態: 実装・検証完了。D01は`7677ebb`、D02は`b9f1471`へコミットした。U06親はM2/M3未着手のwipを維持する。
+
 ## 2. 対象範囲
 
 目標の空状態、履歴の外側見出し撤去、入力枠内のMessageプレースホルダー・本文・操作列・モデル/推論量表示と既存Codex設定への入口。実行中の原稿ありは最終指示に従い送信と小さい中断を両方表示する。
@@ -14,7 +16,7 @@ Goal接続・Goal送信モード・pause/resumeはM2。候補モデル取得・�
 
 ## 4. 関連文書・着手条件
 
-[初期UI](../../initial/10-ui-interaction.md)、[U06親](../unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
+[初期UI](../../initial/10-ui-interaction.md)、[U06親](../../wip/unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
 
 ## 5. 振る舞い仕様
 
@@ -45,7 +47,7 @@ src/gigas/uiのPlanPanel、MessageComposer、ConnectionPanel、MainWindow、設�
 
 ## 9. 検証
 
-対象のred/green、unit/integration、ruff format/check、ty、lock/build、文書リンク、Windows通常/小画面で配置と操作を確認する。結果は作業後に記録する。
+対象のred/green、unit/integration、静的検査・配布物、文書リンク、Windows通常/小画面の表示と操作を確認した。
 
 D01: `uv run pytest tests/unit/test_plan_panel.py -q`で未実装属性のred→2 passed。表示順・空欄常設・Plan更新で目標値不変を既存試験へ統合。既存GUIのPlan回帰5 passed。担当ruff/format/ty成功。GoalのAPI・状態・架空の本文は追加しない。
 
@@ -53,13 +55,25 @@ D02: 部品未実装のred→部品3件green、既存GUIの途中指示6件と�
 
 固定Messageバッジは採用せず、利用者の訂正に従いQt標準placeholderを使う。本文背景を一体面へ揃え、モデル名は小数文字幅を切り上げて省略判定と一致させた。Windows通常フォント/DPR 1.5で整数丸めによる末尾省略を再現し修正。拡大専用分岐・検証は追加していない。
 
+| command | 結果・対象 |
+|---|---|
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u047-placeholder-final` | 743 passed。最終文字幅修正は上記61件とWindows対象1件で再確認 |
+| `uv run ruff format --check .` / `uv run ruff check .` / `uv run ty check --no-progress` | 成功、204 Pythonファイル。type-boundary-review/docstring-styleで公開引数・所有・None境界を照合 |
+| `uv lock --check` / `uv build` | 成功、依存変更なし、wheel/sdist生成 |
+| `uv run python scripts/check_package.py` | 成功、別環境install、資材・capture子プロセス終了、両entrypointの起動/終了 |
+| `uv run python tmp/u06-m1/validate_docs.py` / `git diff --check` | 成功、参照・unit一意性・仮テキスト・差分。意味上の契約は文書と実装を読んで照合 |
+
+Windowsの製品MainWindowへ固定通知と合成画像を渡し、[通常1280×720の空欄](assets/native-normal-empty.png)と[800×600の原稿あり](assets/native-small-draft.png)を同じフォント条件で確認した。薄いMessageが入力で消え、途中指示の受付成功後に戻ること、原稿あり時の送信/小さい中断、空欄時の右端中断、両見出しの常設とPlan中断表示を確認。fixture記録は対象turnへのsteerが1回・stopが1回。実モデルや機器へ接続した試験ではない。検証用ウィンドウは終了済み。
+
+独立レビューで配送/停止提出中/原稿/IME/設定入口に必須修正なし。設定入口は既存I/O制約と同一ダイアログを共有し、送信・原稿を部品側へ二重所有させていない。通常フォントでの画素・モデル名幅の検証は描画不具合の回帰に限定した。
+
 ## 10. 先送り事項
 
-Goalの実接続はM2、次turn設定はM3。実モデル/実機、実IME・複数DPIの工程受入は既存のM3引継ぎを維持する。
+Goalの実接続と本文の選択結合はM2、次turn設定はM3。設定入口は現在の保存/次接続契約までで、会話中の候補選択UIと次turn反映は未実装。実モデル/実機、実IME・複数モニターDPI遷移の工程受入はnot runとして既存M3引継ぎを維持する。単一画面のDPR 1.5での描画確認を複数DPIの受入へ広げない。M2以降・PR/mergeは今回not applicable。
 
 ## 11. チェックリスト
 
 - [x] 意図と対象外を確認した
-- [ ] TDD項目を実装・検証・コミットした
-- [ ] 表示・品質gateと未検証範囲を記録した
-- [ ] 仕様の整合をレビューした
+- [x] TDD項目を実装・検証・コミットした
+- [x] 表示・品質gateと未検証範囲を記録した
+- [x] 仕様の整合をレビューした
