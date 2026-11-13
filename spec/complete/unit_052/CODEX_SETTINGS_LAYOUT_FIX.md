@@ -49,3 +49,7 @@ Windows Qt描画を760×650と620×440 logicalで再作成し、接続済みと�
 APIのlimitName／limitId（例: codex）を見出しにする表示を削除。期間ごとに「一週間の利用上限　残り 21% (リセット: 11/15 00:00)」の一行へまとめる。残りは100−used_percentで計算し、未取得値は補わない。受信データ・利用制限判定は変更しない。
 
 既存unit/integrationを改訂し、改行の除去と残割合への変換でred→greenを確認（refactor-skipped）。使用済み0%→残り100%、100%→残り0%、未取得、コピー・スクロール保持を検証。`uv run pytest tests/unit/test_codex_settings.py tests/integration/test_codex_gui.py -q --basetemp=tmp/u052-remaining-final`: 51 passed。ruff format/check・ty・文書リンク・diff検査を実施。Qt描画を760×650／620×440で再確認し、利用状況が一行に収まることを目視確認。実API再接続と実機検証は表示だけの変更のため未実行。
+
+## 上段の見出し・行間の追加修正（2026-11-13）
+
+上段の見出しを「Codex」とし、専用の行間12px指定を削除。他タブと同じQt標準値を使う。実行環境で上段Gridと一般・I/O・接続時の既定値のFormがすべて6 logical pxであることを確認。760×650／620×440のQt描画と一般タブを目視比較した。`uv run pytest tests/unit/test_codex_settings.py tests/integration/test_codex_gui.py -q --basetemp=tmp/u052-spacing`: 51 passed。ruff format/check、文書リンク、diff検査成功。表示だけの変更で通信・型・依存は不変のため、実API接続・型検査・package buildは再実行しない。
