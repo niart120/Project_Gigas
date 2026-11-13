@@ -4,7 +4,7 @@
 
 通常turnで成立した観測・入力をGoalの継続攻略へ接続し、依頼・記憶・途中介入・公開表示を対応付ける。攻略判断とターン間の継続はCodexへ委任する。
 
-状態: **wip、M0調査・設計完了、M1実装・検証完了、M2以降未着手**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)の実装・検証・コミットを完了した。PR・mergeは対象外。M0の公開API・隔離接続・Qt試作の結果を、製品/実機の受入と混同しない。
+状態: **wip、M0調査・設計完了、M1実装・UI修正完了、M2以降未着手**。2026-11-13の依頼により親をplannedから移して[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)を完了し、続く依頼で[従来M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)を実装・検証・コミットした。その後のUIレビューと合意を受け、[M1文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)で配置・回答操作・閲覧保持を修正・検証・コミットした。M2以降・PR・mergeは今回の対象外。公開API・隔離接続・Qt試作の結果を製品/実機の受入と混同しない。
 
 起点は[実装計画](../../initial/05-implementation.md)、[認証と実行設定の分離](../../initial/02-runtime.md)、[主画面とメッセージ操作](../../initial/10-ui-interaction.md)。利用場面は明示的な継続開始、公開計画の確認、質問回答/追加指示/承認、停止と同一セッション再開。
 
@@ -30,7 +30,7 @@
 |---|---|
 | Goalと通常送信 | goal/set(active)だけで開始し、turn/startを重ねない。既存Goalの目的更新は利用量/状態を維持。pause/clearとは別にturn/interruptが必要。実モデルで継続/再開/paused中会話を確認 |
 | U05の再利用 | Goalの複数turnで同じrun/Grant/endpointを保持。停止で旧Grantを失効し、明示再開のunsubscribe→同thread resumeで新MCPを公開。実runtime+模擬モデル/機器で2自律turn、停止、3DS公開更新を確認 |
-| 共通Message | 質問ID別の回答原稿を一つの欄で編集し、一つのanswers応答へまとめる。追加指示は対象turnへのsteer、承認は明示ボタン。turn間は下書き保持とし配送キューを作らない。質問待ちsteerと複数回答を実runtimeで確認 |
+| Messageと要求応答 | 通常入力と追加指示はMessage、回答・承認は履歴内の要求カードへ分ける。質問ID別原稿を要求ごとに一つのanswersへまとめ、追加指示は対象turnへのsteerへ渡す。M0で確認した配送契約を維持し、M1修正で送信先リストを撤去した。turn間に配送キューを作らない |
 | 公開表示 | tools.update_plan.enabled=trueが必要。Planは現在turnの公開一覧、reasoningは公開summaryのみ、activityは実item。Qt標準部品で選択/コピー/閲覧保持を確認。実モデルsummaryは今回未受信 |
 | 記憶・記録 | guide/currentは不足時だけ生成、既存保持。Codex書込をmemoryへ限定し、原記録はアプリが同じRecordingServiceで非同期保存。実モデル書込、sandboxの親原記録読取/書込拒否を確認 |
 | 認証・設定 | ログインとモデル妥当性を分離。公開experimental thread/settings/updateを次turnへ使い、通常/自律turnへのモデル/effort反映を実モデルと実送信で確認。現在turnは変えない。APIキー/新規ログインはM3未検証 |
@@ -44,18 +44,19 @@
 | 子工程 | 状態・開始条件 | 到達点 |
 |---|---|---|
 | [M0 API・操作契約・Qt](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md) | 調査・設計完了 | 公開形式/実呼出し/模擬機器/Qtと未検証を分け、KISSで設計を確定 |
-| [M1 共通対話UI](../../complete/unit_045/COMMON_DIALOGUE_UI.md) | 実装・検証完了。通常turnの実モデル結合と最終固定通知UIを区別して記録 | 左右配置、共通Message/History、質問・承認、Plan/reasoning/activityを実通知へ接続。旧質問入力を置換し、選択/下書き/閲覧保持を確認 |
-| M2 Goal・記憶・記録 | M1完了とM0契約の実装詳細化 | Goalとrun寿命、停止/再開/MCP更新、guide/memory・公開対話記録を結合。起動環境/sandboxを製品で再確認 |
+| [M1 共通対話UI](../../complete/unit_045/COMMON_DIALOGUE_UI.md) | 従来実装・検証完了。配置・回答操作は後続修正で置換 | 公開通知、配送結果、下書き、選択/コピー/閲覧保持を結合した履歴を残す |
+| [M1 文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md) | 修正・検証・コミット完了 | 左の会話内質問/承認と通常Message、右の16:9映像枠と常設Planを結合。letterbox/stretchと要求寿命を維持し、選択・コピー・更新中閲覧保持を受け入れる |
+| M2 Goal・記憶・記録 | M1修正完了とM0契約の実装詳細化 | Goalとrun寿命、停止/再開/MCP更新、guide/memory・公開対話記録を結合。右の目標欄は確定Goalから表示。起動環境/sandboxを製品で再確認 |
 | M3 設定・認証と工程受入 | M2完了 | 認証と独立した次turn設定、制限/配送競合、新規ChatGPT/APIキー、実モデル・短い実機依頼を確認 |
 
-M1にGoalの仮表示・偽の成功や旧新UI切替を作らない。M3の設定変更をUI置換へ混ぜない。未着手の子仕様/全TDD項目は先行作成せず、次の候補はM2一つとし、今回M1から先へ着手しない。
+M1にGoalの仮表示・偽の成功や旧新UI切替を作らない。M3の設定変更をUI置換へ混ぜない。今回のM1修正で文字拡大専用の例・検証・分岐も撤去した。未着手の子仕様/全TDD項目を先行作成せず、次の候補はM2とする。
 
 ## 7. 振る舞い仕様・TDD Test Listの受入観点
 
 | 観点 | 工程全体の受入 |
 |---|---|
 | 継続・介入・停止 | turn終了をGoal達成とせず、対象の自律turnへ入力/通知を結合。pause/stopで入力停止を先行し、遅い通知/回答で復活しない。保持Goalだけ明示再開できる |
-| 共通UI | Goal/Plan/History/Messageの役割が分かれ、質問中も共通欄が見える。複数質問・自由回答不可・承認を明示的に配送し、秘密入力指定の要求全体は未対応で拒否して、選択/コピー/スクロールが成立する |
+| 共通UI | Goalと公開Plan、会話内の要求カード、通常Messageの役割が分かれる。複数質問・自由回答不可・承認を明示的に配送し、本文と判断が離れない。秘密入力指定は要求全体を未対応で拒否する。カード・Planの更新中も選択/コピー/閲覧位置を保ち、16:9映像枠と既存の方式選択が両立する |
 | 記憶・記録 | 既存記憶を保全しCodexが必要なmemoryだけ編集。公開対話・入力・観測を追跡でき、原画像を再編集しない。保存失敗と入力停止を結合しない |
 | 認証・設定・制限 | 無効既定値でもログイン/選び直し可能。通常/自律turnそれぞれに次turn設定が反映し現turn不変。取得不能の値を捏造せず、制限停止後の自動再開/課金変更をしない |
 
@@ -67,7 +68,7 @@ M0は本親・子仕様、初期設計、移動参照、Qt証跡と隔離調査�
 
 ## 9. 検証状態
 
-M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験とGUI/実機はnot run。通常turnのU05実機受入を流用しない。M1は共通対話UIを実装し全unit/integration 730 passed、通常turnの実モデルPlan/応答と固定通知のWindows操作を確認した。利用者の指摘に従い映像枠と高さ配分を見直し、秘密入力の専用UIは撤回した。実IME・複数DPI・実summaryはM3へ残す。
+M0の実ChatGPTモデル、採用runtime+模擬Responses/機器、Qt試作、schema/source/文書確認は子仕様へ記録した。製品Goalの単体/結合試験とGUI/実機はnot run。通常turnのU05実機受入を流用しない。従来M1は全unit/integration 730 passed、通常turnの実モデルPlan/応答と固定通知のWindows操作を確認した。今回のunit_046修正は全unit/integration 740 passed、配布物検査と固定通知によるWindows通常・小画面、回答/拒否/中断、複数発言の選択・コピー保持を確認した。実モデル・実機の再受入とは区別する。実IME・複数DPI・実summaryはM3へ残す。
 
 M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe、複数turn、介入、質問/承認、pause/再開/clear、設定適用と停止、記録IDを短い実機依頼で対応付ける。300秒実待機や長時間はU10。制限検証で意図的な課金超過は起こさない。
 
@@ -75,7 +76,7 @@ M3の対象機器はUSB Video Device、COM8・CH552・9600 baud。初回observe�
 
 | 事項 | 担当・期限 |
 |---|---|
-| 小画面/大文字、選択箇所自体の更新、IME/DPI、実summary | M1で高さ配分と閲覧保持を検証。秘密入力は用途の根拠がなくM1で撤回。実IME・複数DPI・実summaryはM3の受入へ残す |
+| 小画面、選択箇所自体の更新、IME/DPI、実summary | M1修正で通常フォント条件の大小画面と閲覧保持を検証済み。文字拡大専用の受入は廃止。実IME・複数DPI・実summaryはM3へ残す |
 | Goal開始/再開/完了/制限と要求・停止・設定変更の競合、初回observe、memory書込 | M2/M3受入。公開API単体の成功を製品結合の成功にしない |
 | 独立runtime起動環境 | M2。desktop由来の2つのCODEX_WINDOWS_*起動変数でsandbox内書込が失敗し、子プロセスから除去すると成立した根拠に従う |
 | 新規ブラウザ認証/APIキー/利用不能時 | M3。既存ChatGPT認証の成功と区別する |

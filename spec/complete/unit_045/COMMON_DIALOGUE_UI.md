@@ -6,6 +6,8 @@
 
 2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討した。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直した。D08までの自動検証成功と、UIの受入完了を区別する。
 
+その後のUIレビューで、共通欄の送信先切替・独立した承認列・Planの表示位置を再設計した。現在の契約は[初期設計10](../../initial/10-ui-interaction.md)と[M1修正unit_046](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)へ引き継ぐ。本書の実装・検証結果はunit_045当時の記録であり、後続配置の受入を意味しない。文字拡大専用の例と検証は後続合意で廃止した。
+
 開始時は `codex/u06-m0-goal-design`、M0の未コミット文書だけが残っていた。M0を `79eb6e5` として独立記録した。製品の起点は `ad69559`。U05の入力停止、最新キャッシュ即応、非同期保存、提出済み設定適用の継続を維持する。
 
 ## 2. 対象範囲
@@ -22,7 +24,7 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 
 開始時は質問ごとの入力欄を表示し、質問待ちに通常入力を隠していた。履歴は全本文を組み直してQPlainTextEditへ反映していた。これを共通入力とitem単位のQTextBrowser更新へ置き換え、旧経路を併存させない。
 
-## 5. 振る舞い仕様
+## 5. 当時の振る舞い仕様
 
 | 入力・状態 | 期待する振る舞い |
 |---|---|
@@ -68,7 +70,7 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 
 ## 9. 検証計画・結果
 
-対象pytestのred/green、全unit/integration、ruff format/check、ty、uv lock --check、uv build、git diff --check、文書参照を確認する。製品Qt画面は小画面・大文字、公開通知表示、質問・承認・中断、IME/選択/コピー/スクロールを確認する。機器I/Oを変更しないためM1の実機入力は不要。実runtimeの通常turn結合と固定通知の試験は分けて記録する。
+対象pytestのred/green、全unit/integration、ruff format/check、ty、uv lock --check、uv build、git diff --check、文書参照を確認した。製品Qt画面では公開通知表示、質問・承認・中断、選択/コピー/スクロールを確認した。機器I/Oを変更しないためM1の実機入力は対象外。実runtimeの通常turn結合と固定通知の試験は分けて記録する。後続の画面検証条件はunit_046へ引き継ぐ。
 
 | 項目 | command / 結果 | 確認範囲 |
 |---|---|---|
@@ -82,11 +84,11 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D04 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py -q --basetemp=tmp/pytest-u06-composer`: 最終41 passed。担当ruff check/format、全体ty、diff check: pass | 要求/質問別原稿、秘密提出/失効消去、自由回答不可の明示選択、別送信先への遅い受付、配送結果と失効の順序を確認。不要なWrappedRadioを撤去 |
 | D04独立レビュー | IMEの2件を既存試験へ統合: red 2 failed/1 passed→green | 要求失効時の本文置換後にcompositionが残る問題と、未受付時に開始した新preeditが受付で消える問題を修正。その他の指摘なし。標準Passwordと共通原稿へ置換した範囲以外のrefactorなし |
 | D05 | `uv run pytest tests/unit/test_settings.py tests/unit/test_video_settings.py tests/integration/test_app_settings.py tests/integration/test_settings_apply_contract.py tests/integration/test_settings_recovery.py -q --tb=short --basetemp=tmp/pytest-u06-reasoning`: red 38 failed/110 passed→green 148 passed。担当ruff check/format、全体ty、diff check: pass | 既定値・厳密bool・往復/再起動・取消し3経路・保存待ち/失敗・閉じた後の中断でも提出済み適用を確認。reasoning単独で停止中/取得中のcapture/input再接続なし。既存bool検証を共用し、追加refactorなし |
-| D06 | `uv run pytest tests/integration/test_window_presets.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py -q --basetemp=tmp/pytest-u06-layout`: 48 passed。担当ruff check/format、全体ty、diff check: pass | 左右配置・status/preset追随、長い送信先/選択肢、承認scrollと中断/送信を確認。800×600/Meiryo UI16ptの製品offscreen描画でHistory101px/Message64px。重複wrapper/見出し/余白とPlan末尾空行を必要な範囲だけ除去、追加refactorなし |
+| D06 | `uv run pytest tests/integration/test_window_presets.py tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py -q --basetemp=tmp/pytest-u06-layout`: 48 passed。担当ruff check/format、全体ty、diff check: pass | 当時の左右配置・status/preset追随、送信先/選択肢、承認scrollと中断/送信を確認。重複wrapper/見出し/余白とPlan末尾空行を必要な範囲だけ除去、追加refactorなし |
 | D07 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_codex_transport.py tests/integration/test_answer_lifecycle.py -q --basetemp=tmp/pytest-u06-stdio`: red 1 failed→最終63 passed。担当ruff check/format、全体ty、diff check: pass | ApplicationShell→Service/QThread→stdio→公開decoder/UIを往復。Plan/summary/activity、質問中steer、選択・自由文・秘密の一括回答、承認拒否、終端/close。peerは固定フローのassertだけでRPCを保存しない。追加refactorなし |
 | D08 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_window_presets.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py tests/integration/test_video_gui.py tests/integration/test_codex_shutdown.py -q --basetemp=tmp/pytest-u06-qt`: 57 passed。担当ruff check/format、全体ty、diff check: pass | Plan show/hideでの末尾/過去閲覧/逆向き選択を既存GUI試験へ統合。Transcriptのresize前後で既存の末尾/可視文字の復元を行い、新しいstate/timerを追加しない。最小再現も失敗→成功 |
 | D09 | 既存codex_gui/window_presets/answer_lifecycle/video_gui: 51 passed。video_gui/video_application/resolution_application/settings_apply_contract: 47 passed。担当ruff check/format、全体ty、diff check: pass | 現在Planの重複・終端残存・承認ボタン可視性のred 3件と、映像追従のred 1件を解消。1280→1920→800の実resizeでも取得世代・原画像寸法・接続を維持。重複するresize専用試験は追加せず既存spawn試験へ統合。rootの結合回帰（同4tree＋ui_control_lifetime/video_application/resolution_application/settings_apply_contract、`--basetemp=tmp/pytest-u06-d09-root`）98 passed。独立レビューの未使用layout参照を除去し、codex_gui/window_presets 43 passed |
-| D09描画 | 製品部品をそのまま使う固定通知のQt描画、1280×720/1920×1080・11pt、800×600・16ptを目視 | Historyは1280で400px、1920で760px、800の左幅259pxで167px。800でも承認3ボタン同時可視、Messageは2行分。実モデル・物理機器の証拠とは分ける |
+| D09描画 | 製品部品を使う固定通知のQt描画を目視 | 当時の履歴と入力欄の高さ配分、承認操作を確認。後続合意で比較条件と配置を置換したため、現在画面の証拠にはしない。実モデル・物理機器の証拠とも分ける |
 | D10 | `uv run pytest tests/unit/test_codex_connection.py::test_invalid_server_requests_report_distinct_failures_without_changing_phase -q --basetemp=tmp/pytest-u06-d10-secret`: red 1 failed/1 passed→green 2 passed。接続unit＋codex_gui/codex_transport/answer_lifecycle/ui_control_lifetime/window_presets: 157 passed | 混在要求でwaitingへ移るredを解消。HumanRequestなし、部分応答・interruptなし、元のrunning維持を確認。普通質問の複数回答・IME・原稿隔離を維持し、不要SubmitFilterを既存eventFilterへ統合。担当ruff/全体ty/diff pass、独立レビュー追加指摘なし、追加refactorなし |
 | 最終全体gate | `uv run pytest tests/unit tests/integration -q --tb=short --basetemp=tmp/pytest-u06-final-d10`: **730 passed / 58.42s** | 全製品単体・結合回帰。秘密専用試験の撤去を含む最終件数 |
 | 文書検査 | `uv run python -X utf8 tmp/u06-m1/validate_docs.py`: 13文書、858ローカルリンク、45個の一意なunit、errors 0 | 移動後のリンク・未閉鎖fence・仮テキスト・unit重複を検査。本文の根拠と現行契約は独立読取レビューで確認 |
@@ -98,9 +100,9 @@ D04/D07の秘密入力の検証は当時の実績であり、現行の採用を�
 
 最初の隔離実行はapp-serverの初期化前に終了した。読み取り権限のsandboxでCodex homeのSQLite初期化とPATH alias処理が拒否されたため、同じ隔離プロジェクトの検証を通常権限で実行して成立を確認した。資格情報のコピーや再認証はしていない。D09後の配置とD10後の通常質問は、固定stdioの製品往復とWindows画面で別途確認し、D08時点の実モデル画像を最終配置の証拠にしない。
 
-最終のWindows画面は`$env:QT_QPA_PLATFORM='windows'; uv run python -X utf8 tmp/u06-m1/native_ui.py`（通常）と`--large`（小画面）で確認した。製品MainWindowへ固定通知・合成映像を入れ、runtime・機器サービスは起動していない。Meiryo UI 11pt/16pt、表示倍率150%。1280×720から2560×1369の最大化と復元、800×600で質問の選択肢/自由文・Enter改行/Ctrl+Enter一括送信・拒否・履歴スクロール・中断とPlanの履歴移動を操作した。2つの回答は1件、拒否は1件、中断は1件としてfixtureに記録され、ウィンドウを閉じたPythonもexit 0だった。根拠は`tmp/u06-m1/native-{normal-pending,large,large-after-answers,maximized}.json`と対応画像。
+当時のWindows画面では製品MainWindowへ固定通知・合成映像を入れ、runtime・機器サービスを起動せずに確認した。通常サイズからの最大化と復元、質問の選択肢/自由文・Enter改行/Ctrl+Enter一括送信・拒否・履歴スクロール・中断とPlanの履歴移動を操作した。2つの回答は1件、拒否は1件、中断は1件としてfixtureに記録され、ウィンドウを閉じたPythonもexit 0だった。今回の再設計では同じ通常フォントによる大小画面へ検証を統一し、過去の描画例を流用しない。
 
-[最終の通常画面](assets/native-normal.png)、[小画面の中断後](assets/native-small-stopped.png)、[狭幅の承認配置](assets/qt-small-pending.png)を残す。最後の画像はD09時点のoffscreen描画であり、秘密入力を含まない共通レイアウトの確認用。実ゲーム画面・モデル判断ではない。実IME変換は操作ツールが切替キーを扱えず未確認。D08時点のnative選択/コピー確認と合成Qt preedit試験を、実IME確認へ広げない。複数モニターでのDPI切替も未実施。
+[当時の通常画面](assets/native-normal.png)を履歴として残す。文字拡大を含む旧比較画像への参照は撤去した。実ゲーム画面・モデル判断ではない。実IME変換は操作ツールが切替キーを扱えず未確認。D08時点のnative選択/コピー確認と合成Qt preedit試験を実IME確認へ広げない。複数モニターでのDPI切替も未実施。
 
 最終KISSレビュー: 独立担当が通知・steer・配送証拠・設定とU05停止、別担当がD09/D10の画面・要求寿命を確認した。D09で指摘された未使用layout参照だけを除去し、追加の修正必須事項なし。公開型/docstringは具体的なイベントと配送結果へ対応し、新しい状態機械・自動再送・復旧・Goalの仮実装はない。既存試験への統合を優先し、秘密専用4件と重複resize案を撤去した。全体テストの成功は実モデルsummary・物理機器・実IMEの証拠にはしない。
 

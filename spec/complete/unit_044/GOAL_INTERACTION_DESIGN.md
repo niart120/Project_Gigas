@@ -8,7 +8,7 @@
 
 利用場面は、通常会話から目標を開始し、公開計画を読み、回答・追加指示・承認を渡し、入力を止めて同じ会話で明示的に再開すること。
 
-2026-11-13 M1での改訂: 以下に残る秘密入力の専用UI・消去/保存分岐の採用は撤回した。用途と実モデル受信の根拠がなく、`isSecret=true`を含む要求全体を未対応で返す。現在Planは終了・turn切替時にHistoryへ移し、現在欄との二重表示をしない。現行契約と検証は[M1子仕様](../../complete/unit_045/COMMON_DIALOGUE_UI.md)を正とし、本書のM0実測・当時の判断を履歴として残す。
+2026-11-13 M1での改訂: 秘密入力の専用UI・消去/保存分岐は用途と実モデル受信の根拠がなく撤回し、`isSecret=true`を含む要求全体を未対応で返す。続く[文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)では送信先選択と独立した承認列を撤去し、右側のPlanを常設する。表示契約は[10](../../initial/10-ui-interaction.md)と後続子仕様を正とし、本書のAPI実測と当時の検証は履歴として残す。
 
 ## 2. 対象範囲
 
@@ -74,11 +74,11 @@ Goal変更受付、turn終端、入力解除を別の結果として扱う。遅
 
 Goalは目的と公開状態、Planは現在turnの公開計画、Historyはユーザー/Codex/要求/公開活動、Messageは送信前原稿を所有する。配置は[10](../../initial/10-ui-interaction.md)。Goal/Planと下書きやmemoryを同期する機構は設けない。
 
-質問待ちは同じMessage領域の短い送信先選択で、質問IDまたは「追加指示」を明示する。複数質問の原稿は既存の(HumanRequest.token, question ID)で保持し、選択中の要求に属する必須回答が揃った時だけ一つのanswers応答を返す。回答先が質問なら目標トグルをオフ・切替不可とし、追加指示へ切り替えた場合だけ目標を選べる。秘密原稿を追加指示やGoalへ引き継がない。自由回答可なら回答と指示を含む全文をその回答へ一度送る。本文分割・複数IDへの同文複製はしない。isOther=falseでは選択肢を使い、自由文は追加指示へ送る。承認は要求の許可/拒否/取消しボタンだけで返す。turn/Goal/steerは公開応答、質問/承認は既存AnswerResultのtransport書込完了で送信結果を確定する。後者はモデル側の実行成功ではなく、serverRequest/resolvedだけでも配送成功とはしない。
+質問原稿は既存の(HumanRequest.token, question ID)で保持し、要求の必須回答が揃った時だけ一つのanswers応答を返す。M1修正では回答を会話内の要求カードで編集し、Messageは通常送信と追加指示に分ける。自由回答可なら回答と指示を含む全文をその回答へ一度送り、本文分割・複数IDへの同文複製はしない。isOther=falseでは提示された選択肢を使う。承認は要求が提示した判断の明示操作だけで返す。turn/Goal/steerは公開応答、質問/承認は既存AnswerResultのtransport書込完了で送信結果を確定する。後者はモデル側の実行成功ではなく、serverRequest/resolvedだけでも配送成功とはしない。
 
-複数質問待ちのsteer受付と質問応答後の指示配送を実runtimeで確認した。要求を回答済みにする操作ではなく、モデルが取り込む時点も保証しない。`serverRequest/resolved`・中断・turn終端で要求を失効し、遅い回答は再送しない。秘密回答は同じ領域のpassword入力へ切り替え、履歴/可搬ログに本文を出さない（製品Qt確認はM1）。
+複数質問待ちのsteer受付と質問応答後の指示配送を実runtimeで確認した。要求を回答済みにする操作ではなく、モデルが取り込む時点も保証しない。`serverRequest/resolved`・中断・turn終端で要求を失効し、遅い回答は再送しない。秘密入力指定はM1で未対応要求として扱う方針へ改訂した。
 
-Planは `tools.update_plan.enabled=true` を明示する。既定falseではupdate_planがunsupportedとなり、有効化後に説明文と2項目の `turn/plan/updated` を受信した。thread/turnを照合して一覧全体を置換する。新turn・目的更新の受付で現在欄を空にし、旧Planは履歴へ残す。目的更新後も同じturnのPlan通知を表示するが、通知にGoal改訂IDはないため新目的を反映済みとは保証しない。独自epochで識別できた扱いにはしない。空配列は欄を隠す。停止で未完項目を達成へ変えない。
+Planは `tools.update_plan.enabled=true` を明示する。既定falseではupdate_planがunsupportedとなり、有効化後に説明文と2項目の `turn/plan/updated` を受信した。thread/turnを照合して一覧全体を置換する。新turn・目的更新の受付で現在欄を空にし、旧Planは履歴へ残す。M1修正では空でも領域を残し、中断・終了後の最後の計画を状態とともに保持する。未完項目を達成へ変えない。通知にGoal改訂IDはなく、目的更新後の同turnのPlanが新目的を反映済みとは保証しない。独自epochで識別できた扱いにはしない。
 
 reasoningは公開summaryのdelta/完了itemだけを表示し、空なら省略する。生のreasoning本文は対象外。今回の短い実モデル呼出しでは公開summary未受信。activityは実itemの種別・tool名・対象・結果に限る。MCP通知は切詰めがあるため画像原本はU04のObservationを使い、通知のbase64から復元しない。旧itemは該当履歴へだけ反映し、現在Planや入力許可を変えない。
 
@@ -148,11 +148,11 @@ account/rateLimits/readと更新通知、公開制限状態/エラーを使う�
 | 全体pytest / ruff / ty / build | not run。製品・依存・テスト基盤未変更。今回の文書/隔離試作を検査するgateではない |
 | 実機Goal・製品GUI結合 | not run。M0成立確認は模擬機器で足り、M2/M3の受入に残す |
 
-Qt画像は[通常](assets/qt-normal.png)、[一時停止後](assets/qt-paused.png)、[800×600・16pt](assets/qt-small-large-font.png)。合成履歴の最終追記5.809秒は性能保証ではない。小画面の承認3段ではHistoryが64pxへ縮むため、M1で高さ配分/スクロールを調整し判断本文を読めることを再確認する。
+M0時点のQt画像は[通常](assets/qt-normal.png)、[一時停止後](assets/qt-paused.png)。現在の製品配置の証拠ではない。合成履歴の最終追記5.809秒は性能保証ではない。文字拡大専用の例・画像参照は後続のM1修正合意で撤去し、通常フォントの大小ウィンドウと判断本文の可読性を再検証する。
 
 ## 10. 未確認事項・M1着手条件・後続
 
-M1は通常turnの共通Message/History/Plan/要求応答を実通知へ結合する範囲で着手可能。要求寿命と下書きを維持し、Goalの仮表示/偽の成功を置かない。秘密回答、選択対象そのものの更新/非表示、実Windows IME、DPI、小画面の判断本文を受入条件とする。
+M1は通常turnのMessage/History/Plan/要求応答を実通知へ結合する範囲。要求寿命と下書きを維持し、Goalの仮表示/偽の成功を置かない。選択対象そのものの更新/非表示、小画面の判断本文を製品で確認する。秘密指定は要求全体の未対応拒否、実Windows IME・複数DPIは後続受入としてM1で整理した。
 
 M2はGoal/Grant寿命、停止と設定適用の独立、memory限定書込/起動環境を製品へ結合する。質問・承認中のGoal完了/制限、開始/再開と停止、旧通知、memory書込中断、自律turn開始と設定変更の競合は未検証。turn終端からバックグラウンドコマンドの全終了を推定せず、共通指示で不要なバックグラウンド処理を使わない。独自の終了監視は追加しない。
 
