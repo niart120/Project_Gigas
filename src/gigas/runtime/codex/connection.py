@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
 from gigas.runtime.codex.models import (
+    AccountInfo,
     ActivityEvent,
     DialogueEvent,
     GoalEvent,
@@ -21,12 +22,16 @@ from gigas.runtime.codex.models import (
     PlanStep,
     Question,
     QuestionOption,
+    RateLimitWindow,
     ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
     ThreadConfiguration,
     TurnStarted,
+    UsageBucket,
+    UsageCredits,
+    UsageEvent,
 )
 from gigas.runtime.codex.transport import (
     RpcError,
@@ -133,6 +138,43 @@ def _login_url(value: "JsonValue") -> str:
         message = "ログインURLが不正"
         raise CodexConnectionError(message)
     return url
+
+
+def _optional_text(value: "JsonValue") -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _usage_window(value: "JsonValue") -> RateLimitWindow | None:
+    if value is None:
+        return None
+    window = _object(value)
+    used = window.get("usedPercent")
+    minutes, resets = window.get("windowDurationMins"), window.get("resetsAt")
+    if type(used) is not int:
+        raise CodexConnectionError("利用枠の応答形式が不正")
+    return RateLimitWindow(
+        used,
+        minutes if type(minutes) is int else None,
+        resets if type(resets) is int else None,
+    )
+
+
+def _usage_bucket(value: "JsonValue", key: str | None = None) -> UsageBucket:
+    bucket = _object(value)
+    credit_snapshot = None
+    if bucket.get("credits") is not None:
+        data = _object(bucket["credits"])
+        has_credits, unlimited = data.get("hasCredits"), data.get("unlimited")
+        if not isinstance(has_credits, bool) or not isinstance(unlimited, bool):
+            raise CodexConnectionError("追加利用枠の応答形式が不正")
+        credit_snapshot = UsageCredits(has_credits, unlimited, _optional_text(data.get("balance")))
+    return UsageBucket(
+        _optional_text(bucket.get("limitId")) or key,
+        _optional_text(bucket.get("limitName")),
+        _usage_window(bucket.get("primary")),
+        _usage_window(bucket.get("secondary")),
+        credit_snapshot,
+    )
 
 
 def _questions(value: "JsonValue") -> tuple[Question, ...]:
@@ -272,6 +314,9 @@ class CodexConnection:
         self._goal_starting = False
         self._goal_revision = 0
         self._dialogue: dict[tuple[str, str], JsonObject] = {}
+        self._usage = UsageEvent()
+        self._usage_read: asyncio.Task[None] | None = None
+        self._usage_refresh_pending = False
 
     async def open(self) -> None:
         """Initialize authentication and obtain model choices without starting a thread.
@@ -322,6 +367,7 @@ class CodexConnection:
             selection_detail = await self._read_models()
             self._opened = True
             self._status("ready" if self._authenticated else "login_required", selection_detail)
+            self._refresh_usage()
         except (TransportError, CodexConnectionError) as error:
             reason = str(error) if isinstance(error, CodexConnectionError) else "Codex接続に失敗"
             await self.close()
@@ -385,6 +431,7 @@ class CodexConnection:
         self._require_open()
         if (
             not self._authenticated
+            or self._usage.ordinary_usage_allowed is False
             or not self._model
             or not self._effort
             or self._phase not in {"ready", "stopped"}
@@ -494,6 +541,7 @@ class CodexConnection:
         self._require_open()
         if (
             not self._authenticated
+            or self._usage.ordinary_usage_allowed is False
             or not self._model
             or not self._effort
             or self._sending
@@ -1064,6 +1112,56 @@ class CodexConnection:
         result = _object(await self._peer.request("account/read", {"refreshToken": False}))
         account = result.get("account")
         self._authenticated = isinstance(account, dict) and account.get("type") == "chatgpt"
+        self._emit(
+            AccountInfo(
+                _optional_text(account.get("email")),
+                _optional_text(account.get("planType")),
+                _optional_text(account.get("workspaceName")),
+                True,
+            )
+            if self._authenticated and isinstance(account, dict)
+            else AccountInfo()
+        )
+
+    def _refresh_usage(self) -> None:
+        if not self._authenticated or self._closed:
+            return
+        self._usage_refresh_pending = True
+        if self._usage_read is None or self._usage_read.done():
+            self._usage_read = asyncio.create_task(self._read_usage(), name="gigas-codex-usage")
+            self._operations.add(self._usage_read)
+            self._usage_read.add_done_callback(self._operations.discard)
+
+    async def _read_usage(self) -> None:
+        while self._usage_refresh_pending and not self._closed:
+            self._usage_refresh_pending = False
+            try:
+                result = _object(await self._peer.request("account/rateLimits/read", {}))
+                keyed = result.get("rateLimitsByLimitId")
+                buckets = (
+                    tuple(_usage_bucket(value, key) for key, value in keyed.items())
+                    if isinstance(keyed, dict) and keyed
+                    else (_usage_bucket(result.get("rateLimits")),)
+                )
+                allowed = result.get("ordinaryUsageAllowed")
+                permission = allowed if isinstance(allowed, bool) else None
+                if permission is None and self._usage.ordinary_usage_allowed is False:
+                    permission = False
+                self._usage = UsageEvent(buckets, permission, True)
+            except (TransportError, CodexConnectionError):
+                self._usage = UsageEvent(
+                    self._usage.buckets, self._usage.ordinary_usage_allowed, False
+                )
+            if self._closed:
+                return
+            self._emit(self._usage)
+            if self._usage.ordinary_usage_allowed is False and not self._stopping:
+                self._failure("stopping", "利用制限により続行できない")
+                try:
+                    await self._stop()
+                except CodexConnectionError:
+                    if not self._closed:
+                        self._failure("error", "利用制限による停止を確認できない")
 
     async def _read_models(self) -> str:
         self._model, self._effort, self._choices = "", "", ()
@@ -1193,7 +1291,22 @@ class CodexConnection:
                 elif self._login_starting:
                     self._login_completions[login_id] = params
             return
+        if event.method == "account/rateLimits/updated":
+            # Rolling updates may omit account metadata; obtain the full snapshot
+            # without blocking the consumer or inferring permission from one bucket.
+            self._refresh_usage()
+            return
         if params.get("threadId") != self._thread_id:
+            return
+        if event.method == "error":
+            if (
+                params.get("turnId") == self._turn_id
+                and self._turn_id is not None
+                and params.get("willRetry") is False
+                and not self._stopping
+            ):
+                self._failure("stopping", "ターンが失敗")
+                await self._stop()
             return
         if event.method in {"thread/goal/updated", "thread/goal/cleared"}:
             self._goal_revision += 1
@@ -1248,6 +1361,7 @@ class CodexConnection:
         await self._read_account()
         selection_detail = await self._read_models()
         self._status("ready" if self._authenticated else "login_required", selection_detail)
+        self._refresh_usage()
 
     def _adopt_turn(self, turn_id: str) -> None:
         accepting = (

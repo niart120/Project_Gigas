@@ -178,6 +178,63 @@ class LoginEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountInfo:
+    """Public ChatGPT account identity; absent fields remain unknown."""
+
+    email: str | None = None
+    plan_type: str | None = None
+    workspace_name: str | None = None
+    authenticated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RateLimitWindow:
+    """Reported usage percentage, window length in minutes and Unix reset seconds."""
+
+    used_percent: int
+    window_minutes: int | None = None
+    resets_at: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageCredits:
+    """Reported additional credits, independent of included-usage permission."""
+
+    has_credits: bool
+    unlimited: bool
+    balance: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageBucket:
+    """One backend quota bucket without inferred names, windows or balances."""
+
+    limit_id: str | None = None
+    limit_name: str | None = None
+    primary: RateLimitWindow | None = None
+    secondary: RateLimitWindow | None = None
+    credits: UsageCredits | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageEvent:
+    """Account usage read result, separate from authentication and turn state.
+
+    Attributes:
+        buckets: Last successfully fetched buckets; retained after read failure.
+        ordinary_usage_allowed: Explicit backend permission, or None when unknown.
+            A known False persists through null or failed reads until an explicit
+            True is received; elapsed reset times never establish recovery.
+        available: Whether the most recent read succeeded. False does not by itself
+            prohibit sending or stop execution.
+    """
+
+    buckets: tuple[UsageBucket, ...] = ()
+    ordinary_usage_allowed: bool | None = None
+    available: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class QuestionOption:
     """One model-provided choice with its description."""
 
@@ -306,7 +363,9 @@ class DialogueEvent:
 
 
 type ConnectionEvent = (
-    GoalEvent
+    AccountInfo
+    | UsageEvent
+    | GoalEvent
     | DialogueEvent
     | ModelSelection
     | SessionStatus

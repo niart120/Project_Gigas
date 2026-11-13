@@ -15,6 +15,7 @@ from gigas.runtime.codex.connection import (
     MessageDeliveryError,
 )
 from gigas.runtime.codex.models import (
+    AccountInfo,
     ActivityEvent,
     ConnectionOptions,
     DialogueEvent,
@@ -29,6 +30,7 @@ from gigas.runtime.codex.models import (
     TextEvent,
     ThreadConfiguration,
     TurnStarted,
+    UsageEvent,
 )
 from gigas.runtime.codex.transport import (
     JsonObject,
@@ -103,6 +105,8 @@ class FakePeer:
                 "account": {"type": "chatgpt"} if self.authenticated else None,
                 "requiresOpenaiAuth": True,
             }
+        if method == "account/rateLimits/read":
+            return {"rateLimits": {}, "ordinaryUsageAllowed": True}
         if method == "config/read":
             return {"config": {"mcp_servers": {"existing": {"enabled": True}}}}
         if method == "model/list":
@@ -220,6 +224,7 @@ def test_open_validates_catalog_and_delivers_packaged_instructions(tmp_path: Pat
             "config/read",
             "model/list",
             "model/list",
+            "account/rateLimits/read",
         ]
         status = [event for event in events if isinstance(event, SessionStatus)][-1]
         assert (status.phase, status.model, status.effort, status.authenticated) == (
@@ -283,8 +288,8 @@ def test_login_is_explicit_and_completion_rechecks_account(tmp_path: Path) -> No
             RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
         )
         await _events_processed()
-        assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "ready"
+        status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+        assert status.phase == "ready"
         assert sum(method == "account/read" for method, _ in peer.calls) == 2
         await connection.close()
 
@@ -306,7 +311,7 @@ def test_invalid_defaults_preserve_login_and_allow_selection_before_sending(
         try:
             await connection.open()
             assert not peer.closed
-            status = events[-1]
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(status, SessionStatus)
             assert status.phase == ("ready" if authenticated else "login_required")
             assert status.detail
@@ -326,7 +331,9 @@ def test_invalid_defaults_preserve_login_and_allow_selection_before_sending(
                 )
                 await _events_processed()
                 assert not peer.closed
-                status = events[-1]
+                status = next(
+                    event for event in reversed(events) if isinstance(event, SessionStatus)
+                )
                 assert isinstance(status, SessionStatus)
                 assert status.phase == "ready"
                 assert status.authenticated
@@ -335,7 +342,7 @@ def test_invalid_defaults_preserve_login_and_allow_selection_before_sending(
                     await operation("無効な選択のまま開始しない")
             assert not any(method == "thread/start" for method, _ in peer.calls)
             await connection.select_model("other", "low")
-            status = events[-1]
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(status, SessionStatus)
             assert (status.model, status.effort, status.detail) == ("other", "low", "")
             await connection.send("選び直して開始")
@@ -358,7 +365,7 @@ def test_catalog_rpc_failure_before_login_does_not_block_login(tmp_path: Path) -
         connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
         try:
             await connection.open()
-            status = events[-1]
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(status, SessionStatus)
             assert status.phase == "login_required"
             assert not status.model
@@ -372,7 +379,7 @@ def test_catalog_rpc_failure_before_login_does_not_block_login(tmp_path: Path) -
                 RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
             )
             await _events_processed()
-            status = events[-1]
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(status, SessionStatus)
             assert (status.phase, status.model, status.effort) == (
                 "ready",
@@ -402,7 +409,7 @@ def test_catalog_rejection_after_login_preserves_authenticated_connection(tmp_pa
                 RpcNotification("account/login/completed", {"loginId": "login-1", "success": True})
             )
             await _events_processed()
-            status = events[-1]
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
             assert isinstance(status, SessionStatus)
             assert status.phase == "ready"
             assert status.authenticated
@@ -410,12 +417,311 @@ def test_catalog_rejection_after_login_preserves_authenticated_connection(tmp_pa
             assert not status.model
             assert not status.effort
             assert not peer.closed
-            assert events[-2] == ModelSelection((), "", "")
+            assert next(
+                event for event in reversed(events) if isinstance(event, ModelSelection)
+            ) == ModelSelection((), "", "")
             with pytest.raises(CodexConnectionError):
                 await connection.send("一覧取得失敗中")
             calls = list(peer.calls)
             await _events_processed()
             assert peer.calls == calls
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_account_usage_is_public_and_zero_credits_do_not_block_included_usage(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.responses["account/read"] = {
+            "account": {
+                "type": "chatgpt",
+                "email": "user@example.test",
+                "planType": "pro",
+                "workspaceName": "workspace",
+            }
+        }
+        peer.responses["account/rateLimits/read"] = {
+            "rateLimits": {
+                "limitId": "codex",
+                "limitName": "Codex",
+                "primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1000},
+                "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+            },
+            "ordinaryUsageAllowed": True,
+        }
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            assert AccountInfo("user@example.test", "pro", "workspace", True) in events
+            usage = next(event for event in reversed(events) if isinstance(event, UsageEvent))
+            assert usage.available
+            assert usage.ordinary_usage_allowed is True
+            bucket = usage.buckets[0]
+            assert bucket.limit_id == "codex"
+            assert bucket.primary is not None
+            assert (
+                bucket.primary.used_percent,
+                bucket.primary.window_minutes,
+                bucket.primary.resets_at,
+            ) == (12, 300, 1000)
+            assert bucket.credits is not None
+            assert bucket.credits.balance == "0"
+            await connection.send("利用枠内で開始")
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_usage_refresh_is_nonblocking_and_sparse_notifications_refetch_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            await connection.send("開始")
+            peer.gates["account/rateLimits/read"] = asyncio.Event()
+            peer.responses["account/rateLimits/read"] = {
+                "rateLimits": {
+                    "limitId": "codex",
+                    "limitName": "Codex",
+                    "primary": {"usedPercent": 25},
+                },
+                "ordinaryUsageAllowed": True,
+            }
+            before = sum(method == "account/rateLimits/read" for method, _ in peer.calls)
+            for _ in range(3):
+                peer.events.put_nowait(
+                    RpcNotification(
+                        "account/rateLimits/updated",
+                        {"rateLimits": {"limitId": "codex", "limitName": None, "credits": None}},
+                    )
+                )
+                await _events_processed()
+            peer.events.put_nowait(
+                RpcNotification(
+                    "item/agentMessage/delta",
+                    {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": "message",
+                        "delta": "still received",
+                    },
+                )
+            )
+            await _events_processed()
+            assert TextEvent("message", "still received") in events
+            assert (
+                sum(method == "account/rateLimits/read" for method, _ in peer.calls) == before + 1
+            )
+            peer.gates["account/rateLimits/read"].set()
+            await _events_processed()
+            usage = next(event for event in reversed(events) if isinstance(event, UsageEvent))
+            assert usage.buckets[0].limit_name == "Codex"
+            assert (
+                sum(method == "account/rateLimits/read" for method, _ in peer.calls) == before + 2
+            )
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_usage_denial_stops_goal_and_requires_confirmed_recovery_and_explicit_resume(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            await connection.set_goal("継続")
+            await connection._notification(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "auto-1"}})
+            )
+            peer.responses["account/rateLimits/read"] = {
+                "rateLimits": {},
+                "ordinaryUsageAllowed": False,
+            }
+            peer.events.put_nowait(
+                RpcNotification("account/rateLimits/updated", {"rateLimits": {}})
+            )
+            await _events_processed()
+            assert ("turn/interrupt", {"threadId": "thread-1", "turnId": "auto-1"}) in peer.calls
+            assert peer.goal is not None
+            assert peer.goal["status"] == "paused"
+            peer.events.put_nowait(
+                RpcNotification(
+                    "turn/completed",
+                    {"threadId": "thread-1", "turn": {"id": "auto-1", "status": "interrupted"}},
+                )
+            )
+            await _events_processed()
+            peer.failure = "account/rateLimits/read"
+            peer.events.put_nowait(
+                RpcNotification("account/rateLimits/updated", {"rateLimits": {}})
+            )
+            await _events_processed()
+            failed_usage = next(
+                event for event in reversed(events) if isinstance(event, UsageEvent)
+            )
+            assert not failed_usage.available
+            assert failed_usage.ordinary_usage_allowed is False
+            with pytest.raises(CodexConnectionError):
+                await connection.resume_goal()
+            peer.failure = None
+            for result in (None, True):
+                peer.responses["account/rateLimits/read"] = {
+                    "rateLimits": {"primary": {"usedPercent": 0, "resetsAt": 1}},
+                    "ordinaryUsageAllowed": result,
+                }
+                peer.events.put_nowait(
+                    RpcNotification("account/rateLimits/updated", {"rateLimits": {}})
+                )
+                await _events_processed()
+                usage = next(event for event in reversed(events) if isinstance(event, UsageEvent))
+                assert usage.ordinary_usage_allowed is (result is not None)
+                assert peer.goal["status"] == "paused"
+                if result is None:
+                    with pytest.raises(CodexConnectionError):
+                        await connection.resume_goal()
+            assert await connection.resume_goal()
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("initial_failure", [True, False])
+def test_usage_read_failure_does_not_stop_or_retry_execution(
+    tmp_path: Path, initial_failure: bool
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        if initial_failure:
+            peer.failure = "account/rateLimits/read"
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            await connection.send("開始")
+            if not initial_failure:
+                peer.failure = "account/rateLimits/read"
+                peer.events.put_nowait(
+                    RpcNotification("account/rateLimits/updated", {"rateLimits": {}})
+                )
+                await _events_processed()
+            usage = next(event for event in reversed(events) if isinstance(event, UsageEvent))
+            assert not usage.available
+            assert usage.ordinary_usage_allowed is (None if initial_failure else True)
+            assert not any(method == "turn/interrupt" for method, _ in peer.calls)
+            assert not peer.closed
+            calls = list(peer.calls)
+            await _events_processed()
+            assert peer.calls == calls
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+def test_close_cancels_pending_usage_read_without_late_publication(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        peer.gates["account/rateLimits/read"] = asyncio.Event()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await _events_processed()
+        assert ("account/rateLimits/read", {}) in peer.calls
+        await connection.close()
+        assert peer.closed
+        before = list(events)
+        peer.gates["account/rateLimits/read"].set()
+        await _events_processed()
+        assert events == before
+        assert not any(isinstance(event, UsageEvent) for event in events)
+
+    _run(scenario())
+
+
+def test_usage_denial_during_goal_preparation_prevents_submission(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await _events_processed()
+            peer.gates["thread/settings/update"] = asyncio.Event()
+            starting = asyncio.create_task(connection.set_goal("開始準備中"))
+            await _events_processed()
+            assert any(method == "thread/settings/update" for method, _ in peer.calls)
+            peer.responses["account/rateLimits/read"] = {
+                "rateLimits": {},
+                "ordinaryUsageAllowed": False,
+            }
+            peer.events.put_nowait(
+                RpcNotification("account/rateLimits/updated", {"rateLimits": {}})
+            )
+            await _events_processed()
+            status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+            assert status.phase == "stopping"
+            peer.gates["thread/settings/update"].set()
+            assert await starting is False
+            await _events_processed()
+            assert not any(method == "thread/goal/set" for method, _ in peer.calls)
+            with pytest.raises(CodexConnectionError):
+                await connection.set_goal("利用不可のまま再提出")
+        finally:
+            await connection.close()
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("will_retry", [True, False])
+def test_only_current_final_error_stops_execution(tmp_path: Path, will_retry: bool) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        try:
+            await connection.open()
+            await connection.send("開始")
+            error: JsonObject = {
+                "message": "PRIVATE-REMOTE-DETAIL",
+                "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 429}},
+            }
+            for turn_id in ("old-turn", "turn-1"):
+                peer.events.put_nowait(
+                    RpcNotification(
+                        "error",
+                        {
+                            "threadId": "thread-1",
+                            "turnId": turn_id,
+                            "error": error,
+                            "willRetry": will_retry,
+                        },
+                    )
+                )
+                await _events_processed()
+                assert any(method == "turn/interrupt" for method, _ in peer.calls) is (
+                    not will_retry and turn_id == "turn-1"
+                )
+            assert "PRIVATE-REMOTE-DETAIL" not in repr(events)
         finally:
             await connection.close()
 
@@ -1267,8 +1573,8 @@ def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_pat
         await _events_processed()
         peer.gates["account/login/start"].set()
         await login
-        assert isinstance(events[-1], SessionStatus)
-        assert events[-1].phase == "ready"
+        status = next(event for event in reversed(events) if isinstance(event, SessionStatus))
+        assert status.phase == "ready"
         assert not any(isinstance(event, LoginEvent) for event in events)
         await connection.close()
 

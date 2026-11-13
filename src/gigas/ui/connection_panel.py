@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from gigas.runtime.codex.models import (
+    AccountInfo,
     ActivityEvent,
     GoalEvent,
     HumanRequest,
@@ -26,8 +27,10 @@ from gigas.runtime.codex.models import (
     SessionStatus,
     TextEvent,
     TurnStarted,
+    UsageEvent,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
+from gigas.ui.account_popup import AccountPopup
 from gigas.ui.message_composer import MessageComposer
 from gigas.ui.notifications import Notice
 from gigas.ui.plan_panel import PlanPanel
@@ -95,6 +98,7 @@ class ConnectionPanel(QWidget):
         self._connected = False
         self._available = True
         self._settings_ready = True
+        self._usage_blocked = False
         self._goal: GoalState | None = None
         self._status = SessionStatus("closed")
         self._pending: set[str] = set()
@@ -112,6 +116,9 @@ class ConnectionPanel(QWidget):
         self.connect_action = QAction("接続", self)
         self.disconnect_action = QAction("切断", self)
         self.login_action = QAction("ログイン", self)
+        self.account_action = QAction("アカウント・利用状況", self)
+        self.account_popup = AccountPopup(self)
+        self.account_action.triggered.connect(self.account_popup.show_values)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.hide()
@@ -155,6 +162,8 @@ class ConnectionPanel(QWidget):
     def activate(self, generation: int) -> None:
         """Reset the view for a newly submitted connection generation."""
         self.composer.set_choices(None)
+        self.account_popup.reset()
+        self._usage_blocked = False
         self._goal = None
         self.plan_panel.set_goal(None)
         self._generation = generation
@@ -205,7 +214,12 @@ class ConnectionPanel(QWidget):
         if not isinstance(envelope, ServiceEvent) or envelope.generation != self._generation:
             return
         event = envelope.event
-        if isinstance(event, GoalEvent):
+        if isinstance(event, AccountInfo):
+            self.account_popup.set_account(event)
+        elif isinstance(event, UsageEvent):
+            self._usage_blocked = event.ordinary_usage_allowed is False
+            self.account_popup.set_usage(event)
+        elif isinstance(event, GoalEvent):
             self._goal = event.goal
             self.plan_panel.set_goal(event.goal)
         elif isinstance(event, ModelSelection):
@@ -216,6 +230,8 @@ class ConnectionPanel(QWidget):
             self._status = event
             if event.phase in {"closed", "error"}:
                 self.composer.set_choices(None)
+            if event.phase == "closed":
+                self.account_popup.reset()
             if event.failure_id is not None or (event.phase == "error" and event.detail):
                 self._notify_failure(event.detail, event.failure_id)
             elif (
@@ -336,6 +352,7 @@ class ConnectionPanel(QWidget):
         if result.operation == "disconnect" and not result.error:
             self._connected = False
             self._status = SessionStatus("closed")
+            self.account_popup.reset()
         self._render()
 
     def interrupt(self) -> None:
@@ -478,6 +495,7 @@ class ConnectionPanel(QWidget):
         phase = self._status.phase
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_action.setEnabled(available and self._connected)
+        self.account_action.setEnabled(available and self._connected)
         self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
@@ -485,8 +503,9 @@ class ConnectionPanel(QWidget):
         goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
         goal_mode = self.composer.goal_mode.isChecked()
         settled = phase in {"ready", "stopped"} and self._active_turn is None
-        selection_valid = bool(
-            self._status.authenticated and self._status.model and self._status.effort
+        selection_valid = (
+            bool(self._status.authenticated and self._status.model and self._status.effort)
+            and not self._usage_blocked
         )
         self.composer.goal_mode.setEnabled(
             available

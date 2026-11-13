@@ -31,10 +31,10 @@
 | 状態 | item | 種別・層 | 既存試験への反映 |
 |---|---|---|---|
 | refactor-skipped | D01 無効既定値でも認証・候補選択ができ、有効選択まで送信しない | regression、unit/integration | connection・GUI・serviceの既存認証/候補試験を改訂。下記285件成功、dadc31fへコミット |
-| todo | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合 |
+| green | D02 アカウント・利用制限の取得と通知、取得不能と続行不能の区別 | new/edge、unit/integration | connection通知・service停止・GUI表示へ統合、812件成功。コミット後に完了更新 |
 | todo | D03 初回sandbox準備と新規ChatGPTログインの開始・成功・失敗・取消し | edge、unit/integration/実接続 | 既存login/launch/終了経路を優先。調査で必要と確認した差分だけ実装 |
 
-| green | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。新機能より先に修正 |
+| refactor-skipped | D04 実MCP通知のJSON包みに画像を重複表示・保存しない | regression、unit/実記録replay | 既存公開進捗試験へ実形式を追加。859197bで新機能より先に修正 |
 
 ## 7. 設計メモ
 
@@ -90,3 +90,9 @@ M3実機途中結果: `goal-20261113-173702-808589/report.json`。実gpt-6.1-sol
 D04: 実通知のtext blockにMCP結果全体のJSONが入り、activity/detailsへ約104万文字のbase64画像等を重複保存した。採用版で観測した一段のMCP結果包みだけを解き、内側のtext blockを抽出して画像・structuredContent・_metaを除外する。既存test_public_progressを直形式/包み形式でparameterizeし、包み形式1 failed→2 passed（`--basetemp=tmp/pytest-u050-mcp-red`/`-green`）。公開表示とDialogueEventは同じActivityEventを使うため両方へ反映する。
 
 D04実記録replay: `tmp/u06-m3/activity-replay-20261113-174341/report.json`。実6件を公開通知→ActivityEvent/DialogueEvent→製品サービス→RecordingService→ProjectWriterへ通し、約104万文字/件からobserve260文字/act326文字へ縮小。画像base64なし、公開textのID/時刻/寸法は維持、元記録SHA256不変。実際の切詰めは画像dataの内側で外側JSONは有効だった。未観測の壊れたJSONを推測で復元する処理は加えない。対象ruff/ty成功。
+
+D02: read.ordinaryUsageAllowed=falseと現在turnのwillRetry=falseだけを停止根拠とする。残高ゼロ・使用率・reset時刻で推測しない。疎な更新通知では完全snapshotを再取得し、単一owned taskが処理中の通知を一回分へまとめる。定期poll・再試行はなくcloseで回収する。falseをnull/失敗で解除しない。接続→Codexの非modalポップオーバーは既存Transcriptの選択/コピー/スクロール保持を再利用し、常設表示を増やさない。
+
+D02検証: redは公開イベント/停止処理未実装4 failed、UI入口未実装。`uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u050-d02-full --junitxml=tmp/u06-m3/d02-tests.xml`は812 passed。全体ruff format/check・ty成功。後続描画修正の関連52件も成功。`tmp/u06-m3/account-render/`の通常960×640・800×600、未取得/取得不能/利用不可を目視し、連結改行を修正。`uv run python -X utf8 tmp/u06-m3/account_live.py`は実ChatGPTアカウント識別・利用許可・利用枠1件を製品UIへ表示、接続終了成功（account-live/report.json、popup.png）。実機で利用枠を枯渇させず、停止は固定通知で確認した。
+
+D01時点の`uv build`・`uv run python scripts/check_package.py`も成功。最終製品変更後に配布物gateを再実行する。

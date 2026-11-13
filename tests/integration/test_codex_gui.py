@@ -11,6 +11,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.models import (
+    AccountInfo,
     ActivityEvent,
     ConnectionOptions,
     GoalEvent,
@@ -23,11 +24,14 @@ from gigas.runtime.codex.models import (
     PlanStep,
     Question,
     QuestionOption,
+    RateLimitWindow,
     ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
     TurnStarted,
+    UsageBucket,
+    UsageEvent,
 )
 from gigas.runtime.codex.transport import StdioTransport
 from gigas.services.codex import (
@@ -38,6 +42,7 @@ from gigas.services.codex import (
     ServiceResult,
 )
 from gigas.ui.connection_panel import ConnectionPanel
+from gigas.ui.main_window import MainWindow
 from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.transcript import Transcript
 from tests.integration.test_codex_transport import PEER_COMMAND
@@ -1109,3 +1114,69 @@ def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
     assert not panel.plan_panel.clear_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
     assert panel.plan_panel.goal_value.toPlainText() == "保持する目標"
+
+
+def test_account_popup_updates_preserve_copy_and_usage_requires_explicit_resume(
+    qtbot: QtBot,
+) -> None:
+    window = MainWindow()
+    window.allow_close = True
+    qtbot.addWidget(window)
+    window.resize(800, 600)
+    window.show()
+    panel = window.connection
+    assert panel.account_action in window.codex_menu.actions()
+    assert not panel.account_action.isEnabled()
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    panel.handle_result(ServiceResult(1, "connect"))
+    account = AccountInfo("player@example.test", "plus", "ゲーム", True)
+    panel.handle_event(ServiceEvent(1, account))
+    panel.handle_event(
+        ServiceEvent(
+            1, UsageEvent((UsageBucket("codex", primary=RateLimitWindow(25, 300)),), True, True)
+        )
+    )
+    assert not panel.account_popup.isVisible()
+    panel.account_action.trigger()
+    assert panel.account_popup.isVisible()
+    assert (
+        panel.account_popup.screen()
+        .availableGeometry()
+        .contains(panel.account_popup.frameGeometry())
+    )
+    view = panel.account_popup.view
+    assert account.email is not None
+    view.setTextCursor(view.document().find(account.email))
+    panel.handle_event(
+        ServiceEvent(
+            1, UsageEvent((UsageBucket("codex", primary=RateLimitWindow(30)),), True, True)
+        )
+    )
+    assert view.textCursor().selectedText() == account.email
+    view.copy()
+    assert QApplication.clipboard().text() == account.email
+    assert "30%" in view.toPlainText()
+    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
+    panel.prompt.setPlainText("次の依頼")
+    panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False, available=True)))
+    assert not panel.send_button.isEnabled()
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.plan_panel.clear_button.isEnabled()
+    assert panel.disconnect_action.isEnabled()
+    requests: list[bool] = []
+    panel.goal_resume_requested.connect(lambda: requests.append(True))
+    panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False)))
+    assert not panel.plan_panel.resume_button.isEnabled()
+    panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=True, available=True)))
+    assert panel.send_button.isEnabled()
+    assert panel.plan_panel.resume_button.isEnabled()
+    assert requests == []
+    panel.handle_event(ServiceEvent(1, UsageEvent()))
+    assert panel.send_button.isEnabled()
+    qtbot.keyClick(panel.account_popup, Qt.Key.Key_Escape)
+    assert not panel.account_popup.isVisible()
+    panel.activate(2)
+    panel.handle_event(ServiceEvent(1, account))
+    assert account.email not in panel.account_popup.view.toPlainText()
+    assert panel.prompt.toPlainText() == "次の依頼"

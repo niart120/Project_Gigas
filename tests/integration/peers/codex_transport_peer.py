@@ -153,6 +153,8 @@ def dialogue() -> None:
             result = {"userAgent": "gigas-dialogue-peer"}
         elif method == "account/read":
             result = {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": True}
+        elif method == "account/rateLimits/read":
+            result = {"rateLimits": {}, "ordinaryUsageAllowed": True}
         elif method == "config/read":
             result = {"config": {"mcp_servers": {}}}
         elif method == "model/list":
