@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -61,10 +62,12 @@ class CodexSettings(QFrame):
         layout.addWidget(connection_group)
         self.connection = self._value("未接続")
         self.sandbox = self._value("—")
-        self.account = self._value("—")
+        self.account = self._value("ChatGPT · —")
         self.server_button = self._button("接続")
         self.sandbox_button = self._button("設定する")
         self.account_button = self._button("ログイン")
+        self.account_actions = QHBoxLayout()
+        self.account_actions.addWidget(self.account_button)
         for row, title, value, button in (
             (0, "Codex App Server", self.connection, self.server_button),
             (1, "サンドボックス環境", self.sandbox, self.sandbox_button),
@@ -72,7 +75,10 @@ class CodexSettings(QFrame):
         ):
             self.rows.addWidget(QLabel(title, self), row, 0, Qt.AlignmentFlag.AlignVCenter)
             self.rows.addWidget(value, row, 1, Qt.AlignmentFlag.AlignVCenter)
-            self.rows.addWidget(button, row, 2, Qt.AlignmentFlag.AlignVCenter)
+            if button is self.account_button:
+                self.rows.addLayout(self.account_actions, row, 2)
+            else:
+                self.rows.addWidget(button, row, 2, Qt.AlignmentFlag.AlignVCenter)
             value.setAccessibleName(title)
         usage = QGroupBox("利用状況", self)
         usage_layout = QVBoxLayout(usage)
@@ -107,7 +113,7 @@ class CodexSettings(QFrame):
     def reset(self) -> None:
         """Discard values when their connection generation is replaced or closed."""
         self.view.clear()
-        self.account.setText("—")
+        self.account.setText("ChatGPT · —")
         self.sandbox.setText("—")
         self.view.update_item("usage", "未取得")
 
@@ -119,6 +125,7 @@ class CodexSettings(QFrame):
                 text += f"\n{account.workspace_name}"
         else:
             text = "未ログイン"
+        text = f"ChatGPT · {text}"
         if self.account.text() != text:
             self.account.setText(text)
 

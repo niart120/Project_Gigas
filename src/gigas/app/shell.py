@@ -390,6 +390,9 @@ class ApplicationShell(QObject):
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
             self.dialog.codex_form.insertRow(0, self.window.connection.codex_settings)
+            self.window.connection.codex_settings.account_actions.addWidget(
+                self.dialog.auth_migration_button
+            )
             self.window.connection.codex_settings.show()
             self.dialog.save_button.clicked.connect(lambda _checked: self.apply_settings())
             self.dialog.ok_button.clicked.connect(lambda: self.apply_settings(close_after=True))
@@ -628,6 +631,10 @@ class ApplicationShell(QObject):
             self.dialog.status.setText(message)
             self.dialog.status.setVisible(bool(message))
             self.dialog.set_editable(self._can_edit)
+            chatgpt = self.dialog.values().auth_method == "chatgpt"
+            self.dialog.auth_migration_button.setVisible(not chatgpt)
+            self.window.connection.account_button.setVisible(chatgpt)
+            self.window.connection.codex_settings.account.setVisible(chatgpt)
             self.dialog.capture_refresh_button.setEnabled(self._can_edit and self.video.can_refresh)
             self.dialog.save_button.setEnabled(self._can_edit)
             self.dialog.ok_button.setEnabled(self._can_edit)
