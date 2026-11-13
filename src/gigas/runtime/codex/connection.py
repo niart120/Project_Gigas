@@ -1462,8 +1462,7 @@ class CodexConnection:
         incoming_turn = params.get("turnId")
         if isinstance(incoming_turn, str):
             self._adopt_turn(incoming_turn)
-            if incoming_turn == self._turn_id or incoming_turn in self._completed_turns:
-                # Display-only updates, including late history, never change turn lifetime.
+            if incoming_turn == self._turn_id:
                 with suppress(CodexConnectionError):
                     self._public_notification(event.method, params, incoming_turn)
         if event.method == "serverRequest/resolved":
@@ -1680,6 +1679,7 @@ class CodexConnection:
         self._emit(DialogueEvent(str(payload["kind"]), {**payload, "partial": False}, turn_id))
 
     def _flush_dialogue(self, turn_id: str | None = None) -> None:
+        self._summaries.clear()
         for key, payload in tuple(self._dialogue.items()):
             if turn_id is None or key[0] == turn_id:
                 self._dialogue.pop(key)

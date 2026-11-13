@@ -115,7 +115,7 @@ class PlanEvent:
     """A complete replacement of one accepted turn's public plan.
 
     Attributes:
-        turn_id: Owning turn; may be an earlier completed turn, not the current one.
+        turn_id: Current accepted turn, before its completion notification.
         steps: Complete ordered list. An empty tuple clears that turn's plan.
         explanation: Runtime-provided explanation, or empty when absent.
     """
@@ -130,7 +130,7 @@ class ReasoningEvent:
     """A replacement snapshot containing only a reasoning item's public summary.
 
     Attributes:
-        turn_id: Owning accepted turn, including earlier completed turns.
+        turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
         summary: Public paragraphs in summary-index order; empty removes the summary.
             Raw reasoning content is never included.
@@ -146,7 +146,7 @@ class ActivityEvent:
     """A replacement display value for a public command, file or MCP item.
 
     Attributes:
-        turn_id: Owning accepted turn, including earlier completed turns.
+        turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
         kind: Supported public item type.
         title: Actual command, changed paths, or server/tool name.

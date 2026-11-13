@@ -2094,10 +2094,15 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
         )
         notify("turn/plan/updated", {"plan": []}, turn="unknown-turn")
         await _events_processed()
-        assert [event for event in events[before:] if not isinstance(event, DialogueEvent)] == [
-            PlanEvent("turn-1", (PlanStep("観測", "completed"),)),
-            ReasoningEvent("turn-1", "reason-1", ()),
-            ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "failed", "停止"),
+        assert events[before:] == []
+        notify(
+            "item/reasoning/summaryTextDelta",
+            {"itemId": "reason-1", "summaryIndex": 0, "delta": "次turnの公開要約"},
+            turn="turn-2",
+        )
+        await _events_processed()
+        assert events[before:] == [
+            ReasoningEvent("turn-2", "reason-1", ("次turnの公開要約",)),
         ]
         assert [event for event in events if isinstance(event, SessionStatus)][
             -1
@@ -2982,6 +2987,16 @@ def test_dialogue_snapshots_flush_pending_text_once_on_interruption(tmp_path: Pa
         assert not any(isinstance(event, DialogueEvent) for event in events)
         await connection.stop()
         await connection._notification(_terminal(status="interrupted"))
+        for method, fields in (
+            ("item/agentMessage/delta", {"itemId": "answer", "delta": " late"}),
+            (
+                "item/completed",
+                {"item": {"type": "agentMessage", "id": "answer", "text": "late final"}},
+            ),
+        ):
+            await connection._notification(
+                RpcNotification(method, {"threadId": "thread-1", "turnId": "turn-1", **fields})
+            )
         await connection.close()
         records = [event for event in events if isinstance(event, DialogueEvent)]
         assert records == [
