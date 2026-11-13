@@ -1,10 +1,10 @@
 # U06 M0 Goal・途中介入・記録・実行設定の設計
 
-2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../wip/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
+2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../complete/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
 
 ## 1. 目的・状態・起点
 
-状態: **complete、M0調査・設計完了**。[U06親仕様](../../wip/unit_011/GOAL_EXECUTION.md)のM0のみを扱う。2026-11-13の依頼に従い、採用版公開APIと実呼出し、現コード、Qt表示を照合し、最終KISSレビューを完了した。製品実装・Goalの製品結合・実機受入は未着手。
+状態: **complete、M0調査・設計完了**。[U06親仕様](../../complete/unit_011/GOAL_EXECUTION.md)のM0のみを扱う。2026-11-13の依頼に従い、採用版公開APIと実呼出し、現コード、Qt表示を照合し、最終KISSレビューを完了した。製品実装・Goalの製品結合・実機受入は未着手。
 
 開始時点は `main`、`ad69559`、clean。作業ブランチは `codex/u06-m0-goal-design`。依存はCodex runtime 0.167.0、MCP 2.3.0、PySide6 Essentials 6.12.0、pySerial 3.5。`uv lock --check` は成功。製品コード・テスト・依存は変更していない。
 

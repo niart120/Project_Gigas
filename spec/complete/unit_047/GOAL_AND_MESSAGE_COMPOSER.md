@@ -1,6 +1,6 @@
 # 常設目標と一体型メッセージ入力 仕様書
 
-2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../wip/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
+2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../complete/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
 
 ## 1. 概要
 
@@ -18,7 +18,7 @@ Goal接続・Goal送信モード・pause/resumeはM2。候補モデル取得・�
 
 ## 4. 関連文書・着手条件
 
-[初期UI](../../initial/10-ui-interaction.md)、[U06親](../../wip/unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
+[初期UI](../../initial/10-ui-interaction.md)、[U06親](../../complete/unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
 
 ## 5. 振る舞い仕様
 

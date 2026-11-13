@@ -7,7 +7,7 @@
 Goal開始・目的更新・自律turn・一時停止・同一接続再開・破棄・完了、run/Grant/MCP寿命、memory限定書込、公開対話保存、Goal UIと自律turnへの設定反映を扱う。M3の認証拡張・実機工程受入、U07終了/U08再起動復旧/U09記憶整理/U10長時間、PR・マージは対象外。
 
 ## 関連・着手条件
-[親](../../wip/unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[最新M1](../../complete/unit_048/NEXT_TURN_MODEL.md)、[UI](../../initial/10-ui-interaction.md)、[記録](../../initial/04-agent-memory.md)。採用runtime0.167.0の公開schema・M0隔離結果と製品結合の証拠を区別する。
+[親](../../complete/unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[最新M1](../../complete/unit_048/NEXT_TURN_MODEL.md)、[UI](../../initial/10-ui-interaction.md)、[記録](../../initial/04-agent-memory.md)。採用runtime0.167.0の公開schema・M0隔離結果と製品結合の証拠を区別する。
 
 ## 最終契約と根拠
 
@@ -15,7 +15,7 @@ Goalは公開状態を正本とし、goal/setだけで開始する。目的更�
 
 turn/interruptの終端だけでは、thread内の同期exec_commandも終了しないことを実測した。停止では公開thread/backgroundTerminals/listの全ページを取得し、processIdごとにterminateして、最後に一度一覧の空を確認する。接続が一つの共有taskで回収を所有し、回収中はstopping、未確認失敗はerrorとして新規送信・再開を拒否する。Goal自然停止、失敗・中断、承認cancel、遅いturnも同じ経路を使う。監視・再試行・OS PID終了は追加しない。公開一覧に属さない任意の子孫プロセスや外部書込の終了までは保証しない。
 
-M3の後続修正: complete時も一律interruptして最終応答を切る問題を確認した。[M3 D05](../../wip/unit_050/GOAL_ACCEPTANCE.md)で、入力停止と公開端末回収を維持しながら完了時のturnの自然終端を待つ契約へ改訂する。明示停止・休止・制限・失敗の中断は維持する。
+M3の後続修正: complete時も一律interruptして最終応答を切る問題を確認した。[M3 D05](../../complete/unit_050/GOAL_ACCEPTANCE.md)で、入力停止と公開端末回収を維持しながら完了時のturnの自然終端を待つ契約へ改訂する。明示停止・休止・制限・失敗の中断は維持する。
 
 Goal本文とPlanは別の標準Transcript内で選択・コピー・更新中スクロール保持を行う。独自の跨ぎ選択は作らない。目的更新だけで既受信Planを消さず、公開通知にないGoal改訂との対応を推測しない。目標モードの切替は原稿を保持しAPIを呼ばない。受理成功でモードをオフへ戻し、提出時と同じ原稿だけ消す。編集中の別原稿、失敗・受付不明の原稿は保持する。
 

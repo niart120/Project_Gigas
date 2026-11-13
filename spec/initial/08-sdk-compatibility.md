@@ -6,13 +6,13 @@
 
 ## U02の採用判断
 
-`openai-codex==0.167.0`（対応runtime `openai-codex-cli-bin==0.167.0`）は、要求handlerを唯一のreader内で同期実行するため製品接続に不採用です。模擬peerを使い、回答保留中は後続通知と別要求の応答が読めず、回答後に双方届くことを再現しました。公開の保留・後送APIは確認できません。現在の開発コミット`039d0f27d56c31913ffc0f2055a3432b1bcb0b06`も同じclient.pyで、より新しい公開prereleaseはありません。
+`openai-codex==0.167.0`（対応runtime `openai-codex-cli-bin==0.167.0`）は、要求handlerを唯一のreader内で同期実行するため製品接続に不採用です。模擬peerを使い、回答保留中は後続通知と別要求の応答が読めず、回答後に双方届くことを再現しました。調査時点では公開の保留・後送APIは確認できず、開発コミット`039d0f27d56c31913ffc0f2055a3432b1bcb0b06`も同じclient.pyでした。より新しい公開prereleaseも確認できませんでした。
 
 Windows x64/Python 3.13.5の隔離環境で、固定runtimeのinitialize、未認証account/read、model/list、close呼出しと調査Pythonの正常終了を確認しました。これは認証・モデル利用・通常ターン・異常時の全資源終了の保証ではありません。closeはkill後のwaitや内部スレッド生存の確認結果を公開しないため、終了契約も別途解決が必要です。
 
-詳細な配布物hash、API一覧、再現コード、GUI・サービス所有設計は[M0子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)にあります。2026-11-11にユーザーが公開app-server直接接続を承認しました。[M1](../complete/unit_017/CODEX_DIRECT_CONNECTION.md)で単一stdio接続を実装し、既存ChatGPT認証で通常応答、質問への回答・中断、command承認の取消し、file承認の拒否を確認しました。SDKは製品依存に追加していません。U02完了時のGoal・MCP・旧書込終了は入口の存在確認に留まりました。その後の観測MCPはU04 M2、入力・停止はU05で製品確認済みです。GoalはU06 M0で限定確認を終え、製品結合と旧書込の収束に関する残作業は第7節で区別します。
+詳細な配布物hash、API一覧、再現コード、GUI・サービス所有設計は[M0子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)にあります。2026-11-11にユーザーが公開app-server直接接続を承認しました。[M1](../complete/unit_017/CODEX_DIRECT_CONNECTION.md)で単一stdio接続を実装し、既存ChatGPT認証で通常応答、質問への回答・中断、command承認の取消し、file承認の拒否を確認しました。SDKは製品依存に追加していません。U02完了時のGoal・MCP・旧書込終了は入口の存在確認に留まりました。その後の観測MCPはU04 M2、入力・停止はU05、Goalと公開端末回収はU06 M2で製品へ結合し、M3の実接続結果と制約は第7節で区別します。
 
-採用版のGUI結合・全体品質ゲートは[U02親仕様](../complete/unit_007/CODEX_CONNECTION.md)に記録します。新規ブラウザ認証、APIキー、承認accept後の実行、別版・別環境は、上記の受入結果に含みません。
+採用版のGUI結合・全体品質ゲートは[U02親仕様](../complete/unit_007/CODEX_CONNECTION.md)に記録します。上記はU02時点の結果であり、新規ブラウザ認証と承認accept後の実行は後のM3で確認しました。APIキー、別版・別環境は含みません。
 
 ## U04 M0のMCP公開経路（2026-11-12）
 
@@ -67,11 +67,11 @@ GameIoMcpServer(observations, inputs, protocol)がobserveとact_and_observeを�
 
 **模擬機器で確認済み**: 採用実app-serverとlocalhostのResponses mock、製品MCP・入力・観測・保存を通し、300秒設定で65秒wait完了、途中停止、同threadの3DS能力再読込とtouchを確認しました。試験プロセス内だけGigas側0.25秒・Codex側1秒へ短縮し、TOOL_TIMEOUTとneutralを確認しました。300秒経過の試験ではありません。根拠は`tmp/mcp-input-investigation/RESULT.md`と`complete-runtime-probe/report.json`です。
 
-**製品GUI・実モデル・実機で確認済み**: Windows、USB Video Device、COM8・CH552・9600 baud、採用0.167.0と既存ChatGPT認証、gpt-6.1-sol/lowで3runを実行しました。短い左右入力、設定モーダルからのB長押し停止（interrupted/neutral sent）、左移動後に止まる映像、同thread・ID・保存PNG、正常終了を確認しました。詳細は[U05 M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)に置きます。B解除ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過は未検証で、[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)へ引き継ぎます。
+**製品GUI・実モデル・実機で確認済み**: Windows、USB Video Device、COM8・CH552・9600 baud、採用0.167.0と既存ChatGPT認証、gpt-6.1-sol/lowで3runを実行しました。短い左右入力、設定モーダルからのB長押し停止（interrupted/neutral sent）、左移動後に止まる映像、同thread・ID・保存PNG、正常終了を確認しました。詳細は[U05 M2](../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)に置きます。機器の解除ACKは取得していません。writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過は未検証で、[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)へ引き継ぎます。
 
 ## U06 M0のGoal・途中介入・次ターン設定（2026-11-13）
 
-[M0子仕様](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で、同梱0.167.0の公開schema、採用tag `086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`、実app-serverを照合した。調査用コードとQt試作の確認であり、製品にGoal・共通Message・Planを実装した結果ではない。
+[M0子仕様](../complete/unit_044/GOAL_INTERACTION_DESIGN.md)で、同梱0.167.0の公開schema、採用tag `086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`、実app-serverを照合した。以下はM0の調査用コードとQt試作の結果である。現在はM1/M2でGoal・共通Message・Planを製品へ結合し、実接続の確認範囲は[M3子仕様](../complete/unit_050/GOAL_ACCEPTANCE.md)へ記録している。
 
 **実モデルで確認済み**: 既存ChatGPT認証を隔離した一時HOMEで使い、公開stdio APIを実行した。`thread/goal/set(objective,status=active,origin=user)`だけで初回ターンが始まり、ツール呼出しを含むターン完了後に次ターンが自律開始した。`turn/start`の重複送信やアプリの継続ループは不要である。`status=paused`と`clear`はGoalを変更するが、実行中ターンは`inProgress`のままだった。別途`turn/interrupt`して`interrupted`を受ける。目的を省略した`status=active`で同じGoalの利用量と作成時刻を保って再開できた。pausedのまま通常`turn/start`を送って応答を得てもGoalはpausedを維持した。
 
@@ -87,13 +87,15 @@ M1で秘密入力の採用を撤回した。採用版の[protocol定義](https:/
 
 設定適用の境界は実runtimeとローカルResponses mockの送信JSONでも確認した。ツール保留中に設定を変えても、同じターンのツール結果後の推論は旧モデルを使い、次の自律ターンから新モデル・effortを使った。実モデルの開始時記録だけを根拠に同ターン内の適用時点まで断定していない。
 
-実行根拠は`tmp/u06/runtime-goal/live-20261113-021248/report.json`（Goal）、`live-20261113-021441/report.json`（設定）、`wire-20261113-022053/report.json`（設定適用境界）、`live-20261113-021808/report.json`（paused中の通常送信）、`tmp/u06/mcp-20261113-021320/report.json`（操作権）、`tmp/u06/interaction-20261113-021655/report.json`（質問・steer・Plan）。短い実モデル試験では公開reasoning要約を受信しておらず、全認証・モデルでの提供を保証しない。このM0結果に続くM1では製品の表示結合を確認した。M2でGoalと質問/承認の競合を製品の固定通知試験で確認し、M3の実モデル・実機の一連操作は後続確認とする。300秒経過、長時間継続、APIキー課金経路、制限の実発生はこの結果に含まない。
+実行根拠は`tmp/u06/runtime-goal/live-20261113-021248/report.json`（Goal）、`live-20261113-021441/report.json`（設定）、`wire-20261113-022053/report.json`（設定適用境界）、`live-20261113-021808/report.json`（paused中の通常送信）、`tmp/u06/mcp-20261113-021320/report.json`（操作権）、`tmp/u06/interaction-20261113-021655/report.json`（質問・steer・Plan）。M0の短い実モデル試験では公開reasoning要約を受信しなかった。続く製品結合と実接続はM1〜M3へ分けて記録する。300秒経過、長時間継続、APIキー課金経路、制限の実発生はこのM0結果に含まない。
 
 M1の製品結合: [子仕様](../complete/unit_045/COMMON_DIALOGUE_UI.md)で共通入力・公開表示・配送結果を実装し、固定stdio peer経由の質問/steer/承認/終端を確認した。既存ChatGPT認証と実モデル`gpt-6.1-sol`・lowでは、製品ApplicationShellから通常turnを一度開始し、2回のPlan更新、応答の表示、下書き消去、終端とサービス終了を確認した。公開summaryは未受信。Goal制御・実機・新規認証の証拠には使わない。
 
+M3では資格情報を複製しない新規ログイン、本人によるWindows実行準備と再接続後ready、実IME、通常/自律次turn設定、質問中のsteer、承認accept後の実行とcancelだけによる中断を製品経路で確認した。USB Video DeviceとCOM8・CH552・9600 baudでは入力・memory書込・設定適用の同時停止、本人手動後の同Goal再開と初回observe、旧Grant拒否・旧MCP終了、自然最終応答とclearを確認した。非空summaryは今回のsol/low・terra/mediumの短い呼出しで0件、実承認要求のdeclineは未提供だった。提供されなかった値を表示成功や全モデルの非対応へ広げず、固定試験と実測の詳細は[M3](../complete/unit_050/GOAL_ACCEPTANCE.md)を参照する。
+
 # 1. この文書の位置づけ
 
-**公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。通常ターンはU02、観測はU04、入力・停止はU05で製品確認済みです。GoalはU06 M2で製品へ結合しました。実モデル・実機の一連操作と認証拡張はM3へ残ります。
+**公開app-server v2プロトコルへの単一接続を採用します。** Codex固有処理と通信管理は一つのCodex接続実装へ集約します。SDKの内部クラスや非公開メソッドへの依存、非公開ハンドラの差し替え、同じ通信をSDKと独自処理が二重に受信する構成は採りません。runtimeは0.167.0へ固定しています。通常ターンはU02、観測はU04、入力・停止はU05、Goalの製品結合はU06 M2で確認しました。M3の実接続結果は対象の認証・機器・短い依頼に限定し、未検証の方式や長時間運転へ広げません。
 
 通信の管理主体は一つのCodex接続部に保ちます。asyncio subprocessのreaderで受信を振り分け、回答待ちはreaderの外で扱います。SDK改修・非公開API差替え・二重受信は行いません。以下のSDK調査記述は不採用判断の根拠であり、製品方式の現行契約ではありません。
 
@@ -123,11 +125,13 @@ M1の製品結合: [子仕様](../complete/unit_045/COMMON_DIALOGUE_UI.md)で共
 
 Goalは `thread/goal/set`・`get`・`clear` と更新通知で扱います。U06 M0で開始・自律継続・休止・保持再開・破棄を実モデル確認しました。初回調査のPython SDKにもGoal用の低水準処理は存在しましたが、製品ではその内部処理を利用しません。
 
-U06でCodex接続部へ結合するのは、通常ターンの通知に加えて複数ターンにまたがるGoal更新です。`turn/completed`を依頼全体の達成とみなさず、公開Goal状態、実行中ターン、利用者の停止意思を別々に保持します。
+U06では通常ターンの通知に加えて複数ターンにまたがるGoal更新をCodex接続部へ結合しました。`turn/completed`を依頼全体の達成とみなさず、公開Goal状態、実行中ターン、利用者の停止意思を別々に保持します。
 
 Goal の継続は実行状態、予算、保留入力などの条件を受けます。Goal が active であれば無条件に永久実行するという保証はありません。公式 Cookbook はツール呼び出しを含まない継続ターンで、自動継続が抑制される条件も説明しています。アプリ側で独立した無限再投入ループを重ねません。
 
 Goal開始前に永続thread・通知購読・操作権を用意します。採用版では既存Goalの目的更新も累積利用量を保持します。別の新規依頼は旧Goalをclearしてから作成し、保持再開はobjectiveを省略します。即時停止では先にゲーム入力を閉じ、その後Goalの一時停止または破棄とターン中断を行います。pause単独では実行中ターンもコントローラー押下も止まりません。
+
+Goalのcomplete通知では入力・追加指示・要求を閉じて公開端末を回収し、現在turnの最終応答と自然終端を待ちます。終端後にも公開端末の回収を確認してreadyへ戻します。待機中の明示stop/clearはinterruptしてstoppedへ移り、先行した明示停止を遅いcomplete通知で解除しません。固定通知による競合試験とM3の実モデル自然最終応答を区別して確認しています。
 
 # 4. 介入・表示・利用者への要求
 
@@ -137,15 +141,15 @@ Goal開始前に永続thread・通知購読・操作権を用意します。採�
 
 初回SDK調査では、標準承認ハンドラがacceptを返す実装と、唯一の受信スレッド内でハンドラを同期実行する構造を確認しました。回答保留で後続受信が止まる問題はU02の模擬peerで再現し、SDK不採用の根拠としました。
 
-製品のCodex接続部は一つの公開app-server接続で受信を継続し、回答待ちを受信処理の外で扱います。要求IDに対応する有効な回答だけを返し、承認はGUIの明示操作で送ります。通常ターンの保留・中断・失効はU02、ゲーム入力の独立した停止はU05で確認済みです。共通Messageへの結合はU06 M1の固定stdio往復で確認し、Goalとの競合はM2の固定通知試験で確認し、実モデル受入はM3へ残します。別受信経路やSDK内部handlerの差し替えは追加しません。
+製品のCodex接続部は一つの公開app-server接続で受信を継続し、回答待ちを受信処理の外で扱います。要求IDに対応する有効な回答だけを返し、承認はGUIの明示操作で送ります。共通Messageの配送とGoalとの競合はM1/M2の固定試験、実質問中のsteer・回答、無害なコマンドのaccept後の実行、cancelだけによるturn中断はM3で確認しました。実要求ではdeclineが提示されず、その応答は固定試験に限ります。schemaにある選択肢を要求のavailableDecisionsへ補わず、永続許可も暗黙に選びません。別受信経路やSDK内部handlerの差し替えは追加しません。
 
 # 5. 認証・モデル・利用制限
 
-公開app-serverの `account/login/start`・`account/read`・`model/list` を使います。既存ChatGPT認証とモデル/effort一覧は実行確認済みで、新規ChatGPTログインの受入結果はU06 M3で区別して記録します。APIキー認証は2026-11-13の合意で今回対象外です。認証とモデル妥当性を分離し、特定モデル名やeffortの全種類を固定しません。
+公開app-serverの `account/login/start`・`account/read`・`model/list` を使います。既存ChatGPT認証に加え、M3で資格情報を複製しない新規homeへの本人ログインとモデル一覧取得を確認しました。認証とモデル妥当性を分離し、無効な保存値でもログインと同接続での選び直しを妨げません。有効なモデル/推論レベルを選ぶまでは開始を拒否します。APIキー認証は2026-11-13の合意で今回対象外です。
 
 app-server の利用枠情報は ChatGPT 利用枠が対象です。取得できた使用率や回復予定時刻を表示します。API キー利用時の課金残高やクレジット上限を、同じ通知から必ず取得できるとはしません。
 
-利用制限や課金関連エラーは、得られたエラーと利用枠情報を添えて停止理由にします。ランタイム自身が再試行中の通知と、最終的な実行失敗は分けます。初期版の再開は利用者の明示操作に限り、回復時刻到来だけで入力を再開しません。
+停止根拠は公開readの`ordinaryUsageAllowed=false`または現在turnの最終失敗（`willRetry=false`）です。残高ゼロ・使用率・reset時刻・429だけでは利用不能や回復を断定しません。疎な利用枠通知では完全snapshotを再取得し、定期pollや独自再試行は行いません。取得失敗だけで停止せず、nullや失敗で既知の利用不能も解除しません。実利用枠取得はM3、利用不能・競合時の停止は固定試験で確認し、意図的な課金超過は起こしていません。再開は利用者の明示操作に限ります。
 
 # 6. 継続制御への委任と制約
 
@@ -175,7 +179,7 @@ app-server の利用枠情報は ChatGPT 利用枠が対象です。取得でき
 
 同じGoalの明示再開は、`objective`を送らず `thread/goal/set(status=active, origin=user)` を使います。目的・予算・累積利用量を保つことはU06 M0で確認済みです。受付と実際の開始は受け取った通知どおりに扱い、開始が起きなくても自動再設定しません。通信失敗で結果不明なら成功扱いや自動再送をせず、入力を閉じてエラーを表示します。
 
-ユーザーが停止・アプリ再起動・再開を行う場合も、旧入力の失効と旧実行の終了確認は必要です。Python側の待機取消しだけで、ワーカーや実機入力まで終了したとは扱いません。受信者と子プロセス終了はU02、入力write後の解除はU05の所有契約を使い、Goalとの結合をU06 M2/M3で確認します。アプリ再起動後の復旧はU08です。
+ユーザーが停止・アプリ再起動・再開を行う場合も、旧入力の失効と旧実行の終了確認は必要です。Python側の待機取消しだけで、ワーカーや実機入力まで終了したとは扱いません。受信者と子プロセス終了はU02、入力write後の解除はU05の所有契約を使い、Goalとの結合をU06 M2/M3で確認しました。M3では中立送出後の画面停止を約11秒間確認しましたが、機器ACKと瞬間の物理解除は未観測です。アプリ再起動後の復旧はU08です。
 
 2026-11-10の調査記録では、[Issue #58421](https://github.com/openai/codex/issues/58421)に、0.163.0のLinuxで中断後のキュー入力がidleのまま起動しないという利用者報告があります。調査時点のduplicateによるclosedは、修正済みを意味しません。本構成・Windowsでの再現事実とは区別し、この報告を根拠に無条件の`turn/start`による復旧を採用しません。
 
@@ -192,19 +196,19 @@ app-server の利用枠情報は ChatGPT 利用枠が対象です。取得でき
 
 # 7. 採用版の確認結果と後続の検証
 
-U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確認、U06 M0の限定確認まで進みました。次表は現在の結果と残る検証を区別します。過去のソース調査だけで採用版・製品の成立を保証しません。
+U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確認、U06 M0の限定確認、M1/M2の製品結合を経てM3の対象構成を実接続確認しました。次表は現在の結果と残る検証を区別します。過去のソース調査だけで採用版・製品の成立を保証しません。
 
 | 対象 | 確認対象 | 現在の結果と残る検証 |
 | --- | --- | --- |
 | 起動・版・通常ターン | Windows配布runtime、公開API、受信と子プロセス終了の所有者 | U02で版を固定し、通常ターンの開始・応答・中断・終了をWindowsで確認済み |
-| 質問・承認 | 公開経路での保留・回答・失効 | U02で通常turnの受信・停止・失効を確認済み。共通MessageはU06 M1、Goalとの競合はM2の固定通知で確認、実モデル受入はM3 |
-| 認証・モデル | ChatGPTの経路、資格情報の保管責任、利用可能モデルと設定値の検証 | U02はChatGPTで最小接続を確認。新規ChatGPT認証をU06で確認。APIキーはM3対象外。設定文字列の保存で代用しない |
+| 質問・承認 | 公開経路での保留・回答・失効 | M1/M2で共通UI・Goalとの競合、M3で実質問/steer・accept後の実行・cancelだけの中断を確認。実要求にないdeclineは固定試験のみ |
+| 認証・モデル | ChatGPTの経路、資格情報の保管責任、利用可能モデルと設定値の検証 | M3で新規ログイン、準備したhomeの再接続ready、通常/自律の次turn設定を確認。現在turnは変更しない。APIキーと別home/環境全般の成立は含まない |
 | MCPと画像 | U02で設定経路を調査し、U04冒頭でサーバと画像応答形式を決定 | U04 M2で固定Frame・USB Video Deviceの実映像の実モデル受信、保存画像・観測IDとの対応と実画面の応答性を確認。固定Frameの同接続で次ターンの保存PNG参照、再起動後の会話読込も確認 |
-| MCP接続と実行世代 | 新endpoint/Grantと同threadの設定再読込 | U05の製品で停止後の旧要求拒否を確認済み。Goalの自律turnと同run保持・新MCPでの再開はU06 M0の模擬条件で確認、製品結合はM2で確認、実機受入はM3 |
-| Goalの継続 | 複数ターン、目的更新、pause/resume/clearとinterrupt | U06 M0で実モデルの限定確認済み。Goal達成と質問/承認・停止の競合はM2固定試験、実runtime製品結合もM2確認。実モデル/実機はM3 |
-| 追加指示・計画・制限 | steer、公開Plan、利用枠、終了との競合 | U06 M0でsteer・Planの実runtime配送、ChatGPT利用枠を確認。共通表示はM1、Goal競合はM2、認証/制限の製品結合はM3。受付不明を再送しない |
+| MCP接続と実行世代 | 新endpoint/Grantと同threadの設定再読込 | M3で複数自律turnの同run保持、本人手動後の同thread再開・新MCPの初回observe、旧Grant拒否・旧MCP終了を確認 |
+| Goalの継続 | 複数ターン、目的更新、pause/resume/clearとinterrupt | M3で実モデルの目的更新・自律継続・pause/paused会話・再開・自然最終応答・clearを確認。要求/明示停止とcompleteの競合は固定試験 |
+| 追加指示・計画・制限 | steer、公開Plan、利用枠、終了との競合 | M3で実質問保留中のsteer・公開Plan・実利用枠取得を確認。利用不能停止は固定試験、意図的な課金超過は対象外。受付不明を再送しない |
 | 追加指示による終了作業と休止 | U07 M0で共通配送から終了作業・休止・公開結果を確認 | 必要な差分の実装前。元Goalを保持し、作業報告とアプリが確認できた停止・結果を分ける。専用切替が必要とは仮定しない |
-| 同じGoalと新規スレッドでの再開 | 保持Goalと保存参照・再起動後の復帰を区別 | 同一セッションはU06 M0で限定確認済み、M2で製品結合確認、実機確認はM3。保存スレッド読込・新規再構成はU08 M0。再開後の初回observeはモデルへの指示でありAPI保証ではない |
+| 同じGoalと新規スレッドでの再開 | 保持Goalと保存参照・再起動後の復帰を区別 | 同一セッションはM3で本人の手動操作後の現在画面を実モデルへ渡すところまで確認。保存スレッド読込・新規再構成はU08 M0。再開後の初回observeはモデルへの指示でありAPI保証ではない |
 | 整理スレッドと書き込み終了 | U02で実行終了の観測方法を調べ、U09冒頭で整理の権限・終了・ファイル更新の扱いを確認 | U09の復元実装へ進む前。非同期待機の取消しだけを終了とみなさず、復元を開始できる条件を決定 |
 
 「公開経路の調査」「採用版による限定的な接続確認」「製品フロー全体の検証」は別々に記録します。後続の確認で必要経路が成立しなければ、依存する実装へ進む前に制約と選択肢を示します。公開APIの不足を独自の攻略継続ループや暗黙再接続で補わず、必要なら別の設計変更として扱います。
@@ -219,17 +223,17 @@ U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確�
 
 **確認済みの形式**: 同梱`codex-cli 0.167.0`の`app-server generate-json-schema`から、`TurnPlanUpdatedNotification`の必須項目が`threadId`・`turnId`・`plan`であること、`explanation`が省略可能かつstring/nullであることを確認しました。各計画項目は`step`と`status`を持ち、状態は`pending`・`inProgress`・`completed`です。項目IDはありません。[公式app-server資料](https://learn.chatgpt.com/docs/app-server#turn-events)でもエージェントが計画を公開・変更する通知として案内されています。形式の確認は、Goal継続中の通知頻度・順序・再開後の取得を実行確認した意味ではありません。
 
-**現在の製品との隔たり**: 接続部は通常ターン用であり、GUIは質問カードと通常入力を分けています。回答検証は質問IDごとの値を要求し、選択式で自由回答不可の要求も扱います。通常送信の有効化だけでは共通入力や実行中の介入は成立しません。plan・reasoningの表示、Goal操作を既存GUIが実装済みとは扱いません。
+**現在の製品結合**: M1で通常送信・実行中の追加指示と履歴内の質問/承認カードを結合し、M2でGoal操作と停止・再開を接続しました。回答は質問IDごとに検証し、自由回答不可の要求へ自由文を流用しません。Plan・公開summaryの表示と要求寿命は固定通知で確認済みです。実モデルが各通知を提供する範囲と実機での受入結果は[M3](../complete/unit_050/GOAL_ACCEPTANCE.md)へ記録し、表示実装の存在から推測しません。
 
 **pause／clear／interrupt**: 0.167.0のschemaと上記実モデル試験で、それぞれGoal保持、Goal除去、ターン中断の別操作であることを確認しました。明示操作は`origin=user`で送り、Gigasの一時停止・破棄は先に入力を遮断・解除してからGoal変更と実行中ターンの中断を行います。Codexデスクトップの各ボタンの内部実装を確認した意味ではありません。
 
 | ID | M0の確認・決定と残る検証 | 担当・判断期限 |
 | --- | --- | --- |
-| UI-A1 | 実モデルでGoal開始・自律継続・目的更新・pause・resume・clear・interruptとpaused中通常送信を確認。旧Grant拒否と新MCP公開は実runtime/模擬機器で確認。再開前は最新cacheの利用可否を確認し、再開後まずobserveする指示を渡す。Goal setに画像入力欄はない | M2で製品配線・要求失効と、固定Responsesを使う実runtimeの同thread再開・新MCP経由入力/観測を確認。実モデルによる初回observe遵守と短い実機操作はM3。保存参照からの復帰はU08 |
-| UI-A2 | 実runtimeで保留質問中steer、複数質問への回答、終了後steer拒否を確認。履歴内の要求カードで回答対象を明示し、全question IDの回答を揃えて一括返答する。選択限定回答へ自由文を混ぜず、追加指示はMessageから別送信。普通の文章を承認へ変換しない | M1で既存回答・配送・下書き試験を改訂しQtへ結合。承認待ち・Goal終了との競合はM2の固定試験で確認、実モデルはM3 |
-| UI-A3 | `tools.update_plan.enabled=true`で実runtimeの2項目・説明通知を確認。thread/turn単位で最新配列を置換し、空配列は空表示とする。ターン切替で前計画を現在欄へ残さず、履歴は保持する。Goal全体のTODOと同一視しない | M1で遅延通知・空配列と表示、M2でGoalターン切替を確認。再接続後の再構成はU08 |
-| UI-A4 | 公開要約schemaは確認。短い実モデル試験では未受信。受け取ったsummaryだけを設定で表示し、未提供の要約を生成しない。生の内部推論は取得・表示しない | M1で固定通知の断片・完了・非表示を既存表示試験へ統合、M3で採用モデルの提供範囲を記録 |
-| UI-A5 | U04/U05とM0の実runtime MCP通知を使い、thread/turn/item IDに対応する実ツール名・開始/完了/失敗を履歴へ出す。ツールの待機をGoal停止や達成と同一視せず、固定の攻略動作・推測回数を生成しない | M1の実通知表示、M2でGoal/停止に結合、実モデル/実機受入はM3 |
+| UI-A1 | 公開Goal操作を製品へ結合。再開前は最新cacheの利用可否を確認し、再開後まずobserveする指示を渡す。Goal setに画像入力欄はない | M3で本人手動後の現在画面の初回observe、旧Grant拒否・旧MCP終了、同thread再開・自然完了・clearを確認。保存参照からの復帰はU08 |
+| UI-A2 | 履歴内の要求カードで回答対象を明示し、全question IDの回答を揃えて一括返答する。選択限定回答へ自由文を混ぜず、追加指示はMessageから別送信。普通の文章を承認へ変換しない | M1/M2で配送と要求寿命、M3で実質問中steer・回答、accept後の実行、cancelだけの中断を確認。実要求にないdeclineは固定試験のみ |
+| UI-A3 | `tools.update_plan.enabled=true`で公開Planを受ける。thread/turn単位で最新配列を置換し、空配列は空表示とする。ターン切替で前計画を現在欄へ残さず、履歴は保持する。Goal全体のTODOと同一視しない | M1で遅延通知・空配列と表示、M2でGoalターン切替、M3で実Plan受信を確認。再接続後の再構成はU08 |
+| UI-A4 | 受け取った公開summaryだけを設定で表示し、未提供の要約を生成しない。生の内部推論は取得・表示しない | M1で固定通知の断片・完了・非表示と閲覧保持を確認。M3の短いsol/low・terra/mediumでは非空summaryが0件で、受信した空配列も含む提供範囲の観測に限る。実summary表示成功や全モデル非対応とはしない |
+| UI-A5 | thread/turn/item IDに対応する実ツール名・開始/完了/失敗を履歴へ出す。ツールの待機をGoal停止や達成と同一視せず、固定の攻略動作・推測回数を生成しない | M1/M2で表示とGoal/停止へ結合。M3で実コマンド・MCP通知と保存を確認し、画像base64を対話へ重複保存しない修正も実通知の再送試験で確認 |
 | UI-A6 | 追加指示を受けたエージェントの区切り・必要なセーブ・メモ更新・Goal休止と公開結果。共通の配送・通知・停止で何を確認できるか。作業中の質問・承認とpause／stop、同一セッション再開を確認。未成立なら制約と必要な設計差分を記録 | U07 M0、必要差分の実装前。専用終了ターン・権限・結果スキーマ・自然文分類を前提にしない |
 
 これらを満たす公開経路が未成立なら、制約と代替操作案を担当M0で提示し、合意前に別入力欄、独自の文章分類、回答全文の複数質問への複製、アプリ独自の攻略継続ループを追加しません。PySide6の表示・選択・履歴量はAPIの未確認事項と分け、10とU06のGUI確認で扱います。
@@ -285,6 +289,6 @@ U02で0.167.0と公開app-server直接接続を採用し、U04/U05の製品確�
 
 追加の実runtime検証で、thread内の同期`exec_command`によるmemory書込が同turnの公開interrupted後も継続した。公開`thread/backgroundTerminals/list`・`terminate`を停止経路へ結合し、最終`tmp/u06-m2-runtime/memory-product-20261113-170826/report.json`では製品停止後1秒と同Goal再開後も3 bytes不変、公開一覧が空であること、サービスと検証プロセスの終了を確認した。[採用版のAPI実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server/src/request_processors/thread_processor.rs)と[端末終了実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/unified_exec/process_manager.rs)を照合し、schemaだけの可能性と実呼出しの成功を区別した。公開一覧外の背景子孫や外部書込の全終了は保証しない。自律継続・設定・MCPの最終再確認はrun-20261113-170939/report.jsonに記録した。
 
-製品launchと分離したprocess cwd/runtime・archive/memory構成でmemory書込、親原記録読取/書込拒否を確認した。Windows sandbox未準備の隔離homeでは要求がreadOnlyへ縮退し製品は拒否する。成功条件はWindows sandboxの有効な環境で、新規home準備はM3の受入項目とする。M2はホストモデル・実機・新規認証・長時間の検証ではない。
+製品launchと分離したprocess cwd/runtime・archive/memory構成でmemory書込、親原記録読取/書込拒否を確認した。Windows sandbox未準備の隔離homeでは要求がreadOnlyへ縮退し製品は拒否する。成功条件はWindows sandboxの有効な環境である。M2はホストモデル・実機・新規認証・長時間の検証ではなく、新規home準備と実モデルによる書込範囲はM3で確認した。
 
-M3の製品契約は公開`windowsSandbox/readiness`と`windowsSandbox/setupStart(mode=elevated)`、`windowsSandbox/setupCompleted`を使う。初回状態取得は認証と独立し、準備は明示操作に限る。開始受付だけでは成功とせず、完了通知後にreadinessを再取得する。非readyなら明示再接続を求め、受付不明時は再送せず切断可能な待機を維持する。memory付き開始のready確認とthread応答の書込範囲検証を別に行い、read-only送信は準備状態で拒否しない。schema・固定通知試験と新規homeの実受入は区別し、結果は[M3子仕様](../wip/unit_050/GOAL_ACCEPTANCE.md)に記録する。
+M3の製品契約は公開`windowsSandbox/readiness`と`windowsSandbox/setupStart(mode=elevated)`、`windowsSandbox/setupCompleted`を使う。初回状態取得は認証と独立し、準備は明示操作に限る。開始受付だけでは成功とせず、完了通知後にreadinessを再取得する。成功後も非readyなら明示再接続を求め、受付不明時は再送せず切断可能な待機を維持する。公開失敗理由は既存のエラー詳細へ残す。memory付き開始のready確認とthread応答の書込範囲検証を別に行い、read-only送信は準備状態で拒否しない。新規homeで本人による準備成功と明示再接続後readyを確認したが、他homeや環境全般の準備済みを意味しない。schema・固定通知・実受入と失敗時の制約は[M3子仕様](../complete/unit_050/GOAL_ACCEPTANCE.md)へ分けて記録する。

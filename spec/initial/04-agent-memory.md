@@ -69,7 +69,7 @@ project/
 | --- | --- | --- |
 | 最小プロジェクトと観測記録 | [U04](../complete/unit_009/RECORDED_OBSERVATION.md) | 保存先・ID・管理情報の作成と読込、画像とイベントの対応、既存データの保全、部分失敗 |
 | 依頼・実行と操作記録 | [U05](../complete/unit_010/INPUT_AND_STOP.md) | 操作に必要な識別子、入力前の開始記録、完了・中断・失敗・結果不明の区別 |
-| Goal・スレッド参照、記憶の入口 | [U06](../wip/unit_011/GOAL_EXECUTION.md) | 継続する依頼との対応、追加指示・公開応答、同一セッション再開の記録、既存記憶を保持した案内と読込 |
+| Goal・スレッド参照、記憶の入口 | [U06](../complete/unit_011/GOAL_EXECUTION.md) | 継続する依頼との対応、追加指示・公開応答、同一セッション再開の記録、既存記憶を保持した案内と読込 |
 | 終了作業の記録・保存参照からの復帰 | [U07](../planned/unit_012/PLANNED_STOP.md)・[U08](../planned/unit_013/RESUME.md) | 元依頼と公開された作業報告の区別、未完記録とランタイム参照の読込。U06の再開経路を共用し、過去操作を再送しないこと |
 | 整理の退避・復元と未完状態 | [U09](../planned/unit_014/MEMORY_MAINTENANCE.md) | 書き込みの排他・終了確認、追加・削除・改名を含む復元、再起動後の未完整理 |
 
@@ -119,7 +119,7 @@ M2では加工・符号化済みObservationをアプリへ渡した後、保存�
 | `project_id` | 原記録先の`project.json`と同じID。未選択チャットにも存在する |
 | `payload` | 下記のthread対応、または観測・画像・元Frameの対応 |
 
-`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはU04 M1で、加工後の画像情報とthread対応はU04 M2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録は非同期投入し、保存成功を最初のターンの開始条件にしません。操作イベントはU05 M1で追加しました。Goal・公開会話のイベントは後続工程で追加します。
+`task_id`・`run_id`・`operation_id`は対応する実体がある場合に記録し、U04では生成しません。共通形式と観測payloadはU04 M1で、加工後の画像情報とthread対応はU04 M2で保存・再読込を確認しています。`thread.started`のpayloadは`runtime: "codex"`と実`thread_id`です。この記録は非同期投入し、保存成功を最初のターンの開始条件にしません。操作イベントはU05 M1、Goal・公開会話のイベントはU06 M2で追加しました。現在の公開対話保存は後述のU06契約に従います。
 
 観測payloadは`observation_id`、`captured_at`、`image_path`、`image`、`source_frame`とし、チャットからの観測には実`thread_id`も記録します。単独APIからの観測に架空のthreadを作りません。`observation_id`は`obs-`にUUIDを続けた永続識別子、`captured_at`は元FrameのUTC、`image_path`は`observations/<observation_id>.png`形式の記録先相対パスです。`image`には`mime_type: "image/png"`と出力`width`・`height`、`source_frame`には元Frameの`generation`・`sequence`・`width`・`height`を保存します。取得世代と連番はサービス寿命内の補助情報であり、アプリ再起動後も一意なFrame識別子としては扱いません。
 

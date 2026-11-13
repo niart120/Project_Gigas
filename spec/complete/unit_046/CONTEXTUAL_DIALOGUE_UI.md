@@ -1,6 +1,6 @@
 # 文脈内の質問・承認と常設Plan 仕様書
 
-2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../wip/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
+2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../complete/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
 
 ## 1. 概要
 
@@ -10,7 +10,7 @@ U06 M1の修正子仕様。2026-11-13に合意したQt試作を製品へ反映�
 
 後続の[常設目標と一体型入力](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md)で、目標欄の非表示、枠外見出し、独立した送信/中断列を置き換えた。本書の画像・検証はunit_046時点の結果として残す。
 
-起点は利用者の再設計承認と「仕様反映からM1実装・検証・コミットまで」の依頼。前提は[旧M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)と[U06親](../../wip/unit_011/GOAL_EXECUTION.md)。試作は根拠であって製品受入とはしない。
+起点は利用者の再設計承認と「仕様反映からM1実装・検証・コミットまで」の依頼。前提は[旧M1](../../complete/unit_045/COMMON_DIALOGUE_UI.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)と[U06親](../../complete/unit_011/GOAL_EXECUTION.md)。試作は根拠であって製品受入とはしない。
 
 ## 2. 対象範囲
 

@@ -1,12 +1,12 @@
 # 次ターンのモデル選択
 
-2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../wip/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
+2026-11-13の後続合意: 本書の検証実績は当時の範囲を保持する。現在の後続範囲は[U06親](../../complete/unit_011/GOAL_EXECUTION.md)を正とし、APIキー認証とモニター間DPI遷移はM3の対象外。次turn設定はM1、Goal結合はM2で完了済み。
 
 ## 目的・範囲
 2026-11-13の依頼で次ターン設定をM3からM1へ前倒しする。入力欄のポップオーバーで公開catalogのモデル・推論レベルを選ぶ。設定ファイルは変えない。未接続は未接続表示で操作不可。Goal接続、認証拡張、PR・マージは対象外。
 
 ## 関連・着手条件
-[前回M1](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md)、[親](../../wip/unit_011/GOAL_EXECUTION.md)、[UI](../../initial/10-ui-interaction.md)。開始a159468、作業branch clean。
+[前回M1](../../complete/unit_047/GOAL_AND_MESSAGE_COMPOSER.md)、[親](../../complete/unit_011/GOAL_EXECUTION.md)、[UI](../../initial/10-ui-interaction.md)。開始a159468、作業branch clean。
 
 ## 契約・設計
 モデル選択は接続が所有し、catalogで検証して受理後にUIへ通知する。通常turn/startは選択値を渡す。実行中のturnとsteerは変更しない。開始提出中は選択不可。MCP再構成も選択値を使用する。Goal自律turnのthread/settings/update接続はM2/M3で行う。
