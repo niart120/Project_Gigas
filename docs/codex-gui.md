@@ -24,7 +24,7 @@ App ServerはGIGASとCodexをつなぐローカルプロセスで、ChatGPTロ�
 
 設定保存の処理中や失敗後も、キャンセル・Escで閉じて主画面の「中断」「切断」へ戻れます。中断しても提出済みの設定保存・接続適用は継続します。新しいCodex接続は設定を正常に読み込んでから行います。
 
-入力枠右端の送信アイコンまたは`Ctrl+Enter`で通常ターンを開始し、実行中はそのturnへ追加指示を送ります。Enter単独は改行に使い、IME変換中の`Ctrl+Enter`では送信しません。「中断」は入力を先に止めてターンの中断を要求し、「停止」表示まで終端確認を待ちます。「切断」は入力を止めてruntime接続を終了します。公開の送信成功応答を確認したときにだけ送信時と同じ原稿を消し、受理前の中断・失敗・受付不明や送信後に編集した原稿は残します。追加指示がturn切替と競合して拒否されても、別turnへ自動転送しません。ターン失敗は通知に理由を残し、終端後の端末回収が成功した場合は接続を維持して次の明示的な送信を受け付けます。終了操作の失敗時は切断・再接続が必要です。
+入力枠右端の送信アイコンまたは`Ctrl+Enter`で通常ターンを開始し、実行中はそのturnへ追加指示を送ります。Enter単独は改行に使い、IME変換中の`Ctrl+Enter`では送信しません。「中断」は入力を先に止めてターンの中断を要求し、「停止」表示まで終端確認を待ちます。「切断」は入力を止め、turn終端の待機を打ち切ってruntime接続を終了します。進行中の中断・公開端末回収は共有します。公開の送信成功応答を確認したときにだけ送信時と同じ原稿を消し、受理前の中断・失敗・受付不明や送信後に編集した原稿は残します。追加指示がturn切替と競合して拒否されても、別turnへ自動転送しません。ターン失敗は通知に理由を残し、終端後の端末回収が成功した場合は接続を維持して次の明示的な送信を受け付けます。終了操作の失敗時は切断・再接続が必要です。
 
 入力枠右端は、待機中は送信、実行中で原稿が空なら中断のアイコンです。実行中に原稿がある場合は送信と、その隣に小さい中断を表示します。中断要求中は重複操作を受け付けず、原稿を保持します。空欄で`Ctrl+Enter`を押しても中断しません。空欄時の「Message」は原稿の選択・コピー・送信内容に含まれません。
 
@@ -118,7 +118,7 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 切断中は`create_project(path)`と`open_project(path)`で保存先の選択を予約できます。`project_completed`の`ProjectResult(path, error)`が結果を返し、空の`error`だけが成功です。失敗時は選択済みの保存先を保持します。`set_observation_resolution(value)`は以後の観測へ設定を適用します。`recording_failed(identifier, path, reason)`は観測保存・チャット準備・thread対応記録の失敗を通知し、観測成功や会話開始の成功と混同しないでください。
 
-GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`steer(prompt, expected_turn_id)`、`answer(token, decision=..., answers=...)`、`set_goal(objective)`、`resume_goal()`、`clear_goal()`、`select_model(model, effort)`、`interrupt()`、`disconnect_runtime()`を呼べます。呼出しは処理を予約して戻ります。`completed`は操作呼出しの終了を通知し、ターン終端は`SessionStatus`で判定します。`interrupt()`の完了だけではターン終了を意味しません。実行環境の準備は開始受付ではなく、完了通知と準備状態の確認後に結果を返します。受付不明の待機中も切断でき、再送はしません。
+GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`steer(prompt, expected_turn_id)`、`answer(token, decision=..., answers=...)`、`set_goal(objective)`、`resume_goal()`、`clear_goal()`、`select_model(model, effort)`、`interrupt()`、`disconnect_runtime()`を呼べます。呼出しは処理を予約して戻ります。`completed`は操作呼出しの終了を通知し、ターン終端は`SessionStatus`で判定します。`interrupt()`・`clear_goal()`の完了は終了要求のローカル受付であり、RPCの受付・Goal変更・実停止の完了を意味しません。操作記録の`outcome=accepted`も同じ意味です。`stopping`の間は新規送信・再開を受け付けません。実行環境の準備は開始受付ではなく、完了通知と準備状態の確認後に結果を返します。受付不明の待機中も切断でき、再送はしません。
 
 送信・追加指示・`goal_set`の`ServiceResult.message`は`MessageResult(outcome, turn_id)`です。`accepted`は公開応答での受付、`not_sent`は未配送または明確な拒否、`unknown`は受付不明を表します。通常送信・追加指示の`accepted`には確認したturn IDが入り、Goal送信は`accepted`でも`turn_id=None`です。どちらもturnの完了・指示の遵守を意味しません。
 

@@ -1097,8 +1097,11 @@ def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
     assert not panel.send_button.isEnabled()
     panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "paused"))))
     assert not panel.plan_panel.resume_button.isEnabled()
-    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
+    panel.handle_event(ServiceEvent(3, SessionStatus("stopping", "m", "low", True)))
     panel.handle_result(ServiceResult(3, "stop"))
+    assert not panel.plan_panel.resume_button.isEnabled()
+    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
     assert panel.plan_panel.resume_button.isEnabled()
     assert panel.send_button.isEnabled()
     resumed: list[bool] = []

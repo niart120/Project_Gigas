@@ -82,7 +82,7 @@ class ServiceConnection(Protocol):
         ...
 
     async def clear_goal(self) -> None:
-        """Discard the Goal and interrupt its active turn."""
+        """Locally accept Goal removal; SessionStatus reports completion or failure."""
         ...
 
     async def select_model(self, model: str, effort: str) -> None:
@@ -118,7 +118,7 @@ class ServiceConnection(Protocol):
         ...
 
     async def stop(self) -> None:
-        """Request interruption without asserting turn completion."""
+        """Locally accept interruption; SessionStatus reports completion or failure."""
         ...
 
     async def close(self) -> None:
@@ -210,8 +210,9 @@ class MessageResult:
 class ServiceResult:
     """Operation completion; empty error means the call returned successfully.
 
-    A successful stop result is only interrupt acceptance. Turn termination is
-    reported separately through SessionStatus. Errors contain no raw exception text.
+    Successful stop and goal_clear results confirm local request acceptance only,
+    not RPC acceptance, Goal mutation, or turn termination. SessionStatus reports
+    actual completion or failure. Errors contain no raw exception text.
     Answer operations include token-specific delivery evidence in answer, including
     rejected or cancelled calls. The generation still identifies the connection.
     failure_id correlates this result with an already emitted SessionStatus from
@@ -499,17 +500,6 @@ class CodexServiceThread(QThread):
                 await self._input.close()
             finally:
                 if self._connection is not None:
-                    try:
-                        await self._connection.stop()
-                    except Exception as error:  # noqa: BLE001 -- still close after interruption failure
-                        failure_id = (
-                            error.failure_id if isinstance(error, CodexConnectionError) else None
-                        )
-                        self.completed.emit(
-                            ServiceResult(
-                                self._active_generation, "stop", "中断に失敗", failure_id=failure_id
-                            )
-                        )
                     await self._close_connection()
                 elif self._closing is not None:
                     await asyncio.shield(self._closing)
@@ -634,7 +624,11 @@ class CodexServiceThread(QThread):
                 {
                     "request_id": command.request_id,
                     "operation": command.operation,
-                    "outcome": message.outcome if message else outcome,
+                    "outcome": "accepted"
+                    if command.operation in {"stop", "goal_clear"} and not error
+                    else message.outcome
+                    if message
+                    else outcome,
                     "error": error,
                     "token": command.token if command.operation == "answer" else "",
                 },

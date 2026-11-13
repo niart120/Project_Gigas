@@ -37,7 +37,7 @@ from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_input_service import Device
 from tests.integration.test_observation_storage import sample_frame
-from tests.unit.test_codex_connection import FakePeer, _question, _terminal
+from tests.unit.test_codex_connection import FakePeer, _phase, _question, _terminal, _until
 
 if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
@@ -398,7 +398,12 @@ def test_runtime_failure_revokes_old_mcp_endpoint(qtbot: QtBot, tmp_path: Path) 
                         "params": {"name": "observe", "arguments": {}},
                     },
                 )
-            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError):
+            except (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadError,
+                httpx.RemoteProtocolError,
+            ):
                 response = None
         assert response is None or response.status_code in {401, 503}
     finally:
@@ -818,55 +823,31 @@ def test_failure_id_is_shared_by_worker_status_and_operation_result(
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-@pytest.mark.parametrize("correlated", [False, True])
-def test_shutdown_stop_failure_preserves_correlation_and_still_closes(
-    qtbot: QtBot, tmp_path: Path, correlated: bool
+def test_shutdown_closes_without_submitting_an_additional_stop(
+    qtbot: QtBot, tmp_path: Path
 ) -> None:
-    class FailedStopConnection(ControlledConnection):
-        """Keep cleanup observable when the shutdown interrupt fails."""
-
-        async def stop(self) -> None:
-            """Model a known failure and an unexpected exception independently."""
-            if correlated:
-                message = "中断結果を確認できない"
-                self.emit(SessionStatus("error", detail=message, failure_id=23))
-                raise CodexConnectionError(message, failure_id=23)
-            message = "PRIVATE-SHUTDOWN-ERROR"
-            raise OSError(message)
-
-    connections: list[FailedStopConnection] = []
-    events: list[ServiceEvent] = []
+    connections: list[ControlledConnection] = []
     results: list[ServiceResult] = []
 
     def factory(
         _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
-    ) -> FailedStopConnection:
-        connection = FailedStopConnection(emit)
+    ) -> ControlledConnection:
+        connection = ControlledConnection(emit)
         connections.append(connection)
         return connection
 
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
-    service.received.connect(events.append)
     service.completed.connect(results.append)
     service.start()
     try:
-        generation = service.connect_runtime(ConnectionOptions(tmp_path))
+        service.connect_runtime(ConnectionOptions(tmp_path))
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
-    qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
-    stopped = [result for result in results if result.operation == "stop"]
-    assert len(stopped) == 1
-    assert stopped[0].generation == generation
-    assert stopped[0].failure_id == (23 if correlated else None)
-    assert stopped[0].error
-    assert "PRIVATE" not in stopped[0].error
     assert connections[0].closed.is_set()
-    if correlated:
-        status = events[-1].event
-        assert isinstance(status, SessionStatus)
-        assert status.failure_id == stopped[0].failure_id
+    assert not connections[0].stopped.is_set()
+    assert not any(result.operation == "stop" for result in results)
 
 
 def _submit_delivery(service: CodexServiceThread, operation: str, text: str) -> None:
@@ -1213,30 +1194,18 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-@pytest.mark.parametrize("failure", ["runtime_stop", "input_close"])
-def test_shutdown_still_closes_when_stop_fails(qtbot: QtBot, tmp_path: Path, failure: str) -> None:
-    class FailingStop(ControlledConnection):
-        """Fail interruption without changing close cleanup."""
-
-        async def stop(self) -> None:
-            """Inject an unexpected operation failure."""
-            if failure == "input_close":
-                await super().stop()
-                return
-            message = "secret stop error"
-            raise OSError(message)
-
-    connections: list[FailingStop] = []
+def test_shutdown_still_closes_when_input_close_fails(qtbot: QtBot, tmp_path: Path) -> None:
+    connections: list[ControlledConnection] = []
 
     def factory(
         _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
-    ) -> FailingStop:
-        connection = FailingStop(emit)
+    ) -> ControlledConnection:
+        connection = ControlledConnection(emit)
         connections.append(connection)
         return connection
 
     device = Device()
-    device.fail_close = failure == "input_close"
+    device.fail_close = True
     service = CodexServiceThread(
         tmp_path, CaptureReader(CaptureSnapshot), factory, input_factory=lambda _config: device
     )
@@ -1250,7 +1219,8 @@ def test_shutdown_still_closes_when_stop_fails(qtbot: QtBot, tmp_path: Path, fai
     service.shutdown()
     qtbot.waitUntil(lambda: service.wait(0))
     assert connections[0].closed.is_set()
-    assert bool(service.shutdown_error) == (failure == "input_close")
+    assert not connections[0].stopped.is_set()
+    assert service.shutdown_error
 
 
 def test_input_settings_apply_without_codex_or_chat_and_close_on_shutdown(
@@ -1486,10 +1456,16 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
         service._input_config = resolve_serial_config("COM3", "ch552", None)
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir()
+        events: list[ConnectionEvent] = []
+
+        def receive(event: ConnectionEvent) -> None:
+            events.append(event)
+            service._receive(0, event)
+
         connection = CodexConnection(
             peer,
             ConnectionOptions(runtime_dir),
-            lambda event: service._receive(0, event),
+            receive,
             prepare_turn=service._prepare_turn,
             on_thread_started=service._thread_started,
         )
@@ -1539,6 +1515,7 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
                 assert service._mcp is endpoint
                 assert (await act())["isError"]
             await service._execute(_Command(0, "stop"))
+            await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
             assert service._grant is None
             assert peer.goal is not None
             assert peer.goal["status"] == "paused"
@@ -1553,6 +1530,7 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
             assert not (await act())["isError"]
             await service._execute(_Command(0, "goal_clear"))
             await notify("auto-three", "interrupted")
+            await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
             assert peer.goal is None
             assert service._grant is None
             assert sum(method == "turn/start" for method, _ in peer.calls) == 1
@@ -1585,6 +1563,13 @@ def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) ->
             and row["payload"]["content"]["operation"] == "goal_set"
         )
         assert submitted["request_id"] == delivered["request_id"]
+        end_deliveries = [
+            row["payload"]["content"]
+            for row in rows
+            if row["type"] == "dialogue.delivery"
+            and row["payload"]["content"]["operation"] in {"stop", "goal_clear"}
+        ]
+        assert [item["outcome"] for item in end_deliveries] == ["accepted", "accepted"]
         assert any(
             row["type"] == "dialogue.delivery"
             and row["payload"]["content"]["operation"] == "goal_set"
@@ -1626,6 +1611,9 @@ def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) ->
             assert peer.goal["status"] == "active"
             gate.set()
             await asyncio.gather(*list(service._tasks))
+            await asyncio.wait_for(
+                _until(lambda: peer.goal is not None and peer.goal["status"] == "paused"), 5
+            )
             assert peer.goal["status"] == "paused"
             assert service._grant is None
         finally:
