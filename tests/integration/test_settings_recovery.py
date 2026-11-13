@@ -41,10 +41,15 @@ def test_stop_during_save_preserves_submitted_application(
     dialog.set_serial_ports((SerialPort("COM3", "Controller"),))
     dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM3"))
     dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("pokecon"))
+    history = shell.window.connection.transcript
+    history.update_item("summary", "保存待ち中の公開要約", kind="reasoning")
+    dialog.show_reasoning.setChecked(False)
     dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     assert not dialog.save_button.isEnabled()
     assert dialog.close_button.isEnabled()
+    assert not dialog.show_reasoning.isEnabled()
+    assert "保存待ち中の公開要約" in history.toPlainText()
 
     dialog.close_button.click()
     shell.interrupt()
@@ -54,6 +59,9 @@ def test_stop_during_save_preserves_submitted_application(
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).serial_port == "COM3"
     assert shell.baseline.serial_port == "COM3"
+    assert not load_settings(shell.path).show_reasoning
+    assert not shell.baseline.show_reasoning
+    assert "保存待ち中の公開要約" not in history.toPlainText()
     assert applied == [resolve_serial_config("COM3", "pokecon", 9600)]
 
 

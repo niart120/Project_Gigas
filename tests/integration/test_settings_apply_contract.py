@@ -124,6 +124,7 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
         (("baud",), False, True),
         (("capture",), True, False),
         (("observation",), False, False),
+        (("reasoning",), False, False),
         (("general",), True, False),
         ((), True, True),
         (("port", "observation"), False, True),
@@ -147,6 +148,8 @@ def test_apply_effect_depends_on_changed_settings(
     shell, capture = app
     dialog = open_editor(shell, capture)
     codex_connects: list[object] = []
+    history = shell.window.connection.transcript
+    history.update_item("summary", "取得と独立した公開要約", kind="reasoning")
     applied_resolutions: list[str] = []
     input_configs: list[SerialConfig | None] = []
     monkeypatch.setattr(shell.service, "connect_runtime", codex_connects.append)
@@ -178,6 +181,8 @@ def test_apply_effect_depends_on_changed_settings(
             )
         elif change == "general":
             dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
+        elif change == "reasoning":
+            dialog.show_reasoning.setChecked(False)
     assert shell.dirty == bool(changed)
     target = dialog.values()
     dialog.save_button.click()
@@ -196,6 +201,7 @@ def test_apply_effect_depends_on_changed_settings(
     )
     assert load_settings(shell.path) == target
     assert shell.baseline == target
+    assert ("取得と独立した公開要約" in history.toPlainText()) is target.show_reasoning
     assert not shell.dirty
     assert codex_connects == []
     assert applied_resolutions[-1] == target.observation_resolution

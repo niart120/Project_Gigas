@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -82,6 +83,10 @@ class SettingsDialog(QDialog):
         display_form.addRow("プレビュー方式", self.preview_mode)
         self.preview_fps = self._rate_field(30)
         display_form.addRow("表示FPS", self.preview_fps)
+        self.show_reasoning = QCheckBox("推論要約の表示", self)
+        self.show_reasoning.setChecked(True)
+        self.show_reasoning.toggled.connect(self.changed)
+        display_form.addRow(self.show_reasoning)
         io_form = self._tab("I/O")
         capture_form = self._group(io_form, "映像入力")
         self.capture_choices = QComboBox(self)
@@ -348,6 +353,7 @@ class SettingsDialog(QDialog):
             capture_resolution=str(self.capture_resolution.currentData()),
             preview_letterbox=bool(self.preview_mode.currentData()),
             observation_resolution=self.observation_resolution.currentData(),
+            show_reasoning=self.show_reasoning.isChecked(),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -380,6 +386,7 @@ class SettingsDialog(QDialog):
                 self.capture_resolution.findData(values.capture_resolution)
             )
             self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
+            self.show_reasoning.setChecked(values.show_reasoning)
             self.observation_resolution.setCurrentIndex(
                 self.observation_resolution.findData(values.observation_resolution)
             )
@@ -407,5 +414,6 @@ class SettingsDialog(QDialog):
             self.capture_resolution,
             self.observation_resolution,
             self.preview_mode,
+            self.show_reasoning,
         ):
             field.setEnabled(enabled)

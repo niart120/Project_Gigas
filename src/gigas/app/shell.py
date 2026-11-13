@@ -471,7 +471,10 @@ class ApplicationShell(QObject):
         serial_fields = {"serial_port", "serial_protocol", "serial_baudrate"}
         request = _SettingsRequest(
             target,
-            capture=(not changed or bool(changed - serial_fields - {"observation_resolution"}))
+            capture=(
+                not changed
+                or bool(changed - serial_fields - {"observation_resolution", "show_reasoning"})
+            )
             if capture is None
             else capture,
             input_apply=(not changed or bool(changed & serial_fields))
@@ -511,6 +514,7 @@ class ApplicationShell(QObject):
         self.video.set_preview_fps(settings.preview_fps)
         self.service.set_observation_resolution(settings.observation_resolution)
         self.window.video.view.set_letterbox(settings.preview_letterbox)
+        self.window.connection.transcript.set_reasoning_visible(settings.show_reasoning)
         if self.window.current_window_size_preset != settings.window_size_preset:
             self.window.apply_window_size_preset(settings.window_size_preset)
         if request.capture and not self._exit_requested and not self.committed:

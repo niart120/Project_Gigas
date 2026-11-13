@@ -43,8 +43,8 @@ GoalのないM1では目標トグル/Goal欄/pause-resumeを出さず、通常tu
 | refactor-skipped | D01 対象turnの公開Plan・reasoning summary・activityを受け取り、旧turn/生reasoningと区別する | new | unit/integration | `0db14a4`。既存開始順序試験へPlanを統合。red 4 failed/69 passed→green 73 passed |
 | refactor-skipped | D02 実行中の追加指示をそのturnへ一度だけ配送し、受付結果・拒否・不明を区別する | new | unit/integration | `6cfc3c9`。接続87、サービス/終了回帰149、UI/要求寿命/停止27 passed。受付前消去・実行中送信不可を改訂 |
 | refactor-skipped | D03 公開履歴・Planをitem単位で描画し、選択・コピー・閲覧位置を維持する | new | integration | `e2a0148`。GUI 24、関連回帰37 passed。既存test_codex_guiへ代表条件を統合 |
-| refactor-skipped | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | red 18 failed/18 passed→関連回帰41 passed。test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
-| todo | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | 既存設定保存・適用試験へ統合 |
+| refactor-skipped | D04 共通Messageで質問・追加指示・秘密回答を編集し、承認と配送寿命を保つ | regression | integration | `50db697`。red 18 failed/18 passed→関連回帰41 passed。test_codex_gui/answer_lifecycleを置換、旧質問別入力を撤去 |
+| refactor-skipped | D05 reasoning表示の設定を保存成功後に適用し、受信・映像・入力へ影響させない | new | unit/integration | red 38 failed/110 passed→green 148 passed。既存設定保存・適用試験へ統合 |
 | todo | D06 対話左・映像右で小画面でも操作と本文へ到達できる | new | integration | 既存レイアウト/停止試験、製品画面で確認 |
 | todo | D07 共通画面から公開stdio経路で送信・質問・介入・承認を往復できる | new | integration | 既存transport peerへ固定dialogue例を追加し、GUI試験に統合 |
 
@@ -71,6 +71,7 @@ runtime/codexの公開イベントと通常配送、services/codex、uiのconnec
 | D03レビュー・描画 | 担当ruff check/format、全体ty、diff check: pass。`tmp/u06/qt/d03_view.py`の合成イベント画像を目視 | Planの位置・チェック/印太字/箇条書き、literal HTML、ユーザー背景、要約字下げ。Plan全置換による選択消失とsummary再表示の41pxずれを採用指摘として修正。描画共有は必要な挙動変更の範囲で、追加refactorなし |
 | D04 | `uv run pytest tests/integration/test_codex_gui.py tests/integration/test_answer_lifecycle.py tests/integration/test_ui_control_lifetime.py -q --basetemp=tmp/pytest-u06-composer`: 最終41 passed。担当ruff check/format、全体ty、diff check: pass | 要求/質問別原稿、秘密提出/失効消去、自由回答不可の明示選択、別送信先への遅い受付、配送結果と失効の順序を確認。不要なWrappedRadioを撤去 |
 | D04独立レビュー | IMEの2件を既存試験へ統合: red 2 failed/1 passed→green | 要求失効時の本文置換後にcompositionが残る問題と、未受付時に開始した新preeditが受付で消える問題を修正。その他の指摘なし。標準Passwordと共通原稿へ置換した範囲以外のrefactorなし |
+| D05 | `uv run pytest tests/unit/test_settings.py tests/unit/test_video_settings.py tests/integration/test_app_settings.py tests/integration/test_settings_apply_contract.py tests/integration/test_settings_recovery.py -q --tb=short --basetemp=tmp/pytest-u06-reasoning`: red 38 failed/110 passed→green 148 passed。担当ruff check/format、全体ty、diff check: pass | 既定値・厳密bool・往復/再起動・取消し3経路・保存待ち/失敗・閉じた後の中断でも提出済み適用を確認。reasoning単独で停止中/取得中のcapture/input再接続なし。既存bool検証を共用し、追加refactorなし |
 
 全体gate・製品画面は各項目の結合後に実施する。
 

@@ -86,6 +86,7 @@ def test_all_settings_round_trip_and_offline_clears_device(
         "api_key",
         serial_protocol="pokecon",
         serial_baudrate=57600,
+        show_reasoning=False,
     )
     dialog.set_capture_devices((DeviceInfo("Camera", values.capture_device),))
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData(values.capture_device))
@@ -95,6 +96,7 @@ def test_all_settings_round_trip_and_offline_clears_device(
     dialog.serial_baudrate.setCurrentIndex(dialog.serial_baudrate.findData(values.serial_baudrate))
     dialog.model.setText(values.model)
     dialog.effort.setText(values.effort)
+    dialog.show_reasoning.setChecked(values.show_reasoning)
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path) == values
@@ -113,6 +115,11 @@ def test_all_settings_round_trip_and_offline_clears_device(
         assert other.dialog.capture_choices.findData(values.capture_device) >= 0
         assert other.dialog.model.text() == values.model
         assert other.dialog.auth_method.currentData() == "api_key"
+        assert not other.dialog.show_reasoning.isChecked()
+        other.window.connection.transcript.update_item(
+            "summary", "読込後の公開要約", kind="reasoning"
+        )
+        assert "読込後の公開要約" not in other.window.connection.transcript.toPlainText()
         other.dialog.capture_choices.setCurrentIndex(0)
         other.dialog.serial_port.setCurrentIndex(0)
         other.dialog.model.clear()
@@ -120,7 +127,10 @@ def test_all_settings_round_trip_and_offline_clears_device(
         other.dialog.save_button.click()
         qtbot.waitUntil(lambda: other.operation is None)
         assert load_settings(shell.path) == Settings(
-            auth_method="api_key", serial_protocol="pokecon", serial_baudrate=57600
+            auth_method="api_key",
+            serial_protocol="pokecon",
+            serial_baudrate=57600,
+            show_reasoning=False,
         )
     finally:
         other.window.close()
@@ -175,6 +185,9 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     dialog = shell.dialog
     assert dialog is not None
     dialog.model.setText("edited")
+    history = shell.window.connection.transcript
+    history.update_item("summary", "取消し前の公開要約", kind="reasoning")
+    dialog.show_reasoning.setChecked(False)
     if target == "button":
         dialog.close_button.click()
     elif target == "window":
@@ -185,8 +198,11 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     assert not dialog.isVisible()
     assert not shell.path.exists()
     assert shell.window.isVisible()
+    assert shell.baseline.show_reasoning
+    assert "取消し前の公開要約" in history.toPlainText()
     shell.open_settings()
     assert dialog.model.text() == shell.baseline.model == ""
+    assert dialog.show_reasoning.isChecked()
 
 
 @pytest.mark.parametrize("shell", ["[broken"], indirect=True)
@@ -214,6 +230,10 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
     shell.open_settings()
     assert shell.dialog is not None
     shell.dialog.model.setText("edited")
+    history = shell.window.connection.transcript
+    history.update_item("summary", "保存前の公開要約", kind="reasoning")
+    shell.dialog.show_reasoning.setChecked(False)
+    assert "保存前の公開要約" in history.toPlainText()
 
     def fail(*_args: object, **_kwargs: object) -> None:
         raise PermissionError(errno.EACCES, "injected denial")
@@ -227,11 +247,16 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         assert shell.dialog.save_button.isEnabled()
         assert "remove temporary file" in shell.window.notifications.notices["settings"].details
         assert load_settings(shell.path).model == "original"
+        assert load_settings(shell.path).show_reasoning
+        assert not shell.dialog.show_reasoning.isChecked()
+        assert "保存前の公開要約" in history.toPlainText()
 
     shell.dialog.model.setText("retry")
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == "retry"
+    assert not load_settings(shell.path).show_reasoning
+    assert "保存前の公開要約" not in history.toPlainText()
     assert not shell.error
     assert not shell.dirty
 
