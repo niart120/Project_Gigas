@@ -19,7 +19,7 @@ U06の対話UI・Goal制御、設定ダイアログ内部の変更、新しい�
 - [初期UI仕様](../../initial/10-ui-interaction.md)
 - [設定の利用手順](../../../docs/settings.md)
 - [U05 M2](../../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)
-- [U06親仕様](../../planned/unit_011/GOAL_EXECUTION.md)
+- [U06親仕様](../../complete/unit_011/GOAL_EXECUTION.md)
 
 着手時の確認では、ファイルメニューは設定と終了だけを持っていた。設定はCtrl+,でも開ける。主画面の閉じる操作はApplicationShellの既存終了処理へ接続されている。
 

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,9 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService
+from gigas.game_io.capture.models import Frame
 from gigas.storage.settings import Settings, save_settings
+from gigas.ui.video_panel import VideoPanel
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
 
@@ -56,6 +59,22 @@ def test_real_spawn_capture_displays_and_releases_through_application(
                 != QColor("black")
             )
         )
+        initial = service.snapshot()
+        assert initial.frame is not None
+        for width, height in ((1280, 720), (1920, 1080), (800, 600)):
+            shell.window.resize(width, height)
+            qtbot.waitUntil(lambda: abs(view.height() - view.width() * 9 / 16) <= 1)
+            assert shell.window.video.rect().contains(view.geometry())
+            assert (shell.window.width(), shell.window.height()) == (width, height)
+            current = service.snapshot()
+            assert current.phase == "streaming"
+            assert current.generation == initial.generation
+            assert current.frame is not None
+            assert (current.frame.width, current.frame.height) == (
+                initial.frame.width,
+                initial.frame.height,
+            )
+            assert not marker.exists()
         shell.apply_settings(replace(shell.baseline, capture_device=""))
         qtbot.waitUntil(lambda: shell.operation is None)
         qtbot.waitUntil(lambda: service.snapshot().phase == "idle", timeout=8000)
@@ -68,3 +87,25 @@ def test_real_spawn_capture_displays_and_releases_through_application(
     assert not service.is_alive()
     assert service.snapshot().cleanup == "graceful"
     assert marker.read_text(encoding="utf-8") == "released\nreleased\n"
+
+
+def test_preview_frame_remains_widescreen_with_both_fitting_modes(qtbot: QtBot) -> None:
+    panel = VideoPanel()
+    qtbot.addWidget(panel)
+    frame = Frame(bytes((0, 0, 255)) * (32 * 24), 32, 24, 1, 1, datetime.now(UTC), 1)
+    panel.view.set_frame(frame)
+    panel.show()
+    for width, height in ((640, 480), (900, 240), (320, 400)):
+        panel.resize(width, height)
+        view = panel.view
+        assert panel.rect().contains(view.geometry())
+        assert abs(view.height() - view.width() * 9 / 16) <= 1
+        panel.view.set_letterbox(True)
+        image = panel.view.grab().toImage()
+        assert image.pixelColor(1, image.height() // 2) == QColor("black")
+        assert image.pixelColor(image.width() // 2, image.height() // 2) == QColor("red")
+        panel.view.set_letterbox(False)
+        image = panel.view.grab().toImage()
+        assert image.pixelColor(1, image.height() // 2) == QColor("red")
+        assert (frame.width, frame.height) == (32, 24)
+        assert frame.bgr == bytes((0, 0, 255)) * (32 * 24)

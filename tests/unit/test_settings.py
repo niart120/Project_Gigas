@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,7 @@ def test_missing_settings_returns_defaults_without_creating_directory(tmp_path: 
     assert values == Settings("", "", "", "", "chatgpt")
     assert values.capture_resolution == "full_hd"
     assert values.preview_letterbox is True
+    assert values.show_reasoning is True
     assert not path.parent.exists()
 
 
@@ -71,6 +73,8 @@ def test_omitted_and_unknown_fields_use_defaults(tmp_path: Path) -> None:
         ('[agent]\nauth_method = "invalid"\n', "auth_method"),
         ('project = "folder"\n', "project"),
         ("[project]\nlast_path = 42\n", "last_path"),
+        ("[gui]\nshow_reasoning = 1\n", "show_reasoning"),
+        ('[gui]\nshow_reasoning = "false"\n', "show_reasoning"),
     ],
 )
 def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: str) -> None:
@@ -83,11 +87,15 @@ def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: s
     assert str(path) in str(error.value)
 
 
-def test_invalid_auth_method_cannot_be_saved(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [("auth_method", "invalid"), ("show_reasoning", 0), ("show_reasoning", "false")],
+)
+def test_invalid_setting_cannot_be_saved(tmp_path: Path, field: str, invalid: object) -> None:
     path = tmp_path / "settings.toml"
 
-    with pytest.raises(settings.SettingsError, match="auth_method"):
-        settings.save_settings(path, Settings(auth_method="invalid"))
+    with pytest.raises(settings.SettingsError, match=field):
+        settings.save_settings(path, replace(Settings(), **{field: invalid}))
 
     assert not path.exists()
 

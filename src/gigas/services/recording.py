@@ -2,13 +2,17 @@
 
 import asyncio
 import logging
+from copy import deepcopy
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from gigas.game_io.observation import Observation
+    from gigas.runtime.codex.transport import JsonObject
     from gigas.storage.input_events import InputEvent
     from gigas.storage.project import ProjectWriter
 
@@ -38,6 +42,46 @@ class RecordingService:
         """Queue the thread record without delaying execution; report save failures."""
         self._submit(partial(self._writer.record_thread, thread_id), thread_id)
 
+    async def ensure_memory(self) -> "Path":
+        """Prepare missing memory entries under the same lock as accepted saves.
+
+        Call during explicit thread preparation, never from observation delivery.
+        Filesystem failures propagate to the preparation caller.
+        """
+        await asyncio.shield(self._submit(self._writer.ensure_memory, "memory"))
+        return self._writer.path / "memory"
+
+    def submit_dialogue(
+        self,
+        kind: str,
+        content: "JsonObject",
+        *,
+        thread_id: str,
+        turn_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        """Snapshot public content and queue it without delaying execution.
+
+        Args:
+            kind: Application-selected dialogue.* event name.
+            content: Public fields only; caller excludes secrets, raw RPCs, and drafts.
+            thread_id: Owning conversation.
+            turn_id: Owning turn when known.
+            run_id: Associated input permission interval when known.
+        """
+        self._submit(
+            partial(
+                self._writer.record_dialogue,
+                kind,
+                deepcopy(content),
+                thread_id=thread_id,
+                turn_id=turn_id,
+                run_id=run_id,
+                received_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            ),
+            turn_id or thread_id,
+        )
+
     def submit_input(self, event: "InputEvent") -> None:
         """Submit an input event without waiting; report failures through callbacks/logging."""
         self._submit(partial(self._writer.record_input, event), event.run_id)
@@ -62,7 +106,7 @@ class RecordingService:
 
     def _submit(
         self,
-        operation: "Callable[[], None]",
+        operation: "Callable[[], object]",
         reference: str,
         on_error: "Callable[[Exception], None] | None" = None,
     ) -> asyncio.Task[None]:
@@ -73,7 +117,7 @@ class RecordingService:
 
     async def _save(
         self,
-        operation: "Callable[[], None]",
+        operation: "Callable[[], object]",
         reference: str,
         on_error: "Callable[[Exception], None] | None",
     ) -> None:

@@ -18,7 +18,7 @@ MCP/GUI結合、対話履歴の製品保存API、Codexによるmemory編集の�
 
 ## 4. 関連文書・前提
 
-[03 I/O](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[M0](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[U06](../../planned/unit_011/GOAL_EXECUTION.md)、[公開API](../../../docs/recorded-observation.md)。現コードのOSロックは`.gigas.lock`の1 byteだけであり、他ファイルの読取・memory編集をOSとして排他しない。現Codex接続はread-onlyであり、別Pythonプロセスによる読書きの成功をCodexの書込権限確認としない。
+[03 I/O](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[M0](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[U06](../../complete/unit_011/GOAL_EXECUTION.md)、[公開API](../../../docs/recorded-observation.md)。現コードのOSロックは`.gigas.lock`の1 byteだけであり、他ファイルの読取・memory編集をOSとして排他しない。現Codex接続はread-onlyであり、別Pythonプロセスによる読書きの成功をCodexの書込権限確認としない。
 
 ## 5. 判断と振る舞い
 

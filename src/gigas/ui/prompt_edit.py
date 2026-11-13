@@ -28,6 +28,20 @@ class PromptEdit(QPlainTextEdit):
         super().__init__(parent)
         self._composing = False
 
+    @property
+    def is_composing(self) -> bool:
+        """Whether native preedit text is still being composed."""
+        return self._composing
+
+    def set_draft(self, text: str) -> None:
+        """Replace a route's draft and discard the previous composition.
+
+        Args:
+            text: Committed draft to restore after changing or resolving a target.
+        """
+        self._composing = False
+        self.setPlainText(text)
+
     def inputMethodEvent(self, event: "QInputMethodEvent") -> None:  # noqa: N802 -- Qt override
         """Track Qt preedit state while retaining native commit and editing behavior."""
         self._composing = bool(event.preeditString())

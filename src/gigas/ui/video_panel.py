@@ -7,7 +7,6 @@ from PySide6.QtGui import QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -15,6 +14,8 @@ from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.elided_label import ElidedLabel
 
 if TYPE_CHECKING:
+    from PySide6.QtGui import QResizeEvent
+
     from gigas.game_io.capture import CaptureSnapshot
     from gigas.game_io.capture.models import Frame
     from gigas.storage.settings import Settings
@@ -42,19 +43,12 @@ class VideoView(QWidget):
         super().__init__(parent)
         self._image = QImage()
         self._key: tuple[int, int] | None = None
-        self._preview_size = QSize(640, 360)
         self._letterbox = True
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def set_preview_size(self, width: int, height: int) -> None:
-        """Set the display target while allowing the layout to allocate less space."""
-        self._preview_size = QSize(width, height)
-        self.setMaximumSize(self._preview_size)
-        self.updateGeometry()
-
     def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
-        """Prefer the selected display target without imposing a minimum size."""
-        return self._preview_size
+        """Prefer 640 by 360 logical pixels while accepting the full pane allocation."""
+        return QSize(640, 360)
 
     def set_letterbox(self, enabled: bool) -> None:
         """Change preview fitting without changing the source frame or connection.
@@ -110,9 +104,10 @@ class VideoView(QWidget):
 
 
 class VideoPanel(QWidget):
-    """Draw video and own external status labels.
+    """Keep a 16:9 preview frame and own external status labels.
 
-    MainWindow places the labels in its status bar.
+    MainWindow places the labels in its status bar. The view fits within the
+    allocated area; letterbox/stretch applies independently inside that frame.
 
     Args:
         parent: Owning widget, if any.
@@ -121,15 +116,29 @@ class VideoPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         """Create the preview without discovering or opening devices."""
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self.status = QLabel("未接続", self)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.source = ElidedLabel(parent=self)
         self.status.hide()
         self.source.hide()
         self.view = VideoView(self)
-        layout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 -- Qt override
+        """Prefer a 640 by 360 preview without constraining the window size."""
+        return self.view.sizeHint()
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 -- Qt override
+        """Return the preferred 16:9 preview height for the available width."""
+        return round(width * 9 / 16)
+
+    def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
+        """Fit the preview frame without growing a wide, short window."""
+        super().resizeEvent(event)
+        size = QSize(16, 9).scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.view.setGeometry((self.width() - size.width()) // 2, 0, size.width(), size.height())
 
     def render_state(
         self,

@@ -43,17 +43,20 @@ class _PaneStatuses(QWidget):
         self._splitter = splitter
         self._rows: list[QWidget] = []
         for title, status, identifier in (
+            ("Codex", connection.status, None),
             ("映像", video.status, video.source),
-            ("Codex", connection.status, connection.model),
         ):
             row = QWidget(self)
             layout = QHBoxLayout(row)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(QLabel(title, row))
             layout.addWidget(status)
-            layout.addWidget(identifier, 1)
+            if identifier is not None:
+                layout.addWidget(identifier, 1)
+                identifier.show()
+            else:
+                layout.addStretch()
             status.show()
-            identifier.show()
             row.installEventFilter(self)
             self._rows.append(row)
         for index in range(splitter.count()):
@@ -171,16 +174,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.close_progress)
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
-        self.video = VideoPanel(self.splitter)
-        conversation = QWidget(self.splitter)
-        conversation_layout = QVBoxLayout(conversation)
-        conversation_layout.addWidget(QLabel("Codex", conversation))
-        self.connection = ConnectionPanel(conversation)
+        self.connection = ConnectionPanel(self.splitter)
+        self.connection.setMinimumWidth(320)
+        self.right_pane = QWidget(self.splitter)
+        right_layout = QVBoxLayout(self.right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.video = VideoPanel(self.right_pane)
+        right_layout.addWidget(self.video)
+        right_layout.addWidget(self.connection.plan_panel, 1)
+        self.connection.plan_panel.show()
         self.connection.failed.connect(self.notifications.publish)
         for action in (
             self.connection.connect_action,
             self.connection.disconnect_action,
-            self.connection.login_action,
         ):
             self.codex_menu.addAction(action)
         self.video_menu.addSeparator()
@@ -191,11 +197,10 @@ class MainWindow(QMainWindow):
         self._video_device_group = QActionGroup(self)
         self._video_device_group.setExclusive(True)
         self._video_choices: tuple[tuple[str, str], ...] = ()
-        conversation_layout.addWidget(self.connection, 1)
-        self.splitter.addWidget(self.video)
-        self.splitter.addWidget(conversation)
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
+        self.splitter.addWidget(self.connection)
+        self.splitter.addWidget(self.right_pane)
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 3)
         layout.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
         self.statusBar().setSizeGripEnabled(False)
@@ -295,11 +300,11 @@ class MainWindow(QMainWindow):
         self.window_size_group.setEnabled(enabled)
 
     def apply_window_size_preset(self, key: str) -> None:
-        """Fit the requested window and preview to the available screen.
+        """Fit the requested window and initial pane allocation to the available screen.
 
         Args:
-            key: A validated saved preset. Controls may reduce the actual preview
-                below its scaled target; the selected preview fitting mode stays active.
+            key: A validated saved preset. Later resizing may change either pane;
+                the selected preview fitting mode stays active.
         """
         screen = self.screen()
         if screen is None:
@@ -312,8 +317,7 @@ class MainWindow(QMainWindow):
         )
         self.current_window_size_preset = key
         self.resize(target.window_width, target.window_height)
-        self.video.view.set_preview_size(target.preview_width, target.preview_height)
-        self.splitter.setSizes([target.preview_width, target.window_width - target.preview_width])
+        self.splitter.setSizes([target.window_width - target.preview_width, target.preview_width])
         fit_to_screen(self)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override

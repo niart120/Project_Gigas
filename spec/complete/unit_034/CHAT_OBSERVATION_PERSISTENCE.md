@@ -14,7 +14,7 @@
 
 ## 3. 関連文書と現在の事実
 
-[01 要求](../../initial/01-overview.md)、[04 記憶・原記録](../../initial/04-agent-memory.md)、[M0](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[M1](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)、[M1レビュー](../../complete/unit_033/OBSERVATION_STORAGE_REVIEW.md)、[U06](../../planned/unit_011/GOAL_EXECUTION.md)、[U08](../../planned/unit_013/RESUME.md)を参照する。
+[01 要求](../../initial/01-overview.md)、[04 記憶・原記録](../../initial/04-agent-memory.md)、[M0](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[M1](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)、[M1レビュー](../../complete/unit_033/OBSERVATION_STORAGE_REVIEW.md)、[U06](../../complete/unit_011/GOAL_EXECUTION.md)、[U08](../../planned/unit_013/RESUME.md)を参照する。
 
 - U03のCaptureReader.snapshotは取得中の最新Frameを読める。取得APIは保存先・Codexを知らない。
 - Observation.from_frameは画像を一度PNGへ符号化し、IDを発行する。未保存でも生成できる。

@@ -120,7 +120,13 @@ class ApplicationShell(QObject):
         panel.connect_requested.connect(self.connect_codex)
         panel.disconnect_requested.connect(self.service.disconnect_runtime)
         panel.login_requested.connect(self.service.login)
+        panel.sandbox_requested.connect(self.service.setup_windows_sandbox)
+        panel.model_requested.connect(self.service.select_model)
+        panel.goal_requested.connect(self.service.set_goal)
+        panel.goal_resume_requested.connect(self.service.resume_goal)
+        panel.goal_clear_requested.connect(self.service.clear_goal)
         panel.send_requested.connect(self.service.send)
+        panel.steer_requested.connect(self.service.steer)
         panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)
@@ -383,6 +389,11 @@ class ApplicationShell(QObject):
             return
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
+            self.dialog.codex_form.insertRow(0, self.window.connection.codex_settings)
+            self.window.connection.codex_settings.account_actions.addWidget(
+                self.dialog.auth_migration_button
+            )
+            self.window.connection.codex_settings.show()
             self.dialog.save_button.clicked.connect(lambda _checked: self.apply_settings())
             self.dialog.ok_button.clicked.connect(lambda: self.apply_settings(close_after=True))
             self.dialog.changed.connect(self._render)
@@ -470,7 +481,10 @@ class ApplicationShell(QObject):
         serial_fields = {"serial_port", "serial_protocol", "serial_baudrate"}
         request = _SettingsRequest(
             target,
-            capture=(not changed or bool(changed - serial_fields - {"observation_resolution"}))
+            capture=(
+                not changed
+                or bool(changed - serial_fields - {"observation_resolution", "show_reasoning"})
+            )
             if capture is None
             else capture,
             input_apply=(not changed or bool(changed & serial_fields))
@@ -510,6 +524,7 @@ class ApplicationShell(QObject):
         self.video.set_preview_fps(settings.preview_fps)
         self.service.set_observation_resolution(settings.observation_resolution)
         self.window.video.view.set_letterbox(settings.preview_letterbox)
+        self.window.connection.transcript.set_reasoning_visible(settings.show_reasoning)
         if self.window.current_window_size_preset != settings.window_size_preset:
             self.window.apply_window_size_preset(settings.window_size_preset)
         if request.capture and not self._exit_requested and not self.committed:
@@ -616,6 +631,10 @@ class ApplicationShell(QObject):
             self.dialog.status.setText(message)
             self.dialog.status.setVisible(bool(message))
             self.dialog.set_editable(self._can_edit)
+            chatgpt = self.dialog.values().auth_method == "chatgpt"
+            self.dialog.auth_migration_button.setVisible(not chatgpt)
+            self.window.connection.account_button.setVisible(chatgpt)
+            self.window.connection.codex_settings.account.setVisible(chatgpt)
             self.dialog.capture_refresh_button.setEnabled(self._can_edit and self.video.can_refresh)
             self.dialog.save_button.setEnabled(self._can_edit)
             self.dialog.ok_button.setEnabled(self._can_edit)

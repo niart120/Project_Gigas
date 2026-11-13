@@ -39,11 +39,34 @@ class LifetimeConnection:
     async def login(self) -> None:
         """Provide the connection interface."""
 
-    async def send(self, prompt: str) -> None:
+    async def setup_windows_sandbox(self) -> None:
+        """Provide the explicit environment-setup interface."""
+
+    async def send(self, prompt: str) -> str | None:
         """Accept a turn without completing it."""
         assert prompt
         self.sends += 1
         self.emit(SessionStatus("running", "model", "high", True))
+        return f"turn-{self.sends}"
+
+    async def set_goal(self, objective: str) -> bool:
+        """Accept a test Goal."""
+        return bool(objective)
+
+    async def resume_goal(self) -> bool:
+        """Accept a test Goal resume."""
+        return True
+
+    async def clear_goal(self) -> None:
+        """Accept a test Goal removal."""
+
+    async def select_model(self, model: str, effort: str) -> None:
+        """Accept a test selection."""
+
+    async def steer(self, prompt: str, expected_turn_id: str) -> str:
+        """Acknowledge an instruction for the selected turn."""
+        assert prompt
+        return expected_turn_id
 
     async def answer(
         self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None

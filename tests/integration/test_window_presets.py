@@ -3,7 +3,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, Qt
 from pytestqt.qtbot import QtBot
 
 from gigas.app import video
@@ -11,7 +11,20 @@ from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import Frame
+from gigas.runtime.codex.models import (
+    HumanRequest,
+    PlanEvent,
+    PlanStep,
+    Question,
+    QuestionOption,
+    SessionStatus,
+    TextEvent,
+    TurnStarted,
+)
+from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.ui.main_window import MainWindow
+from gigas.ui.request_card import AnswerSubmission
 from tests.integration.peers.capture_peer import PeerBackend
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_video_gui import (
@@ -62,14 +75,14 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         capture.stream()
         qtbot.waitUntil(lambda: not shell.video.applying)
         original = capture.snapshot().frame
-        original_limit = shell.window.video.view.maximumSize()
+        original_panes = shell.window.splitter.sizes()
         actions = shell.window.window_size_actions
 
         actions["hd"].trigger()
 
         qtbot.waitUntil(entered.is_set)
         assert actions["full_hd"].isChecked()
-        assert shell.window.video.view.maximumSize() == original_limit
+        assert shell.window.splitter.sizes() == original_panes
         assert all(not action.isEnabled() for action in actions.values())
         assert capture.snapshot().phase == "streaming"
         capture.stream(2)
@@ -79,7 +92,7 @@ def test_menu_applies_only_successfully_saved_size_without_changing_capture(
         assert shell.baseline.window_size_preset == expected
         assert load_settings(path).window_size_preset == expected
         assert actions[expected].isChecked()
-        assert (shell.window.video.view.maximumSize() == original_limit) == fail
+        assert (shell.window.splitter.sizes() == original_panes) == fail
         assert len(capture.connections) == 1
         assert original is not None
         current = capture.snapshot().frame
@@ -120,6 +133,16 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert shell.window.video_device_actions[""].isCheckable()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
         assert shell.window.notifications.entry_action in shell.window.view_menu.actions()
+        conversation = shell.window.connection
+        preview = shell.window.video
+        assert preview.rect().contains(preview.view.geometry())
+        assert abs(preview.view.width() * 9 - preview.view.height() * 16) <= 16
+        assert conversation.mapToGlobal(QPoint()).x() < preview.mapToGlobal(QPoint()).x()
+        assert preview.width() > conversation.width()
+        for pane, status in ((conversation, conversation.status), (preview, preview.status)):
+            left = pane.mapToGlobal(QPoint()).x()
+            center = status.mapToGlobal(status.rect().center()).x()
+            assert left <= center < left + pane.width()
         for widget in (
             shell.window.menuBar(),
             shell.window.settings_button,
@@ -129,6 +152,98 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         ):
             assert widget.isVisible()
             assert available.contains(QRect(widget.mapToGlobal(QPoint()), widget.size()))
+
+
+def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBot) -> None:
+    window = MainWindow()
+    window.allow_close = True
+    qtbot.addWidget(window)
+    panel = window.connection
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    header = "長い質問の識別名" * 20
+    option = "長い選択肢の本文" * 20
+    for event in (
+        TurnStarted("turn"),
+        SessionStatus("waiting", "selected-model", "high", True),
+        TextEvent("response", "公開された判断本文\n" * 30),
+        PlanEvent(
+            "turn",
+            (
+                PlanStep("観測", "completed"),
+                PlanStep("移動", "inProgress"),
+                PlanStep("停止", "pending"),
+            ),
+        ),
+        HumanRequest(
+            "question",
+            1,
+            "thread",
+            "turn",
+            "question",
+            questions=(Question("route", header, "経路を選ぶ", (QuestionOption(option, "説明"),)),),
+        ),
+        HumanRequest(
+            "approval",
+            2,
+            "thread",
+            "turn",
+            "command",
+            details="確認対象の詳細\n" * 20,
+            decisions=("accept", "decline", "cancel"),
+        ),
+    ):
+        panel.handle_event(ServiceEvent(1, event))
+    window.resize(800, 600)
+    with qtbot.waitActive(window):
+        window.show()
+    window.splitter.setSizes([400, 400])
+    qtbot.waitUntil(panel.transcript.isVisible)
+    assert (window.width(), window.height()) == (800, 600)
+    assert header in panel.transcript.toPlainText()
+    question = panel.request_views["question"]
+    assert option in question.question_inputs["route"].choices
+    assert panel.transcript.viewport().height() >= 5 * panel.transcript.fontMetrics().lineSpacing()
+    plan = panel.plan_panel.view
+    plan.setTextCursor(plan.document().find("停止"))
+    plan.ensureCursorVisible()
+    assert plan.viewport().rect().contains(plan.cursorRect())
+    panel.prompt.setPlainText("北側から進む\n危険なら停止する")
+    assert panel.prompt.viewport().height() >= 2 * panel.prompt.fontMetrics().lineSpacing()
+    assert panel.prompt.verticalScrollBar().maximum() == 0
+    assert panel.interrupt_button.accessibleName() == "中断"
+    assert panel.composer.isAncestorOf(panel.interrupt_button)
+    for widget in (
+        panel.plan_panel,
+        panel.transcript,
+        panel.prompt,
+        panel.interrupt_button,
+        panel.send_button,
+    ):
+        assert widget.isVisible()
+        assert window.rect().contains(QRect(widget.mapTo(window, QPoint()), widget.size()))
+    assert abs(window.video.view.width() * 9 - window.video.view.height() * 16) <= 16
+    assert window.video.mapTo(window, QPoint()).y() < panel.plan_panel.mapTo(window, QPoint()).y()
+    bar = panel.transcript.verticalScrollBar()
+    assert bar.maximum() > 0
+    button = panel.requests["approval"].decision_buttons["decline"]
+    button.setFocus(Qt.FocusReason.TabFocusReason)
+    viewport = panel.transcript.viewport()
+    qtbot.waitUntil(
+        lambda: viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
+    )
+    answers: list[object] = []
+    instructions: list[tuple[str, str]] = []
+    stops: list[bool] = []
+    panel.answer_requested.connect(answers.append)
+    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.interrupt_requested.connect(lambda: stops.append(True))
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(panel.send_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(panel.interrupt_button, Qt.MouseButton.LeftButton)
+    assert answers == [AnswerSubmission("approval", decision="decline")]
+    assert instructions == [("北側から進む\n危険なら停止する", "turn")]
+    assert stops == [True]
 
 
 def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_menu(

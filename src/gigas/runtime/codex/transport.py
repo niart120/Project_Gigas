@@ -198,6 +198,7 @@ class StdioTransport:
         env: Environment overrides merged with the current process environment.
         request_timeout: Maximum seconds for an individual request.
         close_timeout: Maximum seconds to wait before escalating termination.
+        unset_env: Names removed from the merged environment of the child only.
     """
 
     def __init__(
@@ -207,11 +208,14 @@ class StdioTransport:
         env: "Mapping[str, str] | None" = None,
         request_timeout: float = 30,
         close_timeout: float = 2,
+        *,
+        unset_env: "Sequence[str]" = (),
     ) -> None:
         """Store launch settings without starting a process."""
         self._command = tuple(command)
         self._cwd = cwd
         self._env = dict(env) if env is not None else {}
+        self._unset_env = frozenset(name.upper() for name in unset_env)
         self._request_timeout = request_timeout
         self._close_timeout = close_timeout
         self._process: asyncio.SubprocessTransport | None = None
@@ -251,7 +255,11 @@ class StdioTransport:
                 _ProcessProtocol,
                 *self._command,
                 cwd=self._cwd,
-                env=os.environ | self._env,
+                env={
+                    key: value
+                    for key, value in (os.environ | self._env).items()
+                    if key.upper() not in self._unset_env
+                },
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

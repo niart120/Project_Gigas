@@ -627,3 +627,24 @@ def test_thread_record_rejects_empty_id_before_appending(tmp_path: Path, invalid
     with pytest.raises(ProjectError, match="行1"):
         ProjectWriter.open(writer.path).close()
     assert log.read_bytes() == malformed
+
+
+def test_memory_bootstrap_preserves_existing_memory_and_records(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        memory = writer.ensure_memory()
+        assert memory == writer.path / "memory"
+        assert (memory / "current.md").is_file()
+        assert (writer.path / "guide.md").is_file()
+        (memory / "current.md").write_bytes(b"existing-memory")
+        (writer.path / "guide.md").write_bytes(b"custom-guide")
+        writer.record_dialogue("dialogue.goal", {"objective": "test"}, thread_id="thread")
+        original = (writer.path / "events.jsonl").read_bytes()
+        assert writer.ensure_memory() == memory
+        assert (memory / "current.md").read_bytes() == b"existing-memory"
+        assert (writer.path / "guide.md").read_bytes() == b"custom-guide"
+        assert (writer.path / "events.jsonl").read_bytes() == original
+    finally:
+        writer.close()
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()

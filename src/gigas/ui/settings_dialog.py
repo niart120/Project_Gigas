@@ -4,8 +4,10 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
+    QAbstractButton,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -82,6 +84,10 @@ class SettingsDialog(QDialog):
         display_form.addRow("プレビュー方式", self.preview_mode)
         self.preview_fps = self._rate_field(30)
         display_form.addRow("表示FPS", self.preview_fps)
+        self.show_reasoning = QCheckBox("推論要約の表示", self)
+        self.show_reasoning.setChecked(True)
+        self.show_reasoning.toggled.connect(self.changed)
+        display_form.addRow(self.show_reasoning)
         io_form = self._tab("I/O")
         capture_form = self._group(io_form, "映像入力")
         self.capture_choices = QComboBox(self)
@@ -146,16 +152,19 @@ class SettingsDialog(QDialog):
         controller_form.addRow("プロトコル", self.serial_protocol)
         controller_form.addRow("通信速度", self.serial_baudrate)
         agent_form = self._tab("Codex")
+        self.codex_tab = self.tabs.count() - 1
+        self.codex_form = agent_form
+        agent_form = self._group(agent_form, "接続時の既定値")
         self.model = self._text_field()
         self.effort = self._text_field()
-        self.auth_method = QComboBox(self)
-        self._auth_choices = QStandardItemModel(self.auth_method)
-        self.auth_method.setModel(self._auth_choices)
-        self._set_auth_method("chatgpt")
-        self.auth_method.currentIndexChanged.connect(self.changed)
+        self.model.setPlaceholderText("既定")
+        self.effort.setPlaceholderText("既定")
+        self.auth_migration_button = QPushButton("APIキーからChatGPTに変更", self)
+        self.auth_migration_button.setAutoDefault(False)
+        self.auth_migration_button.hide()
+        self.auth_migration_button.clicked.connect(self._use_chatgpt)
         agent_form.addRow("モデル", self.model)
-        agent_form.addRow("エフォート", self.effort)
-        agent_form.addRow("認証方式", self.auth_method)
+        agent_form.addRow("推論レベル", self.effort)
         self.status = QLabel(self)
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
@@ -198,7 +207,7 @@ class SettingsDialog(QDialog):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             event.accept()
             focused = self.focusWidget()
-            if isinstance(focused, QPushButton) and focused.isEnabled():
+            if isinstance(focused, QAbstractButton) and focused.isEnabled():
                 focused.click()
             return
         super().keyPressEvent(event)
@@ -220,18 +229,9 @@ class SettingsDialog(QDialog):
         field.currentIndexChanged.connect(self.changed)
         return field
 
-    def _set_auth_method(self, value: str) -> None:
-        with QSignalBlocker(self.auth_method):
-            self._auth_choices.clear()
-            supported = QStandardItem("ChatGPT")
-            supported.setData("chatgpt", Qt.ItemDataRole.UserRole)
-            self._auth_choices.appendRow(supported)
-            if value == "api_key":
-                legacy = QStandardItem("APIキー (未対応)")
-                legacy.setData("api_key", Qt.ItemDataRole.UserRole)
-                legacy.setEnabled(False)
-                self._auth_choices.appendRow(legacy)
-            self.auth_method.setCurrentIndex(self.auth_method.findData(value))
+    def _use_chatgpt(self) -> None:
+        self._snapshot = replace(self._snapshot, auth_method="chatgpt")
+        self.changed.emit()
 
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
@@ -341,13 +341,13 @@ class SettingsDialog(QDialog):
             serial_baudrate=int(self.serial_baudrate.currentData()),
             model=self._text_value(self.model),
             effort=self._text_value(self.effort),
-            auth_method=str(self.auth_method.currentData()),
             capture_fps=int(self.capture_fps.currentData()),
             preview_fps=int(self.preview_fps.currentData()),
             window_size_preset=str(self.window_size_preset.currentData()),
             capture_resolution=str(self.capture_resolution.currentData()),
             preview_letterbox=bool(self.preview_mode.currentData()),
             observation_resolution=self.observation_resolution.currentData(),
+            show_reasoning=self.show_reasoning.isChecked(),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -366,7 +366,6 @@ class SettingsDialog(QDialog):
                     self.serial_protocol.findData(values.serial_protocol)
                 )
             self._set_serial_baudrate(values.serial_baudrate)
-            self._set_auth_method(values.auth_method)
             for field, value in (
                 (self.capture_fps, values.capture_fps),
                 (self.preview_fps, values.preview_fps),
@@ -380,6 +379,7 @@ class SettingsDialog(QDialog):
                 self.capture_resolution.findData(values.capture_resolution)
             )
             self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
+            self.show_reasoning.setChecked(values.show_reasoning)
             self.observation_resolution.setCurrentIndex(
                 self.observation_resolution.findData(values.observation_resolution)
             )
@@ -393,7 +393,7 @@ class SettingsDialog(QDialog):
         """Control editing during I/O while retaining copying and dialog closure."""
         for field in (self.model, self.effort):
             field.setReadOnly(not enabled)
-        self.auth_method.setEnabled(enabled)
+        self.auth_migration_button.setEnabled(enabled)
         for field in (
             self.serial_port,
             self.serial_protocol,
@@ -407,5 +407,6 @@ class SettingsDialog(QDialog):
             self.capture_resolution,
             self.observation_resolution,
             self.preview_mode,
+            self.show_reasoning,
         ):
             field.setEnabled(enabled)

@@ -40,6 +40,8 @@ class Settings:
         preview_letterbox: Preserve the preview aspect ratio with black padding when
             true; stretch to the preview area when false. Capture pixels are unchanged.
         last_project_path: Last successfully selected project directory, or empty.
+        show_reasoning: Display public reasoning summaries when true. Hiding them
+            does not stop receiving updates or change model reasoning settings.
     """
 
     capture_device: str = ""
@@ -56,6 +58,7 @@ class Settings:
     last_project_path: str = ""
     serial_protocol: str = "ch552"
     serial_baudrate: int | None = None
+    show_reasoning: bool = True
 
 
 class SettingsError(ValueError):
@@ -147,7 +150,10 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
         window_size_preset=_window_size_preset(gui.get("window_size_preset", "full_hd"), path),
         capture_resolution=_capture_resolution(capture.get("resolution", "full_hd"), path),
-        preview_letterbox=_preview_letterbox(gui.get("preview_letterbox", True), path),
+        preview_letterbox=_gui_boolean(
+            gui.get("preview_letterbox", True), path, "preview_letterbox"
+        ),
+        show_reasoning=_gui_boolean(gui.get("show_reasoning", True), path, "show_reasoning"),
         observation_resolution=_observation_resolution(
             observation.get("resolution", "full_hd"), path
         ),
@@ -176,9 +182,13 @@ def save_settings(path: "Path", settings: Settings) -> None:
     agent = _ensure_table(document, "agent", path)
     gui = _ensure_table(document, "gui", path)
     _set_text(gui, "window_size_preset", _window_size_preset(settings.window_size_preset, path))
-    letterbox = _preview_letterbox(settings.preview_letterbox, path)
-    if gui.get("preview_letterbox") != letterbox:
-        gui["preview_letterbox"] = letterbox
+    for key, value in (
+        ("preview_letterbox", settings.preview_letterbox),
+        ("show_reasoning", settings.show_reasoning),
+    ):
+        boolean = _gui_boolean(value, path, key)
+        if gui.get(key) != boolean:
+            gui[key] = boolean
     _set_text(capture, "resolution", _capture_resolution(settings.capture_resolution, path))
     _set_text(
         observation, "resolution", _observation_resolution(settings.observation_resolution, path)
@@ -301,9 +311,9 @@ def _observation_resolution(value: object, path: Path) -> "ObservationResolution
             raise SettingsError(msg)
 
 
-def _preview_letterbox(value: object, path: Path) -> bool:
+def _gui_boolean(value: object, path: Path, key: str) -> bool:
     if not isinstance(value, bool):
-        msg = f"{path}: gui.preview_letterbox must be a boolean"
+        msg = f"{path}: gui.{key} must be a boolean"
         raise SettingsError(msg)
     return value
 

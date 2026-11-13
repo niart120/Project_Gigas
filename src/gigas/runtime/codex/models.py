@@ -49,10 +49,13 @@ class ThreadConfiguration:
         cwd: Existing absolute archive directory, independent of the process cwd.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
+        memory_dir: Existing absolute cwd / "memory" directory for exclusive runtime
+            writes, or None for read-only operation.
     """
 
     cwd: "Path"
     mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
+    memory_dir: "Path | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +63,11 @@ class SessionStatus:
     """Current application status derived from operations and runtime notifications.
 
     Attributes:
-        phase: Connection or turn phase. Stopped means no pending start or active turn;
-            interrupt receipt alone does not establish it.
-        model: Validated model name, empty before catalog validation.
-        effort: Validated reasoning effort, empty before catalog validation.
+        phase: Connection or turn phase. Stopped means no pending start or active turn
+            and completion of any started terminal cleanup. Interrupt receipt alone
+            does not establish it.
+        model: Selected model for future turns, empty before catalog validation.
+        effort: Selected reasoning level for future turns, empty before validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
         detail: A short application-owned reason safe for display.
         failure_id: Connection-local failure identity shared with an operation result;
@@ -96,6 +100,73 @@ class TextEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanStep:
+    """One step and its runtime-reported public plan status.
+
+    Attributes:
+        step: Model-provided step description.
+        status: Runtime-provided progress, unchanged by application interruption.
+    """
+
+    step: str
+    status: Literal["pending", "inProgress", "completed"]
+
+
+@dataclass(frozen=True, slots=True)
+class PlanEvent:
+    """A complete replacement of one accepted turn's public plan.
+
+    Attributes:
+        turn_id: Owning turn; may be an earlier completed turn, not the current one.
+        steps: Complete ordered list. An empty tuple clears that turn's plan.
+        explanation: Runtime-provided explanation, or empty when absent.
+    """
+
+    turn_id: str
+    steps: tuple[PlanStep, ...]
+    explanation: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningEvent:
+    """A replacement snapshot containing only a reasoning item's public summary.
+
+    Attributes:
+        turn_id: Owning accepted turn, including earlier completed turns.
+        item_id: Runtime item identity within that turn.
+        summary: Public paragraphs in summary-index order; empty removes the summary.
+            Raw reasoning content is never included.
+    """
+
+    turn_id: str
+    item_id: str
+    summary: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityEvent:
+    """A replacement display value for a public command, file or MCP item.
+
+    Attributes:
+        turn_id: Owning accepted turn, including earlier completed turns.
+        item_id: Runtime item identity within that turn.
+        kind: Supported public item type.
+        title: Actual command, changed paths, or server/tool name.
+        status: Status reported by the runtime, not inferred game progress.
+        details: Public textual result preview, command location or file diff.
+            MCP arguments, image data, metadata and structured results are omitted.
+            A preview may be truncated by the runtime.
+    """
+
+    turn_id: str
+    item_id: str
+    kind: Literal["commandExecution", "fileChange", "mcpToolCall"]
+    title: str
+    status: Literal["inProgress", "completed", "failed", "declined"]
+    details: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class LoginEvent:
     """A login URL the user can choose to open in a browser.
 
@@ -104,6 +175,82 @@ class LoginEvent:
     """
 
     url: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountInfo:
+    """Public ChatGPT account identity; absent fields remain unknown."""
+
+    email: str | None = None
+    plan_type: str | None = None
+    workspace_name: str | None = None
+    authenticated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RateLimitWindow:
+    """Reported usage percentage, window length in minutes and Unix reset seconds."""
+
+    used_percent: int
+    window_minutes: int | None = None
+    resets_at: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageCredits:
+    """Reported additional credits, independent of included-usage permission."""
+
+    has_credits: bool
+    unlimited: bool
+    balance: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageBucket:
+    """One backend quota bucket without inferred names, windows or balances."""
+
+    limit_id: str | None = None
+    limit_name: str | None = None
+    primary: RateLimitWindow | None = None
+    secondary: RateLimitWindow | None = None
+    credits: UsageCredits | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageEvent:
+    """Account usage read result, separate from authentication and turn state.
+
+    Attributes:
+        buckets: Last successfully fetched buckets; retained after read failure.
+        ordinary_usage_allowed: Explicit backend permission, or None when unknown.
+            A known False persists through null or failed reads until an explicit
+            True is received; elapsed reset times never establish recovery.
+        available: Whether the most recent read succeeded. False does not by itself
+            prohibit sending or stop execution.
+    """
+
+    buckets: tuple[UsageBucket, ...] = ()
+    ordinary_usage_allowed: bool | None = None
+    available: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxEvent:
+    """Windows sandbox readiness and an explicitly requested setup operation.
+
+    Attributes:
+        readiness: Last public readiness result, or None when unavailable.
+        setting_up: Whether this connection is awaiting setup acceptance/completion.
+            Closing the connection ends local waiting, not the OS-owned setup.
+        reconnect_required: Setup succeeded but this connection must be reopened.
+        detail: Public setup failure or application-owned readiness error reason;
+            empty when no failure is known.
+    """
+
+    readiness: Literal["ready", "notConfigured", "updateRequired"] | None = None
+    setting_up: bool = False
+    detail: str = ""
+    reconnect_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +271,6 @@ class Question:
         question: Model-provided question text.
         options: Selectable model-provided choices; empty allows text input.
         is_other: Whether text outside the supplied options is allowed.
-        is_secret: Whether answer entry should hide the typed text.
     """
 
     id: str
@@ -132,7 +278,6 @@ class Question:
     question: str
     options: tuple[QuestionOption, ...] = ()
     is_other: bool = False
-    is_secret: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +332,69 @@ class TurnStarted:
     turn_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ModelChoice:
+    """A catalog model and its supported reasoning levels."""
+
+    model: str
+    efforts: tuple[str, ...]
+    default_effort: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSelection:
+    """Validated choices and selection for the next ordinary turn."""
+
+    choices: tuple[ModelChoice, ...]
+    model: str
+    effort: str
+
+
+type GoalStatus = Literal[
+    "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class GoalState:
+    """Public Goal state and observed cumulative usage, without inferred completion."""
+
+    objective: str
+    status: GoalStatus
+    tokens_used: int = 0
+    time_used_seconds: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class GoalEvent:
+    """A confirmed Goal snapshot, or None after confirmed removal."""
+
+    goal: GoalState | None
+
+
+@dataclass(frozen=True, slots=True)
+class DialogueEvent:
+    """A public final or partial item snapshot suitable for asynchronous recording."""
+
+    kind: str
+    payload: "JsonObject"
+    turn_id: str | None = None
+
+
 type ConnectionEvent = (
-    SessionStatus | TextEvent | LoginEvent | HumanRequest | RequestResolved | TurnStarted
+    AccountInfo
+    | UsageEvent
+    | SandboxEvent
+    | GoalEvent
+    | DialogueEvent
+    | ModelSelection
+    | SessionStatus
+    | TextEvent
+    | PlanEvent
+    | ReasoningEvent
+    | ActivityEvent
+    | LoginEvent
+    | HumanRequest
+    | RequestResolved
+    | TurnStarted
 )
