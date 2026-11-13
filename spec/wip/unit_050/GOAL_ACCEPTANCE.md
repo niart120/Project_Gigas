@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01・D02・D04を実装・検証・コミット済み、D03の最終検証と実接続受入を継続中。M3全体は未完了。
+2026-11-13のM3実装・検証依頼に着手。起点cbb0bee、branch `codex/u06-m0-goal-design`、開始時clean。M0〜M2の決定を維持し、残る接続機能と実モデル・実機の受入を完了させる。D01〜D04の実装・固定検証・コミット済み（D03: 4c021cf）。実接続受入を継続中で、M3全体は未完了。
 
 ## 2. 対象範囲
 
@@ -67,7 +67,7 @@ D01: connectionの旧挙動で5件、GUIの暗黙選択/再開許可で3件、�
 | Goal開始・目的更新・複数turn・完了・pause/resume/clear | 実モデル・実機の通知と操作記録 | 実2自律turnとcomplete通知を確認。目的更新/pause/resume/clear・自然最終応答は未確認 |
 | 介入・質問・承認・配送競合 | 実要求と回答、固定競合試験、遅い応答の失効 | 固定通知/競合試験は既存実績。今回の実要求は未確認 |
 | 操作権・観測・停止・再公開 | USB Video Device、COM8・CH552・9600 baud。再開初回observe、旧権限失効、入力解除 | 同runの初回observe・各入力解除を確認。実機再開/再公開は未確認 |
-| 次turnモデル/推論レベル、機器設定と停止 | 通常/自律turn、現在turn不変、提出済み機器設定適用の継続 | M0実API/M2模擬結合を維持。製品実モデルの再確認はreadiness更新必要で送信前停止 |
+| 次turnモデル/推論レベル、機器設定と停止 | 通常/自律turn、現在turn不変、提出済み機器設定適用の継続 | M0実API/M2模擬結合を維持。実機設定提出後の停止と適用継続を確認。Goal実行中との結合・製品実モデルの設定確認は準備待ち |
 | 記憶書込中断・公開記録 | 実機停止と書込停止、再開、対話/input/observeのID対応と非同期保存 | 実記録ID・画像非複製のreplayを確認。実モデルのmemory書込/中断は未確認 |
 | 実応答UI | 実summary/Plan/応答、選択コピー/更新中スクロール、実IME | 実Plan3件、summary未受信。閲覧保持は既存固定試験、実IMEは本人操作待ち |
 | 実接続終了 | 切断/アプリ終了、所有処理回収。M2中間版の終了timeoutを再確認 | 実Goal/実アカウント/新規home接続のサービス終了と所有PID回収を確認済み |
@@ -107,3 +107,5 @@ D03追加レビュー: 初回readiness完了前のmemory送信を未準備と誤
 D03最終gate: `uv run pytest tests/unit tests/integration -q`は832 passed、失敗・error・skipなし（JUnit `tmp/u050-d03-reviewed-all.xml`）。`uv run ruff format --check .`（211 files）、`uv run ruff check .`、`uv run ty check --no-progress`、`uv lock --check`、`uv build`、`uv run python scripts/check_package.py`、`git diff --check`が成功。配布物は隔離wheel install、capture worker終了、module/script両入口の起動終了を確認した。公開型/docstring、既存phase・owned task・終了経路をレビュー済み。close競合1例・初回readiness競合4例の指摘を採用して既存試験を改訂し、別状態機械・自動再試行は不要と判断した。
 
 文書確認: 公開手順、初期設計、親/子のAPIキー・DPI除外、記憶と公開記録の所有、次turn設定反映を実装と照合。`uv run python tmp/u06-m1/validate_docs.py`は920 local links、50 unique units、errorsなし。検証用probe・記録は`tmp/u06-m3/`に隔離し、製品へ含めない。
+
+実機設定/停止: `tmp/u06-m3/settings-stop-20261113-180709/report.json`。USB Video DeviceとCOM8・CH552・9600への設定保存を提出直後にstopし、stop完了後もserial接続・映像適用が完了した。続けて取得要求FPS60→30の保存提出直後にstopしても、映像世代1→2へ再接続・適用が完了した。実FPSの測定ではない。同値serialは同ownerを保持し、再接続した証拠にはしない。ボタン入力要求0・モデル0、接続時の中立状態送信のみ。serial owner、全サービスと映像worker PID33184/58844の回収を確認。Goal active中の検証とは区別する。
