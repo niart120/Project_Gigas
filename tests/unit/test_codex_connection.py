@@ -6,15 +6,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from gigas.runtime.codex import launch
 from gigas.runtime.codex.connection import (
     AnswerDeliveryError,
     CodexConnection,
     CodexConnectionError,
 )
 from gigas.runtime.codex.models import (
+    ActivityEvent,
     ConnectionOptions,
     HumanRequest,
     LoginEvent,
+    PlanEvent,
+    PlanStep,
+    ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
@@ -819,6 +824,17 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         peer.events.put_nowait(_question())
         peer.events.put_nowait(
             RpcNotification(
+                "turn/plan/updated",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "explanation": "画面を確認する",
+                    "plan": [{"step": "観測", "status": "inProgress"}],
+                },
+            )
+        )
+        peer.events.put_nowait(
+            RpcNotification(
                 "item/agentMessage/delta",
                 {"threadId": "thread-1", "turnId": "turn-1", "itemId": "a", "delta": "応"},
             )
@@ -845,6 +861,9 @@ def test_notifications_before_start_response_preserve_text_requests_and_completi
         assert RequestResolved(request.token) in events
         assert TextEvent("a", "応") in events
         assert TextEvent("a", "応答", replace=True) in events
+        plan = PlanEvent("turn-1", (PlanStep("観測", "inProgress"),), "画面を確認する")
+        assert plan in events
+        assert events.index(TurnStarted("turn-1")) < events.index(plan)
         assert isinstance(events[-1], SessionStatus)
         assert events[-1].phase == "ready"
         with pytest.raises(CodexConnectionError):
@@ -896,6 +915,173 @@ def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_pat
         await connection.close()
 
     _run(scenario())
+
+
+def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        peer = FakePeer()
+        events: list[ConnectionEvent] = []
+        connection = CodexConnection(peer, ConnectionOptions(tmp_path), events.append)
+        await connection.open()
+        await connection.send("開始")
+
+        def notify(method: str, fields: JsonObject, *, turn: str = "turn-1") -> None:
+            peer.events.put_nowait(
+                RpcNotification(method, {"threadId": "thread-1", "turnId": turn, **fields})
+            )
+
+        notify("turn/plan/updated", {"plan": [{"step": "観測", "status": "pending"}]})
+        notify("turn/plan/updated", {"plan": [], "explanation": None})
+        for index, delta in ((1, "次の確認"), (0, "公開"), (0, "要約")):
+            notify(
+                "item/reasoning/summaryTextDelta",
+                {"itemId": "reason-1", "summaryIndex": index, "delta": delta},
+            )
+        notify(
+            "item/reasoning/textDelta",
+            {"itemId": "reason-1", "contentIndex": 0, "delta": "PRIVATE-REASONING"},
+        )
+        notify(
+            "item/completed",
+            {
+                "item": {
+                    "type": "reasoning",
+                    "id": "reason-1",
+                    "summary": ["確定した公開要約"],
+                    "content": ["PRIVATE-REASONING"],
+                }
+            },
+        )
+        command: JsonObject = {
+            "type": "commandExecution",
+            "id": "cmd-1",
+            "command": "Get-Date",
+            "cwd": "C:/archive",
+            "status": "inProgress",
+        }
+        notify("item/started", {"item": command})
+        notify(
+            "item/completed",
+            {"item": {**command, "status": "completed", "aggregatedOutput": "時刻", "exitCode": 0}},
+        )
+        mcp: JsonObject = {
+            "type": "mcpToolCall",
+            "id": "mcp-1",
+            "server": "game",
+            "tool": "observe",
+            "status": "inProgress",
+            "arguments": {"authorization": "PRIVATE-ARGUMENT"},
+        }
+        notify("item/started", {"item": mcp})
+        notify(
+            "item/completed",
+            {
+                "item": {
+                    **mcp,
+                    "status": "completed",
+                    "result": {
+                        "content": [
+                            {"type": "text", "text": "frame-1"},
+                            {"type": "image", "data": "PRIVATE-IMAGE", "mimeType": "image/png"},
+                        ],
+                        "structuredContent": {"private": "PRIVATE-STRUCTURED"},
+                        "_meta": {"private": "PRIVATE-META"},
+                    },
+                }
+            },
+        )
+        notify(
+            "item/completed",
+            {
+                "item": {
+                    "type": "fileChange",
+                    "id": "file-1",
+                    "status": "completed",
+                    "changes": [{"path": "memory.md", "kind": {"type": "add"}, "diff": "+記録"}],
+                }
+            },
+        )
+        notify("turn/plan/updated", {"plan": []}, turn="unknown-turn")
+        peer.events.put_nowait(
+            RpcNotification(
+                "turn/plan/updated",
+                {"threadId": "foreign-thread", "turnId": "turn-1", "plan": []},
+            )
+        )
+        await _events_processed()
+        assert [event for event in events if isinstance(event, PlanEvent)] == [
+            PlanEvent("turn-1", (PlanStep("観測", "pending"),)),
+            PlanEvent("turn-1", ()),
+        ]
+        assert [event for event in events if isinstance(event, ReasoningEvent)] == [
+            ReasoningEvent("turn-1", "reason-1", ("次の確認",)),
+            ReasoningEvent("turn-1", "reason-1", ("公開", "次の確認")),
+            ReasoningEvent("turn-1", "reason-1", ("公開要約", "次の確認")),
+            ReasoningEvent("turn-1", "reason-1", ("確定した公開要約",)),
+        ]
+        assert [event for event in events if isinstance(event, ActivityEvent)] == [
+            ActivityEvent(
+                "turn-1", "cmd-1", "commandExecution", "Get-Date", "inProgress", "C:/archive"
+            ),
+            ActivityEvent(
+                "turn-1",
+                "cmd-1",
+                "commandExecution",
+                "Get-Date",
+                "completed",
+                "C:/archive\n時刻\n終了コード: 0",
+            ),
+            ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "inProgress"),
+            ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "completed", "frame-1"),
+            ActivityEvent(
+                "turn-1", "file-1", "fileChange", "memory.md", "completed", "add: memory.md\n+記録"
+            ),
+        ]
+        assert "PRIVATE-" not in repr(events)
+
+        peer.events.put_nowait(_terminal())
+        await _events_processed()
+        peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "inProgress"}}
+        await connection.send("次へ")
+        before = len(events)
+        notify("turn/plan/updated", {"plan": [{"step": "観測", "status": "completed"}]})
+        notify("item/completed", {"item": {"type": "reasoning", "id": "reason-1", "summary": []}})
+        notify(
+            "item/completed", {"item": {**mcp, "status": "failed", "error": {"message": "停止"}}}
+        )
+        notify("turn/plan/updated", {"plan": []}, turn="unknown-turn")
+        await _events_processed()
+        assert events[before:] == [
+            PlanEvent("turn-1", (PlanStep("観測", "completed"),)),
+            ReasoningEvent("turn-1", "reason-1", ()),
+            ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "failed", "停止"),
+        ]
+        assert [event for event in events if isinstance(event, SessionStatus)][
+            -1
+        ].phase == "running"
+        assert [event for event in events if isinstance(event, TurnStarted)] == [
+            TurnStarted("turn-1"),
+            TurnStarted("turn-2"),
+        ]
+        await connection.close()
+
+    _run(scenario())
+
+
+def test_launch_enables_public_plan_tool(tmp_path: Path, monkeypatch: "MonkeyPatch") -> None:
+    commands: list[list[str]] = []
+
+    def transport(command: list[str], cwd: Path, env: dict[str, str]) -> FakePeer:
+        assert cwd == tmp_path
+        assert isinstance(env, dict)
+        commands.append(command)
+        return FakePeer()
+
+    monkeypatch.setattr(launch, "StdioTransport", transport)
+    launch.create_connection(ConnectionOptions(tmp_path), lambda _: None)
+    assert "tools.update_plan.enabled=true" in commands[0]
 
 
 def test_eof_expires_requests_closes_peer_and_prevents_resend(tmp_path: Path) -> None:

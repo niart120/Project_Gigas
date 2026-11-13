@@ -96,6 +96,73 @@ class TextEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanStep:
+    """One step and its runtime-reported public plan status.
+
+    Attributes:
+        step: Model-provided step description.
+        status: Runtime-provided progress, unchanged by application interruption.
+    """
+
+    step: str
+    status: Literal["pending", "inProgress", "completed"]
+
+
+@dataclass(frozen=True, slots=True)
+class PlanEvent:
+    """A complete replacement of one accepted turn's public plan.
+
+    Attributes:
+        turn_id: Owning turn; may be an earlier completed turn, not the current one.
+        steps: Complete ordered list. An empty tuple clears that turn's plan.
+        explanation: Runtime-provided explanation, or empty when absent.
+    """
+
+    turn_id: str
+    steps: tuple[PlanStep, ...]
+    explanation: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningEvent:
+    """A replacement snapshot containing only a reasoning item's public summary.
+
+    Attributes:
+        turn_id: Owning accepted turn, including earlier completed turns.
+        item_id: Runtime item identity within that turn.
+        summary: Public paragraphs in summary-index order; empty removes the summary.
+            Raw reasoning content is never included.
+    """
+
+    turn_id: str
+    item_id: str
+    summary: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityEvent:
+    """A replacement display value for a public command, file or MCP item.
+
+    Attributes:
+        turn_id: Owning accepted turn, including earlier completed turns.
+        item_id: Runtime item identity within that turn.
+        kind: Supported public item type.
+        title: Actual command, changed paths, or server/tool name.
+        status: Status reported by the runtime, not inferred game progress.
+        details: Public textual result preview, command location or file diff.
+            MCP arguments, image data, metadata and structured results are omitted.
+            A preview may be truncated by the runtime.
+    """
+
+    turn_id: str
+    item_id: str
+    kind: Literal["commandExecution", "fileChange", "mcpToolCall"]
+    title: str
+    status: Literal["inProgress", "completed", "failed", "declined"]
+    details: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class LoginEvent:
     """A login URL the user can choose to open in a browser.
 
@@ -188,5 +255,13 @@ class TurnStarted:
 
 
 type ConnectionEvent = (
-    SessionStatus | TextEvent | LoginEvent | HumanRequest | RequestResolved | TurnStarted
+    SessionStatus
+    | TextEvent
+    | PlanEvent
+    | ReasoningEvent
+    | ActivityEvent
+    | LoginEvent
+    | HumanRequest
+    | RequestResolved
+    | TurnStarted
 )

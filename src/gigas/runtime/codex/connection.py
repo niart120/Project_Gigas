@@ -9,10 +9,14 @@ from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
 from gigas.runtime.codex.models import (
+    ActivityEvent,
     HumanRequest,
     LoginEvent,
+    PlanEvent,
+    PlanStep,
     Question,
     QuestionOption,
+    ReasoningEvent,
     RequestResolved,
     SessionStatus,
     TextEvent,
@@ -237,6 +241,7 @@ class CodexConnection:
         self._request_items: dict[str, str] = {}
         self._seen_requests: set[RpcId] = set()
         self._file_details: dict[str, str] = {}
+        self._summaries: dict[tuple[str, str], dict[int, str]] = {}
         self._operations: set[asyncio.Task[None]] = set()
         self._cleanup: asyncio.Task[None] | None = None
         self._opening = False
@@ -728,6 +733,10 @@ class CodexConnection:
         incoming_turn = params.get("turnId")
         if isinstance(incoming_turn, str):
             self._adopt_turn(incoming_turn)
+            if incoming_turn == self._turn_id or incoming_turn in self._completed_turns:
+                # Display-only updates, including late history, never change turn lifetime.
+                with suppress(CodexConnectionError):
+                    self._public_notification(event.method, params, incoming_turn)
         if event.method == "serverRequest/resolved":
             request_id = params.get("requestId")
             if isinstance(request_id, str | int) and not isinstance(request_id, bool):
@@ -806,6 +815,93 @@ class CodexConnection:
                     self._emit(TextEvent(_text(item.get("id")), text, replace=True))
             elif item.get("type") == "fileChange":
                 await self._update_file_changes(_text(item.get("id")), item.get("changes"))
+
+    def _public_notification(self, method: str, params: "JsonObject", turn_id: str) -> None:
+        if method == "turn/plan/updated":
+            plan = params.get("plan")
+            if not isinstance(plan, list):
+                return
+            steps: list[PlanStep] = []
+            for raw in plan:
+                step = _object(raw)
+                status = step.get("status")
+                if not isinstance(status, str) or status not in (
+                    "pending",
+                    "inProgress",
+                    "completed",
+                ):
+                    return
+                steps.append(PlanStep(_text(step.get("step")), status))
+            explanation = params.get("explanation")
+            self._emit(
+                PlanEvent(
+                    turn_id, tuple(steps), explanation if isinstance(explanation, str) else ""
+                )
+            )
+        elif method == "item/reasoning/summaryTextDelta":
+            index, delta = params.get("summaryIndex"), params.get("delta")
+            if type(index) is not int or index < 0 or not isinstance(delta, str):
+                return
+            item_id = _text(params.get("itemId"))
+            summary = self._summaries.setdefault((turn_id, item_id), {})
+            summary[index] = summary.get(index, "") + delta
+            self._emit(ReasoningEvent(turn_id, item_id, tuple(summary[i] for i in sorted(summary))))
+        elif method in {"item/started", "item/completed"}:
+            item = _object(params.get("item"))
+            item_id = _text(item.get("id"))
+            if item.get("type") == "reasoning" and method == "item/completed":
+                raw_summary = item.get("summary", [])
+                if not isinstance(raw_summary, list):
+                    return
+                summary = {}
+                for index, paragraph in enumerate(raw_summary):
+                    if not isinstance(paragraph, str):
+                        return
+                    summary[index] = paragraph
+                self._summaries[turn_id, item_id] = summary
+                self._emit(ReasoningEvent(turn_id, item_id, tuple(summary.values())))
+            elif (activity := self._activity(turn_id, item_id, item)) is not None:
+                self._emit(activity)
+
+    @staticmethod
+    def _activity(turn_id: str, item_id: str, item: "JsonObject") -> ActivityEvent | None:
+        kind, status = item.get("type"), item.get("status")
+        if (
+            not isinstance(kind, str)
+            or not isinstance(status, str)
+            or kind not in ("commandExecution", "fileChange", "mcpToolCall")
+            or status not in ("inProgress", "completed", "failed", "declined")
+        ):
+            return None
+        details: list[str] = []
+        if kind == "commandExecution":
+            title = _text(item.get("command"))
+            for key in ("cwd", "aggregatedOutput"):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    details.append(value)
+            exit_code = item.get("exitCode")
+            if type(exit_code) is int:
+                details.append(f"終了コード: {exit_code}")
+        elif kind == "fileChange":
+            changes = item.get("changes")
+            if not isinstance(changes, list):
+                return None
+            details.append(_file_changes(changes))
+            title = "\n".join(_text(_object(change).get("path")) for change in changes)
+        else:
+            title = f"{_text(item.get('server'))}/{_text(item.get('tool'))}"
+            result = item.get("result")
+            if isinstance(result, dict) and isinstance(content := result.get("content"), list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text")
+                        if isinstance(text, str):
+                            details.append(text)
+            error = item.get("error")
+            if isinstance(error, dict) and isinstance(message := error.get("message"), str):
+                details.append(message)
+        return ActivityEvent(turn_id, item_id, kind, title, status, "\n".join(details))
 
     async def _update_file_changes(self, item_id: str, changes: "JsonValue") -> None:
         previous = self._file_details.pop(item_id, None)

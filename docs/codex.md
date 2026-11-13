@@ -12,7 +12,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 同じasyncioループで `open()`、必要なら明示的に `login()`、認証後に `send(prompt)` を呼びます。`open()` は初期化・認証状態・モデル一覧を確認します。未認証時の `LoginEvent.url` は `login()` の開始後にだけ届き、ブラウザを開く操作は利用側で行います。`account/login/completed` とアカウントの再取得によって認証結果を確認します。
 
-`send()` は配布物内の `play.md` を開発者指示として配送し、読み取り専用・人間による承認・永続スレッドで通常ターンを開始します。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。モデルから届く本文以外に、生のプロトコル応答やstderrを表示イベントへ流しません。
+`send()` は配布物内の `play.md` を開発者指示として配送し、読み取り専用・人間による承認・永続スレッドで通常ターンを開始します。利用者のMCP設定は接続用に無効化し、アプリが明示したMCP設定だけを重ねます。本文・公開計画・公開推論要約・ツール活動を型付きイベントへ変換し、生のプロトコル応答やstderrを表示イベントへ流しません。
 
 `prepare_turn(prompt, thread_id)`は通常の`send()`ごとに呼ぶasyncコールバックです。`prompt`は送信する依頼、`thread_id`は初回に`None`、以後は採用済みの実thread IDです。`models.ThreadConfiguration(cwd, mcp_config)`を返し、`cwd`には準備済みの絶対パスを指定します。ランタイム起動用の`ConnectionOptions.cwd`と、会話・原記録のフォルダーを分離できます。省略時は起動用cwdを使います。接続・ログイン時にはこのコールバックを呼ばないため、保存先の準備失敗で認証は失われません。
 
@@ -39,6 +39,10 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 開始処理中の停止も保持します。まだthreadの準備・再開中ならturnを送らず、turnの受付待ちならIDが届いた時点で中断します。この場合、先に戻る `stop()` は中断RPCの完了を表しません。`send()` の取消しや受付不明の通信失敗では接続を閉じ、自動再送しません。
 
 `TextEvent` は `item_id` ごとに扱います。`replace=False` は本文への追記、`replace=True` は確定本文への置換です。開始応答より先に届く質問・本文・ターン終端も処理します。`LoginEvent` のURLは `SessionStatus.phase` が `authenticating` でなくなった時点で破棄してください。
+
+`PlanEvent(turn_id, steps, explanation)`は公開計画の全一覧です。`steps`は`PlanStep(step, status)`の組で、空ならそのturnの計画を消します。ランタイム起動時に`tools.update_plan.enabled=true`を指定しますが、毎turnの計画出力を保証する設定ではありません。
+
+`ReasoningEvent(turn_id, item_id, summary)`は公開要約の段落だけを持つ全置換イベントです。生のreasoning本文は含みません。`ActivityEvent(turn_id, item_id, kind, title, status, details)`はコマンド・ファイル変更・MCP呼出しの公開対象とテキスト結果を持ち、MCPの引数・画像・メタデータは含みません。結果はruntimeによって切り詰められる場合があります。これらの表示イベントには完了済みturnへの遅延更新も届くため、現在欄の更新と過去履歴の更新をturn IDで分けてください。表示通知自体はゲーム入力の許可や成功を意味しません。
 
 `TurnStarted(turn_id)`は、通常ターンのIDをランタイムから受理したときに一度届きます。そのターンの質問や完了の通知に先行します。開始応答より先に質問・完了が届く場合も同じです。開始要求の提出だけでは届かず、ターンの成功や継続中であることを保証する通知ではありません。
 

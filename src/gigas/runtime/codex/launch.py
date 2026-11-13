@@ -52,6 +52,7 @@ def create_connection(
         "notify=[]",
         'web_search="disabled"',
         "features.default_mode_request_user_input=true",
+        "tools.update_plan.enabled=true",
     ):
         command.extend(["--config", override])
     command.extend(["app-server", "--listen", "stdio://"])
