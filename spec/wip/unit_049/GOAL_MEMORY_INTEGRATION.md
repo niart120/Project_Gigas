@@ -21,7 +21,7 @@ Goal本文・Planは各Transcript内で選択/コピー/更新中スクロール
 |---|---|---|
 | refactor-skipped | D01 記憶入口・限定起動環境・対話保存 | 既存storage/recording/launch試験改訂 |
 | refactor-skipped | D02 公開Goal操作・自律turn・配送と停止競合 | 既存connection/transport試験改訂 |
-| green | D03 Goal run/Grant/MCP・通常会話・対話記録 | 既存service/input/settings試験改訂 |
+| refactor-skipped | D03 Goal run/Grant/MCP・通常会話・対話記録 | 既存service/input/settings試験改訂 |
 | green | D04 Goal操作と本文保持 | 既存GUI/Plan試験改訂 |
 
 ## 対象ファイル
@@ -62,7 +62,7 @@ Goal API未実装、Goal UI signal未実装のredから実装。D03は既存read
 
 | command | 根拠 |
 |---|---|
-| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u049-final` | 764 passed。通常turn、停止、配送、設定適用、入力/観測/保存の既存回帰を含む |
+| `uv run pytest tests/unit tests/integration -q --basetemp=tmp/pytest-u049-final` | 779 passed（最終受入実行 `tmp/pytest-u049-acceptance`）。通常turn、停止、配送、設定適用、入力/観測/保存の既存回帰を含む |
 | `uv run pytest tests/integration/test_codex_service.py -q --basetemp=tmp/pytest-u049-service-final` | 62 passed。最後のGoal応答前readyでrunを保持する変更を再検証 |
 | `uv run ruff format --check .` / `uv run ruff check .` / `uv run ty check --no-progress` | 成功。公開型/docstringの所有・None境界、Protocol/fake一致を確認 |
 | `uv lock --check` / `uv build` / `uv run python scripts/check_package.py` | 成功。依存追加なし。隔離install、資材、capture worker終了、module/script起動と終了 |
@@ -79,3 +79,5 @@ Qtは固定通知で[通常画面](assets/normal-paused.png)と[800×600](assets
 KISSレビュー: Goalとturn/操作権を巨大な状態列挙へ展開せず、既存停止/要求/通知/保存の経路を利用。自律継続はruntimeに委任し独自continue・再試行・監視・自動復旧なし。Goal本文とPlanの別標準文書境界を明示し、独自跨ぎ選択は実装しない。
 
 最後の受入監査で、Goalがcomplete/blocked/usageLimited/budgetLimitedへ変化した後も質問/承認へ回答できる8ケースを既存試験でredにした。公開停止理由を保持して要求失効・停止意思固定・turn中断する修正後は成功。提出済み回答の遅い完了でも実行状態へ戻らない。runtime114件＋service62件、合計176件成功。実runtimeプローブもrun-20261113-163521/report.jsonで再成功し、処理は終了済み。
+
+D01コミット7834b2a、D02コミット9a58856。最終受入全unit/integrationは779 passed、ruff/format/ty/lock/build成功。配布物起動検査は同依存・同起動経路で成功、最終runtime修正後のbuildも成功。

@@ -46,6 +46,17 @@ class LifetimeConnection:
         self.emit(SessionStatus("running", "model", "high", True))
         return f"turn-{self.sends}"
 
+    async def set_goal(self, objective: str) -> bool:
+        """Accept a test Goal."""
+        return bool(objective)
+
+    async def resume_goal(self) -> bool:
+        """Accept a test Goal resume."""
+        return True
+
+    async def clear_goal(self) -> None:
+        """Accept a test Goal removal."""
+
     async def select_model(self, model: str, effort: str) -> None:
         """Accept a test selection."""
 
