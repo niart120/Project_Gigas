@@ -28,6 +28,9 @@ protocol = "ch552"
 model = ""
 effort = ""
 auth_method = "chatgpt"
+web_search_enabled = true
+memory_enabled = true
+approvals_reviewer = "auto_review"
 ```
 
 | 項目 | 意味 |
@@ -47,6 +50,11 @@ auth_method = "chatgpt"
 | `agent.model` | 使用したいモデル |
 | `agent.effort` | 使用したい推論レベル |
 | `agent.auth_method` | 認証方式。対応値は `chatgpt`。旧値 `api_key` は読み書きを維持しますが、接続は未対応です |
+| `agent.web_search_enabled` | Web検索設定の保存値。真偽値、既定は`true` |
+| `agent.memory_enabled` | Codex自動記憶の生成・参照をまとめた設定の保存値。真偽値、既定は`true`。`false`を保存しても既存記憶は削除しない |
+| `agent.approvals_reviewer` | 承認方法の保存値。`auto_review`（代わりに承認、既定）または`user`（自分で承認） |
+
+Web検索・自動記憶・承認方法の3項目は現在保存のみ対応しています。実行時への適用と設定画面からの切替は未対応です。他の項目を設定画面で変更しても、これらの保存値を維持します。
 
 項目を省略すると例の値を使います。機器・シリアルポート・モデル・推論レベルの空文字は未指定を表します。`auth_method` は方式だけを記録します。API キーやトークンはこのファイルへ書かないでください。
 

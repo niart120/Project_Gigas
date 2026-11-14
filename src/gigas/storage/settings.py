@@ -5,7 +5,7 @@ import tempfile
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import tomlkit
 from tomlkit.exceptions import ParseError, TOMLKitError
@@ -42,6 +42,10 @@ class Settings:
         last_project_path: Last successfully selected project directory, or empty.
         show_reasoning: Display public reasoning summaries when true. Hiding them
             does not stop receiving updates or change model reasoning settings.
+        web_search_enabled: Allow live Web search in newly prepared execution settings.
+        memory_enabled: Enable Codex memory generation and use together. Saving false
+            does not delete any previously stored memory.
+        approvals_reviewer: Delegate approval to auto_review, or request the user.
     """
 
     capture_device: str = ""
@@ -59,6 +63,9 @@ class Settings:
     serial_protocol: str = "ch552"
     serial_baudrate: int | None = None
     show_reasoning: bool = True
+    web_search_enabled: bool = True
+    memory_enabled: bool = True
+    approvals_reviewer: Literal["auto_review", "user"] = "auto_review"
 
 
 class SettingsError(ValueError):
@@ -150,10 +157,17 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
         window_size_preset=_window_size_preset(gui.get("window_size_preset", "full_hd"), path),
         capture_resolution=_capture_resolution(capture.get("resolution", "full_hd"), path),
-        preview_letterbox=_gui_boolean(
-            gui.get("preview_letterbox", True), path, "preview_letterbox"
+        preview_letterbox=_boolean(
+            gui.get("preview_letterbox", True), path, "gui.preview_letterbox"
         ),
-        show_reasoning=_gui_boolean(gui.get("show_reasoning", True), path, "show_reasoning"),
+        show_reasoning=_boolean(gui.get("show_reasoning", True), path, "gui.show_reasoning"),
+        web_search_enabled=_boolean(
+            agent.get("web_search_enabled", True), path, "agent.web_search_enabled"
+        ),
+        memory_enabled=_boolean(agent.get("memory_enabled", True), path, "agent.memory_enabled"),
+        approvals_reviewer=_approvals_reviewer(
+            agent.get("approvals_reviewer", "auto_review"), path
+        ),
         observation_resolution=_observation_resolution(
             observation.get("resolution", "full_hd"), path
         ),
@@ -186,7 +200,7 @@ def save_settings(path: "Path", settings: Settings) -> None:
         ("preview_letterbox", settings.preview_letterbox),
         ("show_reasoning", settings.show_reasoning),
     ):
-        boolean = _gui_boolean(value, path, key)
+        boolean = _boolean(value, path, f"gui.{key}")
         if gui.get(key) != boolean:
             gui[key] = boolean
     _set_text(capture, "resolution", _capture_resolution(settings.capture_resolution, path))
@@ -210,6 +224,14 @@ def save_settings(path: "Path", settings: Settings) -> None:
     _set_text(agent, "model", settings.model)
     _set_text(agent, "effort", settings.effort)
     _set_text(agent, "auth_method", settings.auth_method)
+    for key, value in (
+        ("web_search_enabled", settings.web_search_enabled),
+        ("memory_enabled", settings.memory_enabled),
+    ):
+        boolean = _boolean(value, path, f"agent.{key}")
+        if agent.get(key) != boolean:
+            agent[key] = boolean
+    _set_text(agent, "approvals_reviewer", _approvals_reviewer(settings.approvals_reviewer, path))
     _settings_from_document(document, path)
     _replace_file(path, tomlkit.dumps(document))
 
@@ -311,11 +333,22 @@ def _observation_resolution(value: object, path: Path) -> "ObservationResolution
             raise SettingsError(msg)
 
 
-def _gui_boolean(value: object, path: Path, key: str) -> bool:
+def _boolean(value: object, path: Path, key: str) -> bool:
     if not isinstance(value, bool):
-        msg = f"{path}: gui.{key} must be a boolean"
+        msg = f"{path}: {key} must be a boolean"
         raise SettingsError(msg)
     return value
+
+
+def _approvals_reviewer(value: object, path: Path) -> Literal["auto_review", "user"]:
+    match value:
+        case "auto_review":
+            return "auto_review"
+        case "user":
+            return "user"
+        case _:
+            msg = f"{path}: agent.approvals_reviewer must be auto_review or user"
+            raise SettingsError(msg)
 
 
 def _set_text(table: MutableMapping[str, object], key: str, value: str) -> None:
