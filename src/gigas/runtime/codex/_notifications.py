@@ -2,7 +2,7 @@
 
 import json
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from gigas.runtime.codex.models import (
     ActivityEvent,
@@ -101,8 +101,53 @@ def _mcp_text(text: str) -> str:
     return text
 
 
-def _activity(turn_id: str, item_id: str, item: "JsonObject") -> ActivityEvent | None:
+def _web_details(item: "JsonObject") -> tuple[str, str]:
+    query = item.get("query")
+    lines = [query] if isinstance(query, str) and query else []
+    action = item.get("action")
+    if isinstance(action, dict):
+        for key in ("query", "url", "pattern"):
+            value = action.get(key)
+            if isinstance(value, str) and value:
+                lines.append(value)
+        queries = action.get("queries")
+        if isinstance(queries, list):
+            lines.extend(value for value in queries if isinstance(value, str) and value)
+    lines = list(dict.fromkeys(lines))
+    title = lines.pop(0) if lines else "Web検索"
+    results = item.get("results")
+    if isinstance(results, list) and results:
+        # Public results deliberately have no provider-specific schema.
+        lines.append(json.dumps(results, ensure_ascii=False, indent=2))
+    return title, "\n".join(lines)
+
+
+def item_activity(
+    turn_id: str,
+    item_id: str,
+    item: "JsonObject",
+    *,
+    web_status: Literal["inProgress", "completed"] | None = None,
+) -> ActivityEvent | None:
+    """Convert a public activity item without requests or recording side effects.
+
+    Args:
+        turn_id: Containing public turn identity.
+        item_id: Public item identity within that turn.
+        item: Public item body; unrelated and unsupported types are ignored.
+        web_status: Received notification lifecycle for Web search, or None for
+            saved items, whose public payload has no lifecycle status.
+
+    Returns:
+        One display snapshot, or None for unsupported or incomplete activity data.
+
+    Raises:
+        ValueError: A supported activity has malformed required display fields.
+    """
     kind, status = item.get("type"), item.get("status")
+    if kind == "webSearch":
+        title, details = _web_details(item)
+        return ActivityEvent(turn_id, item_id, "webSearch", title, web_status, details)
     if (
         not isinstance(kind, str)
         or not isinstance(status, str)
@@ -165,7 +210,7 @@ class TurnContent:
             delta = params.get("delta")
             if isinstance(delta, str):
                 item_id = _text(params.get("itemId"))
-                yield TextEvent(item_id, delta)
+                yield TextEvent(item_id, delta, turn_id=self._turn_id)
                 previous = self._pending.get(item_id, {}).get("text", "")
                 self._pending[item_id] = {
                     "item_id": item_id,
@@ -181,7 +226,7 @@ class TurnContent:
                 and isinstance(text, str)
             ):
                 item_id = _text(item.get("id"))
-                yield TextEvent(item_id, text, replace=True)
+                yield TextEvent(item_id, text, replace=True, turn_id=self._turn_id)
                 yield self._complete(item_id, {"item_id": item_id, "kind": "message", "text": text})
 
     def _public(self, method: str, params: "JsonObject") -> "Iterator[ConnectionEvent]":
@@ -220,7 +265,14 @@ class TurnContent:
                     item_id,
                     {"item_id": item_id, "kind": "reasoning", "summary": list(summary.values())},
                 )
-            elif (activity := _activity(self._turn_id, item_id, item)) is not None:
+            elif (
+                activity := item_activity(
+                    self._turn_id,
+                    item_id,
+                    item,
+                    web_status="completed" if method == "item/completed" else "inProgress",
+                )
+            ) is not None:
                 yield activity
                 snapshot: JsonObject = {
                     "item_id": item_id,

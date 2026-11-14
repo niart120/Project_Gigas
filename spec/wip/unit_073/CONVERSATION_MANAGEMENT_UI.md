@@ -52,7 +52,7 @@ L1→L2→L3→L4の順で進める。L2の表示部品だけでは製品の会�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | L1: 保存履歴と新着Web activityを既存表現へ描画し、過去ページ追加でも選択・閲覧位置を保つ | new/regression/edge | unit/integration | 公開項目、turn/itemの対応、Plan/過去要求の非操作性、順序・重複、reasoning表示 |
+| done | L1: 保存履歴と新着Web activityを既存表現へ描画し、過去ページ追加でも選択・閲覧位置を保つ | new/regression/edge | unit/integration | 公開項目、turn/item/種別の対応、Plan/過去要求の非操作性、順序・重複、reasoning表示 |
 | todo | L2: 合意配置のサイドバー・所属別新規・対象見出しが開閉と操作可否を分けて表示する | new/regression | integration/GUI | 部品と配置、空/局所読込/ページ、幅復帰、既存メニューとサイズ |
 | todo | L3: 会話管理を公開サービスへ結び、下書き・読込・失敗・閲覧Goalと実行操作を分ける | new/regression/edge | integration | Project/未所属、新規/選択/追加履歴、既存picker、世代/選択照合、再接続、停止前切替禁止 |
 | todo | L4: 実画面と実app-serverで履歴閲覧・停止後切替・新規/再開のUIが成立する | acceptance | GUI/integration | native撮影、合意モックとの照合、操作・活性・回収。実機はM7 |
@@ -63,7 +63,7 @@ L1→L2→L3→L4の順で進める。L2の表示部品だけでは製品の会�
 
 | gate | 状態 | 検査する内容 |
 |---|---|---|
-| 各itemのpytestと独立レビュー | not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
+| 各itemのpytestと独立レビュー | L1完了、L2以降not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | not run | M5結合後の全体回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型/所有境界 |
 | uv lock --check / uv build | not run | 配布資材と公開APIの整合 |
@@ -71,6 +71,21 @@ L1→L2→L3→L4の順で進める。L2の表示部品だけでは製品の会�
 | git diff --check・文書/リンク検査 | 着手時に実施 | 合意・実装範囲・根拠・unitの一意性 |
 
 公開型・docstring変更は対応skillを使う。Product Designでは現画面・合意モック・実装後の画面を照合し、説明文を追加せずに対象と操作が識別できることを確認する。スクリーンショットだけでキーボードや支援技術の適合を断定しない。
+
+### L1の実装・検証
+
+`history_entries`は公開TurnPageを時系列の表示値へ変換し、Transcriptは既存項目を残して先頭へ追加する。通知・要求管理・本文保存へ履歴を再投入しない。保存Planは本文として表示し、過去の質問と出力は公開された文面だけを扱う。専用の承認履歴型やすべての回答の保存は仮定しない。保存Webには状態を補わず、ライブWebの開始・完了は通知から表示する。
+
+表示キーはthread・turn・item・表示種別を共有する。提出本文のローカルIDと公開履歴IDは推測して照合せず、表示用IDをrecordsへ加えない。初回の関連回帰では同IDのreasoningとactivityの上書きを1件検出し、種別をキーに含めて既存試験を保ったまま修正した。
+
+| command | 結果・範囲 |
+|---|---|
+| `uv run pytest tests/unit/test_history_presentation.py tests/integration/test_saved_history_gui.py --basetemp=tmp/pytest-m5-history -q` | red: 9 failed。表示変換・先頭追加API未実装とWeb未表示。green: 9 passed。構造整理後と最終修正後も同じ9件成功 |
+| `uv run pytest tests/unit/test_history_presentation.py tests/unit/test_codex_history.py tests/integration/test_saved_history_gui.py tests/integration/test_codex_gui.py tests/integration/test_inline_transcript.py tests/integration/test_conversation_notifications.py --basetemp=tmp/pytest-m5-history -q` | 最終98 passed。既存の本文・Plan・カード・選択・閲覧位置・通知との回帰 |
+| `uv run ruff check .` / 変更Python 8ファイルへの`ruff format --check` / `uv run ty check --no-progress` | 成功。公開型・docstring・呼出し元を照合。ignore/cast追加なし |
+| `uv lock --check` / `uv build` | 成功。83依存、sdist・wheelを生成 |
+
+Refactor status: **refactor-done**。先頭追加の辞書作成を項目ごとの再構築からページ単位へ整理し、同じ9件が成功した。活動の変換・表示キーを履歴とライブで共有する。独立レビューは公開schemaとの対応、既存項目を保つ挿入、試験境界を確認し、最終差分に必須修正なし。会話一覧からの履歴表示はL3、native画面と実接続はL4で結合・検証する。L1では実app-server・モデル・実機を使っていない。
 
 ## 8. 先送り事項
 

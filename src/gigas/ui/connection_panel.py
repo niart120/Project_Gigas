@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.runtime.codex.history import activity_entry, item_key
 from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
@@ -283,9 +284,17 @@ class ConnectionPanel(QWidget):
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
                 self.login_url.setText(event.url)
         elif isinstance(event, TextEvent):
-            self.transcript.update_item(
-                f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
+            key = (
+                item_key(
+                    self._conversation.thread_id or "",
+                    event.turn_id,
+                    event.item_id,
+                    kind=event.role,
+                )
+                if event.turn_id is not None
+                else f"message:{event.item_id}"
             )
+            self.transcript.update_item(key, event.text, kind=event.role, append=not event.replace)
         elif isinstance(event, PlanEvent):
             if event.turn_id == self._conversation.turn_id:
                 self._current_plan = event
@@ -302,25 +311,21 @@ class ConnectionPanel(QWidget):
                 )
         elif isinstance(event, ReasoningEvent):
             self.transcript.update_item(
-                f"reasoning:{(event.turn_id, event.item_id)!r}",
+                item_key(
+                    self._conversation.thread_id or "",
+                    event.turn_id,
+                    event.item_id,
+                    kind="reasoning",
+                ),
                 "\n\n".join(event.summary),
                 kind="reasoning",
             )
         elif isinstance(event, ActivityEvent):
-            statuses = {
-                "inProgress": "実行中",
-                "completed": "完了",
-                "failed": "失敗",
-                "declined": "拒否",
-            }
+            entry = activity_entry(self._conversation.thread_id or "", event)
             self.transcript.update_item(
-                f"activity:{(event.turn_id, event.item_id)!r}",
-                "\n".join(
-                    value
-                    for value in (f"{statuses[event.status]} · {event.title}", event.details)
-                    if value
-                ),
-                kind="activity",
+                entry.key,
+                entry.text,
+                kind=entry.kind,
             )
         elif isinstance(event, HumanRequest):
             if (

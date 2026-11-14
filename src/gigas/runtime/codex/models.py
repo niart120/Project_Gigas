@@ -99,16 +99,18 @@ class TextEvent:
     """User or assistant text intended for the conversation view.
 
     Attributes:
-        item_id: Stable item identifier within this connection.
+        item_id: Runtime item identifier, or a local ID for submitted user text.
         text: User-provided or runtime-provided conversation text.
         role: Source of the text.
         replace: Whether this text replaces earlier deltas for the same item.
+        turn_id: Containing public turn, or None for locally submitted text.
     """
 
     item_id: str
     text: str
     role: Literal["assistant", "user"] = "assistant"
     replace: bool = False
+    turn_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,14 +159,15 @@ class ReasoningEvent:
 
 @dataclass(frozen=True, slots=True)
 class ActivityEvent:
-    """A replacement display value for a public command, file or MCP item.
+    """A replacement display value for a public command, file, MCP or Web item.
 
     Attributes:
         turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
         kind: Supported public item type.
-        title: Actual command, changed paths, or server/tool name.
-        status: Status reported by the runtime, not inferred game progress.
+        title: Actual command, changed paths, server/tool name, or Web search query.
+        status: Public item status or notification lifecycle; None when a saved Web
+            item has no lifecycle status. Never inferred game progress.
         details: Public textual result preview, command location or file diff.
             MCP arguments, image data, metadata and structured results are omitted.
             A preview may be truncated by the runtime.
@@ -172,9 +175,9 @@ class ActivityEvent:
 
     turn_id: str
     item_id: str
-    kind: Literal["commandExecution", "fileChange", "mcpToolCall"]
+    kind: Literal["commandExecution", "fileChange", "mcpToolCall", "webSearch"]
     title: str
-    status: Literal["inProgress", "completed", "failed", "declined"]
+    status: Literal["inProgress", "completed", "failed", "declined"] | None
     details: str = ""
 
 

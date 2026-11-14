@@ -94,6 +94,8 @@ JSONLは既存の末尾へ単純に追記します。過去の破損検査・改
 
 Historyにはユーザー発言、Codexの応答、公開推論要約の`reasoning`、公開ツール活動の`activity`を表示します。同じitemの更新は同じ箇所へ反映し、実際に受信していない活動や内部推論全文は表示しません。受信本文は文字として扱い、HTMLや埋込画像として実行・読込しません。
 
+Web検索も`activity`へ表示します。公開された検索語・参照先・ページ内検索語と、提供された場合の検索結果を使います。結果は公開APIのJSONを文字として表示し、検索結果やリンク先を追加取得しません。実行中はitemの開始・完了通知で状態を更新します。
+
 応答の生成中も、過去の発言を読んだり文字列を選択・コピーしたりできます。文字を選択せず末尾を表示している場合だけ、新しい応答へ自動で追従します。Codexが既存本文を置き換えた場合は、変更範囲外の選択と閲覧位置を保ち、変更範囲内は新しい本文の文字境界へ収めます。
 
 発言と質問本文は続けて選択できます。回答入力欄や選択肢の説明は、それぞれの部品内で選択・コピーします。履歴本文から入力部品内までを一つのドラッグ選択にはできません。
@@ -131,6 +133,12 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 `gigas.services.conversations`の`NewConversationTarget(project_id=None)`は、まだ開始していない会話の所属だけを表します。`StoredConversationTarget(thread_id, cwd, project_id=None)`は、公開応答で確認した既存ID・保存作業場所・所属を表します。どちらも選択対象の値であり、接続済み・実行準備済みを意味しません。`None`の所属は未所属です。
 
 `BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の履歴ページ、`HistoryResult(target, page)`は取得開始時の対象と追加ページを保持します。履歴は`TurnPage`の全文項目とcursorをそのまま使い、全件収集や表示用の本文への変換はしません。サービスの読み取り専用`selected_target`は現在の不変な対象参照です。追加ページや閲覧Goal通知の受信時は、その`target is service.selected_target`を確認してください。同じ会話へ選び直した場合も以前の要求結果を採用しません。読み出した参照自体は変化しませんが、現在の選択は非同期に進み得ます。選択変更はサービスのキュー経由で行います。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
+
+履歴の表示部品には`gigas.runtime.codex.history.history_entries(thread_id, page)`を使えます。降順の`TurnPage`を時系列の`HistoryEntry(key, kind, text)`へ変換し、`Transcript.prepend_items(entries)`で既存本文の前へ追加します。重複キーは既存表示を優先し、選択・閲覧位置・ライブの質問操作部を保持します。変換と描画は通信・ゲーム操作・本文保存・過去の要求への回答を行いません。
+
+変換対象は公開された本文・進捗本文、reasoningのsummary、command/file/MCP/Web活動、Plan本文、turnの中断・失敗です。`agentMessage.questions`の見出し・選択肢や`functionCallOutput`の文字列・`input_text`も、取得できた文面だけを表示します。過去の質問・承認カードは作成せず、すべての質問・回答・判断が保存されているとは仮定しません。保存された`plan.text`は現在Plan欄の手順状態とは別の本文です。保存Webには状態フィールドがないため、完了状態を補いません。
+
+履歴と新着の公開項目にはthread・turn・itemのIDと表示種別を含む同じ表示キーを使います。`TextEvent.turn_id`は公開turnに属する本文で設定され、ローカルで提出したユーザー本文では`None`です。GIGASが付けた提出本文のIDと公開履歴のIDを文字列一致で結合する処理はありません。この表示用のIDをゲームI/O記録へ追加することもありません。
 
 `gigas.services.codex.CodexServiceThread(data_root, reader, factory=..., input_factory=...)` は専用QThread内のasyncioループでCodex・入力接続・ゲームI/O MCP・保存先を所有します。`data_root`は未選択チャットの親となるアプリデータフォルダー、`reader`は既存映像取得サービスの`CaptureReader`です。`input_factory`は解決済み入力設定から機器を作り、既定では`SerialInput`を使います。`start()`だけではCodexにも入力機器にも接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
 
