@@ -258,7 +258,7 @@ class ConversationSidebar(QScrollArea):
         self.projects_more_button.clicked.connect(self._more_projects)
         layout.addWidget(self.loading)
         layout.addWidget(self.projects_more_button)
-        layout.addStretch()
+        layout.addStretch(1)
         self.setWidget(body)
         self._add_group(None, "未所属").heading.setChecked(True)
         self._render()

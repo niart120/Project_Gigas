@@ -66,10 +66,10 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 | gate | 状態 | 検査する内容 |
 |---|---|---|
 | 各itemのpytestと独立レビュー | L1・L2・L3a/b/c完了、L4 not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
-| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | not run | M5結合後の全体回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型/所有境界 |
-| uv lock --check / uv build | not run | 配布資材と公開APIの整合 |
-| 実画面・実app-server | 着手画面とL2の配置・開閉を確認 | 会話管理操作のnative受入はL4。実モデル提出数・未観測項目を記録する |
+| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | L3c後1002 passed（87.62秒）。L4の配置修正前 | M5結合後の全体回帰 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | L3c後成功、format対象284ファイル | 形式・lint・型/所有境界 |
+| uv lock --check / uv build | L3c後成功、83依存・sdist/wheel | 配布資材と公開APIの整合 |
+| 実画面・実app-server | L4初回接続で一覧取得と配置不良を確認し、修正後の再撮影で解消を確認 | 実モデル提出0。閲覧・新規/再開・停止の受入を続ける |
 | git diff --check・文書/リンク検査 | 着手時に実施 | 合意・実装範囲・根拠・unitの一意性 |
 
 公開型・docstring変更は対応skillを使う。Product Designでは現画面・合意モック・実装後の画面を照合し、説明文を追加せずに対象と操作が識別できることを確認する。スクリーンショットだけでキーボードや支援技術の適合を断定しない。
@@ -145,6 +145,12 @@ ConversationControllerが公開一覧・履歴・選択結果をUIへ結合す�
 | `uv lock --check` / `uv build` | 成功。83依存、sdist・wheelを生成 |
 
 Refactor status: **refactor-done**。green後に旧can_select_projectの開始前制限を撤去し、UIの切替判定をcan_switchへ統一した。確定した閲覧結果の表示交換を一つの処理へまとめ、独自の会話状態機械や全文キャッシュは追加していない。独立レビューで初回/局所読込・原稿・通知参照・停止・終了・責務を確認し、必須修正なし。native画面と実app-serverの確認はL4で行う。
+
+### L4の実画面・実接続
+
+初回起動では現在の認証・sandbox readyと公開Project/未所属一覧の取得を確認した。実データの会話行が入るとサイドバーの見出しと行の間へ大きな縦余白が入る問題を検出し、モデル送信前に通常終了して配置修正へ戻した。`tmp/u08-m5-ui/07-l4-sidebar-gap.jpeg`が修正前の実画面。`l4-20261114T203236Z-398c7ecb-report.json`では一覧API各1回のみ、4対象のJSONL/PNGと未所属作業領域は不変、start/resume/turn/startは0回。履歴閲覧・新規開始・既存再開・停止のnative受入はまだ完了していない。
+
+余白の修正は最外layout末尾のstretchを1とし、余剰高さをそこへ配分する1行だけとした。`uv run pytest tests/integration/test_conversation_sidebar.py -k populated_sidebar --basetemp=tmp/pytest-m5-sidebar-gap -q --tb=short`は実寸画面で189pxの不適切な間隔を検出してred→green、構造確認後も1 passed。`uv run pytest tests/integration/test_conversation_sidebar.py tests/integration/test_conversation_controller.py tests/integration/test_window_presets.py tests/integration/test_project_gui.py tests/integration/test_codex_gui.py tests/integration/test_conversation_view.py --basetemp=tmp/pytest-m5-sidebar-gap -q --tb=short`は94 passed。変更2ファイルのruff/format、全体tyも成功。Refactor status: **refactor-skipped**。1行の配置指定に責務の重複や追加抽出の必要はなく、独立レビューで開閉・選択・accessibilityの不変を確認した。再起動後の`08-l4-sidebar-fixed.jpeg`でも会話行と見出しが上詰めとなったことを確認し、保存した画像を再検査した。
 
 ## 8. 先送り事項
 

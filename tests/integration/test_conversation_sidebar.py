@@ -155,6 +155,38 @@ def test_listing_can_continue_while_conversation_switching_is_disabled(qtbot: Qt
     assert group.heading.isEnabled()
 
 
+def test_populated_sidebar_keeps_rows_and_groups_together_in_a_tall_window(qtbot: QtBot) -> None:
+    window = MainWindow()
+    window.allow_close = True
+    qtbot.addWidget(window)
+    window.resize(1921, 1111)
+    with qtbot.waitActive(window):
+        window.show()
+    sidebar = window.sidebar
+    sidebar.set_projects(
+        ProjectPage(tuple(ProjectInfo(str(i), f"Project {i}", Path.cwd()) for i in range(3)), None)
+    )
+    sidebar.set_threads(
+        None, ThreadPage((_thread("one", None), _thread("two", None)), "more", None)
+    )
+    sidebar.set_threads(None, ThreadPage((_thread("three", None),), None, None), append=True)
+    qtbot.wait(1)
+    group = sidebar._groups[None]
+    first = group.threads.visualItemRect(group.threads.item(0))
+    last = group.threads.visualItemRect(group.threads.item(2))
+    heading_bottom = group.heading.mapToGlobal(group.heading.rect().bottomLeft()).y()
+    rows_top = group.threads.viewport().mapToGlobal(first.topLeft()).y()
+    rows_bottom = group.threads.viewport().mapToGlobal(last.bottomLeft()).y()
+    next_heading_top = sidebar._groups["0"].heading.mapToGlobal(QPoint()).y()
+    permitted_gap = group.heading.fontMetrics().lineSpacing()
+    assert 0 <= rows_top - heading_bottom <= permitted_gap
+    assert 0 <= next_heading_top - rows_bottom <= permitted_gap
+    last_group = sidebar._groups["2"]
+    assert last_group.mapTo(sidebar.viewport(), last_group.rect().bottomLeft()).y() < (
+        sidebar.viewport().height() // 2
+    )
+
+
 def test_keyboard_navigation_requests_target_without_changing_confirmed_highlight(
     qtbot: QtBot,
 ) -> None:
