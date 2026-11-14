@@ -56,7 +56,7 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | K1: start/resumeが選択モデル・推論レベル・最新設定を渡し、ID・所属・作業場所・権限の不一致を拒否する | new/regression | unit/integration | 共通設定変換、resume固有項目、Goal開始前のeffort、余分な設定更新の整理 |
-| todo | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
+| refactor-done | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
 | todo | K3: 公開履歴の選択と所属別新規を実行から分け、停止後だけ切り替えられる | new/edge | integration | 取得失敗時保持、unsubscribeと旧要求・資源の回収、遅い結果の失効、閲覧モデル選択・Goal削除 |
 | todo | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
 | todo | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
@@ -90,6 +90,16 @@ start/resumeは共通の設定組立を使い、config.model_reasoning_effortを
 `uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_transport.py tests/integration/test_conversation_execution.py tests/integration/test_conversation_notifications.py tests/integration/test_codex_service.py --basetemp=tmp/pytest-m4-k1-regression -q`は122 passed（12.88秒）。全体ty、対象7ファイルのruff・format、差分検査は成功した。
 
 refactor-skipped: 共通設定を一か所へ集約し、start/resume固有値だけの入口とした。追加状態・転送層は不要と判断した。独立レビューの修正必須指摘なし。公開文書は新規開始時の推論レベル伝達・返却検査を更新し、再接続サービスを実装済みとして記していない。
+
+### K2 実装・検証結果
+
+Resources.prepare_existingは公開metadataの保存cwdを変更せず検査し、現在のMCPを用意する。既存bind_recordsで同じ記録へ追記し、欠けたrecordsだけを明示結合時に作成する。別cwdはclose前に拒否し、保持writer.pathと異なるthread IDも拒否する。新規・既存のMCP組立を共用し、Project選択の所有移動はK3で呼出し元とまとめる。
+
+`uv run pytest tests/integration/test_conversation_resources.py --basetemp=tmp/pytest-m4-resources -q --tb=short`は未実装API・別ID未拒否により15 failed/6 passed、実装後21 passed（5.62秒）、構造確認後21 passed（5.48秒）。既存本文・画像の保持と追記、cwd欠落、MCP部分起動の失敗/取消し、writer取得取消し後の所有、close時の保存drainを確認した。
+
+`uv run pytest tests/integration/test_conversation_resources.py tests/integration/test_conversation_execution.py tests/integration/test_codex_service.py tests/integration/test_workspaces.py --basetemp=tmp/pytest-m4-resources -q --tb=short`は82 passed（15.17秒）。変更2ファイルのruff format/check・tyと差分検査は成功した。
+
+refactor-done: 試験の初期writer命名を整理し、同じ試験が成功した。MCP組立は実装時に共用済みで、追加fixture層やthread台帳は不要と判断した。独立レビューの修正必須指摘なし。同じcwdの別threadへの切替でも旧endpointの入力呼出し先を残さないため、K3では必ずResources.closeを経由する。実app-server・実機はこのitemでは未使用。
 
 ## 9. 先送り事項
 

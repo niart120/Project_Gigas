@@ -82,38 +82,77 @@ class ConversationResources:
                     raise
             else:
                 await asyncio.to_thread(_require_directory, self._cwd)
-            if self._mcp is None:
-                self._mcp = GameIoMcpServer(
-                    self._observe, partial(self._act, start_input=start_input)
-                )
-                try:
-                    await self._mcp.start()
-                except BaseException:
-                    await self._mcp.close()
-                    self._mcp = None
-                    raise
-            prefix = f"mcp_servers.{self._mcp.server_name}."
-            endpoint = self._mcp.config
-            return ThreadConfiguration(
-                self._cwd,
-                {
-                    prefix + "url": endpoint["url"],
-                    prefix + "http_headers": dict(endpoint["http_headers"]),
-                    prefix + "enabled": True,
-                    prefix + "enabled_tools": ["observe", "act_and_observe"],
-                    prefix + "required": True,
-                    prefix + "startup_timeout_sec": 10,
-                    prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
-                    prefix + "tools.act_and_observe.approval_mode": "approve",
-                },
-                project_id=self._project_id,
-            )
+            return await self._prepare_endpoint(self._cwd, start_input, project_id=self._project_id)
         except Exception as error:
             self.report_failure(error)
             raise
 
+    async def prepare_existing(
+        self, cwd: "Path", start_input: "InputStart", *, project_id: str | None
+    ) -> ThreadConfiguration:
+        """Prepare the saved workspace and current MCP endpoint for an existing thread.
+
+        No workspace or recording directory is created. The caller must close
+        these resources before selecting a different workspace. Failed or
+        cancelled preparation leaves retained resources available to close or retry.
+
+        Args:
+            cwd: The existing absolute path returned in ThreadInfo, used unchanged.
+            start_input: Start game input through the current service.
+            project_id: The thread's Project identity, or None when unassigned.
+
+        Returns:
+            Configuration using the saved workspace and current MCP endpoint.
+
+        Raises:
+            RecordError: Another workspace is retained and has not been closed.
+            OSError: The workspace is unavailable or the endpoint cannot start.
+        """
+        try:
+            if self._cwd is not None and self._cwd != cwd:
+                # Keep ownership errors on the same failure callback as I/O errors.
+                raise RecordError("作業場所を変更する前に会話の資源を閉じてください")  # noqa: TRY301
+            await asyncio.to_thread(_require_directory, cwd)
+            self._cwd = cwd
+            return await self._prepare_endpoint(cwd, start_input, project_id=project_id)
+        except Exception as error:
+            self.report_failure(error)
+            raise
+
+    async def _prepare_endpoint(
+        self, cwd: "Path", start_input: "InputStart", *, project_id: str | None
+    ) -> ThreadConfiguration:
+        if self._mcp is None:
+            self._mcp = GameIoMcpServer(self._observe, partial(self._act, start_input=start_input))
+            try:
+                await self._mcp.start()
+            except BaseException:
+                await self._mcp.close()
+                self._mcp = None
+                raise
+        prefix = f"mcp_servers.{self._mcp.server_name}."
+        endpoint = self._mcp.config
+        return ThreadConfiguration(
+            cwd,
+            {
+                prefix + "url": endpoint["url"],
+                prefix + "http_headers": dict(endpoint["http_headers"]),
+                prefix + "enabled": True,
+                prefix + "enabled_tools": ["observe", "act_and_observe"],
+                prefix + "required": True,
+                prefix + "startup_timeout_sec": 10,
+                prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
+                prefix + "tools.act_and_observe.approval_mode": "approve",
+            },
+            project_id=project_id,
+        )
+
     async def bind_records(self, thread_id: str) -> None:
-        """Acquire records for the adopted thread before allowing game I/O or submission."""
+        """Acquire records for the adopted thread before allowing game I/O or submission.
+
+        Rebinding the same destination retains its writer. A different thread ID
+        raises RecordError without creating another destination; close first.
+        """
         if self._cwd is None:
             raise RecordError("会話の作業場所が準備されていません")
         try:
@@ -129,7 +168,10 @@ class ConversationResources:
                     self._writer = await acquisition
                     raise
             else:
-                await asyncio.to_thread(_require_directory, self._cwd)
+                path = await asyncio.to_thread(_record_path, self._cwd, thread_id)
+                if self._writer.path != path:
+                    # Keep ownership errors on the same failure callback as I/O errors.
+                    raise RecordError("記録先を変更する前に会話の資源を閉じてください")  # noqa: TRY301
             writer = self._writer
             if self._recording is None:
                 self._recording = RecordingService(writer)
@@ -213,13 +255,16 @@ class ConversationResources:
 
 
 def _open_records(workspace: "Path", thread_id: str) -> GameIoRecordWriter:
+    path = _record_path(workspace, thread_id)
+    path.parent.mkdir(exist_ok=True)
+    return GameIoRecordWriter.open(path) if path.exists() else GameIoRecordWriter.create(path)
+
+
+def _record_path(workspace: "Path", thread_id: str) -> "Path":
     if not thread_id or thread_id in {".", ".."} or PureWindowsPath(thread_id).name != thread_id:
         raise RecordError("会話IDを記録先のフォルダー名として使用できません")
     _require_directory(workspace)
-    parent = workspace / "records"
-    parent.mkdir(exist_ok=True)
-    path = parent / thread_id
-    return GameIoRecordWriter.open(path) if path.exists() else GameIoRecordWriter.create(path)
+    return (workspace / "records" / thread_id).resolve()
 
 
 def recording_reason(error: BaseException) -> str:
