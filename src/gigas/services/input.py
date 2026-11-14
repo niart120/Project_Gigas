@@ -8,7 +8,7 @@ from uuid import uuid4
 from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
 
     from gigas.game_io.input.config import InputProtocol
 
@@ -70,8 +70,16 @@ class InputService:
     observation or persistence state.
     """
 
-    def __init__(self) -> None:
-        """Prepare the input owner without connecting or creating a chat archive."""
+    def __init__(self, *, on_busy_changed: "Callable[[bool], None] | None" = None) -> None:
+        """Prepare the input owner without connecting or creating a chat archive.
+
+        Args:
+            on_busy_changed: Optional synchronous callback on the owning loop.
+                True follows admitted task ownership; False follows completion
+                of the current task, including neutral recovery. Rejections and
+                stop requests alone do not notify. The callback must not raise.
+        """
+        self._on_busy_changed = on_busy_changed
         self._device: InputDevice | None = None
         self._available = False
         self._operation: asyncio.Task[OperationResult] | None = None
@@ -214,11 +222,15 @@ class InputService:
         task = asyncio.create_task(self._execute(sequence, device, operation_id))
         self._operation = task
         task.add_done_callback(self._release_operation)
+        if self._on_busy_changed is not None:
+            self._on_busy_changed(True)
         return operation_id, task
 
     def _release_operation(self, task: asyncio.Task[OperationResult]) -> None:
         if self._operation is task:
             self._operation = None
+            if self._on_busy_changed is not None:
+                self._on_busy_changed(False)
 
     async def _execute(
         self,

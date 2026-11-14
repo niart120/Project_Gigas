@@ -178,7 +178,11 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 保存済み対象の`send`・`set_goal`・`resume_goal`は、保存cwd・同じrecords・現在のMCPを準備して`thread/resume`を送り、その確認後に指定操作を続けます。要求前からIDに対する通知・質問・保存を受け付け、active Goalの先行実行を許容します。準備中と応答未確認の状態ではモデル変更を受け付けません。resume送信後の失敗では実行を再試行せず、明示切断・再接続が必要です。Goal削除はこの検証成功に依存せず、接続・認証と保持Goalがあれば使えます。
 
-接続済み・会話開始前に`create_project(path)`と`open_project(path)`で公開Projectを選択できます。前者は新規フォルダーを作って登録し、後者は既存フォルダーに対応する公開Projectを選択または登録します。`project_completed`の`ProjectResult(path, error)`が結果を返し、空の`error`だけが選択成功です。成功時のpathは公開応答のroot、失敗時は現在の選択を保持します。選択だけでは会話・MCP・writerを開始しません。
+接続済みで実行と入力回収が停止していれば、`create_project(path)`と`open_project(path)`で公開Projectを選び、その所属の新規会話へ切り替えられます。前者は新規フォルダーを作って登録し、後者は既存フォルダーに対応する公開Projectを選択または登録します。取得待ちの間に接続・実行所有者・選択対象が変わると結果を採用せず、現在の選択を保持します。選択だけでは会話・MCP・writerを開始しません。GUIのProjectメニューは現在、会話開始前だけ利用できます。
+
+`project_completed`の`ProjectResult(generation, path, project, error)`は、成功・失敗とも要求時の接続世代を保持します。空の`error`が選択成功で、`project`に公開`ProjectInfo`、`path`にそのrootが入ります。失敗時は`project=None`、`path`は要求したフォルダーです。受信側は待機解除と世代の照合を分け、古い世代の結果で現在の表示を更新しないでください。
+
+`input_busy_changed(bool)`は入力操作の受付と回収完了を通知します。停止要求やturn終了だけでは`False`にせず、neutralへの復帰完了まで入力所有者の状態に従います。Codex接続の世代と独立したサービス全体の通知です。会話切替や停止表示とのGUI結合はまだありません。
 
 `set_observation_resolution(value)`は以後の観測へ設定を適用します。`recording_failed(identifier, path, reason)`は保存と記録先準備の失敗を通知します。実行前に記録先を開けなければ送信せず、結合後の個別保存失敗は入力・観測・停止を止めません。
 

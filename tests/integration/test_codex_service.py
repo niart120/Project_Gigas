@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         _OperationCall,
         _OperationContext,
     )
+    from gigas.services.conversations import ManagementResult
     from gigas.storage.records import DialogueRecordType
 
 
@@ -330,8 +331,8 @@ def test_initial_bind_failure_is_not_sent_and_retry_keeps_the_created_thread(
     ]
 
 
-@pytest.mark.parametrize("intervening", ["send", "disconnect"])
-def test_late_project_selection_does_not_replace_a_started_or_closed_conversation(
+@pytest.mark.parametrize("intervening", ["send", "send_completed", "new", "disconnect"])
+def test_late_project_selection_does_not_replace_changed_target_or_closed_connection(
     qtbot: QtBot, tmp_path: Path, intervening: str
 ) -> None:
     entered, release = Event(), Event()
@@ -339,6 +340,8 @@ def test_late_project_selection_does_not_replace_a_started_or_closed_conversatio
     target.mkdir()
     results: list[ServiceResult] = []
     projects: list[ProjectResult] = []
+    events: list[ServiceEvent] = []
+    management: list[ManagementResult] = []
 
     class DelayedProjectPeer(FakePeer):
         async def request(self, method: str, params: JsonObject | None) -> JsonValue:
@@ -356,22 +359,45 @@ def test_late_project_selection_does_not_replace_a_started_or_closed_conversatio
     )
     service.completed.connect(results.append)
     service.project_completed.connect(projects.append)
+    service.received.connect(events.append)
+    service.management_completed.connect(management.append)
     service.start()
     try:
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        generation = service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         service.open_project(target)
         qtbot.waitUntil(entered.is_set)
-        if intervening == "send":
+        if intervening.startswith("send"):
             service.send("uses previous selection")
+            qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+            if intervening == "send_completed":
+                service._enqueue(lambda: peer.events.put_nowait(_terminal("completed")))
+                qtbot.waitUntil(
+                    lambda: any(
+                        isinstance(event.event, ConversationStatus)
+                        and event.event.thread_id is not None
+                        and event.event.turn_id is None
+                        and not event.event.sending
+                        for event in events
+                    )
+                )
+        elif intervening == "new":
+            service.new_conversation("later-choice")
+            qtbot.waitUntil(lambda: bool(management))
+            assert not management[-1].error
         else:
             service.disconnect_runtime()
-        qtbot.waitUntil(lambda: any(result.operation == intervening for result in results))
+            qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
         assert not results[-1].error
+        current = service.selected_target
         release.set()
         qtbot.waitUntil(lambda: bool(projects))
         assert projects[-1].error
-        if intervening == "send":
+        assert projects[-1].generation == generation
+        assert projects[-1].path == target
+        assert projects[-1].project is None
+        assert service.selected_target is current
+        if intervening.startswith("send"):
             start = next(params for method, params in peer.calls if method == "thread/start")
             assert start is not None
             assert start["projectId"] is None
@@ -1281,6 +1307,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
     inputs: list[InputConnectionResult] = []
+    busy: list[bool] = []
     service = CodexServiceThread(
         tmp_path,
         CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
@@ -1290,6 +1317,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
     service.completed.connect(results.append)
     service.received.connect(events.append)
     service.input_changed.connect(inputs.append)
+    service.input_busy_changed.connect(busy.append)
     service.start()
     try:
         service.apply_input(resolve_serial_config("COM3", "ch552", None))
@@ -1331,12 +1359,14 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
                 {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 10000}]},
             )
             qtbot.waitUntil(lambda: InputState(buttons=("A",)) in device.calls)
+            qtbot.waitUntil(lambda: busy == [True])
             service.interrupt()
             qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
             qtbot.waitUntil(operation.done)
             interrupted = operation.result().json()["result"]
             assert json.loads(interrupted["content"][0]["text"])["code"] == "INTERRUPTED"
             assert device.calls[-1] == InputState()
+            qtbot.waitUntil(lambda: busy == [True, False])
             assert not any(result.operation == "stop" for result in results)
             refused = _call_game_tool(
                 client,
@@ -1355,6 +1385,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
                 {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
             ).json()["result"]
             assert not resumed["isError"]
+            qtbot.waitUntil(lambda: busy == [True, False, True, False])
         peer.auto_turn_started = True
         service.send("next")
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 3)

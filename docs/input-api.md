@@ -44,6 +44,8 @@ steps = parse_sequence(
 
 読み取り専用の`busy`は、受け付けた操作の実行またはneutralへの復帰がまだ完了していない間だけ`True`です。接続の有無や、会話の実行状態とは別の値です。
 
+`InputService(on_busy_changed=callback)`では、操作taskの受付登録後に`callback(True)`、現在のtaskの回収完了後に`callback(False)`を呼びます。受付拒否では通知せず、停止要求だけでは`False`にしません。開始前の取消しも回収後に`False`となります。callbackは入力を所有するイベントループで同期的に呼ばれるため、待機や例外送出をしない関数を渡してください。
+
 ```python
 import asyncio
 

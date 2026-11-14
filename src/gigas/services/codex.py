@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
     from gigas.game_io.observation import ObservationResolution
     from gigas.runtime.codex.connection import RuntimeEvent
+    from gigas.runtime.codex.management import ProjectInfo
     from gigas.runtime.codex.models import (
         ConnectionEvent,
         ConnectionOptions,
@@ -89,6 +90,8 @@ class CodexServiceThread(QThread):
     immediately; finished and wait(0) confirm thread exit. shutdown_error must be
     empty before treating exit as successful cleanup.
     Rejections on the GUI thread emit completion results without recording a body.
+    The input_busy_changed signal reports input ownership through neutral recovery.
+    It belongs to the service lifetime and is independent of connection generations.
 
     Args:
         data_root: Persistent application data directory; unassigned chats use unassigned/.
@@ -108,6 +111,7 @@ class CodexServiceThread(QThread):
     browse_goal_changed = Signal(int, object)
     recording_failed = Signal(str, str, str)
     input_changed = Signal(object)
+    input_busy_changed = Signal(bool)
     input_ports = Signal(object, str)
 
     def __init__(
@@ -126,7 +130,7 @@ class CodexServiceThread(QThread):
             else factory
         )
         self._input_factory = input_factory
-        self._input = InputService()
+        self._input = InputService(on_busy_changed=self.input_busy_changed.emit)
         self._input_config: SerialConfig | None = None
         self._input_target: SerialConfig | None = None
         self._input_pending = False
@@ -200,9 +204,10 @@ class CodexServiceThread(QThread):
         )
 
     def create_project(self, path: "Path") -> None:
-        """Queue exclusive directory creation and Project selection before a thread starts.
+        """Queue exclusive directory creation and select a new conversation there.
 
-        Requires an open connection. project_completed reports the server root on
+        Requires an open connection and stopped execution, including input recovery.
+        project_completed carries the request generation and public Project on
         success; failure preserves the previous selection without deleting files.
 
         Args:
@@ -220,11 +225,12 @@ class CodexServiceThread(QThread):
     def open_project(self, path: "Path") -> None:
         """Queue server Project lookup or registration for an existing directory.
 
-        Requires an open connection and no started conversation. The first matching
-        server root is reused; an unregistered directory becomes a new Project.
+        Requires an open connection and stopped execution, including input recovery.
+        The first matching server root is reused; an unregistered directory becomes
+        a new Project. A delayed lookup cannot replace an intervening selection.
 
         Args:
-            path: Existing workspace directory, selected before a thread starts.
+            path: Existing workspace directory for a new conversation.
         """
         generation = self._generation
         self._enqueue(
@@ -816,41 +822,31 @@ class CodexServiceThread(QThread):
 
     async def _change_project(self, path: "Path", *, generation: int, create: bool) -> None:
         error = ""
+        project = None
         try:
-            path = await self._select_project(path, generation=generation, create=create)
+            project = await self._select_project(path, generation=generation, create=create)
+            path = project.root
         except CodexConnectionError as failure:
             error = str(failure)
         except Exception as failure:  # noqa: BLE001 -- sanitize unexpected failures at GUI boundary
             error = recording_reason(failure)
-        self.project_completed.emit(ProjectResult(path, error))
+        self.project_completed.emit(ProjectResult(generation, path, project, error))
 
-    async def _select_project(self, path: "Path", *, generation: int, create: bool) -> "Path":
-        if generation != self._active_generation:
-            raise CodexConnectionError("この接続ではプロジェクトを選択できません")
-        connection = self._connection
-        execution = self._conversation
-        connection = self._require_project_selection(connection, execution)
+    async def _select_project(
+        self, path: "Path", *, generation: int, create: bool
+    ) -> "ProjectInfo":
+        connection = self._require_management(generation)
+        execution = self._require_switch(connection)
+        target = self._selection.target
         project = await select_project(CodexManagement(connection), path, create=create)
-        self._require_project_selection(connection, execution)
-        await self._selection.new(project.id, release=lambda: self._release_selection(connection))
-        return project.root
-
-    def _require_project_selection(
-        self, connection: CodexConnection | None, execution: ConversationExecution | None
-    ) -> CodexConnection:
         if (
-            connection is None
-            or execution is None
-            or self._connection is not connection
-            or self._conversation is not execution
-            or self._closing is not None
-            or self._ending
+            self._require_management(generation) is not connection
+            or self._require_switch(connection) is not execution
+            or self._selection.target is not target
         ):
-            raise CodexConnectionError("Codexへ接続してからプロジェクトを選択してください")
-        state = execution.snapshot
-        if state.thread_id is not None or state.sending or state.stopping:
-            raise CodexConnectionError("会話の開始前にプロジェクトを選択してください")
-        return connection
+            raise CodexConnectionError("プロジェクトの取得中に会話の選択が変わりました")
+        await self._selection.new(project.id, release=lambda: self._release_selection(connection))
+        return project
 
     async def _close_connection(self) -> None:
         connection, execution = self._connection, self._conversation

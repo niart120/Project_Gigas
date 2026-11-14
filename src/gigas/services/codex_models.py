@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     from gigas.game_io.input.config import SerialConfig
     from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
+    from gigas.runtime.codex.management import ProjectInfo
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
 
 type ServiceOperation = Literal[
@@ -46,11 +47,15 @@ class ProjectResult:
     """A Project selection attempt; an empty error confirms the selected server root.
 
     Attributes:
+        generation: Connection generation captured when selection was requested.
         path: Requested directory on failure; server-reported root on success.
+        project: Confirmed public Project metadata on success; None on failure.
         error: Display-safe failure details; failure preserves the previous selection.
     """
 
+    generation: int
     path: "Path"
+    project: "ProjectInfo | None" = None
     error: str = ""
 
 

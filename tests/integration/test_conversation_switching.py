@@ -12,7 +12,7 @@ from pytestqt.qtbot import QtBot
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.mcp.game_io import GameIoMcpServer
 from gigas.runtime.codex.connection import CodexConnection
-from gigas.runtime.codex.management import ProjectPage, ThreadPage
+from gigas.runtime.codex.management import ProjectInfo, ProjectPage, ThreadPage
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     ConversationStatus,
@@ -30,13 +30,13 @@ from gigas.services.conversations import (
     StoredConversationTarget,
 )
 from tests.integration.peers.codex_resume import ResumePeer
-from tests.integration.test_codex_service import _mcp_endpoint
+from tests.integration.test_codex_service import _mcp_endpoint, _project_responses
 from tests.integration.test_conversation_selection import _saved
 from tests.unit.test_codex_connection import FakePeer
 
 if TYPE_CHECKING:
     from gigas.runtime.codex.connection import RuntimeEvent
-    from gigas.services.codex import ServiceEvent
+    from gigas.services.codex import ProjectResult, ServiceEvent
 
 
 class _Session:
@@ -147,6 +147,46 @@ def test_browse_and_new_selection_do_not_execute_or_pause_saved_active_goal(
     assert "thread/unsubscribe" not in methods
     assert not (tmp_path / "unassigned").exists()
     assert not (tmp_path / "missing").exists()
+
+
+@pytest.mark.parametrize("create", [False, True])
+def test_project_picker_can_replace_stopped_loaded_conversation_with_public_metadata(
+    qtbot: QtBot, tmp_path: Path, *, create: bool
+) -> None:
+    peer = FakePeer()
+    target = tmp_path / "new-project"
+    if not create:
+        target.mkdir()
+    _project_responses(peer, target)
+    peer.responses["thread/unsubscribe"] = {"status": "unsubscribed"}
+    projects: list[ProjectResult] = []
+    with _session(qtbot, tmp_path, peer) as s:
+        s.service.project_completed.connect(projects.append)
+        assert not s.command("send", lambda: s.service.send("first")).error
+        prior = s.service.selected_target
+        select = s.service.create_project if create else s.service.open_project
+        select(target)
+        qtbot.waitUntil(lambda: len(projects) == 1)
+        assert projects[-1].error
+        assert s.service.selected_target is prior
+        assert not any(method.startswith("project/") for method, _ in peer.calls)
+        s.notify(_terminal())
+        select(target)
+        qtbot.waitUntil(lambda: len(projects) == 2)
+        result = projects[-1]
+        assert not result.error
+        assert result.generation == s.results[0].generation
+        assert result.path == target
+        assert result.project == ProjectInfo("project-1", target.name, target)
+        assert s.service.selected_target == NewConversationTarget("project-1")
+        assert not s.service._resources.records_bound
+        assert s.service._resources._mcp is None
+        assert list(target.iterdir()) == []
+        assert [
+            (method, params) for method, params in peer.calls if method == "thread/unsubscribe"
+        ] == [("thread/unsubscribe", {"threadId": "thread-1"})]
+        assert sum(method == "thread/start" for method, _ in peer.calls) == 1
+        assert not any(method == "thread/resume" for method, _ in peer.calls)
 
 
 @pytest.mark.parametrize("status", ["notLoaded", "notSubscribed", "unsubscribed"])
