@@ -42,7 +42,7 @@ N1→N2→N3の順とする。画面は表示と操作、サービスは選択�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | N1: 設定・モデルを変更し、新規/閲覧から明示実行、ロード後変更へ進める | characterization/regression | integration/GUI | 本サービスと公開peerで3件成功、関連150件成功。製品変更なし |
-| todo | N2: 追加履歴・準備・resume・Goal・通信の失敗後に内容を保持して明示再操作できる | characterization/edge | integration/GUI | 追加履歴、cwd欠落、resume送信後失敗、Goal拒否、通信断の代表経路。下位層の全故障組合せは複製しない |
+| refactor-skipped | N2: 追加履歴・準備・resume・Goal・通信の失敗後に内容を保持して明示再操作できる | characterization/edge | integration/GUI | 5件成功、関連118件成功。製品変更なし |
 | todo | N3: 実resumeへ現在の設定・権限・承認方法を適用し、標準記憶の残条件を確認する | acceptance | integration/runtime | 既存専用home、ON/auto_reviewとOFF/user。模擬FrameのMCP観測を併設。実機はM7 |
 
 ## 7. 対象ファイル
@@ -53,7 +53,7 @@ N1→N2→N3の順とする。画面は表示と操作、サービスは選択�
 
 | gate | 状態・検査範囲 |
 |---|---|
-| itemごとのpytest・構造確認・独立レビュー | N1完了、N2/N3 not run。状態を跨ぐ製品境界と故障後の操作 |
+| itemごとのpytest・構造確認・独立レビュー | N1/N2完了、N3 not run。状態を跨ぐ製品境界と故障後の操作 |
 | 全unit/integration・ruff format/check・ty | not run。追加/修正後の全体回帰と静的検査 |
 | uv lock --check / uv build | not run。依存整合・配布資材 |
 | 実app-server・モデル | not run。実resume・権限・承認・標準記憶。認証資材と本文を検証reportへ転載しない |
@@ -72,6 +72,22 @@ N1→N2→N3の順とする。画面は表示と操作、サービスは選択�
 初期の失敗は試験側のSettings属性名と閉じたpeerの再利用に起因し、製品のredとは扱わない。接続ごとに新peerを作り、公開の保存Goalだけを次接続へ持たせた。Refactor status: **refactor-skipped**。既存ResumePeerが公開RPC/通知、共通ConversationGuiがShell寿命と結果待ち、試験が操作と期待値を持ち、新しい状態管理はない。公開API・文書契約は変更していない。
 
 独立レビューで公開要求・受理前後・拒否後の次送信・試験責務を確認し、必須修正なし。仕様のgate行はN1完了と後続未実行を分けて更新した。
+
+### N2の結果
+
+追加履歴失敗では同じ文書・選択・閲覧位置とcursorを保持し、明示クリックだけで同じ要求を再送できた。作業場所がない会話は履歴・Goal・原稿を表示したまま実行を拒否し、アプリは場所を再作成しなかった。試験側で場所を戻した後の送信は成功した。
+
+送信済みresumeの失敗後は、その接続で再送してもresume/turn/startを増やさず、切断・再接続後の明示送信で再開した。本文のnot_sentはturn/start未送信を示し、resumeの成否が確認できたという意味ではない。Goal削除の拒否では目的と原稿を保持し、明示再操作でだけ削除した。通信断では履歴・次の原稿・通知詳細を保ち、writer所有権の解放後も自動再接続・再送はなかった。
+
+| command | 結果・範囲 |
+|---|---|
+| `uv run pytest tests/integration/test_conversation_failures_gui.py --basetemp=tmp/pytest-m6-failures -q --tb=short` | characterization 5 passed（2.17秒）、構造・契約確認後も5 passed（2.14秒） |
+| `uv run pytest tests/integration/test_conversation_failures_gui.py tests/integration/test_execution_settings_flow.py tests/integration/test_conversation_controller.py tests/integration/test_conversation_view.py tests/integration/test_conversation_resume.py tests/integration/test_conversation_switching.py tests/integration/test_codex_gui.py --basetemp=tmp/pytest-m6-failures-regression -q --tb=short` | 118 passed（13.64秒）。既存の選択・表示・再開・通常対話との回帰 |
+| 追加1ファイルのruff check/format、全体ty、git diff --check | 成功。実app-server・モデル・native画面・機器は未使用 |
+
+初回の1件失敗はGoal削除の試験期待から既存origin=userを落としていたためで、製品不具合ではない。Refactor status: **refactor-skipped**。N1のShell寿命・peerを再利用し、local helperは履歴入力・閲覧操作・実行副作用の期待だけに限定した。副作用のないconfig/readまで禁止する過剰な期待は外した。製品コード・公開API・文書契約に変更はない。
+
+独立レビューで失敗境界・保持・明示再操作・writer所有権解放を確認し、必須修正なし。N1の設定成功経路とN2の故障経路を重複させていないことも確認した。
 
 ## 9. 先送り事項
 
