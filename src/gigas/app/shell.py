@@ -126,7 +126,6 @@ class ApplicationShell(QObject):
         panel.goal_resume_requested.connect(self.service.resume_goal)
         panel.goal_clear_requested.connect(self.service.clear_goal)
         panel.send_requested.connect(self.service.send)
-        panel.steer_requested.connect(self.service.steer)
         panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
         self.service.received.connect(panel.handle_event)

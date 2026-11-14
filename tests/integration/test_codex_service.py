@@ -1,7 +1,8 @@
 import asyncio
 import base64
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
@@ -14,31 +15,31 @@ from pytestqt.qtbot import QtBot
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import resolve_serial_config
 from gigas.game_io.input.models import InputState
+from gigas.game_io.observation import Observation
 from gigas.mcp.game_io import GameIoMcpServer
 from gigas.runtime.codex.connection import (
-    AnswerDeliveryError,
     CodexConnection,
     CodexConnectionError,
-    MessageDeliveryError,
+    RuntimeEvent,
 )
 from gigas.runtime.codex.models import (
-    ConnectionEvent,
     ConnectionOptions,
+    ConversationStatus,
+    GoalEvent,
     HumanRequest,
     SandboxEvent,
-    SessionStatus,
 )
-from gigas.runtime.codex.transport import JsonObject, RpcNotification
+from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
 from tests.integration.test_input_service import Device
 from tests.integration.test_observation_storage import sample_frame
-from tests.unit.test_codex_connection import FakePeer, _phase, _question, _terminal, _until
+from tests.unit.test_codex_connection import FakePeer, _question, _terminal
 
 if TYPE_CHECKING:
-    from gigas.game_io.input.config import SerialConfig
-    from gigas.runtime.codex.models import ThreadConfiguration
+    from gigas.game_io.capture.models import Frame
+    from gigas.game_io.observation import ObservationResolution
     from gigas.services.codex import (
         InputConnectionResult,
         ServiceEvent,
@@ -46,6 +47,29 @@ if TYPE_CHECKING:
         _OperationCall,
         _OperationContext,
     )
+
+
+class ControlledConnection(CodexConnection):
+    """A real connection with worker-lifetime observations and a scripted peer."""
+
+    def __init__(self, emit: Callable[[RuntimeEvent], None]) -> None:
+        """Capture worker identity and use a scripted transport."""
+        self.peer = FakePeer()
+        super().__init__(self.peer, ConnectionOptions(Path.cwd()), emit)
+        self.emit = emit
+        self.thread = QThread.currentThread()
+        self.opened = Event()
+        self.closed = Event()
+
+    async def open(self) -> None:
+        """Publish actual connection facts before exposing the open observation."""
+        await super().open()
+        self.opened.set()
+
+    async def close(self) -> None:
+        """Observe physical cleanup after the transport finishes."""
+        await super().close()
+        self.closed.set()
 
 
 def _mcp_endpoint(params: JsonObject) -> tuple[str, dict[str, str]]:
@@ -78,85 +102,6 @@ def _call_game_tool(
     return response
 
 
-class ControlledConnection:
-    """Expose observable async operations without a runtime process."""
-
-    def __init__(self, emit: Callable[[ConnectionEvent], None]) -> None:
-        """Capture worker identity and connection events."""
-        self.emit = emit
-        self.thread = QThread.currentThread()
-        self.opened = Event()
-        self.sending = Event()
-        self.stopped = Event()
-        self.closed = Event()
-        self.cancelled = Event()
-
-    async def open(self) -> None:
-        """Publish readiness from the worker loop."""
-        self.opened.set()
-        self.emit(SessionStatus("ready", "model", "high", True))
-
-    async def login(self) -> None:
-        """Provide the login surface."""
-
-    async def setup_windows_sandbox(self) -> None:
-        """Provide the explicit environment-setup surface."""
-
-    async def send(self, prompt: str) -> str | None:
-        """Hold one operation until shutdown cancels it."""
-        assert prompt == "hello"
-        self.sending.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            self.cancelled.set()
-
-    async def set_goal(self, objective: str) -> bool:
-        """Accept a test Goal."""
-        return bool(objective)
-
-    async def resume_goal(self) -> bool:
-        """Accept a test Goal resume."""
-        return True
-
-    async def clear_goal(self) -> None:
-        """Accept a test Goal removal."""
-
-    async def select_model(self, model: str, effort: str) -> None:
-        """Accept a test selection."""
-
-    async def steer(self, prompt: str, expected_turn_id: str) -> str:
-        """Hold an in-turn submission until cancellation."""
-        assert expected_turn_id == "turn-1"
-        await self.send(prompt)
-        return expected_turn_id
-
-    async def answer(
-        self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None
-    ) -> None:
-        """Provide the answer surface."""
-
-    async def stop(self) -> None:
-        """Observe interruption while send is pending."""
-        self.stopped.set()
-
-    async def close(self) -> None:
-        """Observe physical service cleanup."""
-        self.closed.set()
-
-
-class WaitingAnswerConnection(ControlledConnection):
-    """Hold an answer until service shutdown cancels its operation."""
-
-    async def answer(
-        self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None
-    ) -> None:
-        """Record arrival without claiming transport completion."""
-        assert (token, decision, answers) == ("pending", "accept", None)
-        self.sending.set()
-        await asyncio.Event().wait()
-
-
 @pytest.mark.parametrize("outcome", ["success", "failure", "disconnect"])
 def test_sandbox_setup_awaits_completion_without_blocking_disconnect(
     qtbot: QtBot, tmp_path: Path, outcome: str
@@ -181,9 +126,7 @@ def test_sandbox_setup_awaits_completion_without_blocking_disconnect(
 
     def factory(
         _options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        _prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        _started: Callable[[str], Awaitable[None]],
+        emit: Callable[[RuntimeEvent], None],
     ) -> SetupConnection:
         connection = SetupConnection(emit)
         connections.append(connection)
@@ -248,13 +191,11 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
 
     def factory(
         options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
+        emit: Callable[[RuntimeEvent], None],
     ) -> CodexConnection:
         peer = FakePeer()
         peers.append(peer)
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+        return CodexConnection(peer, options, emit)
 
     frame = sample_frame(2048, 1536)
     service = CodexServiceThread(
@@ -298,8 +239,9 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         assert isinstance(headers, dict)
         service.set_observation_resolution("hd")
         # A later loop command completes only after the setting command was handled.
-        service.interrupt()
-        qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+        setting_applied = Event()
+        service._enqueue(setting_applied.set)
+        qtbot.waitUntil(setting_applied.is_set)
         monkeypatch.setattr(project, "_publish_image", hold_image)
         with httpx.Client(
             headers={
@@ -351,269 +293,55 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
 
 
-def test_runtime_failure_revokes_old_mcp_endpoint(qtbot: QtBot, tmp_path: Path) -> None:
-    peer = FakePeer()
-    peer.failure = "turn/start"
-    results: list[ServiceResult] = []
-
-    def factory(
-        options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
-    ) -> CodexConnection:
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
-
-    frame = sample_frame(64, 48)
-    service = CodexServiceThread(
-        tmp_path, CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), factory
-    )
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.send("observe")
-        qtbot.waitUntil(
-            lambda: any(result.operation == "send" and result.error for result in results)
-        )
-        assert peer.closed
-        thread = next(params for method, params in peer.calls if method == "thread/start")
-        assert thread is not None
-        config = thread["config"]
-        assert isinstance(config, dict)
-        url = next(value for key, value in config.items() if key.endswith(".url"))
-        headers = next(value for key, value in config.items() if key.endswith(".http_headers"))
-        assert isinstance(url, str)
-        assert isinstance(headers, dict)
-        with httpx.Client(trust_env=False, timeout=1) as client:
-            try:
-                response = client.post(
-                    url,
-                    headers={
-                        **{key: str(value) for key, value in headers.items()},
-                        "Accept": "application/json, text/event-stream",
-                    },
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {"name": "observe", "arguments": {}},
-                    },
-                )
-            except (
-                httpx.ConnectError,
-                httpx.ConnectTimeout,
-                httpx.ReadError,
-                httpx.RemoteProtocolError,
-            ):
-                response = None
-        assert response is None or response.status_code in {401, 503}
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
-
-
-@pytest.mark.parametrize("next_protocol", ["ch552", "3ds"])
-@pytest.mark.parametrize("switch_while_starting", [False, True])
-def test_turn_completion_revokes_input_and_next_send_republishes_same_thread(
-    qtbot: QtBot, tmp_path: Path, next_protocol: str, *, switch_while_starting: bool
+@pytest.mark.parametrize("selected", [False, True])
+def test_disconnect_drains_old_results_before_starting_next_conversation(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool
 ) -> None:
-    peer = FakePeer()
-    loops: list[asyncio.AbstractEventLoop] = []
-    devices: list[Device] = []
+    entered, release = Event(), Event()
+    encode = Observation.from_frame
+    peers: list[FakePeer] = []
     results: list[ServiceResult] = []
-    events: list[ServiceEvent] = []
-    applied: list[InputConnectionResult] = []
-
-    def factory(
-        options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
-    ) -> CodexConnection:
-        loops.append(asyncio.get_running_loop())
-        if switch_while_starting:
-            peer.gates["thread/start"] = asyncio.Event()
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
-
-    def input_factory(config: "SerialConfig") -> Device:
-        device = Device()
-        device.protocol = config.protocol
-        devices.append(device)
-        return device
-
-    frame = sample_frame(64, 48)
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
-        factory,
-        input_factory=input_factory,
-    )
-    service.completed.connect(results.append)
-    service.received.connect(events.append)
-    service.input_changed.connect(applied.append)
-    service.start()
-    try:
-        service.apply_input(resolve_serial_config("COM3", "ch552", None))
-        qtbot.waitUntil(lambda: len(applied) == 1)
-        assert applied[0].connected
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.send("first input")
-        if switch_while_starting:
-            qtbot.waitUntil(lambda: any(method == "thread/start" for method, _ in peer.calls))
-            service.apply_input(resolve_serial_config("COM3", next_protocol, None))
-            qtbot.waitUntil(lambda: len(applied) == 2)
-            assert applied[-1].connected
-            loops[0].call_soon_threadsafe(peer.gates["thread/start"].set)
-        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
-        assert not results[-1].error
-        assert results[-1].message == MessageResult("accepted", "turn-1")
-        service.steer("門の前で止まる", "turn-1")
-        qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
-        assert results[-1].message == MessageResult("accepted", "turn-1")
-        assert sum(method == "thread/start" for method, _ in peer.calls) == 1
-        assert not any(method == "thread/resume" for method, _ in peer.calls)
-        initial = next(params for method, params in peer.calls if method == "thread/start")
-        assert initial is not None
-        archive = Path(str(initial["cwd"])).parent
-        old_url, old_headers = _mcp_endpoint(initial)
-        with httpx.Client(headers=old_headers, trust_env=False, timeout=3) as client:
-            result = _call_game_tool(
-                client,
-                old_url,
-                "act_and_observe",
-                {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]},
-            ).json()["result"]
-            first = None
-            if switch_while_starting and next_protocol == "3ds":
-                assert result["isError"]
-                assert json.loads(result["content"][0]["text"])["code"] == "INPUT_DISABLED"
-                assert devices[0].calls == ["open", "close"]
-                assert devices[1].calls == ["open"]
-            else:
-                assert not result["isError"]
-                first = json.loads(result["content"][1]["text"])
-                assert devices[0].calls == ["open", InputState(buttons=("A",)), InputState()]
-
-            events.clear()
-            loops[0].call_soon_threadsafe(peer.events.put_nowait, _terminal())
-            qtbot.waitUntil(
-                lambda: any(
-                    isinstance(event.event, SessionStatus) and event.event.phase == "ready"
-                    for event in events
-                )
-            )
-            rejected = _call_game_tool(
-                client,
-                old_url,
-                "act_and_observe",
-                {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
-            ).json()["result"]
-            assert rejected["isError"]
-            assert json.loads(rejected["content"][0]["text"])["code"] == "INPUT_DISABLED"
-            assert not _call_game_tool(client, old_url, "observe").json()["result"]["isError"]
-
-            applied_count = len(applied)
-            service.apply_input(resolve_serial_config("COM3", next_protocol, None))
-            qtbot.waitUntil(lambda: len(applied) == applied_count + 1)
-            assert applied[-1].connected
-            loops[0].call_soon_threadsafe(
-                peer.responses.__setitem__,
-                "turn/start",
-                {"turn": {"id": "turn-2", "status": "inProgress", "items": []}},
-            )
-            service.send("second input")
-            qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
-            assert not results[-1].error
-            resumed = next(params for method, params in peer.calls if method == "thread/resume")
-            assert resumed is not None
-            assert resumed["threadId"] == "thread-1"
-            assert resumed["cwd"] == initial["cwd"]
-            methods = [method for method, _ in peer.calls]
-            assert methods.index("thread/unsubscribe") < methods.index("thread/resume")
-            url, headers = _mcp_endpoint(resumed)
-            assert headers != old_headers
-            client.headers.update(headers)
-            catalog = client.post(url, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-            tools = catalog.json()["result"]["tools"]
-            description = next(
-                tool["description"] for tool in tools if tool["name"] == "act_and_observe"
-            )
-            assert devices[-1].protocol.label in description
-            step: JsonObject = {"kind": "press", "buttons": ["A"], "duration_ms": 1}
-            if next_protocol == "3ds":
-                step["touch"] = {"x": 319, "y": 239}
-            result = _call_game_tool(client, url, "act_and_observe", {"sequence": [step]}).json()[
-                "result"
-            ]
-            assert not result["isError"]
-            second = json.loads(result["content"][1]["text"])
-            if first is not None:
-                assert first["operation_id"] != second["operation_id"]
-            if next_protocol == "3ds":
-                assert devices[0].calls[-1] == "close"
-                assert devices[-1].calls == [
-                    "open",
-                    InputState(buttons=("A",), touch=(319, 239)),
-                    InputState(),
-                ]
-            else:
-                assert len(devices) == 1
-    finally:
-        if loops and "thread/start" in peer.gates:
-            loops[0].call_soon_threadsafe(peer.gates["thread/start"].set)
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
-    assert not service.shutdown_error
-    rows = [
-        json.loads(line)
-        for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    started = [row["payload"] for row in rows if row["type"] == "input.operation_started"]
-    expected = [(second["operation_id"], "turn-2")]
-    if first is not None:
-        expected.insert(0, (first["operation_id"], "turn-1"))
-    assert [(row["operation_id"], row["turn_id"]) for row in started] == expected
-    finished = [row["payload"] for row in rows if row["type"] == "input.operation_finished"]
-    expected_observations = [second["observation_id"]]
-    if first is not None:
-        expected_observations.insert(0, first["observation_id"])
-    assert [row["observation_id"] for row in finished] == expected_observations
-
-
-@pytest.mark.parametrize("blocking", [False, True])
-@pytest.mark.parametrize(
-    ("stop_during_answer", "external_resolution"),
-    [(False, False), (True, False), (False, True)],
-)
-def test_human_answer_keeps_input_suspended_until_delivery_without_reviving_stopped_run(
-    qtbot: QtBot,
-    tmp_path: Path,
-    *,
-    blocking: bool,
-    stop_during_answer: bool,
-    external_resolution: bool,
-) -> None:
-    peer = FakePeer()
-    loops: list[asyncio.AbstractEventLoop] = []
-    callbacks: list[Callable[[ConnectionEvent], None]] = []
+    projects = []
+    inputs: list[InputConnectionResult] = []
     device = Device()
-    results: list[ServiceResult] = []
-    events: list[ServiceEvent] = []
-    applied: list[InputConnectionResult] = []
+
+    def delayed_observation(
+        _cls: type[Observation], frame: "Frame", *, resolution: "ObservationResolution" = "full_hd"
+    ) -> Observation:
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError
+        return encode(frame, resolution=resolution)
+
+    class ArchivePeer(FakePeer):
+        def __init__(self, thread_id: str) -> None:
+            super().__init__()
+            self.thread_id = thread_id
+            self.auto_turn_started = False
+
+        async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+            result = await super().request(method, params)
+            if method == "thread/start":
+                assert isinstance(result, dict)
+                result["thread"] = {"id": self.thread_id}
+            elif method == "turn/start":
+                self.events.put_nowait(
+                    RpcNotification(
+                        "turn/started",
+                        {"threadId": self.thread_id, "turn": {"id": "turn-1"}},
+                    )
+                )
+            return result
 
     def factory(
-        options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
+        options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
     ) -> CodexConnection:
-        loops.append(asyncio.get_running_loop())
-        callbacks.append(emit)
-        peer.respond_gate = asyncio.Event()
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+        peer = ArchivePeer(f"thread-{len(peers) + 1}")
+        peers.append(peer)
+        return CodexConnection(peer, options, emit)
+
+    def records(archive: Path) -> list[JsonObject]:
+        return [json.loads(line) for line in (archive / "events.jsonl").read_bytes().splitlines()]
 
     frame = sample_frame(64, 48)
     service = CodexServiceThread(
@@ -623,114 +351,149 @@ def test_human_answer_keeps_input_suspended_until_delivery_without_reviving_stop
         input_factory=lambda _config: device,
     )
     service.completed.connect(results.append)
-    service.received.connect(events.append)
-    service.input_changed.connect(applied.append)
+    service.project_completed.connect(projects.append)
+    service.input_changed.connect(inputs.append)
     service.start()
     try:
+        if selected:
+            service.create_project(tmp_path / "selected")
+            qtbot.waitUntil(lambda: bool(projects))
+            assert not projects[-1].error
         service.apply_input(resolve_serial_config("COM3", "ch552", None))
-        qtbot.waitUntil(lambda: bool(applied))
+        qtbot.waitUntil(lambda: bool(inputs))
+        assert inputs[-1].connected
         service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.send("input after answer")
+        service.send("old conversation")
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
-        initial = next(params for method, params in peer.calls if method == "thread/start")
-        assert initial is not None
-        url, headers = _mcp_endpoint(initial)
-        arguments: JsonObject = {
-            "sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]
-        }
-        with httpx.Client(headers=headers, trust_env=False, timeout=3) as client:
-            loops[0].call_soon_threadsafe(peer.events.put_nowait, _question(blocking=blocking))
-            qtbot.waitUntil(lambda: any(isinstance(event.event, HumanRequest) for event in events))
-            request = next(event.event for event in events if isinstance(event.event, HumanRequest))
-            service.steer("回答後も門の前で止まる", "turn-1")
-            qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
-            assert results[-1].message == MessageResult("accepted", "turn-1")
-            assert not peer.replies
-            suspended = _call_game_tool(client, url, "act_and_observe", arguments).json()["result"]
-            assert suspended["isError"]
-            assert json.loads(suspended["content"][0]["text"])["code"] == "INPUT_DISABLED"
+        old_thread = next(params for method, params in peers[0].calls if method == "thread/start")
+        assert old_thread is not None
+        old_archive = Path(str(old_thread["cwd"])).parent
+        old_url, old_headers = _mcp_endpoint(old_thread)
+        monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_observation))
+        with (
+            httpx.Client(headers=old_headers, trust_env=False, timeout=10) as client,
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            try:
+                pending = pool.submit(
+                    _call_game_tool,
+                    client,
+                    old_url,
+                    "act_and_observe",
+                    {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]},
+                )
+                qtbot.waitUntil(entered.is_set)
+                service.disconnect_runtime()
+                qtbot.waitUntil(lambda: peers[0].closed)
+                assert not pending.done()
+                assert not any(result.operation == "disconnect" for result in results)
+                assert not any(
+                    row["type"] in {"observation.recorded", "input.operation_finished"}
+                    for row in records(old_archive)
+                )
+                release.set()
+                qtbot.waitUntil(pending.done)
+                old_result = pending.result().json()["result"]
+            finally:
+                release.set()
+        assert not old_result["isError"]
+        old_metadata = json.loads(old_result["content"][1]["text"])
+        qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        assert not next(result.error for result in results if result.operation == "disconnect")
+        old_rows = records(old_archive)
+        old_observation = next(
+            row["payload"] for row in old_rows if row["type"] == "observation.recorded"
+        )
+        old_started = next(
+            row["payload"] for row in old_rows if row["type"] == "input.operation_started"
+        )
+        old_finished = next(
+            row["payload"] for row in old_rows if row["type"] == "input.operation_finished"
+        )
+        assert isinstance(old_observation, dict)
+        assert isinstance(old_started, dict)
+        assert isinstance(old_finished, dict)
+        assert old_observation["thread_id"] == old_started["thread_id"] == "thread-1"
+        assert (
+            old_finished["operation_id"]
+            == old_started["operation_id"]
+            == old_metadata["operation_id"]
+        )
+        assert (
+            old_finished["observation_id"]
+            == old_observation["observation_id"]
+            == old_metadata["observation_id"]
+        )
+        old_image = old_archive / str(old_observation["image_path"])
+        assert old_image.read_bytes() == base64.b64decode(old_result["content"][0]["data"])
+        old_log = (old_archive / "events.jsonl").read_bytes()
+        if selected:
+            with pytest.raises(project.ProjectError):
+                ProjectWriter.open(old_archive)
+        else:
+            ProjectWriter.open(old_archive).close()
 
-            if external_resolution:
-                events.clear()
-                loops[0].call_soon_threadsafe(
-                    peer.events.put_nowait,
-                    RpcNotification(
-                        "serverRequest/resolved",
-                        {"threadId": "thread-1", "requestId": request.rpc_id},
-                    ),
-                )
-                qtbot.waitUntil(
-                    lambda: any(
-                        isinstance(event.event, SessionStatus) and event.event.phase == "running"
-                        for event in events
-                    )
-                )
-                result = _call_game_tool(client, url, "act_and_observe", arguments).json()["result"]
-                assert not result["isError"]
-                assert device.calls == ["open", InputState(buttons=("A",)), InputState()]
-                assert not peer.replies
-                return
-
-            service.answer(request.token, answers={"route": "東"})
-            qtbot.waitUntil(lambda: bool(peer.replies))
-            assert not any(result.operation == "answer" for result in results)
-            # A runtime running notification can arrive after the request was
-            # resolved locally but while the answer's transport write still waits.
-            events.clear()
-            loops[0].call_soon_threadsafe(
-                peer.events.put_nowait,
-                RpcNotification(
-                    "turn/started",
-                    {"threadId": "thread-1", "turn": {"id": "turn-1", "status": "inProgress"}},
-                ),
-            )
-            qtbot.waitUntil(
-                lambda: any(
-                    isinstance(event.event, SessionStatus) and event.event.phase == "running"
-                    for event in events
-                )
-            )
-            pending = _call_game_tool(client, url, "act_and_observe", arguments).json()["result"]
-            assert pending["isError"]
-            assert json.loads(pending["content"][0]["text"])["code"] == "INPUT_DISABLED"
-            assert device.calls == ["open"]
-
-            if stop_during_answer:
-                service.interrupt()
-                qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
-                assert any(method == "turn/interrupt" for method, _ in peer.calls)
-                events.clear()
-                # Test the service's stale callback boundary as well as the
-                # connection's own suppression of late turn notifications.
-                loops[0].call_soon_threadsafe(callbacks[0], SessionStatus("running"))
-                qtbot.waitUntil(
-                    lambda: any(
-                        isinstance(event.event, SessionStatus) and event.event.phase == "running"
-                        for event in events
-                    )
-                )
-            assert peer.respond_gate is not None
-            loops[0].call_soon_threadsafe(peer.respond_gate.set)
-            qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
-            answer = next(result for result in results if result.operation == "answer")
-            assert not answer.error
-            assert answer.answer == AnswerResult(request.token, "sent")
-            result = _call_game_tool(client, url, "act_and_observe", arguments).json()["result"]
-            if stop_during_answer:
-                assert result["isError"]
-                assert json.loads(result["content"][0]["text"])["code"] == "INPUT_DISABLED"
-                assert device.calls == ["open"]
-            else:
-                assert not result["isError"]
-                assert device.calls == ["open", InputState(buttons=("A",)), InputState()]
-            assert not _call_game_tool(client, url, "observe").json()["result"]["isError"]
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        service.send("new conversation")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        new_thread = next(params for method, params in peers[1].calls if method == "thread/start")
+        assert new_thread is not None
+        new_archive = Path(str(new_thread["cwd"])).parent
+        assert (new_archive == old_archive) == selected
+        new_url, new_headers = _mcp_endpoint(new_thread)
+        with httpx.Client(headers=new_headers, trust_env=False, timeout=5) as client:
+            new_result = _call_game_tool(
+                client,
+                new_url,
+                "act_and_observe",
+                {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
+            ).json()["result"]
+        assert not new_result["isError"]
+        new_metadata = json.loads(new_result["content"][1]["text"])
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+        new_rows = records(new_archive)
+        if selected:
+            assert new_rows[: len(old_rows)] == old_rows
+            new_rows = new_rows[len(old_rows) :]
+        else:
+            assert (old_archive / "events.jsonl").read_bytes() == old_log
+        assert old_metadata["operation_id"] not in json.dumps(new_rows)
+        assert old_metadata["observation_id"] not in json.dumps(new_rows)
+        new_observation = next(
+            row["payload"] for row in new_rows if row["type"] == "observation.recorded"
+        )
+        new_started = next(
+            row["payload"] for row in new_rows if row["type"] == "input.operation_started"
+        )
+        new_finished = next(
+            row["payload"] for row in new_rows if row["type"] == "input.operation_finished"
+        )
+        assert isinstance(new_observation, dict)
+        assert isinstance(new_started, dict)
+        assert isinstance(new_finished, dict)
+        assert new_observation["thread_id"] == new_started["thread_id"] == "thread-2"
+        assert (
+            new_finished["operation_id"]
+            == new_started["operation_id"]
+            == new_metadata["operation_id"]
+        )
+        assert (
+            new_finished["observation_id"]
+            == new_observation["observation_id"]
+            == new_metadata["observation_id"]
+        )
+        assert (new_archive / str(new_observation["image_path"])).read_bytes() == base64.b64decode(
+            new_result["content"][0]["data"]
+        )
+        ProjectWriter.open(new_archive).close()
+        assert not service.shutdown_error
     finally:
-        if loops and peer.respond_gate is not None:
-            loops[0].call_soon_threadsafe(peer.respond_gate.set)
+        release.set()
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
-        assert not service.shutdown_error
 
 
 def test_disconnect_during_archive_creation_recovers_writer_without_starting_turn(
@@ -749,13 +512,11 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
 
     def factory(
         options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
+        emit: Callable[[RuntimeEvent], None],
     ) -> CodexConnection:
         peer = FakePeer()
         peers.append(peer)
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+        return CodexConnection(peer, options, emit)
 
     monkeypatch.setattr(ProjectWriter, "create", classmethod(delayed_create))
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
@@ -779,53 +540,6 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
         qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
 
 
-@pytest.mark.parametrize("delivery", [False, True])
-def test_failure_id_is_shared_by_worker_status_and_operation_result(
-    qtbot: QtBot, tmp_path: Path, delivery: bool
-) -> None:
-    class FailedAnswerConnection(ControlledConnection):
-        """Publish one failure before returning its associated operation error."""
-
-        async def answer(
-            self,
-            token: str,
-            *,
-            decision: str | None = None,
-            answers: Mapping[str, str] | None = None,
-        ) -> None:
-            """Attach correlation without exposing any transport implementation."""
-            assert (token, decision, answers) == ("token", "accept", None)
-            message = "回答失敗"
-            self.emit(SessionStatus("error", detail=message, failure_id=17))
-            error_type = AnswerDeliveryError if delivery else CodexConnectionError
-            raise error_type(message, failure_id=17)
-
-    events: list[ServiceEvent] = []
-    results: list[ServiceResult] = []
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(CaptureSnapshot),
-        lambda _options, emit, *_callbacks: FailedAnswerConnection(emit),
-    )
-    service.received.connect(events.append)
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        generation = service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.answer("token", decision="accept")
-        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
-        result = next(result for result in results if result.operation == "answer")
-        status = events[-1].event
-        assert isinstance(status, SessionStatus)
-        assert status.failure_id == result.failure_id == 17
-        assert result.generation == events[-1].generation == generation
-        assert result.answer == AnswerResult("token", "unknown" if delivery else "not_sent")
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-
-
 def test_shutdown_closes_without_submitting_an_additional_stop(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -833,7 +547,7 @@ def test_shutdown_closes_without_submitting_an_additional_stop(
     results: list[ServiceResult] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
+        _options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
     ) -> ControlledConnection:
         connection = ControlledConnection(emit)
         connections.append(connection)
@@ -849,17 +563,15 @@ def test_shutdown_closes_without_submitting_an_additional_stop(
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
     assert connections[0].closed.is_set()
-    assert not connections[0].stopped.is_set()
+    assert not any(method == "turn/interrupt" for method, _ in connections[0].peer.calls)
     assert not any(result.operation == "stop" for result in results)
 
 
 def _submit_delivery(service: CodexServiceThread, operation: str, text: str) -> None:
     if operation == "answer":
         service.answer(text, decision="accept")
-    elif operation == "send":
-        service.send(text)
     else:
-        service.steer(text, "turn-1")
+        service.send(text)
 
 
 def _not_sent(result: "ServiceResult", token: str) -> bool:
@@ -870,7 +582,7 @@ def _not_sent(result: "ServiceResult", token: str) -> bool:
     )
 
 
-@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+@pytest.mark.parametrize("operation", ["answer", "send"])
 def test_submission_without_connection_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
@@ -890,7 +602,7 @@ def test_submission_without_connection_reports_not_sent(
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+@pytest.mark.parametrize("operation", ["answer", "send"])
 def test_submission_discarded_before_start_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
@@ -906,71 +618,7 @@ def test_submission_discarded_before_start_reports_not_sent(
     assert _not_sent(result, "queued")
 
 
-def test_cancelled_answer_reports_unknown_once(qtbot: QtBot, tmp_path: Path) -> None:
-    connections: list[WaitingAnswerConnection] = []
-    results: list[ServiceResult] = []
-
-    def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
-    ) -> WaitingAnswerConnection:
-        connection = WaitingAnswerConnection(emit)
-        connections.append(connection)
-        return connection
-
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.answer("pending", decision="accept")
-        qtbot.waitUntil(connections[0].sending.is_set)
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-    answers = [result for result in results if result.operation == "answer"]
-    assert len(answers) == 1
-    assert answers[0].answer == AnswerResult("pending", "unknown")
-
-
-def test_queued_answer_copies_mapping_before_worker_starts(qtbot: QtBot, tmp_path: Path) -> None:
-    received: list[dict[str, str]] = []
-    results: list[ServiceResult] = []
-
-    class AnswerConnection(ControlledConnection):
-        async def answer(
-            self,
-            token: str,
-            *,
-            decision: str | None = None,
-            answers: Mapping[str, str] | None = None,
-        ) -> None:
-            assert (token, decision) == ("queued", None)
-            assert answers is not None
-            received.append(dict(answers))
-
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(CaptureSnapshot),
-        lambda _options, emit, *_callbacks: AnswerConnection(emit),
-    )
-    service.completed.connect(results.append)
-    service.connect_runtime(ConnectionOptions(tmp_path))
-    answers = {"route": "東"}
-    service.answer("queued", answers=answers)
-    answers["route"] = "西"
-    service.start()
-    try:
-        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
-        answer = next(result for result in results if result.operation == "answer")
-        assert answer.answer == AnswerResult("queued", "sent")
-        assert received == [{"route": "東"}]
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-
-
-@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+@pytest.mark.parametrize("operation", ["answer", "send"])
 def test_submission_cancelled_before_execution_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
@@ -996,92 +644,7 @@ def test_submission_cancelled_before_execution_reports_not_sent(
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-@pytest.mark.parametrize("case", ["sent", "rejected", "delivery", "unexpected"])
-def test_answer_completion_preserves_delivery_evidence(
-    qtbot: QtBot, tmp_path: Path, case: str
-) -> None:
-    class AnswerConnection(ControlledConnection):
-        """Model validation, uncertain delivery, and successful transport return."""
-
-        async def answer(
-            self,
-            token: str,
-            *,
-            decision: str | None = None,
-            answers: Mapping[str, str] | None = None,
-        ) -> None:
-            """Expose the requested outcome without an external process."""
-            assert (token, decision, answers) == ("token", "accept", None)
-            if case == "rejected":
-                message = "無効な回答"
-                raise CodexConnectionError(message)
-            if case == "delivery":
-                message = "回答の送信結果を確認できない"
-                raise AnswerDeliveryError(message)
-            if case == "unexpected":
-                message = "PRIVATE-ANSWER-ERROR"
-                raise OSError(message)
-
-    results: list[ServiceResult] = []
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(CaptureSnapshot),
-        lambda _options, emit, *_callbacks: AnswerConnection(emit),
-    )
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        generation = service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.answer("token", decision="accept")
-        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
-        result = next(result for result in results if result.operation == "answer")
-        assert result.generation == generation
-        assert (
-            result.answer
-            == {
-                "sent": AnswerResult("token", "sent"),
-                "rejected": AnswerResult("token", "not_sent"),
-                "delivery": AnswerResult("token", "unknown"),
-                "unexpected": AnswerResult("token", "unknown"),
-            }[case]
-        )
-        assert bool(result.error) == (case != "sent")
-        assert "PRIVATE-ANSWER-ERROR" not in result.error
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-
-
-@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
-def test_submission_for_inactive_generation_is_not_success(
-    qtbot: QtBot, tmp_path: Path, operation: str
-) -> None:
-    results: list[ServiceResult] = []
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(CaptureSnapshot),
-        lambda _options, emit, *_callbacks: ControlledConnection(emit),
-    )
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        first = service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        second = service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.generation == second for result in results))
-        _submit_delivery(service, operation, "wrong-generation")
-        qtbot.waitUntil(lambda: any(result.operation == operation for result in results))
-        result = next(result for result in results if result.operation == operation)
-        assert result.generation == second != first
-        assert result.error
-        assert _not_sent(result, "wrong-generation")
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-
-
-@pytest.mark.parametrize("operation", ["answer", "send", "steer"])
+@pytest.mark.parametrize("operation", ["answer", "send"])
 def test_submission_after_service_shutdown_is_reported_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
@@ -1096,161 +659,13 @@ def test_submission_after_service_shutdown_is_reported_not_sent(
     assert _not_sent(results[0], "late")
 
 
-def test_submission_during_close_rejects_without_recording_on_gui(
-    qtbot: QtBot, tmp_path: Path
-) -> None:
-    peers: list[FakePeer] = []
-    loops: list[asyncio.AbstractEventLoop] = []
-    results: list[ServiceResult] = []
-
-    def factory(
-        options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
-    ) -> CodexConnection:
-        peer = FakePeer()
-        peer.close_gate = asyncio.Event()
-        peers.append(peer)
-        loops.append(asyncio.get_running_loop())
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
-
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        service.send("accepted")
-        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
-        assert results[-1].message == MessageResult("accepted", "turn-1")
-        service.shutdown()
-        qtbot.waitUntil(lambda: peers[0].close_calls == 1)
-
-        service.send("late")
-        sends = [result for result in results if result.operation == "send"]
-        assert len(sends) == 2
-        assert sends[-1].message == MessageResult("not_sent")
-        assert sum(method == "turn/start" for method, _params in peers[0].calls) == 1
-    finally:
-        if peers and peers[0].close_gate is not None:
-            loops[0].call_soon_threadsafe(peers[0].close_gate.set)
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-    assert not service.shutdown_error
-
-
-@pytest.mark.parametrize("operation", ["send", "steer"])
-def test_worker_owns_connection_and_interrupts_while_message_waits(
-    qtbot: QtBot, tmp_path: Path, operation: str
-) -> None:
-    connections: list[ControlledConnection] = []
-    events: list[ServiceEvent] = []
-    results: list[ServiceResult] = []
-
-    def factory(
-        options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
-    ) -> ControlledConnection:
-        assert options.cwd.is_dir()
-        connection = ControlledConnection(emit)
-        connections.append(connection)
-        return connection
-
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
-    service.received.connect(events.append)
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        pulse = Event()
-        QTimer.singleShot(0, pulse.set)
-        qtbot.waitUntil(pulse.is_set)
-        assert not connections
-        generation = service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: len(events) == 1)
-        connection = connections[0]
-        assert connection.thread != QThread.currentThread()
-        assert events[0].generation == generation
-        _submit_delivery(service, operation, "hello")
-        qtbot.waitUntil(connection.sending.is_set)
-        service.interrupt()
-        qtbot.waitUntil(connection.stopped.is_set)
-        pulse.clear()
-        QTimer.singleShot(0, pulse.set)
-        qtbot.waitUntil(pulse.is_set)
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-    assert connection.closed.is_set()
-    assert connection.cancelled.is_set()
-    assert any(result.operation == "stop" and not result.error for result in results)
-    messages = [result for result in results if result.operation == operation]
-    assert len(messages) == 1
-    assert messages[0].message == MessageResult("unknown")
-
-
-@pytest.mark.parametrize("operation", ["send", "steer"])
-@pytest.mark.parametrize("case", ["accepted", "not_sent", "unknown", "unexpected"])
-def test_message_completion_preserves_acceptance(
-    qtbot: QtBot, tmp_path: Path, operation: str, case: str
-) -> None:
-    class MessageConnection(ControlledConnection):
-        """Expose accepted, rejected, and uncertain message outcomes."""
-
-        async def send(self, prompt: str) -> str | None:
-            """Return only confirmed public acceptance."""
-            assert prompt == "hello"
-            if case == "not_sent":
-                return None
-            if case == "unknown":
-                raise MessageDeliveryError("送信結果を確認できない")
-            if case == "unexpected":
-                raise OSError("PRIVATE-MESSAGE-ERROR")
-            return "turn-1"
-
-        async def steer(self, prompt: str, expected_turn_id: str) -> str:
-            """Reject locally or return the confirmed target turn."""
-            assert expected_turn_id == "turn-1"
-            result = await self.send(prompt)
-            if result is None:
-                raise CodexConnectionError("このturnへの追加指示は受け付けない")
-            return result
-
-    results: list[ServiceResult] = []
-    service = CodexServiceThread(
-        tmp_path,
-        CaptureReader(CaptureSnapshot),
-        lambda _options, emit, *_callbacks: MessageConnection(emit),
-    )
-    service.completed.connect(results.append)
-    service.start()
-    try:
-        service.connect_runtime(ConnectionOptions(tmp_path))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        _submit_delivery(service, operation, "hello")
-        qtbot.waitUntil(lambda: any(result.operation == operation for result in results))
-        result = next(result for result in results if result.operation == operation)
-        assert (
-            result.message
-            == {
-                "accepted": MessageResult("accepted", "turn-1"),
-                "not_sent": MessageResult("not_sent"),
-                "unknown": MessageResult("unknown"),
-                "unexpected": MessageResult("unknown"),
-            }[case]
-        )
-        assert "PRIVATE" not in result.error
-    finally:
-        service.shutdown()
-        qtbot.waitUntil(lambda: service.wait(0))
-
-
 def test_shutdown_before_start_and_factory_failure_leave_no_worker(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
     called = Event()
 
     def failed_factory(
-        _options: ConnectionOptions, _emit: Callable[[ConnectionEvent], None], *_callbacks: object
+        _options: ConnectionOptions, _emit: Callable[[RuntimeEvent], None]
     ) -> ControlledConnection:
         called.set()
         message = "private credential"
@@ -1282,7 +697,7 @@ def test_shutdown_still_closes_when_input_close_fails(qtbot: QtBot, tmp_path: Pa
     connections: list[ControlledConnection] = []
 
     def factory(
-        _options: ConnectionOptions, emit: Callable[[ConnectionEvent], None], *_callbacks: object
+        _options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
     ) -> ControlledConnection:
         connection = ControlledConnection(emit)
         connections.append(connection)
@@ -1303,7 +718,7 @@ def test_shutdown_still_closes_when_input_close_fails(qtbot: QtBot, tmp_path: Pa
     service.shutdown()
     qtbot.waitUntil(lambda: service.wait(0))
     assert connections[0].closed.is_set()
-    assert not connections[0].stopped.is_set()
+    assert not any(method == "turn/interrupt" for method, _ in connections[0].peer.calls)
     assert service.shutdown_error
 
 
@@ -1429,7 +844,7 @@ def test_input_switch_keeps_latest_target_even_after_stop(
     assert service.shutdown_error == ""
 
 
-def test_thread_save_failure_does_not_prevent_run(
+def test_thread_save_failure_does_not_prevent_send(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail(_writer: ProjectWriter, thread_id: str) -> None:
@@ -1441,13 +856,9 @@ def test_thread_save_failure_does_not_prevent_run(
 
     def factory(
         options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
+        emit: Callable[[RuntimeEvent], None],
     ) -> CodexConnection:
-        return CodexConnection(
-            FakePeer(), options, emit, prepare_turn=prepare, on_thread_started=started
-        )
+        return CodexConnection(FakePeer(), options, emit)
 
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
@@ -1469,7 +880,7 @@ def test_thread_save_failure_does_not_prevent_run(
         for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert any(
-        row["type"] == "input.run_started" and row["payload"]["thread_id"] == "thread-1"
+        row["type"] == "dialogue.delivery" and row["payload"]["thread_id"] == "thread-1"
         for row in rows
     )
 
@@ -1480,13 +891,11 @@ def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path:
 
     def factory(
         options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        prepare: Callable[[str, str | None], Awaitable["ThreadConfiguration"]],
-        started: Callable[[str], Awaitable[None]],
+        emit: Callable[[RuntimeEvent], None],
     ) -> CodexConnection:
         peer = FakePeer()
         peers.append(peer)
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+        return CodexConnection(peer, options, emit)
 
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
@@ -1509,218 +918,375 @@ def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path:
         qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_goal_service_pause_conversation_resume_and_recording(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        peer = FakePeer()
-        frame = sample_frame(64, 48)
-        reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame))
-        service = CodexServiceThread(tmp_path, reader)
-        device = Device()
-        await service._input.connect(device)
-        service._input_config = resolve_serial_config("COM3", "ch552", None)
-        runtime_dir = tmp_path / "runtime"
-        runtime_dir.mkdir()
-        events: list[ConnectionEvent] = []
-
-        def receive(event: ConnectionEvent) -> None:
-            events.append(event)
-            service._receive(0, event)
-
-        connection = CodexConnection(
-            peer,
-            ConnectionOptions(runtime_dir),
-            receive,
-            prepare_turn=service._prepare_turn,
-            on_thread_started=service._thread_started,
+def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    peer = FakePeer()
+    frame = sample_frame(64, 48)
+    device = Device()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    inputs: list[InputConnectionResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
+        lambda options, emit: CodexConnection(peer, options, emit),
+        input_factory=lambda _config: device,
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.input_changed.connect(inputs.append)
+    service.start()
+    try:
+        service.apply_input(resolve_serial_config("COM3", "ch552", None))
+        qtbot.waitUntil(lambda: bool(inputs))
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        initial = next(params for method, params in peer.calls if method == "thread/start")
+        assert initial is not None
+        url, headers = _mcp_endpoint(initial)
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(event.event, ConversationStatus) and event.event.turn_id == "turn-1"
+                for event in events
+            )
         )
-        service._connection = connection
-        await connection.open()
+        peer.auto_turn_started = False
+        service.send("additional")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert [
+            params["input"]
+            for method, params in peer.calls
+            if method == "turn/start" and params is not None
+        ] == [
+            [{"type": "text", "text": "first"}],
+            [{"type": "text", "text": "additional"}],
+        ]
+        assert not any(method == "turn/steer" for method, _ in peer.calls)
+        with (
+            httpx.Client(headers=headers, trust_env=False, timeout=5) as client,
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            operation = pool.submit(
+                _call_game_tool,
+                client,
+                url,
+                "act_and_observe",
+                {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 10000}]},
+            )
+            qtbot.waitUntil(lambda: InputState(buttons=("A",)) in device.calls)
+            service.interrupt()
+            qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+            qtbot.waitUntil(operation.done)
+            interrupted = operation.result().json()["result"]
+            assert json.loads(interrupted["content"][0]["text"])["code"] == "INTERRUPTED"
+            assert device.calls[-1] == InputState()
+            assert not any(result.operation == "stop" for result in results)
+            refused = _call_game_tool(
+                client,
+                url,
+                "act_and_observe",
+                {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
+            ).json()["result"]
+            assert json.loads(refused["content"][0]["text"])["code"] == "INPUT_DISABLED"
+            service._enqueue(lambda: peer.events.put_nowait(_terminal("interrupted")))
+            qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+            assert not next(result.error for result in results if result.operation == "stop")
+            resumed = _call_game_tool(
+                client,
+                url,
+                "act_and_observe",
+                {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
+            ).json()["result"]
+            assert not resumed["isError"]
+        peer.auto_turn_started = True
+        service.send("next")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 3)
+        assert sum(method == "thread/start" for method, _ in peer.calls) == 1
+        assert not any(
+            method in {"thread/unsubscribe", "thread/resume"} for method, _ in peer.calls
+        )
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+    assert not service.shutdown_error
 
-        service._loop = asyncio.get_running_loop()
-        results: list[ServiceResult] = []
-        service.completed.connect(results.append)
 
-        async def submit(call: Callable[[], None]) -> None:
-            count = len(results)
-            call()
-            await asyncio.wait_for(_until(lambda: len(results) > count), 5)
-            assert not results[-1].error
+def test_stop_waiting_for_terminal_can_disconnect_without_circular_wait(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    peer = FakePeer()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(event.event, ConversationStatus) and event.event.turn_id == "turn-1"
+                for event in events
+            )
+        )
+        service.interrupt()
+        qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+        service.disconnect_runtime()
+        qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+        assert next(result.error for result in results if result.operation == "stop")
+        assert peer.closed
+        assert peer.close_calls == 1
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+    assert not service.shutdown_error
 
-        async def notify(turn: str, status: str | None = None) -> None:
-            await connection._notification(
-                RpcNotification(
-                    "turn/started" if status is None else "turn/completed",
-                    {
-                        "threadId": "thread-1",
-                        "turn": {"id": turn, "status": status or "inProgress"},
-                    },
+
+@pytest.mark.parametrize("outcome", ["accepted", "rejected", "unknown"])
+def test_send_result_collects_turn_notification_and_preserves_delivery_classification(
+    qtbot: QtBot, tmp_path: Path, outcome: str
+) -> None:
+    peer = FakePeer()
+    peer.auto_turn_started = False
+    if outcome == "rejected":
+        peer.rpc_errors["turn/start"] = -32000
+    elif outcome == "unknown":
+        peer.failure = "turn/start"
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        if outcome == "accepted":
+            qtbot.waitUntil(lambda: any(method == "turn/start" for method, _ in peer.calls))
+            service.send("while the start notification is pending")
+            qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+            assert next(result.message for result in results if result.operation == "send") == (
+                MessageResult("not_sent")
+            )
+            assert not any(
+                isinstance(event.event, ConversationStatus) and event.event.turn_id is not None
+                for event in events
+            )
+            service._enqueue(
+                lambda: peer.events.put_nowait(
+                    RpcNotification(
+                        "turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}}
+                    )
                 )
             )
-
-        def endpoint() -> tuple[str, dict[str, str]]:
-            params = next(
-                params
-                for method, params in reversed(peer.calls)
-                if method in {"thread/start", "thread/resume"}
-            )
-            assert params is not None
-            return _mcp_endpoint(params)
-
-        async def act() -> dict:
-            url, headers = endpoint()
-            async with httpx.AsyncClient(headers=headers, trust_env=False) as client:
-                response = await client.post(
-                    url,
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {
-                            "name": "act_and_observe",
-                            "arguments": {
-                                "sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]
-                            },
-                        },
-                    },
-                )
-                return response.json()["result"]
-
-        try:
-            gate = peer.gates["thread/goal/set"] = asyncio.Event()
-            service.set_goal("継続目標")
-            await asyncio.wait_for(
-                _until(lambda: any(method == "thread/goal/set" for method, _ in peer.calls)), 5
-            )
-            original_endpoint = endpoint()
-            await notify("before-goal-reply")
-            assert not (await act())["isError"]
-            await notify("before-goal-reply", "completed")
-            assert (await act())["isError"]
-            gate.set()
-            await asyncio.wait_for(_until(lambda: bool(results)), 5)
-            assert not results[-1].error
-            for turn in ("auto-one", "auto-two"):
-                await notify(turn)
-                assert not (await act())["isError"]
-                await notify(turn, "completed")
-                assert endpoint() == original_endpoint
-                assert (await act())["isError"]
-            await submit(service.interrupt)
-            await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
-            assert peer.goal is not None
-            assert peer.goal["status"] == "paused"
-            await submit(lambda: service.send("状況だけ"))
-            assert (await act())["isError"]
-            await notify("turn-1", "completed")
-            await submit(service.resume_goal)
-            assert endpoint() != original_endpoint
-            await notify("auto-three")
-            assert not (await act())["isError"]
-            await submit(service.clear_goal)
-            await notify("auto-three", "interrupted")
-            await asyncio.wait_for(_until(lambda: _phase(events) == "stopped"), 5)
-            assert peer.goal is None
-            assert sum(method == "turn/start" for method, _ in peer.calls) == 1
-        finally:
-            service._loop = None
-            await service._release_connection(connection)
-            await service._input.close()
-        archives = list((tmp_path / "chats").iterdir())
-        rows = [
-            json.loads(line)
-            for line in (archives[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        ]
-        inputs = [row["payload"] for row in rows if row["type"] == "input.operation_started"]
-        assert [row["turn_id"] for row in inputs] == [
-            "before-goal-reply",
-            "auto-one",
-            "auto-two",
-            "auto-three",
-        ]
+            qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        result = next(result for result in reversed(results) if result.operation == "send")
         assert (
-            inputs[0]["run_id"] == inputs[1]["run_id"] == inputs[2]["run_id"] != inputs[3]["run_id"]
+            result.message
+            == {
+                "accepted": MessageResult("accepted", "turn-1"),
+                "rejected": MessageResult("not_sent"),
+                "unknown": MessageResult("unknown"),
+            }[outcome]
         )
+        assert "PRIVATE" not in result.error
         assert any(
-            row["type"] == "dialogue.submitted"
-            and row["payload"]["content"].get("text") == "継続目標"
-            for row in rows
-        )
-        submitted = next(
-            row["payload"]["content"]
-            for row in rows
-            if row["type"] == "dialogue.submitted"
-            and row["payload"]["content"].get("text") == "継続目標"
-        )
-        delivered = next(
-            row["payload"]["content"]
-            for row in rows
-            if row["type"] == "dialogue.delivery"
-            and row["payload"]["content"]["operation"] == "goal_set"
-        )
-        assert submitted["request_id"] == delivered["request_id"]
-        end_deliveries = [
-            row["payload"]["content"]
-            for row in rows
-            if row["type"] == "dialogue.delivery"
-            and row["payload"]["content"]["operation"] in {"stop", "goal_clear"}
-        ]
-        assert [item["outcome"] for item in end_deliveries] == ["accepted", "accepted"]
-        assert any(
-            row["type"] == "dialogue.delivery"
-            and row["payload"]["content"]["operation"] == "goal_set"
-            and row["payload"]["content"]["outcome"] == "accepted"
-            for row in rows
-        )
-
-    asyncio.run(scenario())
+            isinstance(event.event, ConversationStatus) and event.event.turn_id is not None
+            for event in events
+        ) is (outcome == "accepted")
+        assert sum(method == "turn/start" for method, _ in peer.calls) == 1
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
 
 
-def test_goal_input_setting_applies_while_runtime_pause_waits(tmp_path: Path) -> None:
-    async def scenario() -> None:
-        peer = FakePeer()
-        reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=sample_frame()))
-        service = CodexServiceThread(tmp_path, reader, input_factory=lambda _config: Device())
-        runtime_dir = tmp_path / "runtime"
-        runtime_dir.mkdir()
-        connection = CodexConnection(
-            peer,
-            ConnectionOptions(runtime_dir),
-            lambda event: service._receive(0, event),
-            prepare_turn=service._prepare_turn,
-            on_thread_started=service._thread_started,
-        )
-        service._connection = connection
-        await connection.open()
-        service._loop = asyncio.get_running_loop()
-        results: list[ServiceResult] = []
-        inputs: list[InputConnectionResult] = []
-        service.completed.connect(results.append)
-        service.input_changed.connect(inputs.append)
-        try:
-            service.set_goal("goal")
-            await asyncio.wait_for(_until(lambda: bool(results)), 5)
-            assert not results[0].error
-            gate = asyncio.Event()
-            peer.gates["thread/goal/set"] = gate
-            config = resolve_serial_config("COM3", "ch552", None)
-            service.apply_input(config)
-            await asyncio.wait_for(_until(lambda: bool(inputs)), 2)
-            assert inputs[0].config == config
-            assert inputs[0].connected
-            assert not inputs[0].error
-            assert peer.goal is not None
-            assert peer.goal["status"] == "active"
-            gate.set()
-            await asyncio.gather(*list(service._tasks))
-            await asyncio.wait_for(
-                _until(lambda: peer.goal is not None and peer.goal["status"] == "paused"), 5
+def test_question_and_answer_delivery_do_not_suspend_input_and_stop_joins_delivery(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    peer = FakePeer()
+    frame = sample_frame(64, 48)
+    device = Device()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    inputs: list[InputConnectionResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
+        lambda options, emit: CodexConnection(peer, options, emit),
+        input_factory=lambda _config: device,
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.input_changed.connect(inputs.append)
+    service.start()
+    try:
+        service.apply_input(resolve_serial_config("COM3", "ch552", None))
+        qtbot.waitUntil(lambda: bool(inputs))
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        thread = next(params for method, params in peer.calls if method == "thread/start")
+        assert thread is not None
+        url, headers = _mcp_endpoint(thread)
+
+        def deliver_question() -> None:
+            peer.respond_gate = asyncio.Event()
+            peer.events.put_nowait(_question())
+
+        service._enqueue(deliver_question)
+        qtbot.waitUntil(lambda: any(isinstance(event.event, HumanRequest) for event in events))
+        question = next(event.event for event in events if isinstance(event.event, HumanRequest))
+        with httpx.Client(headers=headers, trust_env=False, timeout=5) as client:
+            result = _call_game_tool(
+                client,
+                url,
+                "act_and_observe",
+                {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]},
+            ).json()["result"]
+            assert not result["isError"]
+        answers = {"route": "西"}
+        service.answer(question.token, answers=answers)
+        answers["route"] = "変更後"
+        qtbot.waitUntil(lambda: bool(peer.replies))
+        assert peer.replies == [("question-1", {"answers": {"route": {"answers": ["西"]}}})]
+        service._enqueue(
+            lambda: peer.events.put_nowait(
+                RpcNotification(
+                    "serverRequest/resolved", {"threadId": "thread-1", "requestId": "question-1"}
+                )
             )
-            assert peer.goal["status"] == "paused"
-        finally:
-            service._loop = None
-            if "thread/goal/set" in peer.gates:
-                peer.gates["thread/goal/set"].set()
-            await service._release_connection(connection)
-            await service._input.close()
+        )
+        service.interrupt()
+        qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+        service._enqueue(lambda: peer.events.put_nowait(_terminal("interrupted")))
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(event.event, ConversationStatus)
+                and event.event.turn_id is None
+                and event.event.stopping
+                for event in events
+            )
+        )
+        assert not any(result.operation in {"stop", "answer"} for result in results)
+        gate = peer.respond_gate
+        assert gate is not None
+        service._enqueue(gate.set)
+        qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+        qtbot.waitUntil(lambda: any(result.operation == "answer" for result in results))
+        answer = next(result for result in results if result.operation == "answer")
+        assert answer.answer == AnswerResult(question.token, "sent")
+        assert not next(result.error for result in results if result.operation == "stop")
+        service.answer(question.token, answers={"route": "東"})
+        qtbot.waitUntil(lambda: sum(result.operation == "answer" for result in results) == 2)
+        assert results[-1].answer == AnswerResult(question.token, "not_sent")
+        assert len(peer.replies) == 1
+    finally:
+        if peer.respond_gate is not None:
+            service._enqueue(peer.respond_gate.set)
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+    assert not service.shutdown_error
 
-    asyncio.run(scenario())
+
+def test_goal_delete_preserves_turn_and_common_stop_preserves_objective(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    class GoalPeer(FakePeer):
+        async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+            result = await super().request(method, params)
+            if method == "thread/goal/set":
+                assert isinstance(result, dict)
+                self.events.put_nowait(
+                    RpcNotification(
+                        "thread/goal/updated", {"threadId": "thread-1", "goal": result["goal"]}
+                    )
+                )
+            elif method == "thread/goal/clear":
+                self.events.put_nowait(
+                    RpcNotification("thread/goal/cleared", {"threadId": "thread-1"})
+                )
+            return result
+
+    peer = GoalPeer()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.set_goal("クチバシティへ向かう")
+        qtbot.waitUntil(lambda: any(result.operation == "goal_set" for result in results))
+        assert not results[-1].error
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+        service._enqueue(
+            lambda: peer.events.put_nowait(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
+        )
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(event.event, ConversationStatus) and event.event.turn_id == "turn-1"
+                for event in events
+            )
+        )
+        service.clear_goal()
+        qtbot.waitUntil(lambda: any(result.operation == "goal_clear" for result in results))
+        assert not next(result.error for result in results if result.operation == "goal_clear")
+        assert not any(method == "turn/interrupt" for method, _ in peer.calls)
+        snapshots = [event.event for event in events if isinstance(event.event, ConversationStatus)]
+        assert snapshots[-1].turn_id == "turn-1"
+        assert snapshots[-1].goal is None
+        service.set_goal("クチバシティへ向かう")
+        qtbot.waitUntil(lambda: sum(result.operation == "goal_set" for result in results) == 2)
+        service.interrupt()
+        qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(event.event, GoalEvent)
+                and event.event.goal is not None
+                and event.event.goal.status == "paused"
+                for event in events
+            )
+        )
+        service._enqueue(lambda: peer.events.put_nowait(_terminal("interrupted")))
+        qtbot.waitUntil(lambda: any(result.operation == "stop" for result in results))
+        assert not next(result.error for result in results if result.operation == "stop")
+        service.resume_goal()
+        qtbot.waitUntil(lambda: any(result.operation == "goal_resume" for result in results))
+        assert not next(result.error for result in results if result.operation == "goal_resume")
+        resumed = next(
+            params for method, params in reversed(peer.calls) if method == "thread/goal/set"
+        )
+        assert resumed == {"threadId": "thread-1", "status": "active", "origin": "user"}
+        assert peer.goal is not None
+        assert peer.goal["objective"] == "クチバシティへ向かう"
+        assert not any(method == "turn/start" for method, _ in peer.calls)
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0), timeout=10000)
+    assert not service.shutdown_error

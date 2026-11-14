@@ -39,7 +39,7 @@ class WindowsSandbox:
             ValueError: Readiness is unavailable or the sandbox needs setup.
         """
         if self._read_task is not None:
-            await self._read_task
+            await asyncio.shield(self._read_task)
         if self._snapshot.readiness != "ready":
             message = (
                 "サンドボックス環境の準備が必要です。"

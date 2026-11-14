@@ -1,50 +1,38 @@
-"""Codex conversation and connection lifecycle over one RPC transport."""
+"""Codex authentication, connection lifecycle and RPC event delivery."""
 
 import asyncio
-import json
-from dataclasses import dataclass
 from importlib import resources
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from gigas.runtime.codex._account_session import AccountSession
-from gigas.runtime.codex._human_requests import HumanRequests
 from gigas.runtime.codex._model_catalog import ModelCatalog
-from gigas.runtime.codex._notifications import TurnContent
 from gigas.runtime.codex._windows_sandbox import WindowsSandbox
 from gigas.runtime.codex.models import (
     AccountInfo,
-    GoalEvent,
-    GoalState,
     LoginEvent,
     ModelSelection,
-    RequestResolved,
     SandboxEvent,
     SessionStatus,
-    TextEvent,
-    TurnStarted,
     UsageEvent,
 )
 from gigas.runtime.codex.transport import (
-    RpcError,
     RpcNotification,
     ServerRequest,
     TransportClosed,
     TransportError,
 )
 from gigas.runtime.codex.transport import (
-    RpcPeer as RpcPeer,  # noqa: PLC0414 -- Preserve the existing public import boundary.
+    RpcPeer as RpcPeer,  # noqa: PLC0414 -- Public transport boundary.
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine, Mapping
+    from collections.abc import Callable, Coroutine
 
-    from gigas.runtime.codex.models import (
-        ConnectionEvent,
-        ConnectionOptions,
-        ConnectionPhase,
-        ThreadConfiguration,
-    )
-    from gigas.runtime.codex.transport import JsonObject, JsonValue
+    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ConnectionPhase
+    from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId
+
+
+type RuntimeEvent = ConnectionEvent | RpcNotification | ServerRequest
 
 
 class CodexConnectionError(RuntimeError):
@@ -67,11 +55,7 @@ class AnswerDeliveryError(CodexConnectionError):
 
 
 class MessageDeliveryError(CodexConnectionError):
-    """A submitted message has no confirmed runtime acceptance; never retry it automatically."""
-
-
-class _ThreadPreparationError(Exception):
-    """A host preparation failure that does not invalidate runtime authentication."""
+    """A submitted message has no confirmed acceptance; never retry it automatically."""
 
 
 def read_play_instructions() -> str:
@@ -84,130 +68,82 @@ def read_play_instructions() -> str:
     return resources.files("gigas.prompts").joinpath("play.md").read_text(encoding="utf-8")
 
 
-def _object(value: "JsonValue") -> "JsonObject":
-    if isinstance(value, dict):
-        return value
-    message = "Codexの応答形式が不正"
-    raise CodexConnectionError(message)
-
-
-def _text(value: "JsonValue") -> str:
-    if isinstance(value, str) and value:
-        return value
-    message = "Codexの応答形式が不正"
-    raise CodexConnectionError(message)
-
-
-@dataclass(slots=True)
-class _Turn:
-    id: str
-    terminal: str | None = None
-    interrupted: bool = False
-
-
-@dataclass(slots=True)
-class _Start:
-    goal: bool = False
-    submitted: bool = False
-    turn: _Turn | None = None
-
-
-@dataclass(slots=True)
-class _End:
-    reason: Literal["complete", "interrupt", "close"]
-    target: _Turn | None
-    goal_action: Literal["none", "pause", "clear"] = "none"
-    goal_sent: Literal["none", "pause", "clear"] = "none"
-    swept: bool = False
-    done: bool = False
-    error: str = ""
-
-
 class CodexConnection:
-    """Own conversation and lifecycle decisions over a single RPC peer.
+    """Own one connection without conversation or device execution state.
 
-    All methods and the synchronous event callback run on the same asyncio loop.
-    The callback must return promptly. Authentication remains owned by the runtime;
-    this class never reads or copies credential files.
-
-    Goal completion closes input while the current turn finishes its final
-    response. A single public-terminal sweep after that turn ends precedes
-    the ready status. Explicit stop or clear interrupts
-    this wait instead.
+    All methods and callbacks run on the same asyncio loop. Conversation notifications
+    and server requests pass through unchanged; their consumer owns thread filtering,
+    question handling and execution decisions. Authentication notifications remain here.
 
     Args:
-        peer: Transport implementing the actual RPC boundary.
-        options: Working directory and requested authentication/model settings.
-        emit: Callback receiving typed application events, never raw RPC frames.
-        prepare_turn: Async host archive/memory/MCP preparation for an ordinary send,
-            new Goal, or explicit Goal resume, receiving the prompt/objective and
-            confirmed thread ID, or None initially. Its configuration starts or
-            resumes the thread; autonomous turns and objective updates reuse it.
-        on_thread_started: Async host recording of the confirmed thread ID.
-            Completion is required before accepting the thread or starting a turn.
-            Callback errors preserve authentication and permit an explicit retry.
+        peer: Single RPC transport, including its process lifetime.
+        options: Runtime directory and requested authentication/model settings.
+        emit: Fast synchronous receiver for connection facts and conversation RPC events.
+            It must not await conversation operations or connection shutdown.
     """
 
     def __init__(
         self,
         peer: RpcPeer,
         options: "ConnectionOptions",
-        emit: "Callable[[ConnectionEvent], None]",
-        *,
-        prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
-        on_thread_started: "Callable[[str], Awaitable[None]]",
+        emit: "Callable[[RuntimeEvent], None]",
     ) -> None:
-        """Store connection dependencies without performing I/O."""
+        """Retain dependencies without starting I/O."""
         self._peer = peer
         self._options = options
         self._emit = emit
-        self._prepare_turn = prepare_turn
-        self._on_thread_started = on_thread_started
         self._pump: asyncio.Task[None] | None = None
         self._opened = False
+        self._opening = False
         self._closed = False
         self._account = AccountSession(peer, self._runtime_fact)
         self._catalog = ModelCatalog(peer, self._runtime_fact)
-        self._phase: ConnectionPhase = "connecting"
-        self._thread_id: str | None = None
-        self._turn: _Turn | None = None
-        self._start: _Start | None = None
-        self._mcp_config: JsonObject = {}
-        self._user_items = 0
-        self._end: _End | None = None
-        self._end_task: asyncio.Task[None] | None = None
-        self._end_changed = asyncio.Event()
-        self._requests = HumanRequests()
-        self._content: TurnContent | None = None
+        self._sandbox = WindowsSandbox(peer, self._runtime_fact)
+        self._snapshot = SessionStatus("connecting")
         self._operations: set[asyncio.Task[object]] = set()
         self._cleanup: asyncio.Task[None] | None = None
-        self._opening = False
         self._failure_serial = 0
-        self._goal: GoalState | None = None
-        self._goal_lock = asyncio.Lock()
-        self._goal_revision = 0
-        self._sandbox = WindowsSandbox(peer, self._runtime_fact)
+
+    @property
+    def status(self) -> SessionStatus:
+        """Latest connection status, independent of conversation activity."""
+        return self._snapshot
+
+    @property
+    def selection(self) -> ModelSelection:
+        """Catalog and confirmed settings for future turns."""
+        return self._catalog.snapshot
+
+    @property
+    def ready(self) -> bool:
+        """Whether authentication and model selection permit execution preparation.
+
+        Sandbox readiness is checked separately by require_ready. Usage information
+        is display data; the server decides whether a submitted request is allowed.
+        """
+        return (
+            self._opened
+            and not self._closed
+            and self._account.authenticated
+            and bool(self.selection.model and self.selection.effort)
+        )
 
     async def open(self) -> None:
-        """Initialize authentication and obtain model choices without starting a thread.
+        """Initialize authentication and model choices without starting a thread.
 
-        Missing ChatGPT authentication emits login_required without logging in.
-        Invalid defaults or a rejected catalog request preserve the connection for
-        login or explicit model selection; sending requires a valid selection.
-        Startup failures release the transport; this connection cannot be reopened.
+        Missing authentication and invalid model defaults preserve the connection
+        for explicit login or selection. Startup failures close its transport.
 
         Raises:
-            CodexConnectionError: Authentication mode, catalog, startup or protocol
-                validation failed.
+            CodexConnectionError: Authentication mode, startup or protocol validation failed.
         """
         await self._operate(self._open())
 
     async def _open(self) -> None:
         if self._closed or self._opened or self._opening:
-            message = "接続を開始できない状態"
-            raise CodexConnectionError(message)
+            raise CodexConnectionError("接続を開始できない状態")
         self._opening = True
-        self._status("connecting")
+        self._publish_status("connecting")
         try:
             self._validate_options()
             await self._peer.start()
@@ -221,29 +157,15 @@ class CodexConnection:
             await self._peer.notify("initialized")
             self._pump = asyncio.create_task(self._consume_events(), name="gigas-codex-events")
             await self._account.read_account()
-            config = _object(
-                await self._peer.request(
-                    "config/read",
-                    {
-                        "includeLayers": False,
-                        "cwd": str(self._options.cwd),
-                    },
-                )
-            )
-            servers = _object(_object(config.get("config")).get("mcp_servers", {}))
-            for name in servers:
-                key = name if name.replace("_", "").isalnum() else json.dumps(name)
-                self._mcp_config[f"mcp_servers.{key}.enabled"] = False
             selection_detail = await self._read_models()
             if self._closed:
                 raise asyncio.CancelledError
             self._opened = True
-            self._status(
+            self._publish_status(
                 "ready" if self._account.authenticated else "login_required", selection_detail
             )
             self._refresh_usage()
-            if not self._closed:
-                self._sandbox.start_read()
+            self._sandbox.start_read()
         except (TransportError, CodexConnectionError, ValueError) as error:
             reason = (
                 str(error)
@@ -257,643 +179,122 @@ class CodexConnection:
             self._opening = False
 
     async def login(self) -> None:
-        """Begin an explicit ChatGPT login and emit its browser URL.
-
-        The account becomes authenticated only after a matching completion
-        notification and a fresh account/read response.
+        """Start explicit ChatGPT login without accessing credential files.
 
         Raises:
             CodexConnectionError: Login is unavailable, already pending or failed.
         """
         await self._operate(self._login())
 
-    async def setup_windows_sandbox(self) -> None:
-        """Explicitly prepare the elevated Windows sandbox and confirm readiness.
+    async def _login(self) -> None:
+        self._require_open()
+        if not self._account.can_login:
+            raise CodexConnectionError("ログインを開始できない状態")
+        self._publish_status("authenticating")
+        try:
+            await self._complete_login(await self._account.login())
+        except (TransportError, CodexConnectionError, ValueError):
+            failure_id = self._failure("login_required", "ログイン開始に失敗")
+            raise CodexConnectionError("ログイン開始に失敗", failure_id=failure_id) from None
 
-        Setup does not require login and never grants the runtime cwd as a workspace.
-        A lost start response keeps waiting for completion without resending. Closing
-        this connection cancels only local waiting; no OS setup cancellation is claimed.
-        Public setup failure reasons remain available in the exception and event detail.
-        Successful setup requiring a fresh connection returns normally and emits
-        SandboxEvent.reconnect_required; it does not make this connection ready.
+    async def setup_windows_sandbox(self) -> None:
+        """Prepare the elevated sandbox and confirm its public readiness.
+
+        The conversation owner decides whether this operation is appropriate while
+        executing. Closing ends local waiting, without claiming OS setup cancellation.
 
         Raises:
-            CodexConnectionError: Setup is unavailable, rejected, failed, or readiness
-                cannot be retrieved.
+            CodexConnectionError: Setup is unavailable, rejected or failed.
         """
         await self._operate(self._setup_windows_sandbox())
 
     async def _setup_windows_sandbox(self) -> None:
         self._require_open()
-        if (
-            self._start is not None
-            or self._turn_id is not None
-            or self._phase not in {"ready", "stopped", "login_required"}
-            or (self._goal is not None and self._goal.status == "active")
-        ):
-            raise CodexConnectionError("実行環境の準備を開始できない状態")
         try:
             await self._sandbox.setup()
         except ValueError as error:
             raise CodexConnectionError(str(error)) from error
 
-    async def _login(self) -> None:
-        self._require_open()
-        if not self._account.can_login:
-            raise CodexConnectionError("ログインを開始できない状態")
-        self._status("authenticating")
+    async def require_ready(self) -> None:
+        """Check authentication, model selection and confirmed sandbox readiness.
+
+        Cancellation of the caller does not close the connection or cancel the
+        shared readiness read. The conversation owns cancellation of preparation.
+
+        Raises:
+            CodexConnectionError: Authentication, model selection or sandbox is unavailable.
+        """
+        if not self.ready:
+            raise CodexConnectionError("認証とモデルの選択が必要です")
         try:
-            outcome = await self._account.login()
-            await self._complete_login(outcome)
-        except (TransportError, CodexConnectionError, ValueError):
-            message = "ログイン開始に失敗"
-            failure_id = self._failure("login_required", message)
-            raise CodexConnectionError(message, failure_id=failure_id) from None
-
-    async def send(self, prompt: str) -> str | None:
-        """Prepare the thread's current configuration and start one ordinary turn.
-
-        Args:
-            prompt: Nonempty user text. Calls are not retried after unknown acceptance.
-
-        Returns:
-            Turn ID confirmed by the public success response, even if the turn has
-            already ended. None means stopping prevented submission during preparation.
-
-        Raises:
-            MessageDeliveryError: A submitted turn has no confirmed acceptance.
-            CodexConnectionError: Preparation failed, the connection is not ready,
-                or the runtime explicitly rejected the request.
-        """
-        return await self._operate(self._send(prompt))
-
-    async def _send(self, prompt: str) -> str | None:
-        self._require_open()
-        if (
-            not self._account.authenticated
-            or self._account.usage.ordinary_usage_allowed is False
-            or not self._catalog.snapshot.model
-            or not self._catalog.snapshot.effort
-            or self._phase not in {"ready", "stopped"}
-            or not prompt.strip()
-            or self._start is not None
-            or (self._goal is not None and self._goal.status == "active")
-        ):
-            message = "ターンを開始できない状態"
-            raise CodexConnectionError(message)
-        self._status("starting")
-        self._end = None
-        self._turn = None
-        start = self._start = _Start()
-        accepted_turn: str | None = None
-        try:
-            await self._configure_thread(prompt)
-            if self._end is not None:
-                return None
-            start.submitted = True
-            self._user_items += 1
-            self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
-            result = _object(
-                await self._peer.request(
-                    "turn/start",
-                    {
-                        "threadId": self._thread_id,
-                        "input": [{"type": "text", "text": prompt}],
-                        "model": self._catalog.snapshot.model,
-                        "effort": self._catalog.snapshot.effort,
-                    },
-                )
-            )
-            turn = _object(result.get("turn"))
-            active = await self._accept_start_response(turn)
-            accepted_turn = _text(turn.get("id"))
-            if not active:
-                return accepted_turn
-            if self._end is not None:
-                self._wake_end()
-            else:
-                self._update_waiting()
-        except _ThreadPreparationError as error:
-            failure_id = self._failure(
-                self._phase if self._end is not None else "ready", str(error)
-            )
-            raise CodexConnectionError(str(error), failure_id=failure_id) from None
-        except RpcError as error:
-            if not start.submitted:
-                await self.close()
-            message = f"ターン開始が拒否された (RPC {error.code})"
-            phase = "error" if self._closed else self._phase if self._end is not None else "ready"
-            failure_id = self._failure(phase, message)
-            raise CodexConnectionError(message, failure_id=failure_id) from None
-        except asyncio.CancelledError:
-            if accepted_turn is None:
-                raise
-            if not self._closed:
-                await self.close()
-            return accepted_turn
-        except (TransportError, CodexConnectionError, OSError, UnicodeError) as error:
-            await self.close()
-            if accepted_turn is not None:
-                return accepted_turn
-            if isinstance(error, CodexConnectionError) and error.failure_id is not None:
-                raise
-            message = "ターン開始に失敗"
-            failure_id = self._failure("error", message)
-            if start.submitted:
-                raise MessageDeliveryError(message, failure_id=failure_id) from None
-            raise CodexConnectionError(message, failure_id=failure_id) from None
-        else:
-            return accepted_turn
-        finally:
-            self._start = None
-            self._wake_end()
-
-    async def set_goal(self, objective: str) -> bool:
-        """Start or update the public Goal once, preserving existing usage and pause.
-
-        Args:
-            objective: Nonempty user objective; never duplicated as a steer.
-
-        Returns:
-            True after public acceptance; False if stopped before submission.
-
-        Raises:
-            CodexConnectionError: Invalid state, preparation, or explicit rejection.
-            MessageDeliveryError: Submitted change has unknown acceptance.
-        """
-        return await self._operate(self._set_goal(objective, resume=False))
-
-    async def resume_goal(self) -> bool:
-        """Resume a retained Goal after reloading the same thread's MCP configuration.
-
-        Returns:
-            True after acceptance; False if stopped before submission.
-
-        Raises:
-            CodexConnectionError: No resumable Goal, an active turn, preparation
-                failure, or explicit RPC rejection.
-            MessageDeliveryError: Resume acceptance is unknown.
-        """
-        return await self._operate(self._set_goal(None, resume=True))
-
-    async def _set_goal(self, objective: str | None, *, resume: bool) -> bool:
-        self._require_open()
-        if (
-            not self._account.authenticated
-            or self._account.usage.ordinary_usage_allowed is False
-            or not self._catalog.snapshot.model
-            or not self._catalog.snapshot.effort
-            or self._start is not None
-            or self._phase not in {"ready", "stopped", "running", "waiting"}
-            or (objective is not None and not objective.strip())
-        ):
-            raise CodexConnectionError("目標を変更できない状態")
-        fresh = self._goal is None or self._goal.status == "complete"
-        if resume and (fresh or self._goal is None or self._goal.status == "active"):
-            raise CodexConnectionError("再開できる目標がない")
-        if (fresh or resume) and (
-            self._turn_id is not None or self._phase not in {"ready", "stopped"}
-        ):
-            raise CodexConnectionError("ターンの終了を待つ必要がある")
-        start = self._start = _Start(goal=True)
-        if fresh or resume:
-            self._end = None
-            self._turn = None
-            self._status("starting")
-        try:
-            async with self._goal_lock:
-                if fresh or resume:
-                    await self._configure_thread(
-                        objective or self._goal.objective if self._goal else objective or ""
-                    )
-                    if self._end is not None:
-                        return False
-                    if resume:
-                        await self._read_retained_goal()
-                    elif self._goal is not None:
-                        await self._goal_request("thread/goal/clear", {})
-                    await self._peer.request(
-                        "thread/settings/update",
-                        {
-                            "threadId": self._thread_id,
-                            "model": self._catalog.snapshot.model,
-                            "effort": self._catalog.snapshot.effort,
-                        },
-                    )
-                    if self._end is not None:
-                        return False
-                params: JsonObject = {}
-                if objective is not None:
-                    params["objective"] = objective
-                if fresh or resume:
-                    params["status"] = "active"
-                if objective is not None:
-                    self._user_items += 1
-                    self._emit(TextEvent(f"user-{self._user_items}", objective, "user", True))
-                start.submitted = True
-                await self._goal_request("thread/goal/set", params)
-                if self._turn_id is None and self._end is None:
-                    self._status("ready")
-                return True
-        except _ThreadPreparationError as error:
-            self._status(self._phase if self._end is not None else "ready")
-            raise CodexConnectionError(str(error)) from None
-        except RpcError as error:
-            self._status(
-                self._phase if self._end is not None or self._turn_id is not None else "ready"
-            )
-            message = f"目標の変更が拒否された (RPC {error.code})"
-            raise CodexConnectionError(message) from None
-        except TransportError:
-            await self.close()
-            if start.submitted:
-                raise MessageDeliveryError("目標の変更結果を確認できない") from None
-            raise CodexConnectionError("目標の準備に失敗") from None
-        except CodexConnectionError as error:
-            if self._turn_id is None:
-                self._status(self._phase if self._end is not None else "ready")
-            if start.submitted:
-                raise MessageDeliveryError("目標の変更結果を確認できない") from error
-            raise
-        finally:
-            self._start = None
-            self._wake_end()
-
-    async def clear_goal(self) -> None:
-        """Locally accept Goal removal and end its execution.
-
-        SessionStatus reports actual completion or failure. Returning does not
-        confirm Goal mutation, turn completion, or terminal cleanup.
-
-        Raises:
-            CodexConnectionError: The connection is not open.
-        """
-        self._require_open()
-        self._request_end("interrupt", goal_action="clear")
-
-    def _accept_goal(self, value: "JsonValue") -> None:
-        if value is None:
-            goal = None
-        else:
-            data = _object(value)
-            status = data.get("status")
-            if (
-                not isinstance(status, str)
-                or status
-                not in {"active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"}
-                or data.get("threadId") != self._thread_id
-            ):
-                raise CodexConnectionError("目標の応答形式が不正")
-            tokens, seconds = data.get("tokensUsed"), data.get("timeUsedSeconds")
-            if type(tokens) is not int or type(seconds) is not int:
-                raise CodexConnectionError("目標の利用量が不正")
-            goal = GoalState(_text(data.get("objective")), status, tokens, seconds)
-        if goal != self._goal:
-            became_inactive = (
-                self._goal is not None
-                and self._goal.status == "active"
-                and (goal is None or goal.status != "active")
-            )
-            self._goal = goal
-            self._emit(GoalEvent(goal))
-            if became_inactive:
-                self._request_end(
-                    "complete" if goal is not None and goal.status == "complete" else "interrupt"
-                )
-
-    async def _read_retained_goal(self) -> None:
-        result = _object(await self._peer.request("thread/goal/get", {"threadId": self._thread_id}))
-        self._accept_goal(result.get("goal"))
-        if self._goal is None or self._goal.status == "complete":
-            raise CodexConnectionError("保持した目標を確認できない")
-
-    async def _goal_request(self, method: str, params: "JsonObject") -> None:
-        revision = self._goal_revision
-        result = _object(
-            await self._peer.request(
-                method, {"threadId": self._thread_id, "origin": "user", **params}
-            )
-        )
-        if method == "thread/goal/clear" and not isinstance(result.get("cleared"), bool):
-            raise CodexConnectionError("目標の破棄結果が不正")
-        if method == "thread/goal/set" and not isinstance(result.get("goal"), dict):
-            raise MessageDeliveryError("目標の変更結果を確認できない")
-        if revision == self._goal_revision:
-            self._accept_goal(None if method == "thread/goal/clear" else result.get("goal"))
-
-    async def _pause_goal(self, *, clear: bool) -> None:
-        async with self._goal_lock:
-            if self._thread_id is None or self._goal is None:
-                return
-            if clear:
-                await self._goal_request("thread/goal/clear", {})
-            elif self._goal.status == "active":
-                await self._goal_request("thread/goal/set", {"status": "paused"})
-
-    async def steer(self, prompt: str, expected_turn_id: str) -> str:
-        """Submit an instruction to exactly the turn selected by the caller.
-
-        Args:
-            prompt: Nonempty text, submitted once without preparing another turn.
-            expected_turn_id: Active turn identity captured when the user submits.
-
-        Returns:
-            Turn ID confirmed by the public success reply. Acceptance does not
-            resolve questions, interrupt input, or guarantee instruction compliance.
-
-        Raises:
-            MessageDeliveryError: Runtime acceptance could not be confirmed.
-            CodexConnectionError: The target is stale, stopping, invalid, or rejected.
-        """
-        return await self._operate(self._steer(prompt, expected_turn_id))
-
-    async def _steer(self, prompt: str, expected_turn_id: str) -> str:
-        self._require_open()
-        if (
-            not prompt.strip()
-            or not expected_turn_id
-            or self._turn_id != expected_turn_id
-            or self._end is not None
-        ):
-            message = "このターンは追加指示を受け付けない"
-            raise CodexConnectionError(message)
-        self._user_items += 1
-        self._emit(TextEvent(f"user-{self._user_items}", prompt, "user", True))
-        try:
-            result = _object(
-                await self._peer.request(
-                    "turn/steer",
-                    {
-                        "threadId": self._thread_id,
-                        "expectedTurnId": expected_turn_id,
-                        "input": [{"type": "text", "text": prompt}],
-                    },
-                )
-            )
-        except RpcError as error:
-            message = f"追加指示が拒否された (RPC {error.code})"
-            raise CodexConnectionError(message) from None
-        except (TransportError, CodexConnectionError):
-            pass
-        else:
-            if result.get("turnId") == expected_turn_id:
-                return expected_turn_id
-        await self.close()
-        message = "追加指示の受付結果を確認できない"
-        failure_id = self._failure("error", message)
-        raise MessageDeliveryError(message, failure_id=failure_id) from None
-
-    async def answer(
-        self,
-        token: str,
-        *,
-        decision: str | None = None,
-        answers: "Mapping[str, str] | None" = None,
-    ) -> None:
-        """Submit one explicit answer to a still-live request.
-
-        Args:
-            token: Connection-unique HumanRequest token received by the event callback.
-            decision: One advertised one-time approval decision, never inferred.
-            answers: One nonempty answer per question ID for a question request.
-
-        Raises:
-            AnswerDeliveryError: Transport completion is unknown; do not retry.
-            CodexConnectionError: The request is stale or the answer is invalid;
-                no response was submitted to the transport.
-
-        Returning confirms transport write completion only, not peer acceptance
-        or execution of an approved operation. Cancellation leaves delivery unknown.
-        """
-        await self._operate(self._answer(token, decision=decision, answers=answers))
-
-    async def _answer(
-        self, token: str, *, decision: str | None, answers: "Mapping[str, str] | None"
-    ) -> None:
-        self._require_open()
-        if self._end is not None:
-            raise CodexConnectionError("この要求は回答を受け付けない")
-        try:
-            request, payload = self._requests.take_answer(token, decision, answers)
+            await self._sandbox.require_ready()
         except ValueError as error:
             raise CodexConnectionError(str(error)) from error
-        self._emit(RequestResolved(token))
-        if decision == "cancel":
-            self._request_end("interrupt", goal_action="pause")
+        self._require_open()
+
+    def propose_model(self, model: str, effort: str) -> ModelSelection:
+        """Validate settings without changing the confirmed selection.
+
+        Raises:
+            CodexConnectionError: Authentication or the proposed selection is invalid.
+        """
+        self._require_open()
+        if not self._account.authenticated:
+            raise CodexConnectionError("モデル・推論レベルを選択できない状態")
         try:
-            await self._peer.respond(request.rpc_id, payload)
-        except TransportError:
-            await self.close()
-            message = "回答の送信結果を確認できない"
-            failure_id = self._failure("error", message)
-            raise AnswerDeliveryError(message, failure_id=failure_id) from None
-        self._update_waiting()
+            return self._catalog.propose(model, effort)
+        except ValueError as error:
+            raise CodexConnectionError(str(error)) from error
 
-    async def stop(self) -> None:
-        """Accept a local end request and immediately close further input.
+    def commit_model(self, selection: ModelSelection) -> None:
+        """Publish validated settings after the conversation applies required RPCs."""
+        self._require_open()
+        self._catalog.commit(selection)
+        self._publish_status(self.status.phase)
 
-        Returning confirms local acceptance only. SessionStatus reports actual
-        completion or failure; no RPC or turn completion is implied.
+    async def request(self, method: str, params: "JsonObject | None") -> "JsonValue":
+        """Send one RPC without retries or conversation state changes.
 
         Raises:
             CodexConnectionError: The connection is not open.
+            TransportError: The request was rejected or its result is unknown.
         """
         self._require_open()
-        self._request_end("interrupt", goal_action="pause")
+        return await self._peer.request(method, params)
 
-    @property
-    def _turn_id(self) -> str | None:
-        return self._turn.id if self._turn is not None and self._turn.terminal is None else None
+    async def respond(self, request_id: "RpcId", result: "JsonValue") -> None:
+        """Write a response under the original server request ID.
 
-    def _request_end(
-        self,
-        reason: Literal["complete", "interrupt", "close"],
-        *,
-        goal_action: Literal["none", "pause", "clear"] = "none",
-    ) -> None:
-        end = self._end
-        if end is not None and end.reason == "close" and reason != "close":
-            return
-        if end is None:
-            end = self._end = _End(reason, self._turn)
-        elif reason != "complete" and reason != end.reason:
-            end.reason = reason
-            end.done = False
-        if reason == "close" and self._turn is not end.target:
-            end.target = self._turn
-            end.swept = False
-        if goal_action != end.goal_action and (
-            goal_action == "clear" or (goal_action == "pause" and end.goal_action == "none")
-        ):
-            end.goal_action = goal_action
-            end.done = False
-        self._expire_requests()
-        if not end.error and not end.done:
-            self._status("stopping")
-        self._wake_end()
+        Raises:
+            CodexConnectionError: The connection is not open.
+            TransportError: Response delivery could not be confirmed.
+        """
+        self._require_open()
+        await self._peer.respond(request_id, result)
 
-    def _wake_end(self) -> None:
-        self._end_changed.set()
-        end = self._end
-        if (
-            end is not None
-            and not end.done
-            and (not end.error or end.reason == "close")
-            and self._end_task is None
-        ):
-            self._end_task = asyncio.create_task(self._run_end(end), name="gigas-codex-end")
-
-    async def _run_end(self, end: _End) -> None:
-        goal: asyncio.Task[None] | None = None
-        interrupt: asyncio.Task[None] | None = None
-        sweep: asyncio.Task[None] | None = None
-        sweep_target: _Turn | None = None
-
-        def launch(operation: "Coroutine[object, object, None]") -> asyncio.Task[None]:
-            task = asyncio.create_task(operation)
-            task.add_done_callback(lambda _: self._end_changed.set())
-            return task
-
-        try:
-            while True:
-                self._end_changed.clear()
-                closing = end.reason == "close"
-                if closing and goal is not None:
-                    goal.cancel()
-                    await asyncio.gather(goal, return_exceptions=True)
-                    goal = None
-                for task in (goal, interrupt, sweep):
-                    if task is not None and task.done():
-                        try:
-                            task.result()
-                        except (TransportError, CodexConnectionError):
-                            if not end.error:
-                                end.error = "目標の停止または端末処理の終了を確認できない"
-                                self._failure("error", end.error)
-                if goal is not None and goal.done():
-                    goal = None
-                if interrupt is not None and interrupt.done():
-                    interrupt = None
-                if sweep is not None and sweep.done():
-                    if sweep_target is not end.target:
-                        end.swept = False
-                    sweep = None
-                target = end.target
-                if not end.error or closing:
-                    if not closing and goal is None and end.goal_sent != end.goal_action:
-                        end.goal_sent = end.goal_action
-                        goal = launch(self._pause_goal(clear=end.goal_action == "clear"))
-                    if (
-                        interrupt is None
-                        and end.reason != "complete"
-                        and target is not None
-                        and target.terminal is None
-                        and not target.interrupted
-                    ):
-                        target.interrupted = True
-                        interrupt = launch(self._interrupt_turn(target))
-                    if (
-                        sweep is None
-                        and not end.swept
-                        and (
-                            (closing and interrupt is None)
-                            or (
-                                not closing
-                                and self._start is None
-                                and (target is None or target.terminal is not None)
-                            )
-                        )
-                    ):
-                        sweep_target = target
-                        end.swept = True
-                        sweep = launch(self._terminate_listed_commands())
-                if goal is None and interrupt is None and sweep is None:
-                    if closing:
-                        end.done = True
-                        return
-                    if end.error:
-                        return
-                    if (
-                        self._start is None
-                        and (end.target is None or end.target.terminal is not None)
-                        and end.swept
-                        and end.goal_sent == end.goal_action
-                    ):
-                        end.done = True
-                        self._status("ready" if end.reason == "complete" else "stopped")
-                        return
-                await self._end_changed.wait()
-        finally:
-            pending = [task for task in (goal, interrupt, sweep) if task is not None]
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            self._end_task = None
-
-    async def _interrupt_turn(self, turn: _Turn) -> None:
-        if turn.terminal is None:
-            await self._peer.request(
-                "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}
-            )
-
-    async def _terminate_listed_commands(self) -> None:
-        if self._thread_id is None:
-            return
-        for process_id in await self._list_thread_commands():
-            result = _object(
-                await self._peer.request(
-                    "thread/backgroundTerminals/terminate",
-                    {"threadId": self._thread_id, "processId": process_id},
-                )
-            )
-            if result.get("terminated") is not True:
-                raise CodexConnectionError("端末処理の終了を確認できない")
-        if await self._list_thread_commands():
-            raise CodexConnectionError("スレッドに端末処理が残っている")
-
-    async def _list_thread_commands(self) -> list[str]:
-        process_ids: list[str] = []
-        cursor: str | None = None
-        while True:
-            params: JsonObject = {"threadId": self._thread_id}
-            if cursor is not None:
-                params["cursor"] = cursor
-            result = _object(await self._peer.request("thread/backgroundTerminals/list", params))
-            data = result.get("data")
-            if not isinstance(data, list):
-                raise CodexConnectionError("端末一覧の応答形式が不正")
-            process_ids.extend(_text(_object(item).get("processId")) for item in data)
-            next_cursor = result.get("nextCursor")
-            if next_cursor is None:
-                return process_ids
-            cursor = _text(next_cursor)
+    async def reject(self, request_id: "RpcId", code: int, message: str) -> None:
+        """Reject a server request selected by the conversation's request handler."""
+        self._require_open()
+        await self._peer.reject(request_id, code, message)
 
     async def close(self) -> None:
-        """Stop waiting for turn completion and close owned operations and transport.
+        """Close authentication work, event reception and the owned RPC transport.
 
-        In-flight interruption and public-terminal cleanup are shared. Preparation,
-        start acceptance and Goal-lock waits are cancelled. Final text and Goal
-        persistence are not guaranteed. Concurrent callers share cleanup;
-        cancelling a caller does not cancel it.
+        Concurrent callers share cleanup. Cancellation of a waiting caller does not
+        cancel it. Conversation sends, answers, input and archives belong to the
+        service's enclosing shutdown; this method never calls conversation stop.
         """
+        await asyncio.shield(self._begin_close())
+
+    def _begin_close(self) -> asyncio.Task[None]:
         if self._cleanup is None:
             self._closed = True
             self._account.cancel_pending()
             self._sandbox.cancel_pending()
-            self._expire_requests()
-            self._flush_dialogue()
-            self._request_end("close")
             self._cleanup = asyncio.create_task(
                 self._shutdown(asyncio.current_task()), name="gigas-codex-close"
             )
-        await asyncio.shield(self._cleanup)
-        current = asyncio.current_task()
-        pending = [task for task in self._operations if task is not current and not task.done()]
-        if self._pump is not None and self._pump is not current and not self._pump.done():
-            pending.append(self._pump)
-        if pending:
-            await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
+        return self._cleanup
 
     async def _shutdown(self, origin: asyncio.Task[object] | None) -> None:
         pending = [task for task in self._operations if task is not origin]
@@ -901,19 +302,17 @@ class CodexConnection:
             pending.append(self._pump)
         for task in pending:
             task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         try:
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            if self._end_task is not None:
-                await self._end_task
-        finally:
             await self._account.close()
             await self._sandbox.close()
+        finally:
             await self._peer.close()
-            self._status("closed")
+        self._publish_status("closed")
 
     async def _operate[T](self, operation: "Coroutine[object, object, T]") -> T:
-        task = asyncio.create_task(operation, name="gigas-codex-operation")
+        task = asyncio.create_task(operation, name="gigas-codex-connection-operation")
         self._operations.add(task)
         try:
             return await task
@@ -926,162 +325,38 @@ class CodexConnection:
 
     def _require_open(self) -> None:
         if not self._opened or self._closed:
-            message = "Codexに接続されていない"
-            raise CodexConnectionError(message)
+            raise CodexConnectionError("Codexに接続されていない")
 
     def _validate_options(self) -> None:
         if self._options.auth_method != "chatgpt":
-            message = "APIキー認証は未対応"
-            raise CodexConnectionError(message)
+            raise CodexConnectionError("APIキー認証は未対応")
         if not self._options.cwd.is_absolute() or not self._options.cwd.is_dir():
-            message = "作業フォルダーが無効"
-            raise CodexConnectionError(message)
-
-    async def _configure_thread(self, prompt: str) -> None:
-        try:
-            context = await self._prepare_turn(prompt, self._thread_id)
-            memory = context.cwd / "memory"
-            valid_directory = context.cwd.is_absolute() and memory.is_dir()
-        except Exception as error:
-            message = "チャットの実行準備に失敗"
-            raise _ThreadPreparationError(message) from error
-        if not valid_directory:
-            message = "チャットの記録先または記憶の準備が不正"
-            raise _ThreadPreparationError(message)
-        if self._end is not None:
-            return
-        try:
-            await self._sandbox.require_ready()
-        except ValueError as error:
-            if self._end is not None:
-                return
-            raise _ThreadPreparationError(str(error)) from error
-        if self._end is not None:
-            return
-        instructions = read_play_instructions()
-        if not instructions.strip():
-            message = "共通指示が空"
-            raise CodexConnectionError(message)
-        instructions += (
-            f"\n\n観測の記録先: {context.cwd}\n"
-            "observeが返す観測IDの画像はobservations/<観測ID>.png、"
-            "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
-            "返された画像と保存画像は同じPNGです。保存は非同期なので、"
-            "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
-            "必要な過去画像は保存されている場合に参照してください。"
-            "\n案内は ../guide.md、現状メモは current.md、知識は notes/。"
-            "書込はこのmemory内だけに限定し、親の原記録は編集しない。"
-        )
-        config = dict(self._mcp_config)
-        if context.cwd != self._options.cwd:
-            result = _object(
-                await self._peer.request(
-                    "config/read", {"includeLayers": False, "cwd": str(context.cwd)}
-                )
-            )
-            servers = _object(_object(result.get("config")).get("mcp_servers", {}))
-            for name in servers:
-                key = name if name.replace("_", "").isalnum() else json.dumps(name)
-                config[f"mcp_servers.{key}.enabled"] = False
-        config.update(context.mcp_config)
-        if self._end is not None:
-            return
-        config.update(
-            {
-                "sandbox_workspace_write.writable_roots": [],
-                "sandbox_workspace_write.network_access": False,
-                "sandbox_workspace_write.exclude_tmpdir_env_var": True,
-                "sandbox_workspace_write.exclude_slash_tmp": True,
-            }
-        )
-        params: JsonObject = {
-            "cwd": str(memory),
-            "model": self._catalog.snapshot.model,
-            "developerInstructions": instructions,
-            "sandbox": "workspace-write",
-            "approvalPolicy": "on-request",
-            "approvalsReviewer": "user",
-            "config": config,
-            "runtimeWorkspaceRoots": [str(memory)],
-        }
-        if self._thread_id is None:
-            params["ephemeral"] = False
-            method = "thread/start"
-        else:
-            result = _object(
-                await self._peer.request("thread/unsubscribe", {"threadId": self._thread_id})
-            )
-            if result.get("status") not in ("unsubscribed", "notSubscribed", "notLoaded"):
-                message = "Codexのチャット購読解除を確認できない"
-                raise CodexConnectionError(message)
-            if self._end is not None:
-                return
-            params["threadId"] = self._thread_id
-            params["excludeTurns"] = True
-            method = "thread/resume"
-        result = _object(await self._peer.request(method, params))
-        sandbox = _object(result.get("sandbox"))
-        expected_sandbox: JsonObject = {
-            "type": "workspaceWrite",
-            "writableRoots": [],
-            "networkAccess": False,
-            "excludeTmpdirEnvVar": True,
-            "excludeSlashTmp": True,
-        }
-        if (
-            result.get("approvalPolicy") != "on-request"
-            or result.get("approvalsReviewer") != "user"
-            or result.get("model") != self._catalog.snapshot.model
-            or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
-            or result.get("cwd") != str(memory)
-        ):
-            message = "Codexの実行設定が要求と不一致"
-            raise CodexConnectionError(message)
-        thread_id = _text(_object(result.get("thread")).get("id"))
-        if self._thread_id is not None and thread_id != self._thread_id:
-            message = "CodexのチャットIDが要求と不一致"
-            raise CodexConnectionError(message)
-        if self._thread_id is None:
-            try:
-                await self._on_thread_started(thread_id)
-            except Exception as error:
-                message = "チャットの対応記録を保存できない"
-                raise _ThreadPreparationError(message) from error
-        self._thread_id = thread_id
+            raise CodexConnectionError("作業フォルダーが無効")
 
     def _runtime_fact(
         self, event: AccountInfo | LoginEvent | UsageEvent | ModelSelection | SandboxEvent
     ) -> None:
-        if self._closed:
-            return
-        self._emit(event)
-        if (
-            isinstance(event, UsageEvent)
-            and event.ordinary_usage_allowed is False
-            and self._end is None
-        ):
-            self._failure("stopping", "利用制限により続行できない")
-            self._request_end("interrupt", goal_action="pause")
+        if not self._closed:
+            self._emit(event)
 
     def _failure(self, phase: "ConnectionPhase", detail: str) -> int:
         self._failure_serial += 1
-        self._status(phase, detail, failure_id=self._failure_serial)
+        self._publish_status(phase, detail, self._failure_serial)
         return self._failure_serial
 
-    def _status(
-        self, phase: "ConnectionPhase", detail: str = "", *, failure_id: int | None = None
+    def _publish_status(
+        self, phase: "ConnectionPhase", detail: str = "", failure_id: int | None = None
     ) -> None:
-        self._phase = phase
-        self._emit(
-            SessionStatus(
-                phase,
-                self._catalog.snapshot.model,
-                self._catalog.snapshot.effort,
-                self._account.authenticated,
-                detail,
-                failure_id,
-            )
+        selection = self.selection
+        self._snapshot = SessionStatus(
+            phase,
+            selection.model,
+            selection.effort,
+            self._account.authenticated,
+            detail,
+            failure_id,
         )
+        self._emit(self._snapshot)
 
     def _refresh_usage(self) -> None:
         if self._opened and not self._closed:
@@ -1093,111 +368,39 @@ class CodexConnection:
         except ValueError as error:
             raise CodexConnectionError(str(error)) from error
 
-    async def select_model(self, model: str, effort: str) -> None:
-        """Select validated values for future turns without changing an active turn.
-
-        A retained Goal also receives the public thread settings update before
-        the selection is acknowledged. Ordinary turns use their next start parameters.
-
-        Args:
-            model: Model from this connection's catalog.
-            effort: Reasoning level supported by that model.
-
-        Raises:
-            CodexConnectionError: Selection is unavailable or not in the catalog.
-        """
-        self._require_open()
-        if self._start is not None or not self._account.authenticated:
-            raise CodexConnectionError("モデル・推論レベルを選択できない状態")
-        try:
-            selection = self._catalog.propose(model, effort)
-        except ValueError as error:
-            raise CodexConnectionError(str(error)) from error
-        if self._thread_id is not None and self._goal is not None:
-            try:
-                await self._peer.request(
-                    "thread/settings/update",
-                    {"threadId": self._thread_id, "model": model, "effort": effort},
-                )
-            except TransportError as error:
-                raise CodexConnectionError("次ターン設定の反映を確認できない") from error
-        self._catalog.commit(selection)
-        self._status(self._phase)
-
     async def _consume_events(self) -> None:
         try:
             while not self._closed:
                 event = await self._peer.next_event()
                 if isinstance(event, TransportClosed):
-                    if not self._closed:
-                        await self.close()
-                        self._failure("error", "Codexとの接続が終了")
+                    self._begin_close()
+                    self._failure("error", "Codexとの接続が終了")
                     return
-                if isinstance(event, ServerRequest):
-                    await self._server_request(event)
-                elif isinstance(event, RpcNotification):
-                    await self._notification(event)
-        except (TransportError, CodexConnectionError) as error:
-            await self.close()
-            if not isinstance(error, CodexConnectionError) or error.failure_id is None:
-                self._failure("error", "Codexの通知処理に失敗")
+                if isinstance(event, RpcNotification):
+                    params = event.params or {}
+                    if event.method == "windowsSandbox/setupCompleted":
+                        self._sandbox.accept_completion(params)
+                        continue
+                    if event.method == "account/login/completed":
+                        task = asyncio.create_task(self._login_completed(params))
+                        self._operations.add(task)
+                        task.add_done_callback(self._operations.discard)
+                        continue
+                    if event.method == "account/rateLimits/updated":
+                        self._refresh_usage()
+                        continue
+                self._emit(event)
+        except (TransportError, CodexConnectionError, ValueError):
+            self._begin_close()
+            self._failure("error", "Codexの通知処理に失敗")
 
-    async def _notification(self, event: RpcNotification) -> None:
-        params = event.params or {}
-        if event.method == "windowsSandbox/setupCompleted":
+    async def _login_completed(self, params: "JsonObject") -> None:
+        try:
+            outcome = await self._account.accept_login_completion(params)
+            await self._complete_login(outcome)
+        except (TransportError, CodexConnectionError, ValueError):
             if not self._closed:
-                self._sandbox.accept_completion(params)
-            return
-        if event.method == "account/login/completed":
-            if not self._closed:
-                try:
-                    outcome = await self._account.accept_login_completion(params)
-                except ValueError as error:
-                    raise CodexConnectionError(str(error)) from error
-                await self._complete_login(outcome)
-            return
-        if event.method == "account/rateLimits/updated":
-            # Rolling updates may omit account metadata; obtain the full snapshot
-            # without blocking the consumer or inferring permission from one bucket.
-            self._refresh_usage()
-            return
-        if params.get("threadId") != self._thread_id:
-            return
-        if event.method == "error":
-            if (
-                params.get("turnId") == self._turn_id
-                and self._turn_id is not None
-                and params.get("willRetry") is False
-                and self._end is None
-            ):
-                self._failure("stopping", "ターンが失敗")
-                await self.stop()
-            return
-        if event.method in {"thread/goal/updated", "thread/goal/cleared"}:
-            self._goal_revision += 1
-            self._accept_goal(params.get("goal") if event.method.endswith("updated") else None)
-            return
-        if event.method == "serverRequest/resolved":
-            request_id = params.get("requestId")
-            if isinstance(request_id, str | int) and not isinstance(request_id, bool):
-                request = self._requests.resolve_rpc_id(request_id)
-                if request is not None:
-                    self._emit(RequestResolved(request.token))
-                    self._update_waiting()
-        elif event.method in {"turn/started", "turn/completed"}:
-            turn = _object(params.get("turn"))
-            if event.method == "turn/started":
-                self._adopt_turn(_text(turn.get("id")))
-            if turn.get("id") != self._turn_id:
-                return
-            if event.method == "turn/completed":
-                await self._complete_turn(turn)
-            elif self._end is not None:
-                self._wake_end()
-            else:
-                self._update_waiting()
-        elif self._turn_id is not None and params.get("turnId") == self._turn_id:
-            await self._item_notification(event.method, params)
+                self._failure("login_required", "ログイン完了を確認できない")
 
     async def _complete_login(self, outcome: bool | None) -> None:
         if self._closed or outcome is None:
@@ -1205,136 +408,9 @@ class CodexConnection:
         if not outcome:
             self._failure("login_required", "ログインに失敗")
             return
-        selection_detail = await self._read_models()
+        detail = await self._read_models()
         if not self._closed:
-            self._status(
-                "ready" if self._account.authenticated else "login_required", selection_detail
+            self._publish_status(
+                "ready" if self._account.authenticated else "login_required", detail
             )
             self._refresh_usage()
-
-    def _adopt_turn(self, turn_id: str) -> None:
-        if self._turn is not None and self._turn.id == turn_id:
-            return
-        accepting = (
-            self._start is not None
-            or self._end is not None
-            or (self._goal is not None and self._goal.status == "active")
-        )
-        if accepting and self._thread_id is not None and self._turn_id is None:
-            turn = self._turn = _Turn(turn_id)
-            if self._start is not None and not self._start.goal:
-                self._start.turn = turn
-            self._content = TurnContent(turn_id)
-            self._emit(TurnStarted(turn_id))
-            if self._end is not None and not self._end.error:
-                self._end.target = turn
-                if self._end.reason != "close":
-                    self._end.reason = "interrupt"
-                self._end.swept = False
-                self._end.done = False
-                self._status("stopping")
-                self._wake_end()
-
-    async def _accept_start_response(self, turn: "JsonObject") -> bool:
-        turn_id = _text(turn.get("id"))
-        pending = self._start
-        if pending is not None and pending.turn is not None:
-            if pending.turn.id != turn_id:
-                raise CodexConnectionError("ターンIDが不一致")
-            if pending.turn.terminal is not None:
-                return False
-        self._adopt_turn(turn_id)
-        if self._turn_id != turn_id:
-            raise CodexConnectionError("ターンIDが不一致")
-        if turn.get("status") in {"completed", "interrupted", "failed"}:
-            await self._complete_turn(turn)
-            return False
-        return True
-
-    async def _complete_turn(self, turn: "JsonObject") -> None:
-        current = self._turn
-        if current is None or current.id != _text(turn.get("id")) or current.terminal is not None:
-            return
-        current.terminal = _text(turn.get("status"))
-        self._flush_dialogue()
-        for request in self._requests.finish():
-            self._emit(RequestResolved(request.token))
-        self._content = None
-        if current.terminal in {"failed", "interrupted"}:
-            self._request_end("interrupt", goal_action="pause")
-        if self._end is not None:
-            self._wake_end()
-        else:
-            self._status("ready")
-        if current.terminal == "failed":
-            self._failure(self._phase, "ターンが失敗")
-
-    async def _item_notification(self, method: str, params: "JsonObject") -> None:
-        if self._content is not None:
-            try:
-                events = tuple(self._content.accept(method, params))
-            except ValueError as error:
-                raise CodexConnectionError(str(error)) from error
-            for event in events:
-                self._emit(event)
-        if method == "item/fileChange/patchUpdated":
-            await self._update_file_changes(_text(params.get("itemId")), params.get("changes"))
-        elif method in {"item/started", "item/completed"}:
-            item = _object(params.get("item"))
-            if item.get("type") == "fileChange":
-                await self._update_file_changes(_text(item.get("id")), item.get("changes"))
-
-    def _flush_dialogue(self) -> None:
-        content, self._content = self._content, None
-        if content is not None:
-            for event in content.finish():
-                self._emit(event)
-
-    async def _update_file_changes(self, item_id: str, changes: "JsonValue") -> None:
-        requests = self._requests.update_file_changes(item_id, changes)
-        if requests is None:
-            return
-        for request in requests:
-            self._resolve(request.token)
-            await self._peer.reject(request.rpc_id, -32602, "Approval details changed")
-        self._update_waiting()
-
-    async def _server_request(self, event: ServerRequest) -> None:
-        methods = {
-            "item/tool/requestUserInput": "question",
-            "item/commandExecution/requestApproval": "command",
-            "item/fileChange/requestApproval": "file",
-        }
-        if event.method not in methods:
-            await self._peer.reject(event.id, -32601, "Unsupported request")
-            return
-        params = event.params or {}
-        if (
-            self._end is not None
-            or params.get("threadId") != self._thread_id
-            or params.get("turnId") != self._turn_id
-            or self._turn_id is None
-        ):
-            return
-        try:
-            request = self._requests.accept(event, params)
-        except ValueError as error:
-            await self._peer.reject(event.id, -32602, "Invalid request parameters")
-            self._failure(self._phase, str(error))
-            return
-        if request is None:
-            return
-        self._emit(request)
-        self._update_waiting()
-
-    def _resolve(self, token: str) -> None:
-        if self._requests.resolve(token) is not None:
-            self._emit(RequestResolved(token))
-
-    def _expire_requests(self) -> None:
-        for request in self._requests.expire():
-            self._emit(RequestResolved(request.token))
-
-    def _update_waiting(self) -> None:
-        if self._turn_id is not None and self._end is None:
-            self._status("waiting" if self._requests.has_blocking else "running")

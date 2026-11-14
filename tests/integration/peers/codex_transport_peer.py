@@ -285,14 +285,15 @@ def dialogue() -> None:
             },
         }
     )
-    steering = json.loads(sys.stdin.buffer.readline())
-    assert steering["method"] == "turn/steer"
-    assert steering["params"] == {
+    additional = json.loads(sys.stdin.buffer.readline())
+    assert additional["method"] == "turn/start"
+    assert additional["params"] == {
         "threadId": thread_id,
-        "expectedTurnId": turn_id,
         "input": [{"type": "text", "text": "質問は保留し、門の前で止まる"}],
+        "model": "fixture-model",
+        "effort": "low",
     }
-    send({"id": steering["id"], "result": {"turnId": turn_id}})
+    send({"id": additional["id"], "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
     answer = json.loads(sys.stdin.buffer.readline())
     answer_matches = answer == {
         "id": "dialogue-question",
@@ -346,10 +347,7 @@ def dialogue() -> None:
         },
     )
     notice("turn/completed", {"turn": {"id": turn_id, "status": "completed"}})
-    for raw in sys.stdin.buffer:
-        request = json.loads(raw)
-        assert request["method"] == "thread/backgroundTerminals/list"
-        send({"id": request["id"], "result": {"data": [], "nextCursor": None}})
+    sys.stdin.buffer.read()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Exercise the product connection against a signed-in Codex runtime.
+"""Exercise product conversation execution against a signed-in Codex runtime.
 
 This opt-in command sends a small real model request. It never logs credentials
 or accepts an execution approval. It is not part of the offline CI suite.
@@ -9,18 +9,25 @@ import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
+from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.models import (
     ConnectionOptions,
+    DialogueEvent,
     HumanRequest,
     RequestResolved,
     SessionStatus,
     TextEvent,
 )
+from gigas.services._conversation_execution import ConversationExecution
+from gigas.services._conversation_resources import ConversationResources
+from gigas.services.input import InputService
 
 if TYPE_CHECKING:
+    from gigas.runtime.codex.connection import RuntimeEvent
     from gigas.runtime.codex.models import ConnectionEvent
 
 PROMPTS = {
@@ -42,7 +49,8 @@ PROMPTS = {
     ),
     "file-approval": (
         "This is a file-approval integration check. Use apply_patch to add only the file "
-        "gigas-u02-approval-check.txt in the current directory, containing GIGAS_U02_FILE. "
+        "../gigas-u02-approval-check.txt outside the writable memory directory, "
+        "containing GIGAS_U02_FILE. "
         "Request the required approval before writing. If permission is declined, "
         "report that and finish without trying again. Do not use shell commands."
     ),
@@ -55,30 +63,79 @@ def _require(condition: bool, message: str) -> None:
 
 
 async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, object]:
-    probe_file = cwd / "gigas-u02-approval-check.txt"
-    if scenario == "file-approval":
-        _require(not probe_file.exists(), "The file-approval probe path already exists")
-    events: asyncio.Queue[ConnectionEvent] = asyncio.Queue()
     baseline = asyncio.all_tasks()
+    events: asyncio.Queue[ConnectionEvent] = asyncio.Queue()
+    archive = cwd / "checks" / str(uuid4())
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    probe_file = archive / "gigas-u02-approval-check.txt"
+    storage_failures: list[str] = []
+    resources = ConversationResources(
+        cwd,
+        CaptureReader(CaptureSnapshot),
+        lambda _operation, _path, reason: storage_failures.append(reason),
+    )
+    inputs = InputService()
+    closing: asyncio.Task[None] | None = None
+
+    def receive(event: "RuntimeEvent") -> None:
+        execution.receive(event)
+
     connection = create_connection(
-        ConnectionOptions(cwd=cwd, effort="low"), events.put_nowait, codex_home=home
+        ConnectionOptions(cwd=cwd, effort="low"), receive, codex_home=home
+    )
+
+    async def release() -> None:
+        outcomes: list[object] = list(
+            await asyncio.gather(
+                connection.close(), resources.close_endpoint(), return_exceptions=True
+            )
+        )
+        outcomes.extend(
+            await asyncio.gather(execution.drain(), inputs.drain_input(), return_exceptions=True)
+        )
+        try:
+            await resources.close()
+        finally:
+            await inputs.close()
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+
+    def request_close() -> asyncio.Task[None]:
+        nonlocal closing
+        if closing is None:
+            closing = asyncio.create_task(release())
+            execution.connection_closing()
+            inputs.stop()
+        return closing
+
+    execution = ConversationExecution(
+        connection,
+        resources,
+        inputs,
+        events.put_nowait,
+        closing=lambda: closing is not None,
+        request_close=request_close,
     )
     assistant_text: dict[str, str] = {}
     requested = False
     resolved = False
     stale_rejected = False
     approval_decision = ""
-    final_phase = ""
+    final_status = ""
+    stop_completed = False
     observed_model = ""
     try:
+        await resources.select_project(archive, create=True)
         await connection.open()
         while not events.empty():
             initial = events.get_nowait()
             if isinstance(initial, SessionStatus):
                 _require(initial.phase != "login_required", "ChatGPT login is required")
                 observed_model = initial.model or observed_model
-        await connection.send(PROMPTS[scenario])
         async with asyncio.timeout(120):
+            turn_id = await execution.send(PROMPTS[scenario])
+            _require(turn_id is not None, "Message was not submitted")
             while True:
                 event = await events.get()
                 if isinstance(event, TextEvent) and event.role == "assistant":
@@ -89,9 +146,10 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                     # Keep the real request pending while the connection keeps receiving.
                     await asyncio.sleep(2)
                     if scenario == "interrupt":
-                        await connection.stop()
+                        await execution.stop()
+                        stop_completed = True
                         try:
-                            await connection.answer(event.token, answers={})
+                            await execution.answer(event.token, answers={})
                         except CodexConnectionError:
                             stale_rejected = True
                     elif scenario == "question":
@@ -102,7 +160,7 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                             )
                             for question in event.questions
                         }
-                        await connection.answer(event.token, answers=answers)
+                        await execution.answer(event.token, answers=answers)
                     elif scenario in {"approval", "file-approval"}:
                         _require(
                             event.kind == ("file" if scenario == "file-approval" else "command"),
@@ -115,40 +173,52 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                             bool(approval_decision),
                             f"Expected a rejectable approval: {event.kind}, {event.decisions}",
                         )
-                        await connection.answer(event.token, decision=approval_decision)
+                        await execution.answer(event.token, decision=approval_decision)
                     else:
-                        await connection.stop()
+                        await execution.stop()
                         message = "Unexpected human request in ordinary scenario"
                         raise RuntimeError(message)
                 elif isinstance(event, RequestResolved):
                     resolved = True
                 elif isinstance(event, SessionStatus):
                     observed_model = event.model or observed_model
-                    _require(event.phase != "error", f"Connection failed: {event.detail}")
-                    if event.phase in ("ready", "stopped"):
-                        final_phase = event.phase
-                        break
+                    _require(
+                        event.phase not in {"error", "closed"},
+                        f"Connection ended before turn completion: {event.detail}",
+                    )
+                elif (
+                    isinstance(event, DialogueEvent)
+                    and event.kind == "turn_completed"
+                    and event.turn_id == turn_id
+                ):
+                    final_status = str(event.payload.get("status", ""))
+                    _require(
+                        final_status in {"completed", "interrupted"},
+                        f"Turn ended without success or interruption: {final_status}",
+                    )
+                    break
         text = "\n".join(assistant_text.values())
         if scenario == "ordinary":
             _require("GIGAS_U02_OK" in text, "Expected the model's verification response")
         elif scenario == "interrupt":
             _require(requested and stale_rejected, "No pending question was interrupted")
-            _require(final_phase == "stopped", "Runtime did not confirm interruption")
+            _require(stop_completed and final_status == "interrupted", "Stop did not complete")
         else:
             _require(requested and resolved, "No request/reply lifecycle was observed")
-            if approval_decision == "cancel":
-                _require(final_phase == "stopped", "Runtime did not confirm cancellation")
-            else:
+            if approval_decision != "cancel":
                 _require(bool(text.strip()), "No model response followed the answer")
     finally:
-        await connection.close()
+        await asyncio.shield(request_close())
     if scenario == "file-approval":
         _require(not probe_file.exists(), "File was written without approval")
     _require(asyncio.all_tasks() == baseline, "Connection tasks remain after close")
+    _require(not storage_failures, f"Archive failed: {storage_failures}")
     return {
         "scenario": scenario,
         "model": observed_model,
-        "phase": final_phase,
+        "turn_status": final_status,
+        "stop_completed": stop_completed,
+        "archive": str(archive),
         "request_observed": requested,
         "request_resolved": resolved,
         "stale_answer_rejected": stale_rejected,

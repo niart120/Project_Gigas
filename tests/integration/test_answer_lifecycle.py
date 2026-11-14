@@ -1,7 +1,13 @@
 import pytest
 from pytestqt.qtbot import QtBot
 
-from gigas.runtime.codex.models import HumanRequest, RequestResolved, SessionStatus, TurnStarted
+from gigas.runtime.codex.models import (
+    ConversationStatus,
+    HumanRequest,
+    RequestResolved,
+    SandboxEvent,
+    SessionStatus,
+)
 from gigas.services.codex import AnswerResult, ServiceEvent, ServiceResult
 from gigas.ui.connection_panel import ConnectionPanel
 
@@ -13,7 +19,9 @@ def panel(qtbot: QtBot) -> ConnectionPanel:
     qtbot.addWidget(widget)
     widget.show()
     widget.activate(1)
-    widget.handle_event(ServiceEvent(1, SessionStatus("running")))
+    widget.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    widget.handle_event(ServiceEvent(1, SandboxEvent("ready")))
+    widget.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     for token in ("first", "second"):
         widget.handle_event(
             ServiceEvent(
@@ -28,7 +36,7 @@ def test_pending_request_and_late_result_survive_next_turn(panel: ConnectionPane
     card = panel.requests["first"]
     card.decision_buttons["accept"].click()
     panel.handle_event(ServiceEvent(1, RequestResolved("first")))
-    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "next")))
     assert card.state == "sending"
     assert panel.requests["first"] is card
     assert panel.requests["second"].is_live
@@ -36,7 +44,7 @@ def test_pending_request_and_late_result_survive_next_turn(panel: ConnectionPane
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
     assert card.state == "sent"
     assert panel.requests["first"] is card
-    panel.handle_event(ServiceEvent(1, TurnStarted("later")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "later")))
     assert set(panel.requests) == {"first", "second"}
     assert panel.requests["second"].is_live
 
@@ -55,26 +63,26 @@ def test_results_remain_until_next_turn_is_confirmed(panel: ConnectionPanel) -> 
     card.decision_buttons["accept"].click()
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
     panel.handle_event(ServiceEvent(1, RequestResolved("second")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
     assert set(panel.requests) == {"first", "second"}
     panel.prompt.setPlainText("次の依頼")
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, SessionStatus("starting")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", sending=True)))
     assert set(panel.requests) == {"first", "second"}
     panel.handle_result(ServiceResult(1, "send", "開始失敗"))
     assert set(panel.requests) == {"first", "second"}
-    panel.handle_event(ServiceEvent(0, TurnStarted("old-generation")))
+    panel.handle_event(ServiceEvent(0, ConversationStatus("thread", "old-generation")))
     assert set(panel.requests) == {"first", "second"}
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "next")))
     assert set(panel.requests) == {"first", "second"}
     assert all(
         record.controls is not None and not record.controls.isVisible()
         for record in panel.requests.values()
     )
     assert "許可" in panel.transcript.toPlainText()
-    panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "next")))
     panel.handle_event(
         ServiceEvent(
             1,
@@ -84,7 +92,7 @@ def test_results_remain_until_next_turn_is_confirmed(panel: ConnectionPanel) -> 
     current = panel.requests["current"]
     current.decision_buttons["decline"].click()
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("current", "sent")))
-    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "next")))
     panel.handle_event(ServiceEvent(1, RequestResolved("first")))
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "unknown")))
     assert set(panel.requests) == {"first", "second", "current"}
@@ -133,18 +141,19 @@ def test_result_queued_before_service_exit_refines_provisional_unknown(
     card.decision_buttons["accept"].click()
     panel.service_finished()
     assert card.state == "unknown"
-    panel.handle_event(ServiceEvent(1, TurnStarted("next")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "next")))
     assert panel.requests["first"] is card
     panel.handle_result(ServiceResult(1, "answer", answer=AnswerResult("first", "sent")))
     assert card.state == "sent"
     assert not card.decision_buttons["accept"].isEnabled()
 
 
-def test_cancel_during_submission_keeps_unknown_until_result(panel: ConnectionPanel) -> None:
+def test_stop_during_submission_waits_for_the_delivery_result(panel: ConnectionPanel) -> None:
     card = panel.requests["first"]
     card.decision_buttons["accept"].click()
     panel.interrupt()
-    assert card.state == "unknown"
+    assert card.state == "sending"
+    assert not card.decision_buttons["accept"].isEnabled()
     panel.handle_result(ServiceResult(1, "answer", "不明", AnswerResult("first", "unknown")))
     panel.handle_event(ServiceEvent(1, RequestResolved("first")))
     assert card.state == "unknown"

@@ -1,13 +1,15 @@
-"""Current-turn human requests and their confirmation details."""
+"""Human requests scoped to their turns and owned response deliveries."""
 
+import asyncio
 import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from gigas.runtime.codex._notifications import file_change_details
 from gigas.runtime.codex.models import HumanRequest, Question, QuestionOption
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId, ServerRequest
 
@@ -63,14 +65,38 @@ def _questions(value: "JsonValue") -> tuple[Question, ...]:
     return tuple(questions)
 
 
+@dataclass(slots=True)
+class _Delivery:
+    submitted: bool = False
+    task: asyncio.Task[None] = field(init=False)
+
+
 class HumanRequests:
-    """Keep live requests, consumed IDs and file details for the current turn."""
+    """Keep live requests, per-turn details and original-ID response deliveries."""
 
     def __init__(self) -> None:
         """Start without requests or confirmation details."""
         self._pending: dict[str, tuple[HumanRequest, str]] = {}
-        self._seen: set[RpcId] = set()
-        self._file_details: dict[str, str] = {}
+        self._seen: dict[RpcId, str] = {}
+        self._file_details: dict[tuple[str, str], str] = {}
+        self._deliveries: dict[RpcId, _Delivery] = {}
+
+    @property
+    def pending_tasks(self) -> tuple[asyncio.Task[None], ...]:
+        """Answer and rejection deliveries owned until their transport writes finish."""
+        return tuple(
+            delivery.task for delivery in self._deliveries.values() if not delivery.task.done()
+        )
+
+    def cancel_unsubmitted(self) -> None:
+        """Cancel accepted responses whose transport call has not started.
+
+        Started writes retain ownership until their result is known; callers
+        recover pending_tasks rather than cancelling those writes again.
+        """
+        for delivery in self._deliveries.values():
+            if not delivery.submitted:
+                delivery.task.cancel()
 
     @property
     def has_blocking(self) -> bool:
@@ -78,29 +104,93 @@ class HumanRequests:
         return any(request.is_blocking for request, _item_id in self._pending.values())
 
     def accept(self, event: "ServerRequest", params: "JsonObject") -> HumanRequest | None:
-        """Decode a current-turn request once, consuming invalid IDs as well.
+        """Decode a request once, consuming invalid IDs for its turn as well.
 
-        The connection checks method, turn and end ownership before calling.
+        The caller checks method and thread/turn ownership before calling.
         ValueError leaves the ID consumed but does not create a live request.
         """
-        if event.id in self._seen:
+        if event.id in self._seen or event.id in self._deliveries:
             return None
-        self._seen.add(event.id)
+        self._seen[event.id] = _text(params.get("turnId"))
         request = self._decode_request(event, params)
         self._pending[request.token] = (request, _text(params.get("itemId")))
         return request
 
-    def take_answer(
-        self, token: str, decision: str | None, answers: "Mapping[str, str] | None"
-    ) -> "tuple[HumanRequest, JsonObject]":
-        """Validate then consume one live request before the transport write."""
+    def answer(
+        self,
+        token: str,
+        decision: str | None = None,
+        answers: "Mapping[str, str] | None" = None,
+        *,
+        respond: "Callable[[RpcId, JsonObject], Awaitable[None]]",
+    ) -> asyncio.Task[None]:
+        """Consume a valid answer and own its delivery before yielding the loop.
+
+        Args:
+            token: Token of a currently unanswered request.
+            decision: One offered approval decision, or None for a question.
+            answers: Question ID to answer text, or None for an approval.
+            respond: Transport response using the original server request ID.
+
+        Returns:
+            Delivery task. Resolution or turn completion does not discard it.
+
+        Raises:
+            ValueError: The request is no longer live or the answer is invalid.
+        """
         entry = self._pending.get(token)
         if entry is None:
             raise ValueError("この要求は回答を受け付けない")
         request, _item_id = entry
         payload = self._answer_payload(request, decision, answers)
         del self._pending[token]
-        return request, payload
+        return self._start_delivery(request.rpc_id, lambda: respond(request.rpc_id, payload))
+
+    def reject(
+        self,
+        request_id: "RpcId",
+        reject: "Callable[[RpcId, int, str], Awaitable[None]]",
+        code: int,
+        message: str,
+    ) -> asyncio.Task[None]:
+        """Own a protocol rejection without blocking the synchronous receiver.
+
+        Args:
+            request_id: Original server request ID.
+            reject: Transport rejection callback.
+            code: JSON-RPC error code.
+            message: Application-owned reason safe to send.
+
+        Returns:
+            Response task, shared if the same ID already has an in-flight delivery.
+        """
+        return self._start_delivery(request_id, lambda: reject(request_id, code, message))
+
+    def _start_delivery(
+        self, request_id: "RpcId", send: "Callable[[], Awaitable[None]]"
+    ) -> asyncio.Task[None]:
+        existing = self._deliveries.get(request_id)
+        if existing is not None:
+            return existing.task
+
+        delivery = _Delivery()
+
+        async def deliver() -> None:
+            delivery.submitted = True
+            await send()
+
+        task = asyncio.create_task(deliver(), name="gigas-response-delivery")
+        delivery.task = task
+        self._deliveries[request_id] = delivery
+        task.add_done_callback(lambda done: self._delivery_finished(request_id, done))
+        return task
+
+    def _delivery_finished(self, request_id: "RpcId", task: asyncio.Task[None]) -> None:
+        delivery = self._deliveries.get(request_id)
+        if delivery is not None and delivery.task is task:
+            del self._deliveries[request_id]
+        if not task.cancelled():
+            task.exception()
 
     def resolve(self, token: str) -> HumanRequest | None:
         """Remove a live token while retaining its consumed RPC ID."""
@@ -120,35 +210,42 @@ class HumanRequests:
         return self.resolve(token) if token is not None else None
 
     def expire(self) -> tuple[HumanRequest, ...]:
-        """Expire live tokens without forgetting current-turn IDs or details."""
+        """Expire live tokens without forgetting per-turn IDs or response deliveries."""
         requests = tuple(request for request, _item_id in self._pending.values())
         self._pending.clear()
         return requests
 
-    def finish(self) -> tuple[HumanRequest, ...]:
-        """Expire requests and release all current-turn data at its terminal."""
-        requests = self.expire()
-        self._seen.clear()
-        self._file_details.clear()
+    def finish(self, turn_id: str) -> tuple[HumanRequest, ...]:
+        """Expire one turn's requests and details, retaining all response deliveries."""
+        requests = tuple(
+            request for request, _ in self._pending.values() if request.turn_id == turn_id
+        )
+        for request in requests:
+            del self._pending[request.token]
+        self._seen = {rpc_id: turn for rpc_id, turn in self._seen.items() if turn != turn_id}
+        self._file_details = {
+            key: detail for key, detail in self._file_details.items() if key[0] != turn_id
+        }
         return requests
 
     def update_file_changes(
-        self, item_id: str, changes: "JsonValue"
+        self, turn_id: str, item_id: str, changes: "JsonValue"
     ) -> tuple[HumanRequest, ...] | None:
         """Return live approvals without consuming them, or None for unchanged details."""
-        previous = self._file_details.pop(item_id, None)
+        key = (turn_id, item_id)
+        previous = self._file_details.pop(key, None)
         try:
             details = file_change_details(changes)
         except ValueError:
             details = None
         if details is not None:
-            self._file_details[item_id] = details
+            self._file_details[key] = details
         if previous == details:
             return None
         return tuple(
             request
             for request, request_item in self._pending.values()
-            if request.kind == "file" and request_item == item_id
+            if request.kind == "file" and request.turn_id == turn_id and request_item == item_id
         )
 
     def _decode_request(self, event: "ServerRequest", params: "JsonObject") -> HumanRequest:
@@ -175,7 +272,7 @@ class HumanRequests:
             message = "承認要求の時刻が不正"
             raise ValueError(message)  # noqa: TRY004 -- Invalid JSON field, not API type.
         kind = "command" if event.method == "item/commandExecution/requestApproval" else "file"
-        self._validate_approval(kind, item_id, params)
+        self._validate_approval(kind, (turn_id, item_id), params)
         offered = params.get("availableDecisions")
         if kind == "file" or offered is None:
             decisions = ("accept", "decline", "cancel")
@@ -202,8 +299,10 @@ class HumanRequests:
             )
             if isinstance(value := params.get(key), str) and value
         )
-        if kind == "file" and item_id in self._file_details:
-            details = "\n".join(part for part in (details, self._file_details[item_id]) if part)
+        if kind == "file" and (turn_id, item_id) in self._file_details:
+            details = "\n".join(
+                part for part in (details, self._file_details[turn_id, item_id]) if part
+            )
         return HumanRequest(
             token,
             event.id,
@@ -214,7 +313,7 @@ class HumanRequests:
             decisions=decisions,
         )
 
-    def _validate_approval(self, kind: str, item_id: str, params: "JsonObject") -> None:
+    def _validate_approval(self, kind: str, item: tuple[str, str], params: "JsonObject") -> None:
         if kind == "command":
             if (
                 params.get("kind", "command") != "command"
@@ -235,7 +334,7 @@ class HumanRequests:
         elif params.get("grantRoot") is not None:
             message = "継続的な書込許可は未対応"
             raise ValueError(message)
-        elif item_id not in self._file_details:
+        elif item not in self._file_details:
             message = "ファイル変更の確認対象が不足"
             raise ValueError(message)
 

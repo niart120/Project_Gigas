@@ -13,16 +13,17 @@ from starlette.applications import Starlette
 
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import get_protocol
-from gigas.game_io.input.models import InputState
-from gigas.game_io.observation import Observation, ObservationResolution
+from gigas.game_io.input.models import InputState, InputStep
+from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
 from gigas.mcp import game_io as mcp_module
 from gigas.mcp.game_io import GameIoMcpServer
-from gigas.services.input import InputService
+from gigas.services._game_io_tools import act_and_observe
+from gigas.services.input import OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
 from gigas.storage import project
 from gigas.storage.project import ProjectWriter
-from tests.integration.test_input_service import Harness
+from tests.integration.test_input_service import Device, Harness
 from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
@@ -60,6 +61,37 @@ def client_for(server: GameIoMcpServer) -> httpx.AsyncClient:
     )
 
 
+def test_http_calls_injected_operation_without_grant() -> None:
+    async def scenario() -> None:
+        received: list[tuple[InputStep, ...]] = []
+
+        async def observe_call() -> Observation:
+            message = "observation is not requested by this call"
+            raise AssertionError(message)
+
+        async def input_call(
+            sequence: tuple[InputStep, ...],
+        ) -> tuple[OperationResult, None]:
+            received.append(sequence)
+            return OperationResult("BUSY", message="操作中"), None
+
+        server = GameIoMcpServer(observe_call, input_call)
+        await server.start()
+        try:
+            async with client_for(server) as client:
+                await initialize(client, server.url)
+                result = (
+                    await act(client, server.url, [{"kind": "wait", "duration_ms": 1}])
+                ).json()["result"]
+                assert json.loads(result["content"][0]["text"])["code"] == "BUSY"
+                assert len(received) == 1
+                assert received[0][0].duration_ms == 1
+        finally:
+            await server.close()
+
+    asyncio.run(scenario())
+
+
 async def observe(client: httpx.AsyncClient, url: str) -> httpx.Response:
     response = await client.post(
         url,
@@ -88,6 +120,25 @@ async def act(client: httpx.AsyncClient, url: str, sequence: object) -> httpx.Re
     return response
 
 
+async def input_unavailable(_sequence: tuple[InputStep, ...]) -> tuple[OperationResult, None]:
+    return OperationResult("INPUT_DISABLED", message="機器未接続です"), None
+
+
+def server_for(h: Harness) -> GameIoMcpServer:
+    async def execute(
+        sequence: tuple[InputStep, ...],
+    ) -> tuple[OperationResult, Observation | ObservationError | None]:
+        return await act_and_observe(
+            sequence,
+            start_input=h.service.start,
+            observations=h.observations,
+            recording=h.recording,
+            thread_id="thread",
+        )
+
+    return GameIoMcpServer(h.observations.observe, execute)
+
+
 @pytest.fixture
 def io_harness(tmp_path: Path) -> "Iterator[Harness]":
     writer = ProjectWriter.create(tmp_path / "game")
@@ -106,9 +157,7 @@ def test_http_act_returns_its_observation_and_operation(
         protocol = get_protocol(protocol_key)
         h.device.protocol = protocol
         await h.service.connect(h.device)
-        grant = await h.service.begin_run("input", "thread-one", h.observations, h.recording)
-        server = GameIoMcpServer(h.observations, h.service, protocol)
-        server.bind_grant(grant)
+        server = server_for(h)
         await server.start()
         step: dict[str, object] = {"kind": "press", "buttons": ["A"], "duration_ms": 1}
         if protocol.touch:
@@ -129,7 +178,6 @@ def test_http_act_returns_its_observation_and_operation(
                     "openWorldHint": True,
                 }
                 assert tool["inputSchema"]["properties"]["sequence"]["type"] == "array"
-                assert protocol.label in tool["description"]
                 assert all(button in tool["description"] for button in protocol.buttons)
                 result = (await act(client, server.url, [step])).json()["result"]
                 assert not result["isError"]
@@ -166,6 +214,48 @@ def test_http_act_returns_its_observation_and_operation(
     asyncio.run(scenario())
 
 
+def test_same_endpoint_uses_current_device_capabilities(io_harness: Harness) -> None:
+    async def scenario() -> None:
+        h = io_harness
+        await h.service.connect(h.device)
+        server = server_for(h)
+        await server.start()
+        url = server.url
+        touch = {"kind": "press", "touch": {"x": 123, "y": 87}, "duration_ms": 1}
+        three_ds = Device()
+        three_ds.protocol = get_protocol("3ds")
+        try:
+            async with client_for(server) as client:
+                await initialize(client, url)
+                await h.service.connect(three_ds)
+                accepted = (await act(client, url, [touch])).json()["result"]
+                assert not accepted["isError"]
+                assert three_ds.calls == ["open", InputState(touch=(123, 87)), InputState()]
+
+                await h.service.connect(h.device)
+                before = list(h.device.calls)
+                rejected = (
+                    await act(
+                        client,
+                        url,
+                        [{"kind": "press", "buttons": ["A"], "duration_ms": 1}, touch],
+                    )
+                ).json()["result"]
+                assert rejected["isError"]
+                metadata = json.loads(rejected["content"][0]["text"])
+                assert metadata["code"] == "INVALID_SEQUENCE"
+                assert metadata["completed_steps"] == 0
+                assert metadata["input_sent"] == "none"
+                assert "operation_id" not in metadata
+                assert h.device.calls == before
+                assert server.url == url
+        finally:
+            await server.close()
+            await h.close()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "sequence",
     [
@@ -180,9 +270,7 @@ def test_http_invalid_sequence_sends_no_input(io_harness: Harness, sequence: obj
     async def scenario() -> None:
         h = io_harness
         await h.service.connect(h.device)
-        grant = await h.service.begin_run("input", "thread", h.observations, h.recording)
-        server = GameIoMcpServer(h.observations, h.service, h.device.protocol)
-        server.bind_grant(grant)
+        server = server_for(h)
         await server.start()
         try:
             async with client_for(server) as client:
@@ -212,9 +300,7 @@ def test_http_missing_image_keeps_completed_input_and_next_call_available(
         h = io_harness
         h.snapshot = CaptureSnapshot()
         await h.service.connect(h.device)
-        grant = await h.service.begin_run("input", "thread", h.observations, h.recording)
-        server = GameIoMcpServer(h.observations, h.service, h.device.protocol)
-        server.bind_grant(grant)
+        server = server_for(h)
         await server.start()
         operation_ids: set[str] = set()
         try:
@@ -252,32 +338,66 @@ def test_http_missing_image_keeps_completed_input_and_next_call_available(
     asyncio.run(scenario())
 
 
-def test_http_run_binding_does_not_adopt_a_later_grant(io_harness: Harness) -> None:
+def test_http_same_endpoint_rejects_during_stop_and_accepts_after_drain(
+    io_harness: Harness,
+) -> None:
     async def scenario() -> None:
         h = io_harness
+        stopping = False
+
+        def start(
+            sequence: tuple[InputStep, ...],
+        ) -> tuple[str, asyncio.Task[OperationResult]] | OperationResult:
+            if stopping:
+                return OperationResult("INPUT_DISABLED", message="停止中です")
+            return h.service.start(sequence)
+
+        async def execute(
+            sequence: tuple[InputStep, ...],
+        ) -> tuple[OperationResult, Observation | ObservationError | None]:
+            return await act_and_observe(
+                sequence,
+                start_input=start,
+                observations=h.observations,
+                recording=h.recording,
+                thread_id="thread",
+            )
+
         await h.service.connect(h.device)
-        server = GameIoMcpServer(h.observations, h.service, h.device.protocol)
+        server = GameIoMcpServer(h.observations.observe, execute)
         await server.start()
         sequence = [{"kind": "press", "buttons": ["A"], "duration_ms": 1}]
         try:
             async with client_for(server) as client:
                 await initialize(client, server.url)
-                unbound = (await act(client, server.url, sequence)).json()["result"]
-                assert unbound["isError"]
-                assert json.loads(unbound["content"][0]["text"])["code"] == "INPUT_DISABLED"
-                grant = await h.service.begin_run("first", "thread", h.observations, h.recording)
-                server.bind_grant(grant)
-                await h.service.finish_run("stopped")
-                newer = await h.service.begin_run("second", "thread", h.observations, h.recording)
-                with pytest.raises(RuntimeError):
-                    server.bind_grant(newer)
-                stale = (await act(client, server.url, sequence)).json()["result"]
-                assert stale["isError"]
-                assert json.loads(stale["content"][0]["text"])["code"] == "INPUT_DISABLED"
-                assert h.device.calls == ["open"]
-                observation = (await observe(client, server.url)).json()["result"]
-                assert not observation["isError"]
+                running = asyncio.create_task(
+                    act(
+                        client,
+                        server.url,
+                        [{"kind": "press", "buttons": ["A"], "duration_ms": 60_000}],
+                    )
+                )
+                await asyncio.wait_for(h.device.pressed.wait(), 1)
+                stopping = True
+                h.service.stop()
+                rejected = (await act(client, server.url, sequence)).json()["result"]
+                assert json.loads(rejected["content"][0]["text"])["code"] == "INPUT_DISABLED"
+                await h.service.drain_input()
+                stopped = (await running).json()["result"]
+                assert json.loads(stopped["content"][0]["text"])["code"] == "INTERRUPTED"
+                stopping = False
+                accepted = (await act(client, server.url, sequence)).json()["result"]
+                assert not accepted["isError"]
+                assert h.device.calls == [
+                    "open",
+                    InputState(buttons=("A",)),
+                    InputState(),
+                    InputState(buttons=("A",)),
+                    InputState(),
+                ]
         finally:
+            h.service.stop()
+            await h.service.drain_input()
             await server.close()
             await h.close()
 
@@ -301,21 +421,24 @@ def test_http_deadline_returns_unknown_result_and_leaves_input_cleanup_owned(
 
         monkeypatch.setattr(h.device, "send", delayed_send)
         await h.service.connect(h.device)
-        grant = await h.service.begin_run("input", "thread", h.observations, h.recording)
-        server = GameIoMcpServer(h.observations, h.service, h.device.protocol)
-        server.bind_grant(grant)
+        server = server_for(h)
         await server.start()
         try:
             async with client_for(server) as client:
                 await initialize(client, server.url)
-                response = await asyncio.wait_for(
+                pending = asyncio.create_task(
                     act(
                         client,
                         server.url,
                         [{"kind": "press", "buttons": ["A"], "duration_ms": 600_000}],
-                    ),
-                    1,
+                    )
                 )
+                await asyncio.wait_for(h.device.pressed.wait(), 1)
+                await asyncio.sleep(0.1)  # The deadline cancels the request while write is held.
+                assert not pending.done()
+                assert h.device.calls == ["open", InputState(buttons=("A",))]
+                release.set()
+                response = await asyncio.wait_for(pending, 1)
                 result = response.json()["result"]
                 assert result["isError"]
                 assert len(result["content"]) == 1
@@ -325,17 +448,11 @@ def test_http_deadline_returns_unknown_result_and_leaves_input_cleanup_owned(
                 assert metadata["neutral"] == "unconfirmed"
                 assert "completed_steps" not in metadata
                 assert "operation_id" not in metadata
-                assert h.device.calls == ["open", InputState(buttons=("A",))]
-                draining = asyncio.create_task(h.service.drain_input())
-                await asyncio.sleep(0)
-                assert not draining.done()
-                release.set()
-                await asyncio.wait_for(draining, 1)
                 assert h.device.calls == ["open", InputState(buttons=("A",)), InputState()]
-                rejected = (
+                accepted = (
                     await act(client, server.url, [{"kind": "wait", "duration_ms": 1}])
                 ).json()["result"]
-                assert json.loads(rejected["content"][0]["text"])["code"] == "INPUT_DISABLED"
+                assert not accepted["isError"]
         finally:
             release.set()
             h.service.stop()
@@ -368,7 +485,7 @@ def test_http_observations_return_same_images_before_saving(
         service = ObservationService(
             CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), recording
         )
-        server = GameIoMcpServer(service, InputService(), None)
+        server = GameIoMcpServer(service.observe, input_unavailable)
         await server.start()
         try:
             async with client_for(server) as client:
@@ -424,11 +541,11 @@ def test_http_authentication_host_origin_and_old_connection(tmp_path: Path) -> N
     async def scenario() -> None:
         recording = RecordingService(writer)
         service = ObservationService(CaptureReader(CaptureSnapshot), recording)
-        old = GameIoMcpServer(service, InputService(), None)
+        old = GameIoMcpServer(service.observe, input_unavailable)
         await old.start()
         old_headers = old.config["http_headers"]
         await old.close()
-        current = GameIoMcpServer(service, InputService(), None)
+        current = GameIoMcpServer(service.observe, input_unavailable)
         await current.start()
         try:
             assert current.server_name != old.server_name
@@ -476,7 +593,7 @@ def test_failed_lifespan_is_an_error_without_exiting_process(
     async def scenario() -> None:
         recording = RecordingService(writer)
         service = ObservationService(CaptureReader(CaptureSnapshot), recording)
-        server = GameIoMcpServer(service, InputService(), None)
+        server = GameIoMcpServer(service.observe, input_unavailable)
         with pytest.raises(RuntimeError, match="MCP"):
             await server.start()
         await server.close()
@@ -513,7 +630,7 @@ def test_cancelled_close_keeps_http_and_observation_work_owned(
         service = ObservationService(
             CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), recording
         )
-        server = GameIoMcpServer(service, InputService(), None)
+        server = GameIoMcpServer(service.observe, input_unavailable)
         await server.start()
         url = server.url
         try:

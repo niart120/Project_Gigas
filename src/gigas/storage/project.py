@@ -13,7 +13,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
-from gigas.storage.input_events import input_record, validate_input_payload
+from gigas.storage.input_events import input_record
 
 if sys.platform == "win32":
     import msvcrt
@@ -184,7 +184,6 @@ class ProjectWriter:
         *,
         thread_id: str,
         turn_id: str | None = None,
-        run_id: str | None = None,
         received_at: str | None = None,
     ) -> None:
         """Append application-selected public dialogue using the shared event envelope.
@@ -194,7 +193,6 @@ class ProjectWriter:
             content: Public fields selected by the caller, excluding secrets and drafts.
             thread_id: Owning runtime conversation.
             turn_id: Owning turn when known.
-            run_id: Input permission interval when associated.
             received_at: UTC receipt time captured before asynchronous storage.
                 None uses the synchronous call time.
 
@@ -209,8 +207,6 @@ class ProjectWriter:
         }
         if turn_id is not None:
             payload["turn_id"] = turn_id
-        if run_id is not None:
-            payload["run_id"] = run_id
         with self._operation():
             sequence = self._require_writable()
             if not kind.startswith("dialogue.") or not kind.removeprefix("dialogue."):
@@ -247,22 +243,18 @@ class ProjectWriter:
             )
 
     def record_input(self, event: "InputEvent") -> None:
-        """Append one typed run or operation event without connection metadata.
+        """Append one typed operation event without connection metadata.
 
         Args:
             event: Start or final outcome. Start records are submitted asynchronously before input.
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: The payload is invalid, writing is unavailable, or append fails.
+            ProjectError: Writing is unavailable or appending fails.
         """
         with self._operation():
             sequence = self._require_writable()
-            try:
-                kind, payload = input_record(event)
-            except (ValueError, TypeError) as error:
-                message = f"入力記録が不正です。記録していません: {error}"
-                raise ProjectError(message) from error
+            kind, payload = input_record(event)
             self._append_event(kind, payload, sequence)
 
     def record(self, observation: "Observation", *, thread_id: str | None = None) -> None:
@@ -486,6 +478,7 @@ def _read_project(path: Path) -> tuple[str, int]:
 
 
 def _read_record(raw: bytes, project_id: str, previous: int) -> int:
+    """Validate the shared envelope without reinterpreting historical payloads."""
     if not raw.endswith(b"\n"):
         message = "末尾の不完全行"
         raise ValueError(message)
@@ -504,23 +497,6 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
     ):
         message = "イベント共通項目または追記順が不正です"
         raise ValueError(message)
-    if kind == "observation.recorded":
-        _validate_observation(record["payload"])
-    elif kind in (
-        "input.run_started",
-        "input.operation_started",
-        "input.operation_finished",
-        "input.run_finished",
-    ):
-        validate_input_payload(kind, record["payload"])
-    elif kind == "thread.started":
-        payload = _object(record["payload"])
-        _thread_id(payload.get("thread_id"))
-        if payload.get("runtime") != "codex":
-            message = "会話記録のruntimeが不正です"
-            raise ValueError(message)
-    elif kind.startswith("dialogue."):
-        _validate_dialogue(record["payload"])
     return sequence
 
 
@@ -528,9 +504,8 @@ def _validate_dialogue(value: object) -> None:
     payload = _object(value)
     _thread_id(payload.get("thread_id"))
     _timestamp(payload.get("received_at"))
-    for name in ("turn_id", "run_id"):
-        if name in payload:
-            _thread_id(payload[name])
+    if "turn_id" in payload:
+        _thread_id(payload["turn_id"])
     _object(payload.get("content"))
 
 

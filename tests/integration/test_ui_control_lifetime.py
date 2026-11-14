@@ -5,7 +5,7 @@ from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
-from gigas.runtime.codex.models import SessionStatus
+from gigas.runtime.codex.models import ConversationStatus, SessionStatus
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings, save_settings
 from tests.integration.peers.controlled_capture import ControlledCapture
@@ -34,7 +34,8 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
         panel = shell.window.connection
         panel.activate(1)
         panel.handle_result(ServiceResult(1, "connect"))
-        panel.handle_event(ServiceEvent(1, SessionStatus("running")))
+        panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+        panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
         interrupted: list[bool] = []
         disconnected: list[bool] = []
         panel.interrupt_requested.connect(lambda: interrupted.append(True))

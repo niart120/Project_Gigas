@@ -14,7 +14,7 @@ from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
     ConnectionOptions,
-    GoalEvent,
+    ConversationStatus,
     GoalState,
     HumanRequest,
     LoginEvent,
@@ -30,7 +30,6 @@ from gigas.runtime.codex.models import (
     SandboxEvent,
     SessionStatus,
     TextEvent,
-    TurnStarted,
     UsageBucket,
     UsageEvent,
 )
@@ -50,11 +49,17 @@ from gigas.ui.transcript import Transcript
 from tests.integration.test_codex_transport import PEER_COMMAND
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
-    from gigas.runtime.codex.models import ConnectionEvent, ThreadConfiguration
+    from gigas.runtime.codex.connection import RuntimeEvent
+    from gigas.runtime.codex.models import GoalStatus
     from gigas.ui.notifications import Notice
     from gigas.ui.prompt_edit import PromptEdit
+
+
+def _ready(panel: ConnectionPanel, generation: int, model: str = "m", effort: str = "low") -> None:
+    panel.handle_event(ServiceEvent(generation, SessionStatus("ready", model, effort, True)))
+    panel.handle_event(ServiceEvent(generation, SandboxEvent("ready")))
 
 
 def _answer_editor(panel: ConnectionPanel, token: str, question_id: str) -> "PromptEdit":
@@ -63,17 +68,108 @@ def _answer_editor(panel: ConnectionPanel, token: str, question_id: str) -> "Pro
     return editor
 
 
+def test_running_snapshot_uses_normal_send_and_stop_completion_restores_admission(
+    qtbot: QtBot,
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    _ready(panel, 1, "m", "low")
+    panel.handle_event(ServiceEvent(1, SandboxEvent("ready")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    assert panel.interrupt_button.isEnabled()
+    sent: list[str] = []
+    panel.send_requested.connect(sent.append)
+    panel.prompt.setPlainText("追加指示")
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn", sending=True)))
+    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    panel.send_button.click()
+    assert sent == ["追加指示"]
+    panel.handle_result(ServiceResult(1, "send", message=MessageResult("accepted", "turn")))
+    panel.interrupt()
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn", stopping=True)))
+    panel.prompt.setPlainText("次の指示")
+    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
+    panel.handle_result(ServiceResult(1, "stop"))
+    assert panel.send_button.isEnabled()
+    panel.send_button.click()
+    assert sent == ["追加指示", "次の指示"]
+
+
+@pytest.mark.parametrize(
+    ("goal_status", "resume", "clear"),
+    [
+        (None, False, False),
+        ("active", False, True),
+        ("paused", True, True),
+        ("blocked", True, True),
+        ("budgetLimited", True, True),
+        ("usageLimited", True, True),
+        ("complete", False, True),
+    ],
+)
+def test_goal_controls_follow_snapshot_while_turn_and_questions_are_active(
+    qtbot: QtBot, goal_status: "GoalStatus | None", *, resume: bool, clear: bool
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    _ready(panel, 1, "m", "low")
+    panel.handle_event(ServiceEvent(1, SandboxEvent("ready")))
+    goal = GoalState("保持した目的", goal_status) if goal_status is not None else None
+    panel.handle_event(
+        ServiceEvent(1, ConversationStatus("thread", "turn", goal, waiting_for_answer=True))
+    )
+    panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False, available=True)))
+    assert not panel.plan_panel.resume_button.isHidden()
+    assert not panel.plan_panel.clear_button.isHidden()
+    assert panel.plan_panel.resume_button.isEnabled() is resume
+    assert panel.plan_panel.clear_button.isEnabled() is clear
+    panel.prompt.setPlainText("通常指示")
+    assert panel.send_button.isEnabled()
+
+
+@pytest.mark.parametrize("error", ["", "再開が拒否された"])
+def test_resume_result_keeps_authoritative_goal_and_reenables_the_button(
+    qtbot: QtBot, error: str
+) -> None:
+    panel = ConnectionPanel()
+    qtbot.addWidget(panel)
+    panel.activate(1)
+    panel.handle_result(ServiceResult(1, "connect"))
+    _ready(panel, 1)
+    limited = GoalState("クチバシティへ", "budgetLimited", 100, 5, 100)
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", goal=limited)))
+    resumed: list[bool] = []
+    sent: list[str] = []
+    panel.goal_resume_requested.connect(lambda: resumed.append(True))
+    panel.send_requested.connect(sent.append)
+    panel.plan_panel.resume_button.click()
+    panel.plan_panel.resume_button.click()
+    assert resumed == [True]
+    assert not panel.plan_panel.resume_button.isEnabled()
+    panel.handle_result(ServiceResult(1, "goal_resume", error))
+    assert panel.plan_panel.goal_value.toPlainText() == limited.objective
+    assert panel.plan_panel.resume_button.isEnabled()
+    panel.prompt.setPlainText("再開して")
+    panel.send_button.click()
+    assert sent == ["再開して"]
+    assert resumed == [True]
+
+
 def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
     def factory(
         options: ConnectionOptions,
-        emit: "Callable[[ConnectionEvent], None]",
-        prepare: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
-        started: "Callable[[str], Awaitable[None]]",
+        emit: "Callable[[RuntimeEvent], None]",
     ) -> CodexConnection:
         peer = StdioTransport((*PEER_COMMAND, "dialogue"), options.cwd)
-        return CodexConnection(peer, options, emit, prepare_turn=prepare, on_thread_started=started)
+        return CodexConnection(peer, options, emit)
 
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     results: list[ServiceResult] = []
@@ -101,9 +197,9 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         panel.prompt.setPlainText("質問は保留し、門の前で止まる")
         panel.send_button.click()
-        qtbot.waitUntil(lambda: any(result.operation == "steer" for result in results))
-        steering = next(result for result in results if result.operation == "steer")
-        assert steering.message == MessageResult("accepted", "dialogue-turn")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        additional = [result for result in results if result.operation == "send"][-1]
+        assert additional.message == MessageResult("accepted", "dialogue-turn")
         assert question.is_live
         route = panel.request_views[token].question_inputs["route"]
         tuple(route.choices.values())[1].click()
@@ -138,8 +234,8 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
     assert panel.plan_panel.view.toPlainText() == "—"
-    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "old")))
+    _ready(panel, 1, "m", "low")
     panel.handle_event(
         ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),), "入口を確認"))
     )
@@ -166,7 +262,7 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert history.count("gigas/observe") == 1
     assert "観測済み" in history
     assert "公開要約" in history
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
     assert "調査" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
     assert panel.plan_panel.status.text() == "終了"
@@ -177,10 +273,10 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     )
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     assert panel.plan_panel.status.text() == "終了"
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
-    panel.handle_event(ServiceEvent(1, TurnStarted("new")))
+    _ready(panel, 1, "m", "low")
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "new")))
     assert "調査" in panel.transcript.toPlainText()
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
     panel.handle_event(ServiceEvent(1, ReasoningEvent("new", "shared", ("新しい要約",))))
@@ -190,18 +286,17 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "公開要約" in panel.transcript.toPlainText()
     panel.interrupt()
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("停止後の通知", "inProgress"),))))
-    assert "移動" in panel.plan_panel.view.toPlainText()
-    assert "停止後の通知" in panel.transcript.toPlainText()
-    panel.handle_event(ServiceEvent(1, SessionStatus("stopped", "m", "low", True)))
-    assert "移動" in panel.plan_panel.view.toPlainText()
+    assert "停止後の通知" in panel.plan_panel.view.toPlainText()
+    panel.handle_event(ServiceEvent(1, ConversationStatus()))
+    assert "停止後の通知" in panel.plan_panel.view.toPlainText()
     assert panel.plan_panel.status.text() == "中断"
     assert "停止後の通知" in panel.transcript.toPlainText()
     assert "移動" not in panel.transcript.toPlainText()
     panel.handle_result(ServiceResult(1, "stop"))
     panel.prompt.setPlainText("次の依頼")
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, SessionStatus("starting")))
-    panel.handle_event(ServiceEvent(1, TurnStarted("after-stop")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus(sending=True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "after-stop")))
     assert "停止後の通知" in panel.transcript.toPlainText()
     assert "進行中" not in panel.transcript.toPlainText()
     assert (
@@ -220,8 +315,8 @@ def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBo
     panel.resize(500, 600)
     panel.show()
     panel.activate(1)
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    _ready(panel, 1, "m", "low")
     steps = (
         PlanStep("入口を観測", "completed"),
         PlanStep("経路を確認", "inProgress"),
@@ -264,8 +359,8 @@ def test_plan_updates_do_not_resize_history_or_move_reading_position(
     panel.show()
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    _ready(panel, 1, "m", "low")
     qtbot.wait(1)
     panel.handle_event(
         ServiceEvent(
@@ -422,10 +517,10 @@ def test_start_notification_keeps_draft_until_acceptance_result(
     qtbot.addWidget(panel)
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     panel.prompt.setPlainText("受付を確認する原稿")
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     assert panel.prompt.toPlainText() == "受付を確認する原稿"
     if composing:
         QApplication.sendEvent(panel.prompt, QInputMethodEvent("次のへんかん", []))
@@ -439,7 +534,7 @@ def test_start_notification_keeps_draft_until_acceptance_result(
 
 @pytest.mark.parametrize("outcome", ["accepted", "not_sent", "unknown"])
 @pytest.mark.parametrize("edited", [False, True])
-def test_running_turn_accepts_one_targeted_instruction(
+def test_running_turn_accepts_one_additional_message(
     qtbot: QtBot, outcome: str, *, edited: bool
 ) -> None:
     panel = ConnectionPanel()
@@ -448,8 +543,8 @@ def test_running_turn_accepts_one_targeted_instruction(
     assert panel.composer.isAncestorOf(panel.prompt)
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    _ready(panel, 1, "m", "low")
     assert panel.interrupt_button.isVisible()
     assert not panel.send_button.isVisible()
     stops: list[bool] = []
@@ -460,23 +555,23 @@ def test_running_turn_accepts_one_targeted_instruction(
     assert panel.send_button.isVisible()
     assert panel.interrupt_button.isVisible()
     assert panel.send_button.isEnabled()
-    instructions: list[tuple[str, str]] = []
-    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    instructions: list[str] = []
+    panel.send_requested.connect(instructions.append)
     panel.send_button.click()
     panel.send_button.click()
-    assert instructions == [("補給後に現在地を確認する", "turn")]
+    assert instructions == ["補給後に現在地を確認する"]
     if edited:
         panel.prompt.setPlainText("次の原稿")
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     result = {
         "accepted": MessageResult("accepted", "turn"),
         "not_sent": MessageResult("not_sent"),
         "unknown": MessageResult("unknown"),
     }[outcome]
-    panel.handle_result(ServiceResult(1, "steer", message=result))
+    panel.handle_result(ServiceResult(1, "send", message=result))
     expected = "次の原稿" if edited else "" if outcome == "accepted" else "補給後に現在地を確認する"
     assert panel.prompt.toPlainText() == expected
-    assert instructions == [("補給後に現在地を確認する", "turn")]
+    assert instructions == ["補給後に現在地を確認する"]
 
 
 def test_late_turn_notifications_after_stop_do_not_reopen_instruction_delivery(
@@ -486,27 +581,27 @@ def test_late_turn_notifications_after_stop_do_not_reopen_instruction_delivery(
     qtbot.addWidget(panel)
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
-    instructions: list[tuple[str, str]] = []
-    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "old")))
+    _ready(panel, 1, "m", "low")
+    instructions: list[str] = []
+    panel.send_requested.connect(instructions.append)
     panel.prompt.setPlainText("現在地を確認")
     panel.send_button.click()
     panel.interrupt()
-    panel.handle_event(ServiceEvent(1, TurnStarted("old")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
-    panel.handle_result(ServiceResult(1, "steer", message=MessageResult("unknown")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "old")))
+    _ready(panel, 1, "m", "low")
+    panel.handle_result(ServiceResult(1, "send", message=MessageResult("unknown")))
     assert panel.prompt.toPlainText() == "現在地を確認"
     assert not panel.send_button.isEnabled()
     panel.handle_result(ServiceResult(1, "stop"))
-    panel.handle_event(ServiceEvent(1, SessionStatus("stopped", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus()))
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, TurnStarted("new")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "new")))
     panel.handle_result(ServiceResult(1, "send", message=MessageResult("accepted", "new")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     panel.prompt.setPlainText("次の指示")
     panel.send_button.click()
-    assert instructions == [("現在地を確認", "old"), ("次の指示", "new")]
+    assert instructions == ["現在地を確認", "現在地を確認", "次の指示"]
 
 
 @pytest.mark.parametrize("edited_draft", [False, True])
@@ -531,7 +626,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
     assert not opened
     panel.open_login_button.click()
     assert opened == [QUrl("https://example.org/login")]
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "chosen", "high", True)))
+    _ready(panel, 1, "chosen", "high")
     assert panel.login_url.text() == ""
     assert not panel.open_login_button.isVisible()
     panel.prompt.setPlainText("hello")
@@ -542,7 +637,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
     assert panel.prompt.toPlainText() == "hello"
     assert panel.send_button.isEnabled()
     panel.send_button.click()
-    panel.handle_event(ServiceEvent(1, SessionStatus("starting", "chosen", "high", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus(sending=True)))
     panel.interrupt_button.click()
     assert stops == [True]
     panel.handle_event(ServiceEvent(1, TextEvent("answer", "<b>A")))
@@ -555,7 +650,7 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
     assert panel.prompt.toPlainText() == "hello"  # A stopped pre-acceptance send also returns.
     if edited_draft:
         panel.prompt.setPlainText("次の原稿")
-    panel.handle_event(ServiceEvent(1, TurnStarted("accepted-turn")))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "accepted-turn")))
     assert panel.prompt.toPlainText() == ("次の原稿" if edited_draft else "hello")
     panel.disconnect_action.trigger()
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
@@ -623,8 +718,8 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     qtbot.addWidget(panel)
     panel.activate(5)
     panel.show()
-    panel.handle_event(ServiceEvent(5, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(5, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(5, ConversationStatus("thread", "turn")))
+    _ready(panel, 5, "m", "low")
     answers: list[object] = []
     panel.answer_requested.connect(answers.append)
     request = HumanRequest(
@@ -718,8 +813,8 @@ def test_question_cards_isolate_drafts_and_late_message_acceptance(
     panel.show()
     panel.activate(1)
     panel.handle_result(ServiceResult(1, "connect"))
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    _ready(panel, 1, "m", "low")
     panel.prompt.setPlainText("same text")
     panel.send_button.click()
     for token in ("first", "second"):
@@ -741,7 +836,7 @@ def test_question_cards_isolate_drafts_and_late_message_acceptance(
     assert first.toPlainText() == second.toPlainText() == ""
     first.setPlainText("same text")
     second.setPlainText("second draft")
-    panel.handle_result(ServiceResult(1, "steer", message=MessageResult("accepted", "turn")))
+    panel.handle_result(ServiceResult(1, "send", message=MessageResult("accepted", "turn")))
     assert panel.prompt.toPlainText() == ""
     assert first.toPlainText() == "same text"
     sent: list[object] = []
@@ -772,8 +867,8 @@ def test_composition_keeps_message_and_question_ctrl_enter_waits(qtbot: QtBot) -
     qtbot.addWidget(panel)
     panel.show()
     panel.activate(1)
-    panel.handle_event(ServiceEvent(1, TurnStarted("turn")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    _ready(panel, 1, "m", "low")
     QApplication.sendEvent(panel.prompt, QInputMethodEvent("へんかん", []))
     panel.handle_event(
         ServiceEvent(
@@ -824,18 +919,20 @@ def test_composition_keeps_message_and_question_ctrl_enter_waits(qtbot: QtBot) -
     QApplication.sendEvent(free, QInputMethodEvent("未確定の回答", []))
     panel.handle_event(ServiceEvent(1, RequestResolved("free")))
     panel.prompt.setPlainText("次の指示")
-    instructions: list[tuple[str, str]] = []
-    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    instructions: list[str] = []
+    panel.send_requested.connect(instructions.append)
     qtbot.keyClick(panel.prompt, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
-    assert instructions == [("次の指示", "turn")]
+    assert instructions == ["次の指示"]
 
 
 @pytest.mark.parametrize("ending", ["resolved", "stop", "disconnect", "terminal"])
-def test_approval_is_explicit_and_invalidated_locally(qtbot: QtBot, ending: str) -> None:
+def test_approval_waits_for_resolution_and_blocks_answers_during_stop(
+    qtbot: QtBot, ending: str
+) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     answers: list[object] = []
     panel.answer_requested.connect(answers.append)
     request = HumanRequest(
@@ -856,10 +953,15 @@ def test_approval_is_explicit_and_invalidated_locally(qtbot: QtBot, ending: str)
         panel.handle_event(ServiceEvent(1, RequestResolved("approval")))
     elif ending == "stop":
         panel.interrupt()
+        card.decision_buttons["accept"].click()
+        assert not answers
+        assert card.is_live
+        panel.handle_event(ServiceEvent(1, RequestResolved("approval")))
     elif ending == "disconnect":
         panel.disconnect_action.trigger()
     else:
-        panel.handle_event(ServiceEvent(1, SessionStatus("stopped")))
+        panel.handle_event(ServiceEvent(1, RequestResolved("approval")))
+        panel.handle_event(ServiceEvent(1, ConversationStatus()))
     card.decision_buttons["accept"].click()
     assert not answers
     assert not card.is_live
@@ -871,7 +973,7 @@ def test_approval_sends_only_the_clicked_advertised_decision(qtbot: QtBot) -> No
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     answers: list[object] = []
     panel.answer_requested.connect(answers.append)
     panel.handle_event(
@@ -941,9 +1043,11 @@ def test_invalid_defaults_keep_login_and_selection_but_block_send_and_resume(
     panel.handle_event(ServiceEvent(1, invalid))
     assert len(failures) == 1
     assert failures[0].details == invalid.detail
-    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
+    panel.handle_event(
+        ServiceEvent(1, ConversationStatus(goal=GoalState("保持した目標", "paused")))
+    )
     assert panel.disconnect_action.isEnabled()
-    assert panel.plan_panel.clear_button.isEnabled()
+    assert not panel.plan_panel.clear_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
     assert not panel.send_button.isEnabled()
     panel.composer.goal_mode.click()
@@ -965,7 +1069,7 @@ def test_invalid_defaults_keep_login_and_selection_but_block_send_and_resume(
     assert picked == [("first", "low")]
     assert not panel.send_button.isEnabled()
     panel.handle_event(ServiceEvent(1, ModelSelection(choices, "first", "low")))
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "first", "low", True)))
+    _ready(panel, 1, "first", "low")
     panel.handle_result(ServiceResult(1, "select_model"))
     assert panel.send_button.isEnabled()
     assert panel.plan_panel.resume_button.isEnabled()
@@ -996,7 +1100,8 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
         "high",
     )
     panel.handle_event(ServiceEvent(1, selection))
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "first", "high", True)))
+    _ready(panel, 1, "first", "high")
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     panel.handle_result(ServiceResult(1, "connect"))
     panel.prompt.setPlainText("原稿を残す")
     composer = panel.composer
@@ -1039,16 +1144,15 @@ def test_goal_mode_only_submits_when_sent_and_keeps_draft(
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(7)
-    panel.handle_event(ServiceEvent(7, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 7, "m", "low")
     panel.handle_result(ServiceResult(7, "connect"))
     submitted: list[str] = []
     panel.goal_requested.connect(submitted.append)
     panel.prompt.setPlainText("橋まで進む")
     panel.composer.goal_mode.click()
-    panel.handle_event(ServiceEvent(7, TurnStarted("ordinary")))
-    panel.handle_event(ServiceEvent(7, SessionStatus("running", "m", "low", True)))
-    assert not panel.send_button.isEnabled()
-    panel.handle_event(ServiceEvent(7, SessionStatus("ready", "m", "low", True)))
+    panel.handle_event(ServiceEvent(7, ConversationStatus("thread", "ordinary")))
+    _ready(panel, 7, "m", "low")
+    assert panel.send_button.isEnabled()
     assert submitted == []
     assert panel.prompt.toPlainText() == "橋まで進む"
     panel.send_button.click()
@@ -1068,40 +1172,42 @@ def test_goal_mode_only_submits_when_sent_and_keeps_draft(
     assert panel.composer.goal_mode.isChecked() == (outcome != "accepted")
     assert submitted == ["橋まで進む"]
     if outcome == "accepted":
-        panel.handle_event(ServiceEvent(7, GoalEvent(GoalState("橋まで進む", "active"))))
-        panel.handle_event(ServiceEvent(7, TurnStarted("auto-1")))
-        panel.handle_event(ServiceEvent(7, SessionStatus("running", "m", "low", True)))
-        instructions: list[tuple[str, str]] = []
-        panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+        panel.handle_event(
+            ServiceEvent(
+                7, ConversationStatus("thread", "auto-1", GoalState("橋まで進む", "active"))
+            )
+        )
+        _ready(panel, 7, "m", "low")
+        instructions: list[str] = []
+        panel.send_requested.connect(instructions.append)
         panel.prompt.setPlainText("次の原稿")
         panel.send_button.click()
-        assert instructions == [("次の原稿", "auto-1")]
+        assert instructions == ["次の原稿"]
         assert submitted == ["橋まで進む"]
 
 
-def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
+def test_goal_turn_gaps_stop_and_explicit_resume(qtbot: QtBot) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(3)
-    panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 3)
     panel.handle_result(ServiceResult(3, "connect"))
-    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
+    active = GoalState("橋まで", "active")
+    paused = GoalState("橋まで", "paused")
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=active)))
     panel.prompt.setPlainText("追加指示")
-    assert not panel.send_button.isEnabled()
+    assert panel.send_button.isEnabled()
     assert panel.interrupt_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
-    panel.handle_event(ServiceEvent(3, TurnStarted("auto-1")))
-    panel.handle_event(ServiceEvent(3, SessionStatus("running", "m", "low", True)))
-    assert panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", "auto-1", active)))
     panel.interrupt()
+    panel.handle_event(
+        ServiceEvent(3, ConversationStatus("thread", "auto-1", paused, stopping=True))
+    )
     assert not panel.send_button.isEnabled()
-    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "paused"))))
     assert not panel.plan_panel.resume_button.isEnabled()
-    panel.handle_event(ServiceEvent(3, SessionStatus("stopping", "m", "low", True)))
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=paused)))
     panel.handle_result(ServiceResult(3, "stop"))
-    assert not panel.plan_panel.resume_button.isEnabled()
-    assert not panel.send_button.isEnabled()
-    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
     assert panel.plan_panel.resume_button.isEnabled()
     assert panel.send_button.isEnabled()
     resumed: list[bool] = []
@@ -1110,12 +1216,12 @@ def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
     assert resumed == [True]
     assert not panel.plan_panel.resume_button.isEnabled()
     assert panel.prompt.toPlainText() == "追加指示"
-    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=active)))
     panel.handle_result(ServiceResult(3, "goal_resume"))
-    assert not panel.send_button.isEnabled()
+    assert panel.send_button.isEnabled()
+    assert not panel.plan_panel.resume_button.isEnabled()
     panel.plan_panel.clear_button.click()
-    panel.handle_event(ServiceEvent(3, GoalEvent(None)))
-    panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread")))
     panel.handle_result(ServiceResult(3, "goal_clear"))
     assert panel.plan_panel.goal_value.toPlainText() == "—"
     assert not panel.plan_panel.resume_button.isEnabled()
@@ -1123,25 +1229,38 @@ def test_goal_turn_gaps_pause_and_explicit_resume(qtbot: QtBot) -> None:
 
 
 @pytest.mark.parametrize("action", ["natural", "stop", "clear"])
-def test_goal_final_report_wait_remains_interruptible_and_finishes_plan(
+def test_goal_completion_and_removal_do_not_interrupt_the_current_turn(
     qtbot: QtBot, action: str
 ) -> None:
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(3)
-    panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 3)
     panel.handle_result(ServiceResult(3, "connect"))
-    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "active"))))
-    panel.handle_event(ServiceEvent(3, TurnStarted("auto")))
-    panel.handle_event(ServiceEvent(3, SessionStatus("running", "m", "low", True)))
+    active = GoalState("橋まで", "active")
+    complete = GoalState("橋まで", "complete")
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", "auto", active)))
     panel.handle_event(ServiceEvent(3, PlanEvent("auto", (PlanStep("橋まで移動", "inProgress"),))))
+    panel.handle_event(
+        ServiceEvent(
+            3,
+            HumanRequest(
+                "question",
+                7,
+                "thread",
+                "auto",
+                "question",
+                questions=(Question("next", "経路", "次は?"),),
+            ),
+        )
+    )
     panel.prompt.setPlainText("次の原稿")
-    panel.handle_event(ServiceEvent(3, GoalEvent(GoalState("橋まで", "complete"))))
-    panel.handle_event(ServiceEvent(3, SessionStatus("stopping", "m", "low", True)))
-    assert not panel.send_button.isEnabled()
+    panel.handle_event(ServiceEvent(3, ConversationStatus("thread", "auto", complete)))
+    assert panel.send_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
     assert panel.interrupt_button.isEnabled()
     assert panel.plan_panel.clear_button.isEnabled()
+    assert panel.requests["question"].is_live
     requested: list[str] = []
     panel.interrupt_requested.connect(lambda: requested.append("stop"))
     panel.goal_clear_requested.connect(lambda: requested.append("clear"))
@@ -1150,17 +1269,27 @@ def test_goal_final_report_wait_remains_interruptible_and_finishes_plan(
             ServiceEvent(3, PlanEvent("auto", (PlanStep("橋まで移動", "completed"),)))
         )
         panel.handle_event(ServiceEvent(3, TextEvent("final", "橋に到着しました", replace=True)))
-        panel.handle_event(ServiceEvent(3, SessionStatus("ready", "m", "low", True)))
+        panel.handle_event(ServiceEvent(3, RequestResolved("question")))
+        panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=complete)))
         assert panel.plan_panel.status.text() == "完了"
         assert "橋に到着しました" in panel.transcript.toPlainText()
         assert not requested
-    else:
-        (panel.interrupt_button if action == "stop" else panel.plan_panel.clear_button).click()
-        assert requested == [action]
+    elif action == "stop":
+        panel.interrupt_button.click()
+        assert requested == ["stop"]
         assert not panel.interrupt_button.isEnabled()
-        panel.handle_event(ServiceEvent(3, SessionStatus("stopped", "m", "low", True)))
-        panel.handle_result(ServiceResult(3, "stop" if action == "stop" else "goal_clear"))
+        panel.handle_event(ServiceEvent(3, RequestResolved("question")))
+        panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=complete)))
+        panel.handle_result(ServiceResult(3, "stop"))
         assert panel.plan_panel.status.text() == "中断"
+    else:
+        panel.plan_panel.clear_button.click()
+        assert requested == ["clear"]
+        panel.handle_event(ServiceEvent(3, ConversationStatus("thread", "auto")))
+        panel.handle_result(ServiceResult(3, "goal_clear"))
+        assert panel.requests["question"].is_live
+        assert panel.plan_panel.status.text() == ""
+        assert panel.interrupt_button.isEnabled()
     assert panel.prompt.toPlainText() == "次の原稿"
     assert panel.send_button.isEnabled()
 
@@ -1171,9 +1300,11 @@ def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
     panel = ConnectionPanel()
     qtbot.addWidget(panel)
     panel.activate(8)
-    panel.handle_event(ServiceEvent(8, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 8, "m", "low")
     panel.handle_result(ServiceResult(8, "connect"))
-    panel.handle_event(ServiceEvent(8, GoalEvent(GoalState("保持する目標", "paused"))))
+    panel.handle_event(
+        ServiceEvent(8, ConversationStatus(goal=GoalState("保持する目標", "paused")))
+    )
     assert panel.plan_panel.clear_button.isEnabled()
     panel.handle_result(ServiceResult(8, "disconnect"))
     assert not panel.plan_panel.clear_button.isEnabled()
@@ -1181,7 +1312,7 @@ def test_goal_controls_disable_on_disconnect_without_discarding_confirmed_text(
     assert panel.plan_panel.goal_value.toPlainText() == "保持する目標"
 
 
-def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resume(
+def test_account_settings_preserve_copy_and_usage_does_not_block_submission(
     qtbot: QtBot,
 ) -> None:
     window = MainWindow()
@@ -1192,7 +1323,7 @@ def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resu
     panel = window.connection
     assert window.codex_menu.actions() == [panel.connect_action, panel.disconnect_action]
     panel.activate(1)
-    panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
+    _ready(panel, 1, "m", "low")
     panel.handle_result(ServiceResult(1, "connect"))
     account = AccountInfo("player@example.test", "plus", "ゲーム", True)
     panel.handle_event(ServiceEvent(1, account))
@@ -1219,17 +1350,19 @@ def test_account_settings_updates_preserve_copy_and_usage_requires_explicit_resu
     qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     assert QApplication.clipboard().text() == account.email
     assert "70%" in panel.codex_settings.view.toPlainText()
-    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持した目標", "paused"))))
+    panel.handle_event(
+        ServiceEvent(1, ConversationStatus(goal=GoalState("保持した目標", "paused")))
+    )
     panel.prompt.setPlainText("次の依頼")
     panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False, available=True)))
-    assert not panel.send_button.isEnabled()
-    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.send_button.isEnabled()
+    assert panel.plan_panel.resume_button.isEnabled()
     assert panel.plan_panel.clear_button.isEnabled()
     assert panel.disconnect_action.isEnabled()
     requests: list[bool] = []
     panel.goal_resume_requested.connect(lambda: requests.append(True))
     panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=False)))
-    assert not panel.plan_panel.resume_button.isEnabled()
+    assert panel.plan_panel.resume_button.isEnabled()
     panel.handle_event(ServiceEvent(1, UsageEvent(ordinary_usage_allowed=True, available=True)))
     assert panel.send_button.isEnabled()
     assert panel.plan_panel.resume_button.isEnabled()
@@ -1281,12 +1414,13 @@ def test_explicit_sandbox_setup_remains_disconnectable_and_reports_unknown_accep
     assert not panel.sandbox_action.isEnabled()
     panel.handle_event(ServiceEvent(1, SandboxEvent("updateRequired")))
     assert panel.sandbox_action.isEnabled()
-    panel.handle_event(ServiceEvent(1, SessionStatus("running", "m", "low", True)))
-    assert not panel.sandbox_action.isEnabled()
     panel.handle_event(ServiceEvent(1, SessionStatus("ready", "m", "low", True)))
-    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("自律継続中", "active"))))
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     assert not panel.sandbox_action.isEnabled()
-    panel.handle_event(ServiceEvent(1, GoalEvent(GoalState("保持中", "paused"))))
+    panel.handle_event(ServiceEvent(1, ConversationStatus(goal=GoalState("自律継続中", "active"))))
+    assert not panel.sandbox_action.isEnabled()
+    panel.handle_event(ServiceEvent(1, ConversationStatus(goal=GoalState("保持中", "paused"))))
+    assert panel.sandbox_action.isEnabled()
     panel.sandbox_action.trigger()
     failed = SandboxEvent(None, False, "setup-failed-fixture")
     panel.handle_event(ServiceEvent(1, failed))

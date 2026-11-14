@@ -13,11 +13,6 @@ type ConnectionPhase = Literal[
     "login_required",
     "authenticating",
     "ready",
-    "starting",
-    "running",
-    "waiting",
-    "stopping",
-    "stopped",
     "error",
     "closed",
 ]
@@ -61,9 +56,7 @@ class SessionStatus:
     """Current application status derived from operations and runtime notifications.
 
     Attributes:
-        phase: Connection or turn phase. Stopped means no pending start or active turn
-            and completion of any started terminal cleanup. Interrupt receipt alone
-            does not establish it.
+        phase: Connection/authentication state, independent of conversation execution.
         model: Selected model for future turns, empty before catalog validation.
         effort: Selected reasoning level for future turns, empty before validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
@@ -318,7 +311,7 @@ class RequestResolved:
 
 @dataclass(frozen=True, slots=True)
 class TurnStarted:
-    """An ordinary or autonomous turn accepted from a start notification or response.
+    """An ordinary or autonomous turn adopted from a server start notification.
 
     Emitted once, before events for that turn, even when completion precedes the
     start response. Unknown item, question and completion notifications do not
@@ -366,6 +359,36 @@ class GoalState:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationStatus:
+    """Immutable display projection of server facts and owned operation tasks.
+
+    No field grants input or chooses between starting and steering a turn.
+    Sending and stopping are projected from live tasks, not stored phases.
+    """
+
+    thread_id: str | None = None
+    turn_id: str | None = None
+    goal: GoalState | None = None
+    sending: bool = False
+    stopping: bool = False
+    waiting_for_answer: bool = False
+
+
+def can_submit(connection: SessionStatus, conversation: ConversationStatus) -> bool:
+    """Whether an authenticated conversation can accept one new send operation.
+
+    Model/sandbox readiness is checked for execution, not for selecting a valid
+    model. Answers use their original request and are independent of this slot.
+    """
+    return (
+        connection.phase == "ready"
+        and connection.authenticated
+        and not conversation.sending
+        and not conversation.stopping
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class GoalEvent:
     """A confirmed Goal snapshot, or None after confirmed removal."""
 
@@ -389,6 +412,7 @@ type ConnectionEvent = (
     | DialogueEvent
     | ModelSelection
     | SessionStatus
+    | ConversationStatus
     | TextEvent
     | PlanEvent
     | ReasoningEvent

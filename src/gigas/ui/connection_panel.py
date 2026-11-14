@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
-    GoalEvent,
+    ConversationStatus,
     HumanRequest,
     LoginEvent,
     ModelSelection,
@@ -27,8 +27,8 @@ from gigas.runtime.codex.models import (
     SandboxEvent,
     SessionStatus,
     TextEvent,
-    TurnStarted,
     UsageEvent,
+    can_submit,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.codex_settings import CodexSettings
@@ -42,19 +42,11 @@ from gigas.ui.transcript import Transcript
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from gigas.runtime.codex.models import GoalState
-
-
 _PHASE_LABELS = {
     "connecting": "接続中",
     "login_required": "未認証",
     "authenticating": "認証待ち",
     "ready": "待機",
-    "starting": "開始中",
-    "running": "実行中",
-    "waiting": "回答待ち",
-    "stopping": "中断中",
-    "stopped": "停止",
     "error": "エラー",
     "closed": "切断",
 }
@@ -82,7 +74,6 @@ class ConnectionPanel(QWidget):
     goal_resume_requested = Signal()
     goal_clear_requested = Signal()
     send_requested = Signal(str)
-    steer_requested = Signal(str, str)
     interrupt_requested = Signal()
     answer_requested = Signal(object)
     failed = Signal(object)
@@ -100,16 +91,13 @@ class ConnectionPanel(QWidget):
         self._connected = False
         self._available = True
         self._settings_ready = True
-        self._usage_blocked = False
         self._sandbox = SandboxEvent()
-        self._goal: GoalState | None = None
         self._status = SessionStatus("closed")
+        self._conversation = ConversationStatus()
         self._pending: set[str] = set()
         self._submitted = ""
-        self._active_turn: str | None = None
         self._current_plan: PlanEvent | None = None
         self._error = ""
-        self._stopping = False
         self._failure_ids: set[int] = set()
         self.requests: dict[str, RequestRecord] = {}
         self.request_views: dict[str, RequestView] = {}
@@ -177,9 +165,8 @@ class ConnectionPanel(QWidget):
         """Reset the view for a newly submitted connection generation."""
         self.composer.set_choices(None)
         self.codex_settings.reset()
-        self._usage_blocked = False
         self._sandbox = SandboxEvent()
-        self._goal = None
+        self._conversation = ConversationStatus()
         self.plan_panel.set_goal(None)
         self._generation = generation
         self._failure_ids.clear()
@@ -187,8 +174,6 @@ class ConnectionPanel(QWidget):
         self._status = SessionStatus("connecting")
         self._error = ""
         self._pending = {"connect"}
-        self._stopping = False
-        self._active_turn = None
         self._current_plan = None
         for record in self.requests.values():
             record.invalidate()
@@ -218,9 +203,8 @@ class ConnectionPanel(QWidget):
         self.login_url.clear()
         self._expire_requests()
         self._archive_plan()
-        if self._active_turn is not None:
+        if self._conversation.turn_id is not None:
             self.plan_panel.set_plan(self._current_plan, interrupted=True)
-        self._active_turn = None
         self._render()
 
     @Slot(object)
@@ -238,10 +222,20 @@ class ConnectionPanel(QWidget):
             if event.setting_up and event.detail and event.detail != previous_detail:
                 self._notify_failure(event.detail, operation="setup_windows_sandbox")
         elif isinstance(event, UsageEvent):
-            self._usage_blocked = event.ordinary_usage_allowed is False
             self.codex_settings.set_usage(event)
-        elif isinstance(event, GoalEvent):
-            self._goal = event.goal
+        elif isinstance(event, ConversationStatus):
+            if event.turn_id != self._conversation.turn_id:
+                self._archive_plan()
+                if event.turn_id is not None:
+                    self._clear_plan()
+                elif self._conversation.turn_id is not None:
+                    interrupted = (
+                        event.stopping or self._conversation.stopping or "stop" in self._pending
+                    )
+                    self.plan_panel.set_plan(
+                        self._current_plan, interrupted=interrupted, finished=not interrupted
+                    )
+            self._conversation = event
             self.plan_panel.set_goal(event.goal)
         elif isinstance(event, ModelSelection):
             self.composer.set_choices(event)
@@ -262,24 +256,13 @@ class ConnectionPanel(QWidget):
                 and not (event.model and event.effort)
             ):
                 self._notify_failure(event.detail, operation="select_model")
-            if event.phase in {"stopping", "stopped", "closed", "error"}:
+            if event.phase in {"closed", "error"}:
                 self._expire_requests()
-            if event.phase in {"ready", "stopped", "closed", "error"}:
                 self._archive_plan()
-                if self._active_turn is not None and not self._stopping:
-                    self.plan_panel.set_plan(
-                        self._current_plan,
-                        interrupted=event.phase != "ready",
-                        finished=event.phase == "ready",
-                    )
-                self._active_turn = None
+                if self._conversation.turn_id is not None:
+                    self.plan_panel.set_plan(self._current_plan, interrupted=True)
             if event.phase != "authenticating":
                 self.login_url.clear()
-        elif isinstance(event, TurnStarted):
-            if event.turn_id != self._active_turn and not self._stopping:
-                self._archive_plan()
-                self._clear_plan()
-            self._active_turn = event.turn_id
         elif isinstance(event, LoginEvent):
             url = QUrl(event.url)
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
@@ -289,15 +272,12 @@ class ConnectionPanel(QWidget):
                 f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
             )
         elif isinstance(event, PlanEvent):
-            if event.turn_id == self._active_turn:
+            if event.turn_id == self._conversation.turn_id:
                 self._current_plan = event
-            if (
-                event.turn_id == self._active_turn
-                and not self._stopping
-                and self._status.phase != "stopping"
-                and "disconnect" not in self._pending
-            ):
-                self.plan_panel.set_plan(event)
+                self.plan_panel.set_plan(
+                    event,
+                    interrupted=self._conversation.stopping or "stop" in self._pending,
+                )
             else:
                 self.transcript.update_plan(
                     f"plan:{event.turn_id}",
@@ -330,9 +310,8 @@ class ConnectionPanel(QWidget):
         elif isinstance(event, HumanRequest):
             if (
                 event.token not in self.requests
-                and not self._stopping
                 and "disconnect" not in self._pending
-                and self._status.phase in {"starting", "running", "waiting"}
+                and self._status.phase == "ready"
             ):
                 self._add_request(event)
         elif isinstance(event, RequestResolved) and event.token in self.requests:
@@ -352,7 +331,7 @@ class ConnectionPanel(QWidget):
                 record.finish_submission(result.answer.outcome)
                 self._request_changed(record)
         if (
-            result.operation in {"send", "steer", "goal_set"}
+            result.operation in {"send", "goal_set"}
             and result.operation in self._pending
             and result.message is not None
             and result.message.outcome == "accepted"
@@ -381,10 +360,8 @@ class ConnectionPanel(QWidget):
         if not self._connected or "stop" in self._pending or "disconnect" in self._pending:
             return
         self._pending.add("stop")
-        self._stopping = True
-        if self._active_turn is not None:
+        if self._conversation.turn_id is not None:
             self.plan_panel.set_plan(self._current_plan, interrupted=True)
-        self._expire_requests()
         self._render()
         self.interrupt_requested.emit()
 
@@ -421,26 +398,17 @@ class ConnectionPanel(QWidget):
         self._error = ""
         if self.composer.goal_mode.isChecked():
             self._pending.add("goal_set")
-            if self._goal is None or self._goal.status == "complete":
-                self._stopping = False
             self._render()
             self.goal_requested.emit(self._submitted)
             return
-        steering = self._status.phase in {"running", "waiting"}
-        self._pending.add("steer" if steering else "send")
-        if not steering:
-            self._stopping = False
+        self._pending.add("send")
         self._render()
-        if steering and self._active_turn is not None:
-            self.steer_requested.emit(self._submitted, self._active_turn)
-        else:
-            self.send_requested.emit(self._submitted)
+        self.send_requested.emit(self._submitted)
 
     def _resume_goal(self) -> None:
         if not self.plan_panel.resume_button.isEnabled():
             return
         self._pending.add("goal_resume")
-        self._stopping = False
         self._render()
         self.goal_resume_requested.emit()
 
@@ -448,10 +416,6 @@ class ConnectionPanel(QWidget):
         if not self.plan_panel.clear_button.isEnabled():
             return
         self._pending.add("goal_clear")
-        self._stopping = True
-        if self._active_turn is not None:
-            self.plan_panel.set_plan(self._current_plan, interrupted=True)
-        self._expire_requests()
         self._render()
         self.goal_clear_requested.emit()
 
@@ -462,7 +426,7 @@ class ConnectionPanel(QWidget):
 
     def _answer(self, token: str, decision: str | None = None) -> None:
         record = self.requests[token]
-        if not self._available or self._stopping or "disconnect" in self._pending:
+        if not self._answers_available:
             return
         submission = record.submit(decision)
         if submission is not None:
@@ -471,9 +435,7 @@ class ConnectionPanel(QWidget):
             self.answer_requested.emit(submission)
 
     def _request_changed(self, record: RequestRecord) -> None:
-        self.request_views[record.request.token].refresh(
-            available=self._available and not self._stopping and "disconnect" not in self._pending
-        )
+        self.request_views[record.request.token].refresh(available=self._answers_available)
 
     def _edit_draft(self) -> None:
         self._message_draft = self.prompt.toPlainText()
@@ -490,7 +452,10 @@ class ConnectionPanel(QWidget):
         self.plan_panel.set_plan(None)
 
     def _archive_plan(self) -> None:
-        if self._current_plan is not None and self._current_plan.turn_id == self._active_turn:
+        if (
+            self._current_plan is not None
+            and self._current_plan.turn_id == self._conversation.turn_id
+        ):
             event = self._current_plan
             self.transcript.update_plan(
                 f"plan:{event.turn_id}",
@@ -498,6 +463,16 @@ class ConnectionPanel(QWidget):
                 event.explanation,
                 inactive=True,
             )
+
+    @property
+    def _answers_available(self) -> bool:
+        return (
+            self._available
+            and self._connected
+            and self._status.phase == "ready"
+            and not self._conversation.stopping
+            and not self._pending.intersection({"stop", "disconnect"})
+        )
 
     def _notify_failure(
         self, detail: str, failure_id: int | None = None, *, operation: str = ""
@@ -529,6 +504,8 @@ class ConnectionPanel(QWidget):
     def _render(self) -> None:
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
+        conversation = self._conversation
+        goal = conversation.goal
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_action.setEnabled(available and self._connected)
         server_action = self.disconnect_action if self._connected else self.connect_action
@@ -543,19 +520,15 @@ class ConnectionPanel(QWidget):
         self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
-        goal_active = self._goal is not None and self._goal.status == "active"
-        goal_finishing = (
-            self._goal is not None
-            and self._goal.status == "complete"
-            and phase == "stopping"
-            and self._active_turn is not None
-            and not self._stopping
-        )
+        goal_active = goal is not None and goal.status == "active"
         self.sandbox_action.setEnabled(
             available
             and self._connected
-            and phase in {"ready", "stopped", "login_required"}
+            and phase in {"ready", "login_required"}
+            and conversation.turn_id is None
             and not goal_active
+            and not conversation.sending
+            and not conversation.stopping
             and not self._pending
             and not self._sandbox.reconnect_required
             and not self._sandbox.setting_up
@@ -564,99 +537,70 @@ class ConnectionPanel(QWidget):
         self.account_button.setEnabled(self.login_action.isEnabled())
         self.codex_settings.sandbox_button.setText(self.sandbox_action.text())
         self.codex_settings.sandbox_button.setEnabled(self.sandbox_action.isEnabled())
-        goal_pending = bool(self._pending.intersection({"goal_set", "goal_resume", "goal_clear"}))
-        goal_mode = self.composer.goal_mode.isChecked()
-        settled = phase in {"ready", "stopped"} and self._active_turn is None
-        selection_valid = (
-            bool(self._status.authenticated and self._status.model and self._status.effort)
-            and not self._usage_blocked
+        submitted = bool(
+            self._pending.intersection(
+                {"send", "goal_set", "goal_resume", "goal_clear", "select_model"}
+            )
         )
-        self.composer.goal_mode.setEnabled(
-            available
-            and not goal_pending
-            and not self._pending.intersection({"send", "steer"})
-            and not any(record.state in {"waiting", "sending"} for record in self.requests.values())
-        )
-        self.plan_panel.resume_button.setEnabled(
-            available
-            and settled
-            and selection_valid
-            and not self._pending
-            and self._goal is not None
-            and self._goal.status not in {"active", "complete"}
-        )
-        self.plan_panel.clear_button.setEnabled(
+        stopping = conversation.stopping or "stop" in self._pending
+        accepting = (
             available
             and self._connected
-            and (phase in {"ready", "running", "waiting", "stopped"} or goal_finishing)
-            and self._goal is not None
-            and not self._pending
+            and can_submit(self._status, conversation)
+            and not submitted
+            and not stopping
         )
-        ready = (
-            available
-            and selection_valid
-            and (
-                phase in {"ready", "stopped"}
-                or (
-                    phase in {"running", "waiting"}
-                    and self._active_turn is not None
-                    and not self._stopping
-                )
-            )
-            and not self._pending.intersection(
-                {"send", "steer", "goal_set", "goal_resume", "goal_clear"}
-            )
+        prepared = (
+            self._sandbox.readiness == "ready"
+            and not self._sandbox.setting_up
+            and not self._sandbox.reconnect_required
         )
-        if goal_active and self._active_turn is None and not goal_mode:
-            ready = False
-        if goal_mode and (self._goal is None or self._goal.status == "complete") and not settled:
-            ready = False
-        if "stop" in self._pending or phase == "stopping":
-            ready = False
+        ready = accepting and bool(self._status.model and self._status.effort) and prepared
+        self.composer.goal_mode.setEnabled(
+            available and not submitted and not conversation.sending and not stopping
+        )
+        self.plan_panel.resume_button.setEnabled(
+            ready and goal is not None and goal.status not in {"active", "complete"}
+        )
+        self.plan_panel.clear_button.setEnabled(ready and goal is not None)
         self.prompt.setReadOnly(not available)
         for view in self.request_views.values():
-            view.refresh(available=available and not self._stopping)
+            view.refresh(available=self._answers_available)
         running = (
             goal_active
-            or phase in {"starting", "running", "waiting", "stopping"}
-            or bool(
-                self._pending.intersection(
-                    {"send", "stop", "goal_set", "goal_resume", "goal_clear"}
-                )
-            )
+            or conversation.turn_id is not None
+            or conversation.sending
+            or submitted
+            or stopping
         )
         self.composer.render_actions(
             send_enabled=ready and bool(self._message_draft.strip()),
-            interrupt_enabled=(
-                available
-                and (
-                    goal_active
-                    or goal_finishing
-                    or phase in {"starting", "running", "waiting"}
-                    or bool(self._pending.intersection({"send", "goal_set", "goal_resume"}))
-                )
-                and "stop" not in self._pending
-                and not self._stopping
-            ),
+            interrupt_enabled=(available and self._connected and running and not stopping),
             running=running,
             has_draft=bool(self._message_draft.strip()),
         )
         visible = available and phase == "authenticating" and bool(self.login_url.text())
         self.login_url.setVisible(visible)
         self.open_login_button.setVisible(visible)
-        self.status.setText("完了処理中" if goal_finishing else _PHASE_LABELS[phase])
-        model_available = (
-            self._available
-            and self._connected
-            and self._status.phase in {"ready", "running", "waiting", "stopped"}
-            and not self._pending
+        self.status.setText(
+            _PHASE_LABELS[phase]
+            if phase != "ready"
+            else "中断中"
+            if stopping
+            else "送信中"
+            if conversation.sending or submitted
+            else "回答待ち"
+            if conversation.waiting_for_answer
+            else "実行中"
+            if conversation.turn_id is not None
+            else "待機"
         )
-        if not model_available and "select_model" not in self._pending:
+        if not accepting and "select_model" not in self._pending:
             self.composer.popup.hide()
-        self.composer.model_choice.setEnabled(model_available)
-        self.composer.effort_choice.setEnabled(model_available)
+        self.composer.model_choice.setEnabled(accepting)
+        self.composer.effort_choice.setEnabled(accepting)
         self.composer.model_button.setEnabled(
-            model_available
+            accepting
             and self.composer.selection is not None
             and bool(self.composer.selection.choices)
         )

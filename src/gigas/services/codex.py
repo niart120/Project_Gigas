@@ -4,7 +4,7 @@ import asyncio
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from threading import Lock
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from PySide6.QtCore import QThread, Signal
@@ -12,6 +12,7 @@ from PySide6.QtCore import QThread, Signal
 from gigas.game_io.input.serial import SerialInput, list_serial_ports
 from gigas.runtime.codex.connection import (
     AnswerDeliveryError,
+    CodexConnection,
     CodexConnectionError,
     MessageDeliveryError,
 )
@@ -27,8 +28,8 @@ from gigas.runtime.codex.models import (
     TextEvent,
     TurnStarted,
 )
+from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
-from gigas.services._conversation_run import ConversationRun
 from gigas.services.input import InputService
 from gigas.storage.project import ProjectError
 
@@ -39,22 +40,19 @@ if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.input.config import SerialConfig
     from gigas.game_io.observation import ObservationResolution
+    from gigas.runtime.codex.connection import RuntimeEvent
     from gigas.runtime.codex.models import (
         ConnectionEvent,
         ConnectionOptions,
-        ThreadConfiguration,
     )
     from gigas.runtime.codex.transport import JsonObject
     from gigas.services.input import InputDevice
-    from gigas.services.observation import ObservationService
-    from gigas.services.recording import RecordingService
 
 type ServiceOperation = Literal[
     "connect",
     "login",
     "setup_windows_sandbox",
     "send",
-    "steer",
     "answer",
     "stop",
     "disconnect",
@@ -66,84 +64,9 @@ type ServiceOperation = Literal[
 type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
 
 
-class ServiceConnection(Protocol):
-    """Async connection boundary owned exclusively by the service loop."""
-
-    async def open(self) -> None:
-        """Open the connection and report authentication state."""
-        ...
-
-    async def set_goal(self, objective: str) -> bool:
-        """Create or update the public Goal; return confirmed acceptance."""
-        ...
-
-    async def resume_goal(self) -> bool:
-        """Explicitly resume the retained Goal after preparing the same thread."""
-        ...
-
-    async def clear_goal(self) -> None:
-        """Locally accept Goal removal; SessionStatus reports completion or failure."""
-        ...
-
-    async def select_model(self, model: str, effort: str) -> None:
-        """Select catalog values for the next ordinary turn."""
-        ...
-
-    async def login(self) -> None:
-        """Begin explicit login."""
-        ...
-
-    async def setup_windows_sandbox(self) -> None:
-        """Await explicit environment setup and its readiness confirmation."""
-        ...
-
-    async def send(self, prompt: str) -> str | None:
-        """Return the acknowledged turn ID, or None if stopped before submission."""
-        ...
-
-    async def steer(self, prompt: str, expected_turn_id: str) -> str:
-        """Return the acknowledged target turn without resolving pending questions."""
-        ...
-
-    async def answer(
-        self, token: str, *, decision: str | None = None, answers: "Mapping[str, str] | None" = None
-    ) -> None:
-        """Answer a live local request token once.
-
-        Returning confirms transport write completion only. Raise
-        CodexConnectionError for rejection before transmission, and
-        AnswerDeliveryError when delivery is unknown. Cancellation and unexpected
-        exceptions also leave delivery unknown; callers must not retry them.
-        """
-        ...
-
-    async def stop(self) -> None:
-        """Locally accept interruption; SessionStatus reports completion or failure."""
-        ...
-
-    async def close(self) -> None:
-        """Wait for all owned connection resources to close."""
-        ...
-
-
 type ConnectionFactory = Callable[
-    [
-        ConnectionOptions,
-        Callable[[ConnectionEvent], None],
-        Callable[[str, str | None], Awaitable[ThreadConfiguration]],
-        Callable[[str], Awaitable[None]],
-    ],
-    ServiceConnection,
+    [ConnectionOptions, Callable[[RuntimeEvent], None]], CodexConnection
 ]
-
-
-def _create_connection(
-    options: "ConnectionOptions",
-    emit: "Callable[[ConnectionEvent], None]",
-    prepare: "Callable[[str, str | None], Awaitable[ThreadConfiguration]]",
-    started: "Callable[[str], Awaitable[None]]",
-) -> ServiceConnection:
-    return create_connection(options, emit, prepare_turn=prepare, on_thread_started=started)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,9 +133,9 @@ class MessageResult:
 class ServiceResult:
     """Operation completion; empty error means the call returned successfully.
 
-    Successful stop and goal_clear results confirm local request acceptance only,
-    not RPC acceptance, Goal mutation, or turn termination. SessionStatus reports
-    actual completion or failure. Errors contain no raw exception text.
+    A successful stop confirms server termination and local input recovery.
+    A successful goal_clear confirms its RPC result, not execution termination.
+    Errors contain no raw exception text.
     Answer operations include token-specific delivery evidence in answer, including
     rejected or cancelled calls. The generation still identifies the connection.
     failure_id correlates this result with an already emitted SessionStatus from
@@ -237,7 +160,7 @@ class _OperationContext:
     request_id: str = field(default_factory=lambda: f"message-{uuid4()}")
 
 
-type _ConnectionCall = Callable[[ServiceConnection], Awaitable[str | bool | None]]
+type _ConversationCall = Callable[[ConversationExecution], Awaitable[str | bool | None]]
 type _OperationCall = Callable[[], Awaitable[str | bool | None]]
 
 
@@ -256,7 +179,7 @@ class CodexServiceThread(QThread):
         input_factory: Creates an input device on the service loop from resolved settings.
         factory: Creates the runtime on the service loop when connecting.
             The conversation directory is prepared on the first send.
-            Receives options, event callback, chat preparation, and thread binding.
+            Receives options and the synchronous runtime event callback.
             The default creates the bundled runtime connection.
     """
 
@@ -271,7 +194,7 @@ class CodexServiceThread(QThread):
         self,
         data_root: "Path",
         reader: "CaptureReader",
-        factory: ConnectionFactory = _create_connection,
+        factory: ConnectionFactory = create_connection,
         *,
         input_factory: "Callable[[SerialConfig], InputDevice]" = SerialInput,
     ) -> None:
@@ -288,7 +211,7 @@ class CodexServiceThread(QThread):
         self._input_pending = False
         self._input_apply_task: asyncio.Task[None] | None = None
         self._resources = ConversationResources(data_root, reader, self.recording_failed.emit)
-        self._run = ConversationRun(self._input)
+        self._conversation: ConversationExecution | None = None
         self._resources_lock = asyncio.Lock()
         self._lock = Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -296,7 +219,7 @@ class CodexServiceThread(QThread):
         self._ending = False
         self._generation = 0
         self._active_generation = 0
-        self._connection: ServiceConnection | None = None
+        self._connection: CodexConnection | None = None
         self._closing: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._done: asyncio.Event | None = None
@@ -364,57 +287,38 @@ class CodexServiceThread(QThread):
         return self._generation
 
     def set_goal(self, objective: str) -> None:
-        """Submit an explicit objective without queuing an ordinary turn."""
-        self._submit(
-            "goal_set",
-            lambda connection: self._run.prepare_goal(lambda: connection.set_goal(objective)),
-        )
+        """Submit the objective through the conversation's shared send operation."""
+        self._submit("goal_set", lambda execution: execution.set_goal(objective))
 
     def resume_goal(self) -> None:
-        """Resume a retained Goal with new MCP capabilities after cleanup."""
-        self._submit("goal_resume", self._resume_goal)
+        """Request active status without replacing the retained objective."""
+        self._submit("goal_resume", lambda execution: execution.resume_goal())
 
     def clear_goal(self) -> None:
-        """Revoke input immediately, then discard the Goal and interrupt its turn."""
-        self._submit("goal_clear", lambda connection: connection.clear_goal())
+        """Withdraw the Goal without interrupting the current turn or input."""
+        self._submit("goal_clear", lambda execution: execution.clear_goal())
 
     def select_model(self, model: str, effort: str) -> None:
-        """Queue a next-turn selection without writing persistent settings."""
-        self._submit(
-            "select_model", lambda connection: self._select_model(connection, model, effort)
-        )
+        """Submit next-turn settings through the shared conversation send operation."""
+        self._submit("select_model", lambda execution: self._select_model(execution, model, effort))
 
     def login(self) -> None:
-        """Queue an explicit ChatGPT login request."""
-        self._submit("login", lambda connection: connection.login())
+        """Queue explicit ChatGPT login on the connection owner."""
+        self._submit_connection("login", lambda connection: connection.login())
 
     def setup_windows_sandbox(self) -> None:
-        """Queue explicit Windows environment setup without blocking disconnect.
-
-        Completion reports setup completion, not just acceptance of its start.
-        Disconnecting does not assert cancellation of Windows setup itself.
-        """
-        self._submit("setup_windows_sandbox", lambda connection: connection.setup_windows_sandbox())
+        """Queue explicit Windows preparation without blocking disconnect."""
+        self._submit_connection(
+            "setup_windows_sandbox", lambda connection: connection.setup_windows_sandbox()
+        )
 
     def send(self, prompt: str) -> None:
-        """Queue a user turn; completion does not mean the turn has finished.
+        """Submit ordinary or additional text through the same turn/start path.
 
         Args:
-            prompt: User text passed unchanged to the connection.
+            prompt: User text passed unchanged to conversation execution.
         """
-        self._submit("send", lambda connection: connection.send(prompt))
-
-    def steer(self, prompt: str, expected_turn_id: str) -> None:
-        """Queue one instruction for the selected active turn, without retrying.
-
-        Args:
-            prompt: User text passed unchanged to the connection.
-            expected_turn_id: Turn identity captured when the user submits.
-
-        The completed signal carries MessageResult for acceptance, rejection, or
-        uncertainty. It does not assert that the model followed the instruction.
-        """
-        self._submit("steer", lambda connection: connection.steer(prompt, expected_turn_id))
+        self._submit("send", lambda execution: execution.send(prompt))
 
     def answer(
         self, token: str, *, decision: str | None = None, answers: "Mapping[str, str] | None" = None
@@ -438,12 +342,12 @@ class CodexServiceThread(QThread):
         )
 
     def interrupt(self) -> None:
-        """Queue stop independently of a pending connect or send operation."""
-        self._submit("stop", lambda connection: connection.stop())
+        """Request common stop; the result reports actual stop completion."""
+        self._submit("stop", lambda execution: execution.stop())
 
     def disconnect_runtime(self) -> None:
         """Close the current connection while keeping the service loop available."""
-        self._submit("disconnect", lambda _connection: self._close_connection())
+        self._submit_connection("disconnect", lambda _connection: self._close_connection())
 
     def shutdown(self) -> None:
         """Reject new commands and asynchronously close all owned resources."""
@@ -469,11 +373,22 @@ class CodexServiceThread(QThread):
                 self._ending = True
 
     def _submit(
-        self, operation: ServiceOperation, call: _ConnectionCall, *, token: str = ""
+        self, operation: ServiceOperation, call: _ConversationCall, *, token: str = ""
     ) -> None:
         context = _OperationContext(self._generation, operation, token)
         self._enqueue(
             lambda: self._start_operation(context, lambda: self._invoke(context, call)), context
+        )
+
+    def _submit_connection(
+        self,
+        operation: ServiceOperation,
+        call: "Callable[[CodexConnection], Awaitable[None]]",
+    ) -> None:
+        context = _OperationContext(self._generation, operation)
+        self._enqueue(
+            lambda: self._start_operation(context, lambda: self._invoke_connection(context, call)),
+            context,
         )
 
     def _enqueue(
@@ -501,27 +416,21 @@ class CodexServiceThread(QThread):
             self._dispatch(start, context)
         await self._done.wait()
         try:
+            await self._close_connection()
+        finally:
             try:
                 await self._input.close()
             finally:
-                if self._connection is not None:
-                    await self._close_connection()
-                elif self._closing is not None:
-                    await asyncio.shield(self._closing)
-        finally:
-            pending = list(self._tasks)
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            try:
-                await self._run.drain()
-            finally:
+                pending = list(self._tasks)
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
                 async with self._resources_lock:
                     await self._resources.close()
 
     def _signal_shutdown(self) -> None:
         self._input_pending = False
-        self._run.stop()
+        self._input.stop()
         if self._done is not None:
             self._done.set()
 
@@ -535,8 +444,6 @@ class CodexServiceThread(QThread):
         start()
 
     def _start_operation(self, context: _OperationContext, call: _OperationCall) -> None:
-        if context.operation in {"stop", "disconnect", "goal_clear"}:
-            self._run.stop()
         task = asyncio.create_task(
             self._execute(context, call), name=f"gigas-service-{context.operation}"
         )
@@ -566,7 +473,6 @@ class CodexServiceThread(QThread):
         if command.operation in {
             "answer",
             "send",
-            "steer",
             "select_model",
             "goal_set",
             "goal_resume",
@@ -587,7 +493,7 @@ class CodexServiceThread(QThread):
     ) -> None:
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
         message = None
-        if command.operation in {"send", "steer"}:
+        if command.operation == "send":
             if outcome == "sent":
                 message = (
                     MessageResult("accepted", turn_id)
@@ -626,15 +532,20 @@ class CodexServiceThread(QThread):
         changing = config != self._input_config or (
             config is not None and not self._input.connected
         )
-        if changing and self._run.goal_active_or_preparing:
-            context = _OperationContext(self._active_generation, "stop")
-            self._start_operation(
-                context, lambda: self._invoke(context, lambda connection: connection.stop())
-            )
+        execution = self._conversation
+        if changing and execution is not None:
+            snapshot = execution.snapshot
+            if (
+                snapshot.sending
+                or snapshot.turn_id is not None
+                or (snapshot.goal is not None and snapshot.goal.status == "active")
+            ):
+                context = _OperationContext(self._active_generation, "stop")
+                self._start_operation(context, execution.stop)
         self._input_target = config
         self._input_pending = True
         if self._input_apply_task is not None and not self._input_apply_task.done():
-            self._run.stop()
+            self._input.stop()
             return
         self._input_apply_task = asyncio.create_task(self._apply_input())
         self._track(self._input_apply_task)
@@ -655,7 +566,7 @@ class CodexServiceThread(QThread):
             try:
                 if config is None or config != self._input_config or not self._input.connected:
                     device = None if config is None else self._input_factory(config)
-                    self._run.stop()
+                    self._input.stop()
                     await self._input.connect(device)
                 self._input_config = config
             except Exception as failure:  # noqa: BLE001 -- preserve a displayable input diagnostic.
@@ -680,13 +591,15 @@ class CodexServiceThread(QThread):
             goal_accepted = result is True
             turn_id = result if isinstance(result, str) else None
         except asyncio.CancelledError:
+            if command.operation in {"stop", "disconnect"}:
+                self._complete(command, "停止・切断の完了を確認できない", "unknown")
+                return
             if command.operation == "setup_windows_sandbox":
                 self._complete(command, "実行環境の準備完了を確認できない", "unknown")
                 return
             if command.operation in {
                 "answer",
                 "send",
-                "steer",
                 "select_model",
                 "goal_set",
                 "goal_resume",
@@ -712,37 +625,52 @@ class CodexServiceThread(QThread):
             if self._connection is not None:
                 raise CodexConnectionError("接続の終了待ち")
             options.cwd.mkdir(parents=True, exist_ok=True)
-            self._run.reset_connection()
             self._active_generation = generation
             self._closing = None
-            self._connection = self._factory(
-                options,
-                lambda event: self._receive(generation, event),
-                self._prepare_turn,
-                self._thread_started,
-            )
-        await self._connection.open()
 
-    async def _invoke(self, command: _OperationContext, call: _ConnectionCall) -> str | bool | None:
+            def receive(event: "RuntimeEvent") -> None:
+                execution.receive(event)
+
+            connection = self._factory(options, receive)
+            execution = ConversationExecution(
+                connection,
+                self._resources,
+                self._input,
+                lambda event: self._receive(generation, event),
+                closing=lambda: self._closing is not None or self._connection is not connection,
+                request_close=lambda: self._begin_close(connection, execution),
+            )
+            self._connection = connection
+            self._conversation = execution
+        await connection.open()
+
+    async def _invoke_connection(
+        self,
+        command: _OperationContext,
+        call: "Callable[[CodexConnection], Awaitable[None]]",
+    ) -> None:
         connection = self._connection
         if connection is None or command.generation != self._active_generation:
-            if command.operation == "setup_windows_sandbox":
-                raise CodexConnectionError("この接続では実行環境の準備を受け付けない")
-            if command.operation in {
-                "answer",
-                "send",
-                "steer",
-                "select_model",
-                "goal_set",
-                "goal_resume",
-                "goal_clear",
-            }:
-                message = "この接続では送信を受け付けない"
-                raise CodexConnectionError(message)
-            return None
+            if command.operation == "disconnect":
+                return
+            raise CodexConnectionError("この接続では操作を受け付けません")
+        if self._closing is not None and command.operation != "disconnect":
+            raise CodexConnectionError("接続の終了待ち")
+        await call(connection)
+
+    async def _invoke(
+        self, command: _OperationContext, call: _ConversationCall
+    ) -> str | bool | None:
+        execution = self._conversation
+        if execution is None or command.generation != self._active_generation:
+            if command.operation == "stop":
+                self._input.stop()
+                await self._input.drain_input()
+                return None
+            raise CodexConnectionError("この接続では送信を受け付けない")
         if command.operation in {"goal_resume", "goal_clear", "stop"}:
             self._record_submission({})
-        return await call(connection)
+        return await call(execution)
 
     def _record_submission(self, payload: "JsonObject") -> None:
         context = self._recording_operation.get()
@@ -750,19 +678,15 @@ class CodexServiceThread(QThread):
             payload.update({"request_id": context.request_id, "operation": context.operation})
         self._record_dialogue("submitted", payload)
 
-    async def _resume_goal(self, connection: ServiceConnection) -> bool:
-        if not self._resources.has_live_frame:
-            raise CodexConnectionError("再開には取得中の映像が必要です")
-        await self._input.drain_input()
-        return await self._run.prepare_goal(connection.resume_goal)
-
-    async def _select_model(self, connection: ServiceConnection, model: str, effort: str) -> None:
+    async def _select_model(
+        self, execution: ConversationExecution, model: str, effort: str
+    ) -> None:
         self._record_submission({"model": model, "effort": effort})
-        await connection.select_model(model, effort)
+        await execution.select_model(model, effort)
 
     async def _answer(
         self,
-        connection: ServiceConnection,
+        execution: ConversationExecution,
         token: str,
         decision: str | None,
         answers: "Mapping[str, str] | None",
@@ -774,40 +698,17 @@ class CodexServiceThread(QThread):
                 "answers": dict(answers) if answers is not None else None,
             }
         )
-        await self._run.answer(
-            token, lambda: connection.answer(token, decision=decision, answers=answers)
-        )
+        await execution.answer(token, decision=decision, answers=answers)
 
     def _receive(self, generation: int, event: "ConnectionEvent") -> None:
         if generation == self._active_generation:
             self._record_event(event)
-            self._run.receive(event)
         self.received.emit(ServiceEvent(generation, event))
-        if (
-            isinstance(event, SessionStatus)
-            and event.phase == "closed"
-            and generation == self._active_generation
-            and self._closing is None
-        ):
-            # Runtime failures use the same cleanup as an explicit disconnect.
-            context = _OperationContext(generation, "disconnect")
-            self._dispatch(
-                lambda: self._start_operation(
-                    context,
-                    lambda: self._invoke(context, lambda _connection: self._close_connection()),
-                ),
-                context,
-            )
 
     def _record_dialogue(
         self, kind: str, payload: "JsonObject", *, turn_id: str | None = None
     ) -> None:
-        self._resources.record_dialogue(
-            kind,
-            payload,
-            turn_id=turn_id or self._run.turn_id,
-            run_id=self._run.run_id,
-        )
+        self._resources.record_dialogue(kind, payload, turn_id=turn_id)
 
     def _record_event(self, event: "ConnectionEvent") -> None:
         kinds = {
@@ -848,72 +749,47 @@ class CodexServiceThread(QThread):
                 raise ProjectError("Codexを切断してからプロジェクトを変更してください")
             await self._resources.select_project(path, create=create)
 
-    async def _prepare_turn(self, message: str, thread_id: str | None) -> "ThreadConfiguration":
-        # Cancellation must recover synchronous I/O and its newly acquired writer.
-        self._run.prepare(message)
-        return await _finish_io(self._prepare_recording(thread_id))
-
-    async def _prepare_recording(self, thread_id: str | None) -> "ThreadConfiguration":
-        self._run.finish("replaced")
-        await self._run.drain()
-        async with self._resources_lock:
-            protocol = (
-                self._input_config.protocol
-                if self._input_config is not None and self._input.connected
-                else None
-            )
-            configuration, observations, recording = await self._resources.prepare(
-                self._input, protocol
-            )
-            if thread_id is not None:
-                try:
-                    await self._begin_run(thread_id, observations, recording)
-                except Exception as error:
-                    self._resources.report_failure(error)
-                    raise
-            return configuration
-
-    async def _thread_started(self, thread_id: str) -> None:
-        await _finish_io(self._record_thread(thread_id))
-
-    async def _record_thread(self, thread_id: str) -> None:
-        async with self._resources_lock:
-            observations, recording = self._resources.record_thread(thread_id)
-            await self._begin_run(thread_id, observations, recording)
-
-    async def _begin_run(
-        self, thread_id: str, observations: "ObservationService", recording: "RecordingService"
-    ) -> None:
-        grant = await self._run.begin(thread_id, observations, recording)
-        self._resources.bind(grant)
-
     async def _close_connection(self) -> None:
-        connection = self._connection
-        if connection is None:
-            return
+        connection, execution = self._connection, self._conversation
+        if connection is not None and execution is not None:
+            await asyncio.shield(self._begin_close(connection, execution))
+        elif self._closing is not None:
+            await asyncio.shield(self._closing)
+
+    def _begin_close(
+        self, connection: CodexConnection, execution: ConversationExecution
+    ) -> asyncio.Task[None]:
+        if self._connection is not connection:
+            return asyncio.create_task(connection.close())
         if self._closing is None:
             self._closing = asyncio.create_task(
-                self._release_connection(connection), name="gigas-connection-resources-close"
+                self._release_connection(connection, execution),
+                name="gigas-connection-resources-close",
             )
-        await asyncio.shield(self._closing)
+            execution.connection_closing()
+            self._input.stop()
+        return self._closing
 
-    async def _release_connection(self, connection: ServiceConnection) -> None:
-        # Revoke HTTP intake while joining the runtime, and still drain saving
-        # after either cleanup reports a failure.
-        self._run.finish("disconnected")
-        await self._run.drain()
+    async def _release_connection(
+        self, connection: CodexConnection, execution: ConversationExecution
+    ) -> None:
+        # Never join the stop task or Qt command that requested this shutdown.
         outcomes = await asyncio.gather(
             connection.close(), self._resources.close_endpoint(), return_exceptions=True
+        )
+        drained = await asyncio.gather(
+            execution.drain(), self._input.drain_input(), return_exceptions=True
         )
         async with self._resources_lock:
             try:
                 await self._resources.disconnect()
             finally:
-                if not isinstance(outcomes[0], BaseException):
+                if self._connection is connection:
+                    self._conversation = None
                     self._connection = None
-        for result in outcomes:
-            if isinstance(result, BaseException):
-                raise result
+        for outcome in (*outcomes, *drained):
+            if isinstance(outcome, BaseException):
+                raise outcome
 
 
 async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:

@@ -14,20 +14,26 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
+from gigas.game_io.input.config import PROTOCOLS
 from gigas.game_io.input.models import InvalidSequenceError, parse_sequence
 from gigas.game_io.observation import ObservationError
 from gigas.services.input import OperationResult
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from gigas.game_io.input.config import InputProtocol
+    from gigas.game_io.input.models import InputStep
     from gigas.game_io.observation import Observation
-    from gigas.services.input import InputGrant, InputService
-    from gigas.services.observation import ObservationService
 
 
 TOOL_TIMEOUT_SECONDS = 300
+
+type ActCall = Callable[
+    [tuple[InputStep, ...]],
+    Awaitable[tuple[OperationResult, Observation | ObservationError | None]],
+]
 
 
 class McpServerConfig(TypedDict):
@@ -49,41 +55,23 @@ class GameIoMcpServer:
     or event loop. Closing HTTP does not own those services or claim saving has finished.
 
     Args:
-        observations: Application-owned latest-image service; its writer is not owned here.
-        inputs: Application-owned input service; its connection is not owned here.
-        protocol: Applied input capabilities, or None when input is disconnected.
+        observe: Fetch the latest image from this conversation's resources.
+        act: Admit input and compose its outcome with observation or observation failure.
     """
 
     def __init__(
         self,
-        observations: "ObservationService",
-        inputs: "InputService",
-        protocol: "InputProtocol | None",
+        observe: "Callable[[], Awaitable[Observation]]",
+        act: ActCall,
     ) -> None:
         """Prepare a connection-specific name and token without opening a listener."""
-        self._observations = observations
-        self._inputs = inputs
-        self._protocol = protocol
-        self._grant: InputGrant | None = None
+        self._observe_call = observe
+        self._act_call = act
         self._name = f"gigas_{uuid4().hex}"
         self._authorization = f"Bearer {secrets.token_urlsafe(32)}"
         self._url = ""
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
-
-    def bind_grant(self, grant: "InputGrant") -> None:
-        """Attach this endpoint to its only run after the runtime supplies a thread ID.
-
-        Observation remains available before binding and after the grant expires.
-        A new run requires a new server; binding never restores input permission.
-
-        Raises:
-            RuntimeError: A run has already been bound to this server.
-        """
-        if self._grant is not None:
-            message = "MCPサーバーには実行が設定済みです"
-            raise RuntimeError(message)
-        self._grant = grant
 
     @property
     def server_name(self) -> str:
@@ -229,24 +217,14 @@ class GameIoMcpServer:
     async def _observe(self) -> CallToolResult:
         """Return the latest game image and its observation identity."""
         try:
-            observation = await self._observations.observe()
+            observation = await self._observe_call()
         except ObservationError as error:
             return _error_result({"code": error.code, "message": str(error)})
         return _observation_result(observation)
 
-    def _input_description(self) -> str:
-        protocol = self._protocol
-        capabilities = "Input is disconnected; act_and_observe cannot send input."
-        if protocol is not None:
-            touch = (
-                "touch: {x: 0..319, y: 0..239}, independent of observation image coordinates."
-                if protocol.touch
-                else "Touch input is unsupported."
-            )
-            capabilities = (
-                f"Applied protocol: {protocol.label} ({protocol.key}). "
-                f"Buttons: {', '.join(sorted(protocol.buttons))}. {touch}"
-            )
+    @staticmethod
+    def _input_description() -> str:
+        buttons = sorted({button for protocol in PROTOCOLS for button in protocol.buttons})
         return (
             "Execute a finite nonempty sequence and return the latest cached game image with "
             "operation_id and observation_id. The image may predate the input. "
@@ -255,45 +233,46 @@ class GameIoMcpServer:
             "Do not repeat buttons or combine opposite directions. "
             "left_stick and right_stick are {x: -100..100, y: -100..100}; "
             "right/down are positive. Omitted inputs are released or centered. "
+            "touch: {x: 0..319, y: 0..239}, independent of observation image coordinates. "
+            f"Known buttons across supported devices: {', '.join(buttons)}. "
+            "Available inputs depend on the connected device; an unsupported input rejects "
+            "the entire sequence before sending any input. "
             "press requires input; wait accepts only kind and duration_ms. "
             "The whole sequence is validated before sending. "
             f"The request deadline is {TOOL_TIMEOUT_SECONDS} seconds. "
             "An error or timeout may follow partial execution; never automatically resend "
             "the sequence. Observe again before deciding what to do. "
-            f"{capabilities}"
         )
 
     async def _act_and_observe(self, sequence: list[object]) -> CallToolResult:
-        """Validate and execute a finite input sequence within this endpoint's run."""
+        """Validate input, delegate admission, and format the composed outcome."""
+        observation: Observation | ObservationError | None = None
         try:
-            steps = parse_sequence(sequence, self._protocol)
+            steps = parse_sequence(sequence)
         except InvalidSequenceError as error:
             result = OperationResult("INVALID_SEQUENCE", message=str(error))
         else:
-            if self._grant is None or self._protocol is None:
-                result = OperationResult("INPUT_DISABLED", message="この実行では入力できません")
-            else:
-                try:
-                    async with asyncio.timeout(TOOL_TIMEOUT_SECONDS):
-                        result = await self._inputs.act(self._grant, steps)
-                except TimeoutError:
-                    # InputService owns cancellation and any pending release.
-                    # No completed outcome is available to this HTTP request.
-                    return _error_result(
-                        {
-                            "code": "TOOL_TIMEOUT",
-                            "phase": "unknown",
-                            "input_sent": "unknown",
-                            "neutral": "unconfirmed",
-                            "message": (
-                                "要求の待機期限に達しました。入力結果と解除完了は未確定です。"
-                                "一部が実行された可能性があるため、同じ操作列を再送せず、"
-                                "観測して状態を確認してください"
-                            ),
-                        }
-                    )
-        if result.observation is not None:
-            return _observation_result(result.observation, result.operation_id)
+            try:
+                async with asyncio.timeout(TOOL_TIMEOUT_SECONDS):
+                    result, observation = await self._act_call(steps)
+            except TimeoutError:
+                # InputService owns cancellation and any pending release.
+                # No completed outcome is available to this HTTP request.
+                return _error_result(
+                    {
+                        "code": "TOOL_TIMEOUT",
+                        "phase": "unknown",
+                        "input_sent": "unknown",
+                        "neutral": "unconfirmed",
+                        "message": (
+                            "要求の待機期限に達しました。入力結果と解除完了は未確定です。"
+                            "一部が実行された可能性があるため、同じ操作列を再送せず、"
+                            "観測して状態を確認してください"
+                        ),
+                    }
+                )
+        if observation is not None and not isinstance(observation, ObservationError):
+            return _observation_result(observation, result.operation_id)
         metadata: dict[str, object] = {
             "code": result.code,
             "phase": result.phase,
@@ -304,6 +283,8 @@ class GameIoMcpServer:
         }
         if result.operation_id is not None:
             metadata["operation_id"] = result.operation_id
+        if isinstance(observation, ObservationError):
+            metadata.update(code=observation.code, phase="observe", message=str(observation))
         return _error_result(metadata)
 
     async def close(self) -> None:
