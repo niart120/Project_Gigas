@@ -309,10 +309,12 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
         panel.transcript.document().find("停止後の通知").charFormat().fontWeight()
         != QFont.Weight.Bold
     )
+    retained = panel.transcript.toPlainText()
+    plan = panel.plan_panel.view.toPlainText()
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("旧接続", "pending"),))))
-    assert panel.transcript.toPlainText() == ""
-    assert panel.plan_panel.view.toPlainText() == "—"
+    assert panel.transcript.toPlainText() == retained
+    assert panel.plan_panel.view.toPlainText() == plan
 
 
 def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBot) -> None:
@@ -885,8 +887,10 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     assert not pending_record.is_live
     pending_view.submit_button.click()
     assert len(answers) == 1
+    retained = dict(panel.requests)
     panel.handle_event(ServiceEvent(5, request))
-    assert not panel.requests
+    assert panel.requests == retained
+    assert not any(record.is_live for record in panel.requests.values())
 
 
 @pytest.mark.parametrize("outcome", ["sent", "not_sent", "unknown"])
@@ -1132,7 +1136,7 @@ def test_invalid_defaults_keep_login_and_selection_but_block_send_and_resume(
         ServiceEvent(1, ConversationStatus(goal=GoalState("保持した目標", "paused")))
     )
     assert panel.disconnect_action.isEnabled()
-    assert not panel.plan_panel.clear_button.isEnabled()
+    assert panel.plan_panel.clear_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
     assert not panel.send_button.isEnabled()
     panel.composer.goal_mode.click()

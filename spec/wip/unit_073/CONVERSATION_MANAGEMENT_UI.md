@@ -54,7 +54,7 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 |---|---|---|---|---|
 | done | L1: 保存履歴と新着Web activityを既存表現へ描画し、過去ページ追加でも選択・閲覧位置を保つ | new/regression/edge | unit/integration | 公開項目、turn/item/種別の対応、Plan/過去要求の非操作性、順序・重複、reasoning表示 |
 | done | L2: 合意配置のサイドバー・所属別新規・対象見出しが開閉と操作可否を分けて表示する | new/regression | integration/GUI | 部品と配置、空/局所読込/ページ、幅復帰、既存メニューとサイズ。サービス結合はL3c |
-| todo | L3a: 再接続と表示対象の交換を分け、閲覧Goal・初回読込・下書きの表示操作を成立させる | new/regression/edge | integration/GUI | 再接続で履歴・下書き・表示Goalを保持。実行のactive Goalと閲覧Goalを混同せず、Goal削除は共通の受付条件だけで活性化 |
+| done | L3a: 再接続と表示対象の交換を分け、閲覧Goal・初回読込・下書きの表示操作を成立させる | new/regression/edge | integration/GUI | 再接続で履歴・下書き・表示Goalを保持。実行のactive Goalと閲覧Goalを混同せず、Goal削除は共通の受付条件だけで活性化 |
 | todo | L3b: Project選択結果と入力回収状態をUIへ渡し、停止済み会話からのProject選択を成立させる | new/regression/edge | unit/integration | 公開Project metadata・接続世代を結果へ添え、遅い結果の選択上書きを防ぐ。入力所有者のbusyを通知し、独自の実行状態台帳を増やさない |
 | todo | L3c: 会話UI調整役で一覧・新規・選択・履歴・picker・下書き確認を結合する | new/regression/edge | integration | Project/未所属、世代/選択参照の照合、局所読込、初回読込失敗、閲覧Goal更新、停止・入力回収前の切替禁止、開始時の実IDへの表示同期 |
 | todo | L4: 実画面と実app-serverで履歴閲覧・停止後切替・新規/再開のUIが成立する | acceptance | GUI/integration | native撮影、合意モックとの照合、操作・活性・回収。実機はM7 |
@@ -65,7 +65,7 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 
 | gate | 状態 | 検査する内容 |
 |---|---|---|
-| 各itemのpytestと独立レビュー | L1・L2完了、L3以降not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
+| 各itemのpytestと独立レビュー | L1・L2・L3a完了、L3b以降not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | not run | M5結合後の全体回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型/所有境界 |
 | uv lock --check / uv build | not run | 配布資材と公開APIの整合 |
@@ -103,6 +103,20 @@ Sidebarは公開ページから所属・会話名・cursorを表示し、展開�
 Refactor status: **refactor-done**。確定選択の色を戻す処理をselection変更の一経路へ集約し、クリック側の重複を削除した。独立レビューで、矢印/Spaceで候補だけを移動したときの選択色の不一致を検出し、Enter等で確定するまでは表示中の会話の色を保持する修正を確認した。最終差分に必須修正なし。L3のa→b→c分割も初期設計と親の受入条件へ照合し、担当漏れ・依存の矛盾なし。
 
 nativeでは2回起動し、Sidebarを閉じると幅と下部状態表示が既存2領域へ戻ること、設定ラベルから既存ダイアログを開けることを確認した。展開済み見出しが選択色で塗られる問題は、開閉状態を保ちながら描画だけ塗り無し・左寄せへ修正し、再起動後の`tmp/u08-m5-ui/04-l2-open.jpeg`と`05-l2-folded.jpeg`で確認した。`03-l2-closed.jpeg`は閉状態、`audit.md`に手順と限界を記録した。両processは通常終了。Codex・映像・入力への接続とモデル提出は0回。会話データの一覧・対象見出し・実行中の活性はL3結合後に確認し、空一覧の画面確認を支援技術全体の検証とは扱わない。
+
+### L3aの実装・検証
+
+接続世代の更新と表示対象の交換を分けた。再接続では同じ履歴文書・選択・下書き・表示Goal/Planを保ち、古い要求カードは操作を失効させて残す。明示的な対象交換でだけ以前の内容を破棄する。初回読込は旧内容を隠し、成功時に交換、失敗時に同じ文書と閲覧位置を再表示する。閲覧Goalは実行状態にせず、Goal削除は認証等の共通受付条件だけで活性化する。
+
+| command | 結果・範囲 |
+|---|---|
+| `uv run pytest tests/integration/test_conversation_view.py --basetemp=tmp/pytest-m5-view -q` | red: 5 failed→green: 5 passed。構造整理後・最終差分も同じ5件成功。読込成功/失敗、再接続、Goal、下書き、停止を確認 |
+| `uv run pytest tests/integration/test_conversation_view.py tests/integration/test_codex_gui.py tests/integration/test_saved_history_gui.py tests/integration/test_inline_transcript.py tests/integration/test_conversation_sidebar.py tests/integration/test_project_gui.py --basetemp=tmp/pytest-m5-view -q` | 92 passed。既存カード・モデル・本文・Project経路の回帰 |
+| `uv run pytest tests/integration/test_window_presets.py --basetemp=tmp/pytest-m5-view -q` | 6 passed。表示部品の親変更後のウィンドウ配置 |
+| 変更Python 4ファイルへの`ruff format --check` / `ruff check`、`uv run ty check --no-progress` | 成功。公開API・型・docstringと利用文書を照合 |
+| `uv lock --check` / `uv build` | 成功。83依存、sdist・wheelを生成 |
+
+Refactor status: **refactor-done**。文書・見出し・Goal/Plan・読込時の可視性をConversationDisplayへ分け、ConnectionPanelは接続・受付・カード・原稿を担当する。独立レビューで表示寿命・通知の境界・試験と文書を照合し、必須修正なし。サービス・picker・サイドバーの結合は変更せず、L3b/cへ引き継ぐ。native画面・実app-server・実機はこのitemでは使用していない。
 
 ## 8. 先送り事項
 
