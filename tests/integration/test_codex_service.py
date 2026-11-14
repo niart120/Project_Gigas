@@ -26,6 +26,7 @@ from gigas.runtime.codex.models import (
     ConnectionOptions,
     ConversationStatus,
     DialogueEvent,
+    ExecutionSettings,
     GoalEvent,
     HumanRequest,
     SandboxEvent,
@@ -115,6 +116,40 @@ def _call_game_tool(
     )
     response.raise_for_status()
     return response
+
+
+def test_connection_execution_settings_reach_the_first_thread(qtbot: QtBot, tmp_path: Path) -> None:
+    peer = FakePeer()
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(
+            ConnectionOptions(
+                tmp_path / "runtime", execution_settings=ExecutionSettings(False, False, "user")
+            )
+        )
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("check settings")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        params = next(params for method, params in peer.calls if method == "thread/start")
+        assert params is not None
+        assert params["approvalsReviewer"] == "user"
+        config = params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "disabled"
+        assert config["features.memories"] is False
+        assert config["memories.generate_memories"] is False
+        assert config["memories.use_memories"] is False
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
 
 
 def test_initial_bind_failure_is_not_sent_and_retry_keeps_the_created_thread(

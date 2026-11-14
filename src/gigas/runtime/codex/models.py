@@ -19,6 +19,23 @@ type ConnectionPhase = Literal[
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionSettings:
+    """Application-owned options for runtime startup and new conversation execution.
+
+    Attributes:
+        web_search_enabled: Use live Web search when true; disable it when false.
+        memory_enabled: Enable standard memory generation and use together.
+            False does not delete existing memory files.
+        approvals_reviewer: Delegate on-request approvals to auto_review, or ask the user.
+            Delegation does not grant unconditional permission.
+    """
+
+    web_search_enabled: bool = True
+    memory_enabled: bool = True
+    approvals_reviewer: Literal["auto_review", "user"] = "auto_review"
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectionOptions:
     """Settings for one Codex connection.
 
@@ -28,12 +45,14 @@ class ConnectionOptions:
         model: Catalog model name, or empty to select the catalog default.
         effort: Catalog reasoning effort, or empty to select the model default.
         auth_method: Authentication preference. Only chatgpt is currently supported.
+        execution_settings: Immutable execution defaults for startup and new threads.
     """
 
     cwd: "Path"
     model: str = ""
     effort: str = ""
     auth_method: str = "chatgpt"
+    execution_settings: ExecutionSettings = field(default_factory=ExecutionSettings)
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,6 +18,7 @@ from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     DialogueEvent,
+    ExecutionSettings,
     HumanRequest,
     RequestResolved,
     SessionStatus,
@@ -82,8 +83,11 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
     def receive(event: "RuntimeEvent") -> None:
         execution.receive(event)
 
+    settings = ExecutionSettings(approvals_reviewer="user")
     connection = create_connection(
-        ConnectionOptions(cwd=cwd, effort="low"), receive, codex_home=home
+        ConnectionOptions(cwd=cwd, effort="low", execution_settings=settings),
+        receive,
+        codex_home=home,
     )
 
     async def release() -> None:
@@ -116,6 +120,7 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
         resources,
         inputs,
         events.put_nowait,
+        settings=settings,
         closing=lambda: closing is not None,
         request_close=request_close,
     )

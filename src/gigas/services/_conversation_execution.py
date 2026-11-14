@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from gigas.game_io.input.models import InputStep
     from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
-    from gigas.runtime.codex.models import ConnectionEvent, GoalState
+    from gigas.runtime.codex.models import ConnectionEvent, ExecutionSettings, GoalState
     from gigas.runtime.codex.transport import JsonObject, JsonValue
     from gigas.services._conversation_resources import ConversationResources
     from gigas.services.input import InputService
@@ -93,6 +93,7 @@ class ConversationExecution:
         inputs: "InputService",
         emit: "Callable[[ConnectionEvent], None]",
         *,
+        settings: "ExecutionSettings",
         closing: "Callable[[], bool]",
         request_close: "Callable[[], asyncio.Task[None]]",
     ) -> None:
@@ -101,6 +102,7 @@ class ConversationExecution:
         self._resources = resources
         self._inputs = inputs
         self._emit = emit
+        self._settings = settings
         self._closing = closing
         self._request_close = request_close
         self._thread_id: str | None = None
@@ -167,6 +169,7 @@ class ConversationExecution:
             self._publish()
 
     async def _prepare(self) -> str:
+        settings = self._settings
         await self._connection.require_ready()
         try:
             if self._thread_id is None:
@@ -177,9 +180,13 @@ class ConversationExecution:
                 config = await self._connection.request(
                     "config/read", {"includeLayers": False, "cwd": str(configuration.cwd)}
                 )
-                params = protocol.thread_start_params(configuration, selection, config)
+                params = protocol.thread_start_params(
+                    configuration, selection, config, settings=settings
+                )
                 result = await self._connection.request("thread/start", params)
-                self._thread_id = protocol.validate_thread(result, configuration, selection)
+                self._thread_id = protocol.validate_thread(
+                    result, configuration, selection, settings=settings
+                )
                 self._publish()
             await self._resources.bind_records(self._thread_id)
         except (OSError, RecordError) as error:

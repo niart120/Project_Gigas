@@ -4,7 +4,7 @@ import pytest
 
 from gigas.runtime.codex import _conversation_protocol as protocol
 from gigas.runtime.codex.connection import CodexConnectionError
-from gigas.runtime.codex.models import ModelSelection, ThreadConfiguration
+from gigas.runtime.codex.models import ExecutionSettings, ModelSelection, ThreadConfiguration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +32,9 @@ def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp
         "config": {"mcp_servers": {"existing": {}, "name.with.dot": {}, "game": {}}}
     }
 
-    params = protocol.thread_start_params(configuration, selection, server_config)
+    params = protocol.thread_start_params(
+        configuration, selection, server_config, settings=ExecutionSettings()
+    )
 
     assert params["projectId"] == project_id
     assert params["cwd"] == str(tmp_path)
@@ -41,8 +43,10 @@ def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp
     assert params["ephemeral"] is False
     assert params["sandbox"] == "workspace-write"
     assert params["approvalPolicy"] == "on-request"
-    assert params["approvalsReviewer"] == "user"
-    assert params["config"] == {
+    assert params["approvalsReviewer"] == "auto_review"
+    config = params["config"]
+    assert isinstance(config, dict)
+    expected: JsonObject = {
         "mcp_servers.existing.enabled": False,
         'mcp_servers."name.with.dot".enabled': False,
         **configuration.mcp_config,
@@ -51,6 +55,8 @@ def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp
         "sandbox_workspace_write.exclude_tmpdir_env_var": True,
         "sandbox_workspace_write.exclude_slash_tmp": True,
     }
+    for key, value in expected.items():
+        assert config[key] == value
     instructions = params["developerInstructions"]
     assert isinstance(instructions, str)
     assert instructions == packaged_instructions
@@ -67,7 +73,7 @@ def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
         "cwd": str(configuration.cwd),
         "runtimeWorkspaceRoots": [str(configuration.cwd)],
         "approvalPolicy": "on-request",
-        "approvalsReviewer": "user",
+        "approvalsReviewer": "auto_review",
         "sandbox": {
             "type": "workspaceWrite",
             "writableRoots": [],
@@ -85,16 +91,16 @@ def test_confirmed_thread_returns_only_its_identity(
     configuration = ThreadConfiguration(tmp_path, project_id=project_id)
     selection = ModelSelection((), "selected-model", "high")
 
-    assert protocol.validate_thread(_thread_result(configuration), configuration, selection) == (
-        "thread-1"
-    )
+    assert protocol.validate_thread(
+        _thread_result(configuration), configuration, selection, settings=ExecutionSettings()
+    ) == ("thread-1")
 
 
 @pytest.mark.parametrize(
     "override",
     [
         {"approvalPolicy": "never"},
-        {"approvalsReviewer": "auto_review"},
+        {"approvalsReviewer": "user"},
         {"model": "different-model"},
         {"cwd": "other-directory"},
         {"runtimeWorkspaceRoots": None},
@@ -112,7 +118,10 @@ def test_thread_rejects_unconfirmed_configuration(tmp_path: "Path", override: "J
 
     with pytest.raises(CodexConnectionError):
         protocol.validate_thread(
-            {**_thread_result(configuration), **override}, configuration, selection
+            {**_thread_result(configuration), **override},
+            configuration,
+            selection,
+            settings=ExecutionSettings(),
         )
 
 

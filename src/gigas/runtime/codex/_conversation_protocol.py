@@ -3,11 +3,12 @@
 import json
 from typing import TYPE_CHECKING, Literal
 
+from gigas.runtime.codex._execution_settings import config_overrides
 from gigas.runtime.codex.connection import CodexConnectionError, read_play_instructions
 from gigas.runtime.codex.models import GoalState
 
 if TYPE_CHECKING:
-    from gigas.runtime.codex.models import ModelSelection, ThreadConfiguration
+    from gigas.runtime.codex.models import ExecutionSettings, ModelSelection, ThreadConfiguration
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
@@ -24,7 +25,11 @@ def _text(value: "JsonValue") -> str:
 
 
 def thread_start_params(
-    configuration: "ThreadConfiguration", selection: "ModelSelection", server_config: "JsonValue"
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    *,
+    settings: "ExecutionSettings",
 ) -> "JsonObject":
     """Build one thread request using the prepared workspace and runtime configuration.
 
@@ -32,6 +37,7 @@ def thread_start_params(
         configuration: Prepared workspace, Project assignment, and Gigas-owned MCP overrides.
         selection: Confirmed model selection from the connection's catalog.
         server_config: Complete config/read response for the workspace.
+        settings: Execution options captured before preparation began.
 
     Returns:
         Parameters for thread/start with an explicit Project assignment. The workspace
@@ -49,14 +55,7 @@ def thread_start_params(
         key = name if name.replace("_", "").isalnum() else json.dumps(name)
         config[f"mcp_servers.{key}.enabled"] = False
     config.update(configuration.mcp_config)
-    config.update(
-        {
-            "sandbox_workspace_write.writable_roots": [],
-            "sandbox_workspace_write.network_access": False,
-            "sandbox_workspace_write.exclude_tmpdir_env_var": True,
-            "sandbox_workspace_write.exclude_slash_tmp": True,
-        }
-    )
+    config.update(config_overrides(settings))
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")
@@ -68,7 +67,7 @@ def thread_start_params(
         "developerInstructions": instructions,
         "sandbox": "workspace-write",
         "approvalPolicy": "on-request",
-        "approvalsReviewer": "user",
+        "approvalsReviewer": settings.approvals_reviewer,
         "config": config,
         "runtimeWorkspaceRoots": [cwd],
         "ephemeral": False,
@@ -76,7 +75,11 @@ def thread_start_params(
 
 
 def validate_thread(
-    result: "JsonValue", configuration: "ThreadConfiguration", selection: "ModelSelection"
+    result: "JsonValue",
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    *,
+    settings: "ExecutionSettings",
 ) -> str:
     """Return the thread ID after confirming the requested execution boundaries.
 
@@ -84,6 +87,7 @@ def validate_thread(
         result: Complete thread/start response.
         configuration: Workspace and Project assignment used to construct the request.
         selection: Model selection submitted with the request.
+        settings: The same immutable options used to construct the request.
 
     Returns:
         Confirmed thread identity, without adopting execution state.
@@ -105,7 +109,7 @@ def validate_thread(
         "projectId" not in thread
         or thread.get("projectId") != configuration.project_id
         or response.get("approvalPolicy") != "on-request"
-        or response.get("approvalsReviewer") != "user"
+        or response.get("approvalsReviewer") != settings.approvals_reviewer
         or response.get("model") != selection.model
         or response.get("cwd") != str(configuration.cwd)
         or response.get("runtimeWorkspaceRoots") != [str(configuration.cwd)]

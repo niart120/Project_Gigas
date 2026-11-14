@@ -12,6 +12,10 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None)` は接続を作成します。`options` は `ConnectionOptions`、`emit` は `RuntimeEvent` を受け取る短い同期コールバックです。作成時にはプロセスを起動しません。同じasyncioループで `open()`、必要なら `login()` を呼び、最後に `close()` を待ちます。
 
+`ConnectionOptions.execution_settings`は`ExecutionSettings`を受け取ります。`web_search_enabled`と`memory_enabled`は真偽値で、どちらも既定は`True`です。`approvals_reviewer`は`"auto_review"`（代わりに承認、既定）または`"user"`（自分で承認）を指定します。接続起動時と新規thread開始時に同じ設定変換を使います。
+
+Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準の生成・参照をまとめて切り替え、OFFでも既存の記憶を削除しません。生成は候補となる会話や実行条件に従い、ON直後の生成は保証しません。作業フォルダーのAGENTS.mdと標準探索先のSkillsを読み込み、GIGAS独自の探索処理や資料様式は設けません。Apps・Plugins・Hooksと外部通知は無効です。
+
 `CodexConnection`は通信、認証、モデル候補と確定選択、Windows実行環境を所有します。`request(method, params)`、`respond(request_id, result)`、`reject(request_id, code, message)`でRPCを配送し、会話の通知・要求をコールバックへ渡します。接続自身は会話・Goal・機器入力を制御しません。アプリでの送信・Goal・停止は[CodexServiceThread](codex-gui.md#サービスapi)を使い、内部の会話実行が調整します。
 
 `open()`は初期化・認証状態・モデル一覧を確認します。未認証時の`LoginEvent.url`は明示的な`login()`後にだけ届きます。ブラウザは利用側が開き、`account/login/completed`とアカウント再取得で結果を確認します。URLは認証処理の終了時に破棄してください。
@@ -73,7 +77,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 初回の通常指示またはGoal作成で、作業フォルダーとゲームI/O MCPを準備して永続threadを作ります。Project所属なら公開APIで取得した唯一のroot、未所属なら新しい`unassigned/<workspace-id>/`をcwd・runtimeWorkspaceRootsに指定します。Project IDも明示し、未所属はnullです。接続・ログインだけでは会話の作業場所や記録先を作成しません。
 
-作業フォルダーをworkspace-writeの通常書込先にし、追加書込先は空、シェルのネットワークは無効、一時領域は除外します。応答の所属、モデル、cwd、runtimeWorkspaceRoots、承認設定、sandboxを確認します。ユーザー側の外部MCP設定はこの会話で無効化し、GIGASが用意したゲームMCPだけを使います。
+作業フォルダーをworkspace-writeの通常書込先にし、追加書込先は空、シェルのネットワークは無効、一時領域は除外します。承認はon-requestと選択した承認方法を使います。「代わりに承認」はCodexによる審査であり、無条件の許可ではありません。応答の所属、モデル、cwd、runtimeWorkspaceRoots、承認設定、sandboxを確認します。ユーザー側の外部MCP設定はこの会話で無効化し、GIGASが用意したゲームMCPだけを使います。
 
 配布物内の`play.md`をdeveloperInstructionsとして渡します。保存の案内は作業場所配下の`records/<thread-id>/events.jsonl`・`observations/<observation-id>.png`という構造と、原記録を編集しないことです。固定の攻略資料名を指定せず、正確な会話別パスを渡すための追加APIやMCP応答項目も設けません。必要な保存画像は観測IDから探せます。MCPのURL・認証値をその案内や原記録へ含めません。
 

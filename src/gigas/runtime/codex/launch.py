@@ -1,10 +1,12 @@
 """Assemble the pinned Codex runtime with explicit integration settings."""
 
+import json
 import os
 from typing import TYPE_CHECKING
 
 from codex_cli_bin import bundled_codex_path, bundled_path_dir
 
+from gigas.runtime.codex._execution_settings import config_overrides
 from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.transport import StdioTransport
 
@@ -25,7 +27,8 @@ def create_connection(
     """Create a connection without starting the bundled runtime.
 
     Args:
-        options: Runtime working directory and model/authentication preferences.
+        options: Runtime directory, model/authentication preferences and execution defaults.
+            Standard AGENTS and Skills discovery remain enabled.
         emit: Fast synchronous callback receiving connection facts and conversation RPC events.
         codex_home: Optional isolated runtime home, created here if absent.
             None preserves the runtime default. Existing credentials are not copied.
@@ -38,21 +41,8 @@ def create_connection(
         OSError: The explicit runtime home cannot be created as a directory.
     """
     command = [str(bundled_codex_path())]
-    for override in (
-        "features.apps=false",
-        "features.plugins=false",
-        "features.memories=false",
-        "features.hooks=false",
-        "features.codex_hooks=false",
-        "features.plugin_hooks=false",
-        "skills.include_instructions=false",
-        "project_doc_max_bytes=0",
-        "notify=[]",
-        'web_search="disabled"',
-        "features.default_mode_request_user_input=true",
-        "tools.update_plan.enabled=true",
-    ):
-        command.extend(["--config", override])
+    for key, value in config_overrides(options.execution_settings).items():
+        command.extend(["--config", f"{key}={json.dumps(value)}"])
     command.extend(["app-server", "--listen", "stdio://"])
     env: dict[str, str] = {}
     if codex_home is not None:

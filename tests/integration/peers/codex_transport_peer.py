@@ -175,12 +175,12 @@ def dialogue() -> None:
         elif method == "thread/start":
             assert params["sandbox"] == "workspace-write"
             assert params["approvalPolicy"] == "on-request"
-            assert params["approvalsReviewer"] == "user"
+            assert params["approvalsReviewer"] in {"auto_review", "user"}
             result = {
                 "thread": {"id": thread_id, "projectId": params["projectId"]},
                 "model": params["model"],
                 "approvalPolicy": "on-request",
-                "approvalsReviewer": "user",
+                "approvalsReviewer": params["approvalsReviewer"],
                 "cwd": params["cwd"],
                 "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
                 "sandbox": {

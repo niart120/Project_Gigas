@@ -11,7 +11,7 @@ from gigas.runtime.codex.connection import (
     CodexConnectionError,
     MessageDeliveryError,
 )
-from gigas.runtime.codex.models import ConnectionOptions
+from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
 from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
@@ -48,6 +48,7 @@ class Conversation:
             self.resources,
             self.inputs,
             self.events.append,
+            settings=ExecutionSettings(),
             closing=lambda: self.closing is not None,
             request_close=self.close,
         )

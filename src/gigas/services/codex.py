@@ -609,6 +609,7 @@ class CodexServiceThread(QThread):
                 self._resources,
                 self._input,
                 lambda event: self._receive(generation, event),
+                settings=options.execution_settings,
                 closing=lambda: self._closing is not None or self._connection is not connection,
                 request_close=lambda: self._begin_close(connection, execution),
             )
