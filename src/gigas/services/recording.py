@@ -58,7 +58,6 @@ class RecordingService:
         *,
         thread_id: str,
         turn_id: str | None = None,
-        run_id: str | None = None,
     ) -> None:
         """Snapshot public content and queue it without delaying execution.
 
@@ -67,7 +66,6 @@ class RecordingService:
             content: Public fields only; caller excludes secrets, raw RPCs, and drafts.
             thread_id: Owning conversation.
             turn_id: Owning turn when known.
-            run_id: Associated input permission interval when known.
         """
         self._submit(
             partial(
@@ -76,7 +74,6 @@ class RecordingService:
                 deepcopy(content),
                 thread_id=thread_id,
                 turn_id=turn_id,
-                run_id=run_id,
                 received_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             ),
             turn_id or thread_id,
@@ -84,7 +81,7 @@ class RecordingService:
 
     def submit_input(self, event: "InputEvent") -> None:
         """Submit an input event without waiting; report failures through callbacks/logging."""
-        self._submit(partial(self._writer.record_input, event), event.run_id)
+        self._submit(partial(self._writer.record_input, event), event.operation_id)
 
     def submit_observation(
         self,

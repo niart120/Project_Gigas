@@ -12,14 +12,15 @@ from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureService
 from gigas.game_io.capture.models import Frame
 from gigas.runtime.codex.models import (
+    ConversationStatus,
     HumanRequest,
     PlanEvent,
     PlanStep,
     Question,
     QuestionOption,
+    SandboxEvent,
     SessionStatus,
     TextEvent,
-    TurnStarted,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
@@ -164,8 +165,9 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
     header = "長い質問の識別名" * 20
     option = "長い選択肢の本文" * 20
     for event in (
-        TurnStarted("turn"),
-        SessionStatus("waiting", "selected-model", "high", True),
+        SessionStatus("ready", "selected-model", "high", True),
+        SandboxEvent("ready"),
+        ConversationStatus("thread", "turn", waiting_for_answer=True),
         TextEvent("response", "公開された判断本文\n" * 30),
         PlanEvent(
             "turn",
@@ -233,16 +235,16 @@ def test_small_dialogue_keeps_controls_and_scrollable_text_reachable(qtbot: QtBo
         lambda: viewport.rect().contains(QRect(button.mapTo(viewport, QPoint()), button.size()))
     )
     answers: list[object] = []
-    instructions: list[tuple[str, str]] = []
+    instructions: list[str] = []
     stops: list[bool] = []
     panel.answer_requested.connect(answers.append)
-    panel.steer_requested.connect(lambda text, turn: instructions.append((text, turn)))
+    panel.send_requested.connect(instructions.append)
     panel.interrupt_requested.connect(lambda: stops.append(True))
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(panel.send_button, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(panel.interrupt_button, Qt.MouseButton.LeftButton)
     assert answers == [AnswerSubmission("approval", decision="decline")]
-    assert instructions == [("北側から進む\n危険なら停止する", "turn")]
+    assert instructions == ["北側から進む\n危険なら停止する"]
     assert stops == [True]
 
 

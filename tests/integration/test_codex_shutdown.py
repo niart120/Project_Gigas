@@ -1,7 +1,8 @@
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
+from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QTimer
@@ -11,80 +12,57 @@ from pytestqt.qtbot import QtBot
 from gigas.app.settings_worker import SettingsIO
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
-from gigas.runtime.codex.models import (
-    ConnectionEvent,
-    ConnectionOptions,
-    SessionStatus,
-    ThreadConfiguration,
-)
+from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
+from gigas.runtime.codex.models import ConnectionOptions, ConversationStatus
+from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from gigas.services.codex import CodexServiceThread
 from gigas.storage.settings import Settings, SettingsError, load_settings
+from tests.unit.test_codex_connection import FakePeer, _terminal
+
+if TYPE_CHECKING:
+    from gigas.services.codex import ServiceEvent
 
 
-class LifetimeConnection:
-    """Control cleanup while exposing turn acceptance and stopping."""
+class LifetimePeer(FakePeer):
+    """Provide explicit turn notifications for the shutdown scenarios."""
 
-    def __init__(self, emit: Callable[[ConnectionEvent], None]) -> None:
-        """Create lifecycle observations."""
-        self.emit = emit
+    async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+        """Start and terminate one turn through the public notification boundary."""
+        result = await super().request(method, params)
+        if method == "turn/start":
+            self.events.put_nowait(
+                RpcNotification("turn/started", {"threadId": "thread-1", "turn": {"id": "turn-1"}})
+            )
+        elif method == "turn/interrupt":
+            self.events.put_nowait(_terminal("interrupted"))
+        return result
+
+
+class LifetimeConnection(CodexConnection):
+    """Control connection cleanup while the real execution layer owns stopping."""
+
+    def __init__(self, options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]) -> None:
+        """Prepare a scripted transport and an observable close barrier."""
+        self.peer = LifetimePeer()
+        super().__init__(self.peer, options, emit)
         self.closing = Event()
         self.release = Event()
-        self.stops = 0
-        self.sends = 0
 
-    async def open(self) -> None:
-        """Publish a ready authenticated connection."""
-        self.emit(SessionStatus("ready", "model", "high", True))
+    @property
+    def stops(self) -> int:
+        """Count actual interrupt requests, excluding connection cleanup."""
+        return sum(method == "turn/interrupt" for method, _ in self.peer.calls)
 
-    async def login(self) -> None:
-        """Provide the connection interface."""
-
-    async def setup_windows_sandbox(self) -> None:
-        """Provide the explicit environment-setup interface."""
-
-    async def send(self, prompt: str) -> str | None:
-        """Accept a turn without completing it."""
-        assert prompt
-        self.sends += 1
-        self.emit(SessionStatus("running", "model", "high", True))
-        return f"turn-{self.sends}"
-
-    async def set_goal(self, objective: str) -> bool:
-        """Accept a test Goal."""
-        return bool(objective)
-
-    async def resume_goal(self) -> bool:
-        """Accept a test Goal resume."""
-        return True
-
-    async def clear_goal(self) -> None:
-        """Accept a test Goal removal."""
-
-    async def select_model(self, model: str, effort: str) -> None:
-        """Accept a test selection."""
-
-    async def steer(self, prompt: str, expected_turn_id: str) -> str:
-        """Acknowledge an instruction for the selected turn."""
-        assert prompt
-        return expected_turn_id
-
-    async def answer(
-        self, token: str, *, decision: str | None = None, answers: Mapping[str, str] | None = None
-    ) -> None:
-        """Provide the answer interface."""
-        assert token
-        assert decision is not None or answers is not None
-
-    async def stop(self) -> None:
-        """Count explicit interruption and report the terminal state."""
-        self.stops += 1
-        self.emit(SessionStatus("stopped", "model", "high", True))
+    @property
+    def sends(self) -> int:
+        """Count actual user message submissions."""
+        return sum(method == "turn/start" for method, _ in self.peer.calls)
 
     async def close(self) -> None:
-        """Remain alive until the test permits cleanup."""
+        """Keep the owned process alive until the test releases cleanup."""
         self.closing.set()
         assert await asyncio.to_thread(self.release.wait, 10)
-        self.emit(SessionStatus("closed"))
+        await super().close()
 
 
 def _start(
@@ -93,12 +71,10 @@ def _start(
     connections: list[LifetimeConnection] = []
 
     def factory(
-        _options: ConnectionOptions,
-        emit: Callable[[ConnectionEvent], None],
-        _prepare_turn: Callable[[str, str | None], Awaitable[ThreadConfiguration]],
-        _on_thread_started: Callable[[str], Awaitable[None]],
+        options: ConnectionOptions,
+        emit: Callable[[RuntimeEvent], None],
     ) -> LifetimeConnection:
-        connection = LifetimeConnection(emit)
+        connection = LifetimeConnection(options, emit)
         connections.append(connection)
         return connection
 
@@ -107,6 +83,8 @@ def _start(
         io,
         service=CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory),
     )
+    events: list[ServiceEvent] = []
+    shell.service.received.connect(events.append)
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)
     panel = shell.window.connection
@@ -114,7 +92,12 @@ def _start(
     panel.prompt.setPlainText("hello")
     qtbot.waitUntil(panel.send_button.isEnabled)
     panel.send_button.click()
-    qtbot.waitUntil(panel.interrupt_button.isEnabled)
+    qtbot.waitUntil(
+        lambda: any(
+            isinstance(item.event, ConversationStatus) and item.event.turn_id == "turn-1"
+            for item in events
+        )
+    )
     return shell, connections[0]
 
 

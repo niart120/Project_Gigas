@@ -8,11 +8,12 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
+from gigas.game_io.input.models import InputStep
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
 from gigas.storage import project
-from gigas.storage.input_events import RunFinished, RunStarted
+from gigas.storage.input_events import OperationFinished, OperationStarted
 from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
 from tests.integration.test_observation_storage import sample_frame
 
@@ -30,7 +31,7 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
     append = project._append_row
 
     def delayed_append(path: Path, row: bytes) -> None:
-        if json.loads(row)["type"] == "input.run_started":
+        if json.loads(row)["type"] == "input.operation_started":
             entered.set()
             if not release.wait(10):
                 message = "test recording release"
@@ -40,17 +41,19 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
     monkeypatch.setattr(project, "_append_row", delayed_append)
 
     async def scenario() -> None:
-        recording.submit_input(RunStarted("req", "run", "thread", "A"))
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
             observation = Observation.from_frame(sample_frame())
             recording.submit_observation(observation)
             payload: JsonObject = {"text": "公開応答"}
             recording.submit_dialogue(
-                "dialogue.message", payload, thread_id="thread", turn_id="turn", run_id="run"
+                "dialogue.message", payload, thread_id="thread", turn_id="turn"
             )
             payload["text"] = "変更後"
-            recording.submit_input(RunFinished("req", "run", "stopped"))
+            recording.submit_input(
+                OperationFinished("operation-1", "interrupted", 0, phase="input", reason="stopped")
+            )
             with pytest.raises(ProjectBusyError):
                 writer.close()
             assert not (writer.path / observation.image_path).exists()
@@ -70,17 +73,16 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
             json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
         assert [row["type"] for row in records] == [
-            "input.run_started",
+            "input.operation_started",
             "observation.recorded",
             "dialogue.message",
-            "input.run_finished",
+            "input.operation_finished",
         ]
         recorded_payload = records[2]["payload"]
         assert recorded_payload.pop("received_at") <= records[2]["occurred_at"]
         assert recorded_payload == {
             "thread_id": "thread",
             "turn_id": "turn",
-            "run_id": "run",
             "content": {"text": "公開応答"},
         }
         assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
@@ -94,7 +96,7 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
 
 
 def test_record_failure_reaches_shared_failure_callback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
@@ -108,10 +110,11 @@ def test_record_failure_reaches_shared_failure_callback(
 
     async def scenario() -> None:
         recording.on_failure = failures.append
-        recording.submit_input(RunStarted("req", "run", "thread", "A"))
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
         recording.submit_dialogue("dialogue.delivery", {"outcome": "unknown"}, thread_id="thread")
         await recording.drain()
         assert len(failures) == 2
+        assert "operation-1" in caplog.text
 
     try:
         asyncio.run(scenario())

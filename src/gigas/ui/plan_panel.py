@@ -35,8 +35,10 @@ class PlanPanel(QFrame):
         goal_heading.addWidget(self.goal_status)
         self.resume_button = QToolButton(self)
         self.resume_button.setText("再開")
+        self.resume_button.setEnabled(False)
         self.clear_button = QToolButton(self)
-        self.clear_button.setText("破棄")
+        self.clear_button.setText("削除")
+        self.clear_button.setEnabled(False)
         goal_heading.addWidget(self.resume_button)
         goal_heading.addWidget(self.clear_button)
         layout.addLayout(goal_heading)
@@ -81,10 +83,6 @@ class PlanPanel(QFrame):
         }
         self.goal_status.setText(labels.get(goal.status, goal.status) if goal else "")
         self.goal_value.update_item("goal", goal.objective if goal else "—", kind="plan")
-        self.resume_button.setVisible(
-            goal is not None and goal.status not in {"active", "complete"}
-        )
-        self.clear_button.setVisible(goal is not None)
 
     def set_plan(
         self,

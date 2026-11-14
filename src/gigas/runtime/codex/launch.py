@@ -9,29 +9,25 @@ from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.transport import StdioTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
     from pathlib import Path
 
-    from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions, ThreadConfiguration
+    from gigas.runtime.codex.connection import RuntimeEvent
+    from gigas.runtime.codex.models import ConnectionOptions
 
 
 def create_connection(
     options: "ConnectionOptions",
-    emit: "Callable[[ConnectionEvent], None]",
+    emit: "Callable[[RuntimeEvent], None]",
     *,
     codex_home: "Path | None" = None,
-    prepare_turn: "Callable[[str, str | None], Awaitable[ThreadConfiguration]] | None" = None,
-    on_thread_started: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> CodexConnection:
     """Create a connection without starting the bundled runtime.
 
     Args:
         options: Runtime working directory and model/authentication preferences.
-        emit: Fast synchronous callback receiving typed connection events.
+        emit: Fast synchronous callback receiving connection facts and conversation RPC events.
         codex_home: Optional isolated runtime home. None preserves the runtime default.
-        prepare_turn: Optional host archive/MCP preparation for each prompt and
-            its existing thread ID, or None before the first thread.
-        on_thread_started: Optional host recording awaited before the first turn.
 
     Returns:
         A connection whose open method launches the pinned app-server.
@@ -72,6 +68,4 @@ def create_connection(
         ),
         options,
         emit,
-        prepare_turn=prepare_turn,
-        on_thread_started=on_thread_started,
     )

@@ -13,11 +13,6 @@ type ConnectionPhase = Literal[
     "login_required",
     "authenticating",
     "ready",
-    "starting",
-    "running",
-    "waiting",
-    "stopping",
-    "stopped",
     "error",
     "closed",
 ]
@@ -28,8 +23,8 @@ class ConnectionOptions:
     """Settings for one Codex connection.
 
     Attributes:
-        cwd: Existing absolute directory for the runtime process, separate from source code.
-            Also used by threads when no preparation callback supplies an archive.
+        cwd: Existing absolute directory for the runtime process, separate from source code
+            and the prepared chat archive.
         model: Catalog model name, or empty to select the catalog default.
         effort: Catalog reasoning effort, or empty to select the model default.
         auth_method: Authentication preference. Only chatgpt is currently supported.
@@ -46,16 +41,14 @@ class ThreadConfiguration:
     """Prepared chat location and application-owned MCP overrides.
 
     Attributes:
-        cwd: Existing absolute archive directory, independent of the process cwd.
+        cwd: Prepared absolute archive directory, independent of the process cwd.
+            Its existing memory subdirectory is the thread's workspace and only write root.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
-        memory_dir: Existing absolute cwd / "memory" directory for exclusive runtime
-            writes, or None for read-only operation.
     """
 
     cwd: "Path"
     mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
-    memory_dir: "Path | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +56,7 @@ class SessionStatus:
     """Current application status derived from operations and runtime notifications.
 
     Attributes:
-        phase: Connection or turn phase. Stopped means no pending start or active turn
-            and completion of any started terminal cleanup. Interrupt receipt alone
-            does not establish it.
+        phase: Connection/authentication state, independent of conversation execution.
         model: Selected model for future turns, empty before catalog validation.
         effort: Selected reasoning level for future turns, empty before validation.
         authenticated: Whether account/read confirmed the chosen authentication type.
@@ -117,7 +108,7 @@ class PlanEvent:
     """A complete replacement of one accepted turn's public plan.
 
     Attributes:
-        turn_id: Owning turn; may be an earlier completed turn, not the current one.
+        turn_id: Current accepted turn, before its completion notification.
         steps: Complete ordered list. An empty tuple clears that turn's plan.
         explanation: Runtime-provided explanation, or empty when absent.
     """
@@ -132,7 +123,7 @@ class ReasoningEvent:
     """A replacement snapshot containing only a reasoning item's public summary.
 
     Attributes:
-        turn_id: Owning accepted turn, including earlier completed turns.
+        turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
         summary: Public paragraphs in summary-index order; empty removes the summary.
             Raw reasoning content is never included.
@@ -148,7 +139,7 @@ class ActivityEvent:
     """A replacement display value for a public command, file or MCP item.
 
     Attributes:
-        turn_id: Owning accepted turn, including earlier completed turns.
+        turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
         kind: Supported public item type.
         title: Actual command, changed paths, or server/tool name.
@@ -320,10 +311,11 @@ class RequestResolved:
 
 @dataclass(frozen=True, slots=True)
 class TurnStarted:
-    """One ordinary turn whose identity was accepted from the runtime.
+    """An ordinary or autonomous turn adopted from a server start notification.
 
     Emitted once, before events for that turn, even when completion precedes the
-    start response. A submitted or canceled start request alone does not emit it.
+    start response. Unknown item, question and completion notifications do not
+    establish a turn. A submitted or canceled start request alone does not emit it.
 
     Attributes:
         turn_id: Runtime turn identity within this connection's conversation.
@@ -363,6 +355,37 @@ class GoalState:
     status: GoalStatus
     tokens_used: int = 0
     time_used_seconds: int = 0
+    token_budget: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationStatus:
+    """Immutable display projection of server facts and owned operation tasks.
+
+    No field grants input or chooses between starting and steering a turn.
+    Sending and stopping are projected from live tasks, not stored phases.
+    """
+
+    thread_id: str | None = None
+    turn_id: str | None = None
+    goal: GoalState | None = None
+    sending: bool = False
+    stopping: bool = False
+    waiting_for_answer: bool = False
+
+
+def can_submit(connection: SessionStatus, conversation: ConversationStatus) -> bool:
+    """Whether an authenticated conversation can accept one new send operation.
+
+    Model/sandbox readiness is checked for execution, not for selecting a valid
+    model. Answers use their original request and are independent of this slot.
+    """
+    return (
+        connection.phase == "ready"
+        and connection.authenticated
+        and not conversation.sending
+        and not conversation.stopping
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +412,7 @@ type ConnectionEvent = (
     | DialogueEvent
     | ModelSelection
     | SessionStatus
+    | ConversationStatus
     | TextEvent
     | PlanEvent
     | ReasoningEvent
