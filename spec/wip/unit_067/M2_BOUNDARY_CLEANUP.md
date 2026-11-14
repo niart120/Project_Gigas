@@ -24,8 +24,8 @@ StdioTransportはsubprocess起動で得たprotocolをreaderへ渡す。reader自
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | R1: 解決済み設定で現在のportを照合し、接続と初期neutralを行う | characterization | unit | 再解決を削除。設定・接続の37試験と静的検査成功、commit後に完了扱いとする |
-| todo | R2: 取得要求を一度取り出し、待機と取得の終了を回収する | characterization | integration | 既存の列挙・取得・再接続・終了試験で確認 |
+| refactor-done | R1: 解決済み設定で現在のportを照合し、接続と初期neutralを行う | characterization | unit | c2cabaa。設定・接続の37試験と静的検査成功 |
+| green | R2: 取得要求を一度取り出し、待機と取得の終了を回収する | characterization | integration | 待機と取出しを同じ分岐へ整理。取得関連47試験と静的検査成功、commit後に完了扱いとする |
 | todo | R3: 起動したprotocolで通知を受け、EOF・起動取消し・close時に処理を回収する | characterization | integration | 既存の模擬子プロセス試験で確認 |
 
 ## 6. 対象ファイル
@@ -37,6 +37,8 @@ StdioTransportはsubprocess起動で得たprotocolをreaderへ渡す。reader自
 各itemで対応試験とty、ruffを実行する。最後に全unit/integration、ruff format/check、ty、lock/build、仕様・公開文書の参照・diffを確認し、親M2の受入とする。実機・実app-serverを新たに実行する変更ではなく、模擬プロセス・I/Oの結果として報告する。
 
 R1は既存のserial 10試験を変更前の基準として確認した。構造整理なので人工的なredや検査呼出回数の試験は追加せず、`_open_native`の再解決とimportだけを削除した。`uv run pytest tests/unit/test_serial_input.py tests/unit/test_settings.py -q`は37 passed。設定解決、現在のport照合、接続時neutral、送信失敗・取消し回収を確認し、対象ruff format/checkと全体tyも成功した。SerialInputの解決済み設定という前提は既存docstringを維持し、公開API文書へ明記した。
+
+R2は`uv run pytest tests/integration/test_capture_service.py tests/integration/test_capture_fallback.py tests/integration/test_capture_failures.py tests/integration/test_capture_configuration.py -q`が変更前47 passed（20.49秒）、変更後47 passed（20.48秒）。Conditionの待機・要求取出しを同じ制御フローへ揃え、取出し後の到達不能なNone分岐を削った。列挙・画像取得・再接続・起動前shutdown・取得中の終了と故障時回収を既存試験で確認し、対象ruff format/check、全体ty、差分検査も成功した。新しい状態・assert/cast/ignore・構造依存の試験は追加していない。
 
 ## 8. 先送り事項
 

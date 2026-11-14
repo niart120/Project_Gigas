@@ -231,15 +231,16 @@ class CaptureService(Thread):
         """Serve requests until shutdown, confining all device calls to child processes."""
         while True:
             with self._condition:
-                self._condition.wait_for(lambda: self._closing or self._pending is not None)
-                if self._closing:
+                while not self._closing:
+                    if self._pending is not None:
+                        _operation, options = self._pending
+                        self._pending = None
+                        generation = self._state.generation
+                        break
+                    self._condition.wait()
+                else:
                     self._state = replace(self._state, phase="closed")
                     return
-                pending, self._pending = self._pending, None
-                if pending is None:
-                    continue
-                _operation, options = pending
-                generation = self._state.generation
             self._run_request(options, generation)
 
     def _run_request(self, options: "CaptureOptions | None", generation: int) -> None:
