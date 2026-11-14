@@ -40,8 +40,8 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 | refactor-skipped | I2: Web・記憶・承認者の既定値、保存往復、不正値拒否、他設定の保持 | new | unit/integration | UIと実行への適用はM3/M5。red10→関連70件green、全814件green |
 | refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、0f955d2 |
 | refactor-done | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | 新規17件red→I3込み36件green、接続を含む82件green。公開型・クライアント・応答変換を分離、298c5e8 |
-| refactor-skipped | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 新規11件red→green、管理・接続・既存Goal解析を含め131件green。選択対象とのUI結合はM4/M5。実runtimeのcold get/clearも確認 |
-| todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | 実接続・認証は模擬試験と区別 |
+| refactor-skipped | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 新規11件red→green、管理・接続・既存Goal解析を含め131件green。実runtimeのcold get/clearも確認、87e88af。UI結合はM4/M5 |
+| todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | GUIの接続と明示ログイン開始まで確認。本人認証後の送信・停止・再接続は未確認 |
 
 ## 7. 対象ファイル
 
@@ -79,12 +79,16 @@ I5の[実runtimeプローブ](assets/probe_goals.py)を`uv run python -X utf8 sp
 
 ## 9. 先送り事項
 
+I6は実GUIの接続で`login_required`、明示ログインで`authenticating`とLoginEventを確認した。検証用のApplicationShellには`tmp/u08-m1-acceptance-20261115/settings.toml`を渡し、同じ親のcodex_homeを使う既定サービスで起動した。開発用の認証・設定はコピーしていない。本人のブラウザ認証とWindows実行環境の準備、実モデルの通常送信・停止・再接続は未確認であり、M1をcompleteにしない。
+
 M2〜M7は親仕様の順序に従う。記録先結合・設定適用・再接続・UI・通し受入をM1の完了へ読み替えない。
+
+M2では保存部品だけでなく、旧Projectメニューからのcreate/open・起動時last_project_pathの選択・固定memoryを使うthread設定も同時に置換する。既存入口を旧ProjectWriterへ残さず、Projectの位置は管理APIから解決し、前回選択を別の正本にしない。サイドバーの追加はM5で行う。
 
 ## 10. 完了チェックリスト
 
 - [x] 合意・範囲・責務と既存コードの境界を確認した
 - [ ] I1〜I6を検証し、各cycleの構造確認を記録した
-- [ ] 型・docstring・公開docsと実APIの整合を確認した
+- [x] 型・docstring・公開docsと実APIの整合を確認した
 - [ ] 必要な品質ゲートと実接続・認証の確認を完了した
 - [ ] 親仕様・初期設計の進捗を更新した
