@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-本書は主画面の構成と利用者操作を定めます。実行制御は[02](02-runtime.md)、APIの根拠は[08](08-sdk-compatibility.md)に従います。U08のサイドバー・保存済み履歴・再接続UIは採用設計であり、製品反映・実画面確認は未実施です。専用の計画的終了[U07](../planned/unit_012/PLANNED_STOP.md)は初期版対象外です。
+本書は主画面の構成と利用者操作を定めます。実行制御は[02](02-runtime.md)、APIの根拠は[08](08-sdk-compatibility.md)に従います。U08のサイドバー・保存済み履歴・再接続UIは[M5](../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)で製品へ結合し、実画面・実app-serverで確認しました。設定・障害の結合検証と実機受入の状態は[U08親仕様](../wip/unit_013/RESUME.md)を参照してください。専用の計画的終了[U07](../planned/unit_012/PLANNED_STOP.md)は初期版対象外です。
 
 ## 状態と対象範囲
 

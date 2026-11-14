@@ -28,24 +28,18 @@ uv run python scripts/check_codex.py file-approval --cwd "$env:TEMP\gigas-codex-
 
 ## 確認済みの範囲と未確認事項
 
-2026年11月14日のU08以前の構成では、app-server `0.167.0`、`gpt-6.1-sol`・effort `low`、既存のChatGPT認証で、通常応答、元要求IDへの質問回答、質問保留中の共通停止・古い回答の拒否・接続回収を確認しました。以下のGoal・実機結果も同日の確認であり、公開Projectと会話別recordsへ変更した現在の保存経路の受入結果ではありません。
+2026年11月15日、app-server `0.167.0`、`gpt-6.1-sol`・effort `low`、GIGAS専用homeのChatGPT認証で、次の範囲を確認しています。
 
-別の検証プログラムでは、Goal作成、目的を保持したpausedへの停止、pausedのまま通常指示、目的を変更しないactiveへの再開、turnを止めないGoal削除、その後の共通停止を確認しました。終了時の残存task・記録エラーはありませんでした。
+| 対象 | 確認済みの範囲 | 根拠と限界 |
+|---|---|---|
+| 認証と新規会話 | 本人ログイン、Windows sandbox準備後のApp Server再接続、Project/未所属の開始、共通停止、会話別records | [M1](../spec/complete/unit_069/MANAGEMENT_API.md)、[M2](../spec/complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)。観測保存は模擬Frameを使用 |
+| 指示・資料・ツール | 標準AGENTS/Skills、作業資料の編集、別会話資料の参照、Web ON/OFF、通常シェルの通信拒否、両承認方法 | [M3](../spec/complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)。ゲーム操作なし |
+| 会話選択と再開 | 公開履歴・Web activity、Project/未所属の新規、既存再開、Goal再開と停止、停止後切替、再接続時の履歴・原稿保持 | [M4](../spec/complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)、[M5](../spec/complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)。実GUI・実モデル。実データの複数ページ履歴は未観測 |
+| 設定と失敗後の操作 | 新規/閲覧時のモデル候補と実行後の変更、再開時の保存設定、追加履歴失敗、作業場所欠落、resume失敗、Goal拒否、通信断後の保持と明示再操作 | [M6](../spec/complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)。状態と故障はQt/模擬peer、設定保存から実resumeの権限・承認は実接続で確認 |
+| 標準自動記憶 | ON時の公開参照とゲームMCP利用後の生成対象維持、OFF時の参照停止と既存summary保持 | [M6](../spec/complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)。標準の6時間idle等の必要条件を満たす候補0で、実会話からの抽出は未観測。即時生成や有用性は保証しない |
 
-実機ではCOM8のCH552・9600 baudとUSB Video Deviceを使い、実モデルから同じstateless MCPを経由したゲーム操作と停止を確認しました。RIGHTの500 ms要求を265 msの押下で中断し、neutral送信から約47 ms後に停止結果が返りました。停止後の映像で右方向への移動を確認し、その後の観測でも位置を維持しました。同じMCP入口で次のobserveを受け付け、画像・操作結果をarchiveへ保存できています。一回のRIGHTだけを許す制限は、この実機検証プログラムに限ったものです。
+M6ではON設定の実処理後、受入補助のQt待機で終了確認がタイムアウトしました。モデルなしで補助の遅延削除通知不足を再現して修正し、OFF設定の実接続では正常終了を確認しています。製品コードは変更せず、ONの実処理成功と終了確認の失敗を検証記録で分けています。
 
-この実機確認は製品のサービス部品を組み合わせたPythonプログラムで行い、GUIから実機までを通した操作ではありません。GUIから公開stdioへの配送、Qtから実HTTP MCP・模擬入力への接続は同時点の自動試験で確認しました。検証の詳細と境界は[unit_061](../spec/complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../spec/complete/unit_062/GOAL_EXECUTION_MODEL.md)を参照してください。
+U08以前のCOM8・CH552・9600 baudとUSB Video Deviceによる入力・停止の実証は[unit_061](../spec/complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../spec/complete/unit_062/GOAL_EXECUTION_MODEL.md)を参照してください。公開Projectと会話別recordsへ変えた現構成のGUIから実機までの通し受入は[U08](../spec/wip/unit_013/RESUME.md)のM7で確認します。
 
-2026年11月15日の[M1](../spec/complete/unit_069/MANAGEMENT_API.md)では、専用homeでの本人ログイン、Windows sandboxの準備とApp Server再接続、GUIからの通常応答・生成中の停止・停止後の送信を確認しました。この時点では記録は旧形式です。
-
-同日の[M2](../spec/complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)では、製品GUIから未所属の通常送信、Projectの新規作成、Goal開始・生成中停止・停止後の通常送信と正常終了を確認しました。公開Project root・会話cwd・recordsの実thread IDが一致し、Goalは目的を保持してpausedとなりました。提出本文と確定応答を保存し、中断した未完本文は補完保存していません。
-
-実Codexと64×48の模擬Frameを使った製品サービスの確認では、observe 1回のMCP応答と保存PNGの168 bytes・観測IDが一致しました。進捗を含む確定本文2件、提出1件、観測1件が新形式で残り、保存エラーなく停止・回収・終了しました。これは実機映像・入力の確認とは区別します。
-
-同日の[M3](../spec/complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)では、設定画面のWeb検索・自動記憶・承認方法の表示と保存経路、実CodexによるAGENTS・Skillの利用、攻略資料の編集と別会話資料の参照を確認しました。Web検索のON/OFF、自動審査による承認と本人承認要求への取消しも確認済みです。同じURLに通常のPowerShellではHTTP 200で到達し、sandbox内ではソケットアクセス拒否となりました。
-
-自動記憶はON時の公開参照経路、OFF時の参照停止・既存ファイル保持を確認しました。標準処理による試験用summaryの形式整理は観測しましたが、実会話からの記憶抽出は未観測です。即時生成は保証せず、ゲームMCPを使った会話の生成対象状態とともに後続で確認します。これらはゲーム入力なしの検証であり、実機操作の確認には含めません。
-
-同日の[M4](../spec/complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)では、実サービスから保存会話を閲覧し、プロセス再起動後と同一プロセス内の切替後の両方で再開できることを確認しました。保存ID・cwd・所属を維持し、現在のMCP・推論レベル・承認方法が反映されています。模擬画像3枚はMCP応答と同じbytesで元の会話のrecordsへ追記され、既存のJSONL・画像は保持されました。active Goalへの追加指示と共通停止も確認済みです。
-
-再開応答前の通知・観測は制御した結合試験で確認し、今回の実モデルでは発生していません。会話選択・履歴の画面と実機を通した検証は後続です。公開Projectと会話別recordsに対応させた本スクリプト自体は、CLI・静的検査までを確認し、実モデルでは未実行です。GUIから実機までの通し受入は[U08](../spec/wip/unit_013/RESUME.md)のM7で確認します。他の入力機器・OS、長時間運転は未検証です。APIキー認証は対象外です。
+上記の製品受入は、このページ冒頭の`check_codex.py`の実行とは別経路です。現行スクリプト自体はCLI・静的検査まで確認し、実モデルでは未実行です。他の入力機器・OS、長時間運転、モニター間DPI遷移は未検証です。APIキー認証は対象外です。
