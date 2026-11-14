@@ -120,7 +120,9 @@ async def close_project(
 
 `writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにturnまたはGoalの要求へ進みます。失敗は既存の通知へ残し、入力の受付とは分離します。
 
-`writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
+`writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。会話IDは呼出側で採用した値を渡し、writerは空白や実在・帰属を検査し直しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
+
+対話・観測・入力の内容は呼出側の責任で組み立てます。writerはID・時刻・寸法などの内容を再検査せず、イベント全体を一度だけJSON化します。任意の不正値を必ず拒否する保証はありません。画像の書込先だけは`obs-UUID4`のIDを確認して`observations/<ID>.png`へ固定し、保存先と記録するパスを一致させます。PNGの再符号化・再デコードは行いません。
 
 ## 入力の開始・結果を記録する
 

@@ -470,18 +470,17 @@ def test_historical_observation_payload_is_not_reinterpreted(tmp_path: Path) -> 
     assert log.read_bytes() == original
 
 
-@pytest.mark.parametrize("field", ["generation", "sequence"])
-def test_invalid_source_identifiers_cannot_create_unreadable_records(
-    tmp_path: Path, field: str
-) -> None:
+@pytest.mark.parametrize("observation_id", ["../escaped", "obs-../../escaped"])
+def test_observation_path_cannot_escape_storage(tmp_path: Path, observation_id: str) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
-        invalid = replace(sample_frame(), **{field: True})
+        observation = Observation.from_frame(sample_frame())
         with pytest.raises(ProjectError):
-            writer.record(Observation.from_frame(invalid))
+            writer.record(replace(observation, observation_id=observation_id))
         assert (writer.path / "events.jsonl").read_bytes() == b""
         assert list((writer.path / "observations").iterdir()) == []
-        writer.record(Observation.from_frame(sample_frame()))
+        assert not (tmp_path / "escaped.png").exists()
+        writer.record(observation)
     finally:
         writer.close()
     reopened = ProjectWriter.open(writer.path)
@@ -583,20 +582,6 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
             assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 3
     finally:
         writer.close()
-
-
-@pytest.mark.parametrize("invalid", ["", "  ", "\n"])
-def test_thread_record_rejects_empty_id_before_appending(tmp_path: Path, invalid: str) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
-    try:
-        with pytest.raises(ProjectError):
-            writer.record_thread(invalid)
-        assert (writer.path / "events.jsonl").read_bytes() == b""
-        writer.record_thread("opaque-runtime-id")
-    finally:
-        writer.close()
-    reopened = ProjectWriter.open(writer.path)
-    reopened.close()
 
 
 @pytest.mark.parametrize("value", [float("nan"), "unpaired-\ud800"])
