@@ -7,36 +7,72 @@ The directory must not exist. Keep it for inspection; nothing is deleted.
 import argparse
 import json
 import os
-from pathlib import Path
 import queue
 import subprocess
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from codex_cli_bin import bundled_codex_path
 
+from gigas.runtime.codex.transport import JsonObject, JsonValue
+
+
+def _object(value: JsonValue) -> JsonObject:
+    if not isinstance(value, dict):
+        message = "Expected a JSON object in the probe response"
+        raise TypeError(message)
+    return value
+
+
+def _text(value: JsonValue) -> str:
+    if not isinstance(value, str):
+        message = "Expected text in the probe response"
+        raise TypeError(message)
+    return value
+
+
+def _array(value: JsonValue) -> list[JsonValue]:
+    if not isinstance(value, list):
+        message = "Expected an array in the probe response"
+        raise TypeError(message)
+    return value
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
 
 class McpFixture:
-    def __init__(self, marker):
+    """Host a local discovery-only MCP endpoint with one unique marker tool."""
+
+    def __init__(self, marker: str) -> None:
+        """Start a local endpoint without connecting to any game device."""
         self.token = uuid.uuid4().hex
-        self.calls = []
+        self.calls: list[str] = []
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args):
+            def log_message(
+                self,
+                format: str,  # noqa: A002 -- Preserve the standard handler's keyword signature.
+                *args: object,
+            ) -> None:
                 pass
 
-            def do_GET(self):
+            def do_GET(self) -> None:
                 self.send_error(405)
 
-            def do_POST(self):
+            def do_POST(self) -> None:
                 if self.headers.get("Authorization") != "Bearer " + fixture.token:
                     self.send_error(401)
                     return
-                value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                fixture.calls.append(value["method"])
+                value = _object(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                method = _text(value["method"])
+                fixture.calls.append(method)
                 if "id" not in value:
                     self.send_response(202)
                     self.send_header("Content-Length", "0")
@@ -44,7 +80,7 @@ class McpFixture:
                     return
                 result = {
                     "initialize": {
-                        "protocolVersion": value.get("params", {}).get(
+                        "protocolVersion": _object(value.get("params", {})).get(
                             "protocolVersion", "2025-06-18"
                         ),
                         "capabilities": {"tools": {}},
@@ -62,7 +98,7 @@ class McpFixture:
                     "resources/list": {"resources": []},
                     "resources/templates/list": {"resourceTemplates": []},
                     "prompts/list": {"prompts": []},
-                }.get(value["method"], {})
+                }.get(method, {})
                 data = json.dumps({"jsonrpc": "2.0", "id": value["id"], "result": result}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -74,7 +110,8 @@ class McpFixture:
         self.url = f"http://127.0.0.1:{self.server.server_port}/mcp"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    def config(self):
+    def config(self) -> JsonObject:
+        """Return only the endpoint configuration needed by app-server discovery."""
         return {
             "url": self.url,
             "http_headers": {"Authorization": "Bearer " + self.token},
@@ -82,13 +119,17 @@ class McpFixture:
             "startup_timeout_sec": 10,
         }
 
-    def close(self):
+    def close(self) -> None:
+        """Stop and release the fixture HTTP server."""
         self.server.shutdown()
         self.server.server_close()
 
 
 class Client:
-    def __init__(self, root, memory=True):
+    """Drive the pinned stdio protocol in one isolated, unauthenticated home."""
+
+    def __init__(self, root: Path, memory: bool = True) -> None:
+        """Start the runtime with an unavailable local inference provider."""
         env = os.environ.copy()
         env["CODEX_HOME"] = str(root / "codex_home")
         for key in ("CODEX_WINDOWS_REGISTERED_CORE", "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY"):
@@ -113,7 +154,7 @@ class Client:
         for override in overrides:
             command.extend(["-c", override])
         command.append("app-server")
-        self.process = subprocess.Popen(
+        self.process = subprocess.Popen(  # noqa: S603 -- Bundled executable and fixed probe arguments.
             command,
             cwd=root,
             env=env,
@@ -123,9 +164,15 @@ class Client:
             text=True,
             encoding="utf-8",
         )
-        self.queue = queue.Queue()
+        stdin, stdout = self.process.stdin, self.process.stdout
+        if stdin is None or stdout is None:
+            message = "Probe subprocess pipes were not created"
+            raise RuntimeError(message)
+        self.stdin = stdin
+        self.stdout = stdout
+        self.queue: queue.Queue[JsonObject] = queue.Queue()
         self.counter = 0
-        self.notifications = []
+        self.notifications: list[JsonObject] = []
         threading.Thread(target=self.read, daemon=True).start()
         self.call(
             "initialize",
@@ -136,15 +183,18 @@ class Client:
         )
         self.send({"method": "initialized"})
 
-    def read(self):
-        for line in self.process.stdout:
-            self.queue.put(json.loads(line))
+    def read(self) -> None:
+        """Receive protocol objects on the sole stdout reader thread."""
+        for line in self.stdout:
+            self.queue.put(_object(json.loads(line)))
 
-    def send(self, value):
-        self.process.stdin.write(json.dumps(value) + "\n")
-        self.process.stdin.flush()
+    def send(self, value: JsonObject) -> None:
+        """Write one JSON request or notification to the local subprocess."""
+        self.stdin.write(json.dumps(value) + "\n")
+        self.stdin.flush()
 
-    def call(self, method, params):
+    def call(self, method: str, params: JsonObject) -> JsonObject:
+        """Await one RPC response while retaining intervening notifications."""
         self.counter += 1
         self.send({"id": self.counter, "method": method, "params": params})
         while True:
@@ -152,11 +202,12 @@ class Client:
             if value.get("id") == self.counter:
                 if "error" in value:
                     raise RuntimeError((method, value["error"]))
-                return value["result"]
+                return _object(value["result"])
             self.notifications.append(value)
 
-    def close(self):
-        self.process.stdin.close()
+    def close(self) -> None:
+        """Close stdin and wait for the owned runtime process to exit."""
+        self.stdin.close()
         try:
             self.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -165,7 +216,17 @@ class Client:
         self.stderr.close()
 
 
-def run(root, first_mcp, second_mcp):
+def run(root: Path, first_mcp: McpFixture, second_mcp: McpFixture) -> JsonObject:
+    """Check public management/configuration boundaries without inference.
+
+    Args:
+        root: New absolute directory that must not exist before the probe.
+        first_mcp: Initial discovery-only MCP endpoint.
+        second_mcp: Replacement endpoint for the idle resume check.
+
+    Returns:
+        Evidence also saved under root/result.json; no credential values are included.
+    """
     root.mkdir(parents=True, exist_ok=False)
     (root / "codex_home").mkdir()
     project = root / "project"
@@ -175,37 +236,42 @@ def run(root, first_mcp, second_mcp):
     skill = workspace / ".agents" / "skills" / "m0-local-marker"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(
-        "---\nname: m0-local-marker\ndescription: M0 isolated discovery probe.\n---\nOnly a discovery marker.\n",
+        "---\nname: m0-local-marker\ndescription: M0 isolated discovery probe.\n"
+        "---\nOnly a discovery marker.\n",
         encoding="utf-8",
     )
     (workspace / "AGENTS.md").write_text("M0 isolated instruction marker.\n", encoding="utf-8")
     version_env = os.environ.copy()
     version_env["CODEX_HOME"] = str(root / "codex_home")
-    result = {
-        "runtime": subprocess.check_output(
+    result: JsonObject = {
+        "runtime": subprocess.check_output(  # noqa: S603 -- Bundled executable with --version.
             [str(bundled_codex_path()), "--version"], env=version_env, text=True
         ).strip()
     }
     c = Client(root)
     try:
-        p = c.call(
-            "project/create",
-            {
-                "name": "M0 probe",
-                "roots": [{"path": str(project)}],
-                "idempotencyKey": uuid.uuid4().hex,
-            },
-        )["project"]
-        assert p["roots"] == [{"path": str(project)}]
+        p = _object(
+            c.call(
+                "project/create",
+                {
+                    "name": "M0 probe",
+                    "roots": [{"path": str(project)}],
+                    "idempotencyKey": uuid.uuid4().hex,
+                },
+            )["project"]
+        )
+        _require(p["roots"] == [{"path": str(project)}], "Project root mismatch")
         result["project_one_root"] = True
-        config = c.call("config/read", {"cwd": str(workspace), "includeLayers": False})["config"]
+        config = _object(
+            c.call("config/read", {"cwd": str(workspace), "includeLayers": False})["config"]
+        )
         result["config"] = {
             key: config.get(key) for key in ("web_search", "memories", "project_doc_max_bytes")
         }
         skills = c.call("skills/list", {"cwds": [str(workspace)], "forceReload": True})
-        assert "m0-local-marker" in json.dumps(skills)
+        _require("m0-local-marker" in json.dumps(skills), "Local skill was not discovered")
         result["local_skill_discovered"] = True
-        params = {
+        params: JsonObject = {
             "cwd": str(workspace),
             "runtimeWorkspaceRoots": [str(workspace)],
             "projectId": None,
@@ -225,10 +291,11 @@ def run(root, first_mcp, second_mcp):
             },
         }
         response = c.call("thread/start", params)
-        thread = response["thread"]
-        tid = thread["id"]
-        assert thread["cwd"] == str(workspace) and thread.get("projectId") is None
-        assert response["approvalsReviewer"] == "auto_review"
+        thread = _object(response["thread"])
+        tid = _text(thread["id"])
+        _require(thread["cwd"] == str(workspace), "Thread cwd mismatch")
+        _require(thread.get("projectId") is None, "Thread should be unassigned")
+        _require(response["approvalsReviewer"] == "auto_review", "Initial reviewer mismatch")
         result["start"] = {
             key: response.get(key)
             for key in ("cwd", "approvalPolicy", "approvalsReviewer", "sandbox")
@@ -236,7 +303,7 @@ def run(root, first_mcp, second_mcp):
         result["session_source"] = thread.get("source")
         result["instruction_source_kinds"] = response.get("instructionSources")
         c.call("thread/unsubscribe", {"threadId": tid})
-        bootstrap = {
+        bootstrap: JsonObject = {
             **params,
             "threadId": tid,
             "excludeTurns": True,
@@ -251,12 +318,13 @@ def run(root, first_mcp, second_mcp):
                 raise
             result["empty_thread_resume_with_record_path"] = "Rejected: no rollout found"
         else:
-            raise AssertionError("Expected pinned-runtime empty-thread limitation changed")
+            message = "Expected pinned-runtime empty-thread limitation changed"
+            raise AssertionError(message)
         # The failed cold resume removed the empty in-memory thread; start afresh.
         response = c.call("thread/start", params)
-        tid = response["thread"]["id"]
+        tid = _text(_object(response["thread"])["id"])
         inventory = c.call("mcpServerStatus/list", {"threadId": tid})
-        assert "m0_marker_first" in json.dumps(inventory)
+        _require("m0_marker_first" in json.dumps(inventory), "Initial MCP tool was not discovered")
         # Persist a user item without a usable inference endpoint; interrupt explicitly.
         turn = c.call(
             "turn/start",
@@ -267,20 +335,24 @@ def run(root, first_mcp, second_mcp):
         )
         time.sleep(1)
         try:
-            c.call("turn/interrupt", {"threadId": tid, "turnId": turn["turn"]["id"]})
+            c.call("turn/interrupt", {"threadId": tid, "turnId": _object(turn["turn"])["id"]})
         except RuntimeError as error:
             if "no active turn to interrupt" not in str(error):
                 raise
         result["persistence_turn"] = (
             "Unavailable local provider; interrupted or already terminated."
         )
-        read = c.call("thread/read", {"threadId": tid})["thread"]
-        assert read["cwd"] == str(workspace)
-        unassigned = c.call("thread/list", {"projectId": None, "modelProviders": []})["data"]
-        assert tid in [t["id"] for t in unassigned], {"thread": read, "listed": unassigned}
+        read = _object(c.call("thread/read", {"threadId": tid})["thread"])
+        _require(read["cwd"] == str(workspace), "Stored cwd mismatch")
+        unassigned = _array(
+            c.call("thread/list", {"projectId": None, "modelProviders": []})["data"]
+        )
+        _require(
+            tid in [_object(t)["id"] for t in unassigned], "Thread absent from unassigned list"
+        )
         result["unassigned_list_and_read"] = True
         result["unsubscribe"] = c.call("thread/unsubscribe", {"threadId": tid})["status"]
-        resume = {
+        resume: JsonObject = {
             **params,
             "threadId": tid,
             "excludeTurns": True,
@@ -289,14 +361,16 @@ def run(root, first_mcp, second_mcp):
         }
         for key in ("projectId", "ephemeral", "historyMode"):
             resume.pop(key, None)
-        resume["config"] = {**params["config"], "mcp_servers": {"m0_fixture": second_mcp.config()}}
+        resume["config"] = {
+            **_object(params["config"]),
+            "mcp_servers": {"m0_fixture": second_mcp.config()},
+        }
         response = c.call("thread/resume", resume)
-        assert response["approvalsReviewer"] == "user", response
+        _require(response["approvalsReviewer"] == "user", "Resumed reviewer mismatch")
         result["idle_unsubscribe_resume_reviewer_changed"] = True
         inventory = c.call("mcpServerStatus/list", {"threadId": tid})
-        assert "m0_marker_second" in json.dumps(inventory) and "m0_marker_first" not in json.dumps(
-            inventory
-        )
+        _require("m0_marker_second" in json.dumps(inventory), "Replacement MCP missing")
+        _require("m0_marker_first" not in json.dumps(inventory), "Old MCP remains after resume")
         result["idle_resume_mcp_url_and_auth_replaced"] = True
         pages = c.call("thread/turns/list", {"threadId": tid, "limit": 10})
         result["history_page_read"] = bool(pages.get("data"))
@@ -305,13 +379,16 @@ def run(root, first_mcp, second_mcp):
         c.close()
     c = Client(root, memory=False)
     try:
-        read = c.call("thread/read", {"threadId": tid})["thread"]
-        assert read["cwd"] == str(workspace)
-        assert c.call("project/read", {"projectId": p["id"]})["project"]["id"] == p["id"]
+        read = _object(c.call("thread/read", {"threadId": tid})["thread"])
+        _require(read["cwd"] == str(workspace), "Stored cwd mismatch")
+        _require(
+            _object(c.call("project/read", {"projectId": p["id"]})["project"])["id"] == p["id"],
+            "Project identity changed after restart",
+        )
         result["restart_resolves_workspace_and_project"] = True
         response = c.call("thread/resume", resume)
-        assert response["thread"]["id"] == tid
-        config = c.call("config/read", {"includeLayers": False})["config"]
+        _require(_object(response["thread"])["id"] == tid, "Thread identity changed after restart")
+        config = _object(c.call("config/read", {"includeLayers": False})["config"])
         result["memory_off_config"] = config.get("memories")
         result["restart_resume"] = True
     finally:
@@ -319,17 +396,23 @@ def run(root, first_mcp, second_mcp):
     (root / "result.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the probe and print its evidence from the CLI boundary."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     first = McpFixture("m0_marker_first")
     second = McpFixture("m0_marker_second")
     try:
-        run(args.output.resolve(), first, second)
+        result = run(args.output.resolve(), first, second)
+        print(json.dumps(result, ensure_ascii=False, indent=2))  # noqa: T201 -- CLI evidence.
     finally:
         first.close()
         second.close()
+
+
+if __name__ == "__main__":
+    main()

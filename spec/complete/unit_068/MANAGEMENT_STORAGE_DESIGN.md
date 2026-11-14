@@ -106,6 +106,14 @@ uv run python -X utf8 spec/wip/unit_068/assets/probe_m0.py --output C:/Users/tra
 
 文書は合意・差分・責務境界・担当段階の整合を読んで確認した。レビュー指摘に対応し、閲覧中のモデル選択、Goal再開の活性条件とresumeしない削除、呼出し元を含む工程境界、初期設計からの過去の実測・経緯の削除を反映した。`uv run python -X utf8 -`による検査で、対象13文書の相対参照・アンカー・JSONL例5行、調査コードのPython構文と結果JSON、68 unitの番号一意性を確認し、欠落・仮テキストは0件だった。`git diff --check`は成功。調査コードのみ`uv run ruff format`で整形し、製品コードは変更していない。製品のunit/integration・型検査・package buildはnot applicable、製品経路・実モデル・GUI・実機はnot runとしてM1〜M7へ割り当てた。
 
+M1着手時の全体lintで本調査コードの53件を検出したため、型注釈・docstring・JSON境界の検査・CLI出力を整えた。動作条件や公開要求の順序は維持し、全体除外は設けていない。2026-11-14に`uv run ruff format --check spec/complete/unit_068/assets/probe_m0.py`、`uv run ruff check spec/complete/unit_068/assets/probe_m0.py`、`uv run ty check --no-progress spec/complete/unit_068/assets/probe_m0.py`が成功した。次の再実行も終了コード0で、Project/cwd永続化、記憶設定、MCP差替え、履歴・Goal取得を再確認した。
+
+```powershell
+uv run python -X utf8 spec/complete/unit_068/assets/probe_m0.py --output tmp/u08-m0-probe-lint-20261114-02
+```
+
+再実行結果は指定先のresult.jsonに保存し、当初のassets/probe-result.jsonは変更していない。repo配下の隔離作業場所のためinstructionSourcesには祖先のrepo AGENTS.mdも含まれる。未準備homeの実効sandboxはreadOnlyであり、権限・モデル推論・本人認証・実機の受入は依然として未実施である。
+
 ## 9. 先送り事項
 
 製品実装・製品経路の検証は第6節の担当と完了条件へ引き継いだ。M0内の未決事項はない。数時間の運転・記録量はU10、正確な保存先パスの案内や攻略補助・資料規約は実プレイで不足が確認された後の作業選定とする。固定の攻略様式や独自記憶整理を先行追加しない。
