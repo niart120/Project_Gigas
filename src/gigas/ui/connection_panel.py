@@ -33,6 +33,7 @@ from gigas.runtime.codex.models import (
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
 from gigas.ui.codex_settings import CodexSettings
+from gigas.ui.conversation_sidebar import ConversationHeading
 from gigas.ui.message_composer import MessageComposer
 from gigas.ui.notifications import Notice
 from gigas.ui.plan_panel import PlanPanel
@@ -133,6 +134,9 @@ class ConnectionPanel(QWidget):
         self.codex_settings.rows.addLayout(login, 3, 0, 1, 3)
         self.plan_panel = PlanPanel(self)
         self.plan_panel.hide()  # MainWindow places this in the right pane.
+        self.heading = ConversationHeading(self)
+        self.heading.hide()  # The conversation controller supplies a confirmed target.
+        layout.addWidget(self.heading)
         self.transcript = Transcript(self)
         self.transcript.setAccessibleName("会話")
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
