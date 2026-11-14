@@ -36,7 +36,7 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| refactor-skipped | I1: 既定サービス接続はGIGAS専用homeを使い、接続前は作成せず、開発用homeを変更しない | new | integration | 起動・終了と既存接続の回帰を確認、I1 commit対象 |
+| refactor-skipped | I1: 既定サービス接続はGIGAS専用homeを使い、接続前は作成せず、開発用homeを変更しない | new | integration | 起動・終了と既存接続の回帰を確認、70bc1f7 |
 | todo | I2: Web・記憶・承認者の既定値、保存往復、不正値拒否、他設定の保持 | new | unit/integration | UIと実行への適用はM3/M5 |
 | todo | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | schema照合、管理部品として実装 |
 | todo | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | cursorと公開履歴の境界型 |
@@ -55,7 +55,7 @@ I1の専用home経路を実装。初回redはCODEX_HOME未指定、レビュー�
 
 I1の構造確認はrefactor-skipped。専用homeは既存factoryへpartialで束縛し、作成は既存launchの明示home経路に置いた。サービスへ設定や認証コピーの状態を追加していない。レビュー指摘のhome実在条件を修正し、同じ試験でgreenを確認した。[実runtimeプローブ](assets/probe_home.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_home.py --output-root tmp/u08-m1-home-20261114-02 --result spec/wip/unit_069/assets/probe-home-result.json`で実行し、終了コード0。[結果](assets/probe-home-result.json)は専用home作成・login_required・非認証・正常終了・auth.json未作成を示す。I6の本人認証・管理APIの検証は未実施。
 
-I1の全unitは349 passed、全integrationは455 passed。全体ruffではM0の既存調査資材に53件の違反があり、別の資材修正として解消する。I1の製品・テスト・調査資材のruff、全体format、tyは成功。実機入力はM1のAPI確認には不要。M7でUSB Video Device・COM8を使えることはユーザー承認済み。
+I1の全unitは349 passed、全integrationは455 passed。全体ruffではM0の既存調査資材に53件の違反があり、別の資材修正として解消済み。全体ruff・format・tyも成功。I1の製品・テスト・調査資材のruff、全体format、tyは成功。実機入力はM1のAPI確認には不要。M7でUSB Video Device・COM8を使えることはユーザー承認済み。
 
 ## 9. 先送り事項
 

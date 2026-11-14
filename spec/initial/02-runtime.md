@@ -4,7 +4,7 @@
 
 通常指示と追加指示の開始・介入、Goalによる自律継続はapp-serverへ任せます。GIGASはユーザー操作の配送、公開状態の表示、限定した本文とゲームI/Oの記録、ゲームI/O、明示停止を担います。共通契約は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal固有の契約は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)を正本とし、操作画面は[10](10-ui-interaction.md)、処理順は[09](09-control-flows.md)に示します。
 
-以下はU08で採用する管理・保存・再接続を含む設計です。U08の製品実装は未着手です。公開APIの成立条件は[08](08-sdk-compatibility.md)、製品経路で確認する条件は[07](07-verification.md)に定めます。
+以下はU08で採用する管理・保存・再接続を含む設計です。実装・受入状況は[U08親仕様](../wip/unit_013/RESUME.md)に集約します。公開APIの成立条件は[08](08-sdk-compatibility.md)、製品経路で確認する条件は[07](07-verification.md)に定めます。
 
 ## 実行単位と責務
 

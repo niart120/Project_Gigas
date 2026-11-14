@@ -4,7 +4,7 @@
 
 初期版の製品範囲は[01](01-overview.md)に従います。U07・U09は初期版対象外です。本書は工程の入口、依存関係、実施順を所有します。各工程の到達点・分割・受入条件は親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
-U08は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)の設計を完了し、製品実装・受入は未着手です。次の実行候補はM1の子仕様作成です。設計確定から製品実装へ自動着手しません。
+U08は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)を完了し、[M1](../wip/unit_069/MANAGEMENT_API.md)を実装中です。各段階の進捗・受入状態は[親仕様](../wip/unit_013/RESUME.md)に集約します。
 
 ## 開発方針
 

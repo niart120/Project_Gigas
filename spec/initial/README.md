@@ -25,7 +25,7 @@
 
 # 現在地と次の作業
 
-[U08](../wip/unit_013/RESUME.md)は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)の設計を完了しました。次はM1の専用home・設定・管理APIです。製品実装は未着手、U10は後続作業、U07・U09は初期版対象外です。依存と実施順は[05](05-implementation.md)を正本とします。
+[U08](../wip/unit_013/RESUME.md)は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)の設計を完了しました。現在は[M1の専用home・設定・管理API](../wip/unit_069/MANAGEMENT_API.md)を実装中です。U10は後続作業、U07・U09は初期版対象外です。依存と実施順は[05](05-implementation.md)を正本とします。
 
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 

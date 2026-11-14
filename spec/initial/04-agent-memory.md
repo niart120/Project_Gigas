@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-本書はU08で採用する管理・保存・指示の契約の正本です。方式の根拠は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)に集約します。製品反映はM1〜M6、GUI・実機の通し受入はM7です。製品実装・受入は未着手です。
+本書はU08で採用する管理・保存・指示の契約の正本です。方式の根拠は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)に集約します。製品反映はM1〜M6、GUI・実機の通し受入はM7です。実装・受入状況は[U08親仕様](../wip/unit_013/RESUME.md)に集約します。
 
 ## 責務と保存先
 
