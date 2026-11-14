@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip**。[U08親仕様](../unit_013/RESUME.md)のM4を担当する。[M3](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)は製品実装・実接続受入まで完了した。次は、公開履歴を読む選択対象と実行資源を持つ対象を分け、既存会話への明示送信・Goal操作をサービス経由で成立させる。
+状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM4を担当する。公開履歴を読む選択対象と実行資源を持つ対象を分け、既存会話への明示送信・Goal操作をサービス経由で結合した。製品実装・実app-serverの受入を完了し、会話管理UIはM5へ引き継ぐ。
 
 起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD5、[02](../../initial/02-runtime.md)の所有、[08](../../initial/08-sdk-compatibility.md)の公開契約、[09](../../initial/09-control-flows.md)のS06。画面の配置・下書き・履歴表示範囲は[10](../../initial/10-ui-interaction.md)を維持し、UIの結合はM5が担当する。
 
@@ -62,7 +62,7 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 | refactor-done | K3a: 公開履歴と所属別新規の選択候補を取得し、失敗時に以前の対象を保持する | new/edge | unit/integration | 新規/既存target・閲覧/ページ結果、取得は一件、履歴を蓄積せず、実行資源を作らない |
 | refactor-done | K3b: 選択部品をサービスへ結合し、停止後だけ切替え、閲覧モデル選択・Goal削除を実行せず扱う | new/edge | integration | unsubscribeと旧要求・資源の回収、遅い結果の失効、start後・切断後の対象保持、Goal相関共用 |
 | refactor-done | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
-| todo | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
+| done | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
 
 ## 7. 対象ファイル
 
@@ -73,12 +73,12 @@ runtime/codexの要求組立・管理/表示型、servicesの会話選択・実�
 | command / 確認 | 状態 | 対象 |
 |---|---|---|
 | 採用版公開schema・ソース照合 | 確認済み（静的） | resumeの要求・実効応答、unsubscribeの3結果、設定再構築条件、Goal通知と再開順序。根拠は08と第5節の採用版ソース |
-| 各itemのpytest | K1〜K4成功、K5 not run | 要求、選択/実行境界、資源と通知・停止の順序。詳細は後掲 |
-| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m4-root -q | not run | 既存の通常送信・Goal・機器・GUIを含む回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・公開型/所有境界 |
-| uv lock --check / uv build | not run | 公開API・依存・配布契約 |
-| 隔離homeでの実接続 | not run | K5の両再開経路。モデルへの明示送信回数と実機未使用を記録する |
-| git diff --check、文書内容・参照検査 | 着手仕様で成功 | 仕様・公開APIと実装範囲の一致。実装後は更新箇所を再確認する |
+| 各itemのpytest | K1〜K4成功 | 要求、選択/実行境界、資源と通知・停止の順序。詳細は後掲 |
+| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m4-root -q --tb=short | 968 passed（85.31秒） | 既存の通常送信・Goal・機器・GUIを含む回帰 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | 成功（formatは274ファイル） | 形式・lint・公開型/所有境界 |
+| uv lock --check / uv build | 成功（83 packages、sdist/wheel 0.1.0） | 公開API・依存・配布契約 |
+| 隔離homeでの実接続 | 成功 | K5の両再開経路。明示送信3回、実機未使用。詳細は後掲 |
+| git diff --check、文書内容・参照検査 | 成功 | 仕様・公開API・所有境界・実装範囲の一致、リンク・unit一意性 |
 
 公開型・docstringは対応skillで確認する。実接続ではM1の認証済み隔離homeを使い、資格情報を複製しない。自動試験の模擬MCP・入力と実モデルの結果を区別し、途中失敗や未観測範囲を残す。
 
@@ -136,6 +136,18 @@ refactor-done: Goal変更と公開通知の相関をprivateなGoalTrackerへ集�
 
 refactor-done: 未検証resumeの拒否条件を準備所有者へ共通化し、停止試験は明示的な停止状態の観測後に早期turnを渡すよう整理した。同じ対象試験は成功した。レビューで見つけたGoal削除への過剰なロード条件は撤去し、検査失敗後の削除試験を追加した。独立レビューの修正必須指摘は解消済み。初期設計02・09と公開API・設定文書を更新し、既存GUIで利用できる操作とM5で結合する保存Goal・履歴表示を区別した。実app-server・モデル・実機はこのitemでは未使用で、K5とM4全体gateは未実施。
 
+### K5 実app-server受入結果
+
+認証済みの隔離home、採用版0.167.0、gpt-6.1-solを使用した。`uv run python tmp/live_m4_acceptance.py --case browse --output tmp/u08-m4-browse-verified.json`、同じ入口の`--case unassigned --execute-model --output tmp/u08-m4-unassigned.json`、`--case goal --execute-model --output tmp/u08-m4-goal.json`を別プロセスで順に実行した。モデルへの明示turn/startは未所属2回・Project1回の計3回、新規thread/startは0回。実MCPと64×48の模擬Frameを使用し、映像機器・入力機器は接続していない。
+
+閲覧ではProject/所属別一覧、保存本文・Web activityを含む履歴、Goal、モデル候補変更をサービスから取得し、resume・settings/update・MCP起動・記録変更がないことを確認した。未所属/Projectの新規選択だけではフォルダーを作らない。専用fixtureのcwdを一時退避した間も閲覧でき、明示送信は再作成せず失敗し、元フォルダーを復元した。初回の`tmp/u08-m4-browse.json`は、想定した保存準備エラーまで補助が予期しない失敗へ数えていた。元結果を保持し、期待する拒否区間のエラーを全件記録するよう補助だけ直して再確認した。両回ともモデル提出は0回。
+
+未所属会話`01a1db17-e91a-73c1-8ac8-a59facccf9b9`では、プロセス起動後の再開→観測→自然終端→停止→別会話閲覧→同一プロセスでの再選択・再開を確認した。unsubscribeはunsubscribedを返し、2回目は新しいMCP入口を使用した。返却ID・cwd・未所属状態を維持し、推論レベルlow→medium、承認方法user→auto_reviewが実効応答に反映された。workspace-write・on-request・シェル通信禁止・追加書込先なしも返却値で確認した。
+
+Project会話`01a1db18-ac33-7062-8923-79d88471c64e`は保存済みpaused Goalを公開APIでactiveへする試験準備を1回行い、製品の通常送信でresume→turn/startを確認した。準備操作ではthread未ロードで、実行開始を観測していない。製品からの追加指示でobserveを1回行い、共通停止がturn終端interruptedとGoal pausedを確認して終了した。目的の書換えや新規thread作成は行っていない。resume応答前のturn開始・観測は今回の実接続では発生せず、その順序の制御試験はK4の根拠と区別する。
+
+3観測ともMCPが返した168 bytesと保存PNG、observation_idとJSONL相対パスが一致した。未所属は提出2・確定本文4・観測2、Projectは提出1・確定本文1・観測1を追記し、旧JSONLの先頭bytesと既存画像を保持した。実行していない会話の記録は不変。想定したcwd欠落以外の保存失敗と終了エラーは0件だった。独立レビューで公開要求・応答、画像・記録と受入結果を照合した。保存履歴は1ページに収まっており、実データでの複数ページ遷移は未観測で、cursorの配送は自動試験の根拠による。ネイティブの会話選択UIはM5、実機はM7で検証する。
+
 ## 9. 先送り事項
 
 M5はサイドバー・履歴描画・下書きと既存UIへの接続、M6は新規/閲覧/実行を跨ぐ操作・設定・障害の全体確認、M7はUSB Video Device・COM8での通し受入を担当する。M3で未観測の会話からの記憶抽出とゲームMCP後の生成対象維持はM6・M7へ引継ぎ、M4へ新しい記憶機構を追加しない。
@@ -143,8 +155,8 @@ M5はサイドバー・履歴描画・下書きと既存UIへの接続、M6は�
 ## 10. 完了チェックリスト
 
 - [x] M3完了とM4の範囲・所有を確認した
-- [ ] 採用版の公開契約と詳細なサービス境界を照合した
-- [ ] K1〜K5と構造確認・独立レビューを記録した
-- [ ] 公開型・docstring・利用手順と実装を整合させた
-- [ ] 品質ゲートと実接続の両再開経路を確認した
-- [ ] 親・初期設計へ完了範囲とM5以降の引継ぎを反映した
+- [x] 採用版の公開契約と詳細なサービス境界を照合した
+- [x] K1〜K5と構造確認・独立レビューを記録した
+- [x] 公開型・docstring・利用手順と実装を整合させた
+- [x] 品質ゲートと実接続の両再開経路を確認した
+- [x] 親・初期設計へ完了範囲とM5以降の引継ぎを反映した

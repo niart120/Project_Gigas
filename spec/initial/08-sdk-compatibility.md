@@ -91,6 +91,8 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 
 根拠は採用版の[Project schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server-protocol/src/protocol/v2/project.rs)、[thread処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/request_processors/thread_processor.rs)、[Goal継続](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/runtime.rs)です。製品経路での実行結果と未検証範囲は、担当子仕様へ記録します。
 
+[M4](../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)では実サービスから保存会話の閲覧、プロセス再起動後のresume、同一プロセスでの停止・unsubscribe・切替後のresumeを確認しました。保存ID・cwd・所属、現在のMCP・推論レベル・承認方法と同じ記録先への追記が成立しています。active Goalへの追加指示と共通停止も確認しましたが、応答前の先行turnは今回の実接続では発生せず、遅延を制御した結合試験で確認しています。
+
 ### 設定の所有と適用
 
 専用CODEX_HOMEは%LOCALAPPDATA%/GIGAS/codex_homeです。GIGASのsettings.tomlをUI設定の正本とし、開発用のconfig.tomlや認証を同期しません。既存account/login/start→公開ログインURLでの本人操作→完了通知・account/readをこのhomeで使います。接続・ログインの前にProject作成・選択を要求せず、選択したProjectごとにhomeを切り替えません。Windows実行環境のreadiness・setupは既存の明示操作を維持します。
