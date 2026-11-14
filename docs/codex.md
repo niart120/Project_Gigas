@@ -38,6 +38,23 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 相対rootの入力は`ValueError`、不正な応答や非対応のrootsは`CodexConnectionError`です。接続が閉じている場合も`CodexConnectionError`になります。通信失敗・サーバー拒否は既存の`TransportError`・`RpcError`として伝えます。
 
+## 保存済み会話と履歴の取得API
+
+同じ`CodexManagement`から会話の所属・保存cwd・履歴を取得できます。取得だけでは`thread/start`・`thread/resume`を呼ばず、実行対象の選択やモデルの確定値を変更しません。保存cwdが既に存在しなくても取得でき、ディレクトリを再作成しません。
+
+| メソッド | 入力と結果 |
+| --- | --- |
+| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None)` | 指定Projectの会話を`ThreadPage`で取得する。`None`は明示的に未所属を選び、全モデルプロバイダーを対象にする |
+| `read_thread(thread_id)` | `includeTurns=false`で`ThreadInfo`を取得する。本文の一括取得は行わない |
+| `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None)` | `itemsView=full`を明示し、1ページのturnと各turnに含まれる公開itemを`TurnPage`で取得する |
+| `list_items(thread_id, *, turn_id=None, cursor=None, limit=None, sort_direction=None)` | 1ページの公開itemを`ItemPage`で取得する。`turn_id`指定時はそのturnに絞る |
+
+`ThreadInfo`は`id`、`name`、`preview`、`cwd`、`project_id`、`created_at`・`updated_at`、`model`・`reasoning_effort`、公開`status`を持ちます。タイトルやモデル情報が未提供の場合は`None`のまま返し、代替値を補いません。
+
+`TurnInfo`は`id`・`status`、`items`、`items_view`、公開エラー`error`と任意の時刻・所要時間・`root_turn_id`を持ちます。`ThreadItemInfo`は`turn_id`と`item`、任意の`started_at_ms`・`completed_at_ms`を持ちます。itemの本文、画像参照、reasoning、Web検索などの種類別データは、公開されたJSONオブジェクトをそのまま保持します。本文の短縮、表示イベントへの変換、古い質問への回答受付は行いません。
+
+各ページの`threads`・`turns`・`items`はサーバー順のtupleです。`next_cursor`は続きの取得に使い、`backwards_cursor`は`sort_direction`を反転して取得するときに使います。どちらも不透明な文字列または`None`で、クライアントは解析しません。`sort_direction`は`asc`・`desc`、省略時は会話・turn一覧が降順、item一覧が昇順です。ページ取得は1回の要求で終了し、全件を自動収集しません。不正応答・通信失敗の例外はProject管理APIと共通です。
+
 ## 実行環境と初回準備
 
 `SandboxEvent(readiness, setting_up, detail, reconnect_required)`はWindows実行環境の状態です。`readiness`は`ready / notConfigured / updateRequired`、取得不能は`None`です。接続後に認証と独立して取得します。`setup_windows_sandbox()`は明示的な準備を依頼し、開始受付だけでなく完了通知と状態再取得を待ちます。Windowsの確認操作は本人が行います。

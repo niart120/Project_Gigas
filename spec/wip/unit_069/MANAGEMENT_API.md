@@ -39,7 +39,7 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 | refactor-skipped | I1: 既定サービス接続はGIGAS専用homeを使い、接続前は作成せず、開発用homeを変更しない | new | integration | 起動・終了と既存接続の回帰を確認、70bc1f7 |
 | refactor-skipped | I2: Web・記憶・承認者の既定値、保存往復、不正値拒否、他設定の保持 | new | unit/integration | UIと実行への適用はM3/M5。red10→関連70件green、全814件green |
 | refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、commit待ち |
-| todo | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | cursorと公開履歴の境界型 |
+| refactor-done | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | 新規17件red→I3込み36件green、接続を含む82件green。公開型・クライアント・応答変換を分離。commit待ち |
 | todo | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 選択対象とのUI結合はM4/M5 |
 | todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | 実接続・認証は模擬試験と区別 |
 
@@ -64,6 +64,12 @@ I3: `CodexManagement`と不変の`ProjectInfo`・`ProjectPage`を追加。採用
 I3の構造確認はrefactor-skipped。管理部品は既存の接続requestとProject応答変換だけを所有し、ファイル作成・選択状態・位置台帳・再試行を持たない。create/readで同じ応答変換を共用し、接続・会話実行・サービスへ管理責務を追加していない。`uv run pytest tests/unit/test_codex_management.py tests/unit/test_codex_connection.py --basetemp=tmp/pytest-m1-projects -q`は65 passed。全unitは368 passed、全体ruff・format・ty、実runtimeプローブのty、build・差分検査も成功。公開型とGoogle形式docstring、`docs/codex.md`の入力・戻り値・例外を照合した。
 
 I3の[実runtimeプローブ](assets/probe_projects.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_projects.py --output-root tmp/u08-m1-projects-20261114-01 --result spec/wip/unit_069/assets/probe-projects-result.json`で実行し、終了コード0。[結果](assets/probe-projects-result.json)は製品APIによるProject作成・一覧・read、再起動後のID・名前・rootの保持、未認証と両接続の正常終了を示す。新規の隔離homeを使い、認証コピー・モデル実行・機器操作は行っていない。I6の本人認証と全管理APIの確認は別途必要。
+
+I4: `list_threads`・`read_thread`・`list_turns`・`list_items`を追加した。`projectId:null`は未所属、`modelProviders:[]`は全プロバイダーとし、metadata取得は`includeTurns:false`、turn取得は`itemsView:full`を明示する。本文・公開itemの種類別payloadを保持し、各ページの`nextCursor`・`backwardsCursor`を解析せず返す。独立したschema調査でも、turn要求の既定summaryと応答の既定fullの違い、item一覧のturnId付きwrapper、19種のitem共通id/typeを確認した。
+
+`uv run pytest tests/unit/test_codex_history.py --basetemp=tmp/pytest-m1-history -q`は未実装の4メソッドで17 failedを確認した。実装後、I3を含む36 passed。green後に値型を`management_models.py`、応答変換を`_management_protocol.py`へ移し、公開クライアントを要求の配送へ絞った。`management`からの型importは維持し、接続・会話実行・サービス・GUIには管理状態を追加していない。構造変更後の`uv run pytest tests/unit/test_codex_history.py tests/unit/test_codex_management.py tests/unit/test_codex_connection.py --basetemp=tmp/pytest-m1-history -q`は82 passed。対象ruff・format・差分検査と全体tyは成功し、型境界にAny・cast・ignoreを追加していない。公開型のdocstringと`docs/codex.md`を入力・戻り値・例外・ページ単位の振る舞いに照合した。独立レビューではschemaとの不一致・本文欠落・責務の混在による修正必須の指摘なし。実runtimeと統合gateは別途確認する。
+
+I4の[実runtimeプローブ](assets/probe_history.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_history.py --output-root tmp/u08-m1-history-20261115-02 --result spec/wip/unit_069/assets/probe-history-result.json`で実行し、終了コード0。[結果](assets/probe-history-result.json)は所属別一覧、保存cwd、全文・turn/item対応、cursor、プロセス再起動後のresumeなしの履歴取得を示す。利用不能なローカル接続先へ合成本文を提出し、公開item確定後に明示中断して履歴を作った。モデル応答・認証・ゲーム操作の確認ではない。全unitは385 passed、全体ruff・format・ty、lock・build・差分検査も成功した。
 
 ## 9. 先送り事項
 
