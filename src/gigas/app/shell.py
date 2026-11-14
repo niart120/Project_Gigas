@@ -12,7 +12,7 @@ from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorke
 from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
 from gigas.game_io.input.serial import SerialPort
-from gigas.runtime.codex.models import ConnectionOptions
+from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
 from gigas.services.codex import CodexServiceThread, InputConnectionResult, ProjectResult
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
@@ -312,6 +312,7 @@ class ApplicationShell(QObject):
             self.baseline.model,
             self.baseline.effort,
             self.baseline.auth_method,
+            execution_settings=_execution_settings(self.baseline),
         )
         self.window.connection.activate(self.service.connect_runtime(options))
         self._render()
@@ -497,7 +498,17 @@ class ApplicationShell(QObject):
             target,
             capture=(
                 not changed
-                or bool(changed - serial_fields - {"observation_resolution", "show_reasoning"})
+                or bool(
+                    changed
+                    - serial_fields
+                    - {
+                        "observation_resolution",
+                        "show_reasoning",
+                        "web_search_enabled",
+                        "memory_enabled",
+                        "approvals_reviewer",
+                    }
+                )
             )
             if capture is None
             else capture,
@@ -537,6 +548,7 @@ class ApplicationShell(QObject):
             self.dialog.set_values(settings)
         self.video.set_preview_fps(settings.preview_fps)
         self.service.set_observation_resolution(settings.observation_resolution)
+        self.service.set_execution_settings(_execution_settings(settings))
         self.window.video.view.set_letterbox(settings.preview_letterbox)
         self.window.connection.transcript.set_reasoning_visible(settings.show_reasoning)
         if self.window.current_window_size_preset != settings.window_size_preset:
@@ -768,6 +780,12 @@ class ApplicationShell(QObject):
         self.window.allow_close = True
         self.window.close()
         self.stopped.emit()
+
+
+def _execution_settings(settings: Settings) -> ExecutionSettings:
+    return ExecutionSettings(
+        settings.web_search_enabled, settings.memory_enabled, settings.approvals_reviewer
+    )
 
 
 def _effective_settings(settings: Settings) -> Settings:

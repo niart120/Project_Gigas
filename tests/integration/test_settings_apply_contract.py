@@ -125,6 +125,9 @@ def test_explicit_offline_choice_clears_device_even_when_already_stopped(
         (("capture",), True, False),
         (("observation",), False, False),
         (("reasoning",), False, False),
+        (("web",), False, False),
+        (("memory",), False, False),
+        (("approval",), False, False),
         (("general",), True, False),
         ((), True, True),
         (("port", "observation"), False, True),
@@ -183,6 +186,12 @@ def test_apply_effect_depends_on_changed_settings(
             dialog.preview_mode.setCurrentIndex(dialog.preview_mode.findData(False))
         elif change == "reasoning":
             dialog.show_reasoning.setChecked(False)
+        elif change == "web":
+            dialog.set_values(replace(dialog.values(), web_search_enabled=False))
+        elif change == "memory":
+            dialog.set_values(replace(dialog.values(), memory_enabled=False))
+        elif change == "approval":
+            dialog.set_values(replace(dialog.values(), approvals_reviewer="user"))
     assert shell.dirty == bool(changed)
     target = dialog.values()
     dialog.save_button.click()

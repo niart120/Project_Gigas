@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,7 @@ from gigas.runtime.codex.models import (
     ActivityEvent,
     ConnectionOptions,
     ConversationStatus,
+    ExecutionSettings,
     GoalState,
     HumanRequest,
     LoginEvent,
@@ -41,6 +43,7 @@ from gigas.services.codex import (
     ServiceEvent,
     ServiceResult,
 )
+from gigas.storage.settings import Settings, save_settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.main_window import MainWindow
 from gigas.ui.request_card import AnswerSubmission
@@ -728,9 +731,12 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
 def test_shell_connect_uses_saved_snapshot_without_automatic_start(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    saved = Settings(web_search_enabled=False, memory_enabled=False, approvals_reviewer="user")
+    save_settings(tmp_path / "settings.toml", saved)
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     shell = ApplicationShell(tmp_path / "settings.toml", service=service)
     snapshots: list[ConnectionOptions] = []
+    applied: list[ExecutionSettings] = []
 
     def capture(options: ConnectionOptions) -> int:
         snapshots.append(options)
@@ -738,12 +744,22 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
 
     # Replace only the GUI command boundary; no runtime launches in this test.
     monkeypatch.setattr(service, "connect_runtime", capture)
+    monkeypatch.setattr(service, "set_execution_settings", applied.append)
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
         assert not snapshots
+        assert applied == [ExecutionSettings(False, False, "user")]
         shell.open_settings()
         assert shell.dialog is not None
+        shell.dialog.set_values(
+            replace(
+                saved,
+                web_search_enabled=True,
+                memory_enabled=True,
+                approvals_reviewer="auto_review",
+            )
+        )
         shell.dialog.model.setText("unsaved")
         assert not snapshots
         shell.dialog.tabs.setCurrentIndex(shell.dialog.codex_tab)
@@ -754,7 +770,10 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         panel.server_button.setFocus()
         qtbot.keyClick(panel.server_button, Qt.Key.Key_Return)
         assert len(snapshots) == 1
-        assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")
+        assert snapshots[0] == ConnectionOptions(
+            tmp_path / "runtime", execution_settings=ExecutionSettings(False, False, "user")
+        )
+        assert applied == [ExecutionSettings(False, False, "user")]
         panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
         panel.handle_result(ServiceResult(1, "connect"))
         logins: list[bool] = []

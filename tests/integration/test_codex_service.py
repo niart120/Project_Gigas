@@ -152,6 +152,128 @@ def test_connection_execution_settings_reach_the_first_thread(qtbot: QtBot, tmp_
         qtbot.waitUntil(lambda: service.wait(0))
 
 
+@pytest.mark.parametrize("before_worker_start", [False, True])
+def test_saved_execution_settings_replace_pending_start_but_not_existing_thread(
+    qtbot: QtBot, tmp_path: Path, *, before_worker_start: bool
+) -> None:
+    peer = FakePeer()
+    options_seen: list[ConnectionOptions] = []
+    results: list[ServiceResult] = []
+
+    def factory(
+        options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
+    ) -> CodexConnection:
+        options_seen.append(options)
+        return CodexConnection(peer, options, emit)
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    initial = ExecutionSettings(False, False, "user")
+    service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=initial))
+    try:
+        if before_worker_start:
+            service.set_execution_settings(ExecutionSettings())
+        service.start()
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        assert results[-1].error == ""
+        if not before_worker_start:
+            service.set_execution_settings(ExecutionSettings())
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        assert options_seen[0].execution_settings == initial
+        params = next(params for method, params in peer.calls if method == "thread/start")
+        assert params is not None
+        assert params["approvalsReviewer"] == "auto_review"
+        config = params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "live"
+        assert config["memories.generate_memories"] is True
+        assert config["memories.use_memories"] is True
+
+        service.set_execution_settings(initial)
+        peer.auto_turn_started = False
+        service.send("additional")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        methods = [method for method, _params in peer.calls]
+        assert methods.count("thread/start") == 1
+        assert methods.count("turn/start") == 2
+        assert "thread/settings/update" not in methods
+        assert "thread/resume" not in methods
+        assert len(options_seen) == 1
+    finally:
+        if not service.isRunning():
+            service.start()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+@pytest.mark.parametrize("gate_method", ["config/read", "thread/start"])
+def test_execution_settings_changed_during_preparation_wait_for_next_new_thread(
+    qtbot: QtBot, tmp_path: Path, gate_method: str
+) -> None:
+    entered, release, updated = Event(), Event(), Event()
+
+    class PreparingPeer(FakePeer):
+        async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+            result = await super().request(method, params)
+            if method == gate_method:
+                entered.set()
+                assert await asyncio.to_thread(release.wait, 10)
+            return result
+
+    first, second = PreparingPeer(), FakePeer()
+    peers = iter((first, second))
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(next(peers), options, emit),
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(entered.is_set)
+        changed = ExecutionSettings(False, False, "user")
+        service.set_execution_settings(changed)
+        service._enqueue(updated.set)
+        qtbot.waitUntil(updated.is_set)
+        release.set()
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].error == ""
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        first_params = next(params for method, params in first.calls if method == "thread/start")
+        assert first_params is not None
+        assert first_params["approvalsReviewer"] == "auto_review"
+        config = first_params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "live"
+        assert config["features.memories"] is True
+        service.disconnect_runtime()
+        qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        assert results[-1].error == ""
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=changed))
+        qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        service.send("next conversation")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        next_params = next(params for method, params in second.calls if method == "thread/start")
+        assert next_params is not None
+        assert next_params["approvalsReviewer"] == "user"
+        config = next_params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "disabled"
+        assert config["features.memories"] is False
+    finally:
+        release.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
 def test_initial_bind_failure_is_not_sent_and_retry_keeps_the_created_thread(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

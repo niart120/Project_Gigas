@@ -17,7 +17,7 @@ from gigas.runtime.codex.connection import (
 )
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.management import CodexManagement
-from gigas.runtime.codex.models import DialogueEvent, TextEvent
+from gigas.runtime.codex.models import DialogueEvent, ExecutionSettings, TextEvent
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
 from gigas.services._workspaces import select_project
@@ -201,6 +201,7 @@ class CodexServiceThread(QThread):
         self._input_pending = False
         self._input_apply_task: asyncio.Task[None] | None = None
         self._resources = ConversationResources(data_root, reader, self.recording_failed.emit)
+        self._execution_settings = ExecutionSettings()
         self._conversation: ConversationExecution | None = None
         self._resources_lock = asyncio.Lock()
         self._lock = Lock()
@@ -267,23 +268,38 @@ class CodexServiceThread(QThread):
         """
         self._enqueue(lambda: self._resources.set_resolution(resolution))
 
+    def set_execution_settings(self, settings: ExecutionSettings) -> None:
+        """Queue saved options for future conversation preparation without sending an RPC.
+
+        Args:
+            settings: Last successfully loaded or saved application options. An ongoing
+                preparation retains its snapshot; an existing runtime thread is unchanged.
+        """
+        self._enqueue(lambda: self._apply_execution_settings(settings))
+
+    def _apply_execution_settings(self, settings: ExecutionSettings) -> None:
+        self._execution_settings = settings
+        if self._conversation is not None:
+            self._conversation.set_execution_settings(settings)
+
     def connect_runtime(self, options: "ConnectionOptions") -> int:
         """Queue a connection using an immutable settings snapshot.
 
         Args:
-            options: Settings and absolute conversation directory for this connection.
+            options: Saved startup settings and the absolute process working directory.
+                Conversation workspaces are prepared separately on explicit execution.
 
         Returns:
             Generation identifying all events and results for this connection attempt.
         """
         self._generation += 1
         context = _OperationContext(self._generation, "connect")
-        self._enqueue(
-            lambda: self._start_operation(
-                context, lambda: self._connect(options, context.generation)
-            ),
-            context,
-        )
+
+        def start() -> None:
+            self._apply_execution_settings(options.execution_settings)
+            self._start_operation(context, lambda: self._connect(options, context.generation))
+
+        self._enqueue(start, context)
         return self._generation
 
     def set_goal(self, objective: str) -> None:
@@ -609,7 +625,7 @@ class CodexServiceThread(QThread):
                 self._resources,
                 self._input,
                 lambda event: self._receive(generation, event),
-                settings=options.execution_settings,
+                settings=self._execution_settings,
                 closing=lambda: self._closing is not None or self._connection is not connection,
                 request_close=lambda: self._begin_close(connection, execution),
             )

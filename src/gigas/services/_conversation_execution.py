@@ -129,6 +129,15 @@ class ConversationExecution:
     def _publish(self) -> None:
         self._emit(self.snapshot)
 
+    def set_execution_settings(self, settings: "ExecutionSettings") -> None:
+        """Retain saved options for a later new-thread preparation without an RPC.
+
+        Args:
+            settings: Last successfully loaded or saved options. Preparation already
+                in progress uses its captured value; existing threads are not updated.
+        """
+        self._settings = settings
+
     def _require_admission(self) -> None:
         if self._closing() or self._stopping is not None:
             raise CodexConnectionError("停止・切断処理中は送信できません")

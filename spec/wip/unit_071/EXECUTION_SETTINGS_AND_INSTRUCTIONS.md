@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip（J1完了、次はJ2）**。[U08親仕様](../unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合する。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。
+状態: **wip（J1・J2完了、次はJ3）**。[U08親仕様](../unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合する。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。
 
 起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD4・D5と、[08の設定契約](../../initial/08-sdk-compatibility.md#設定の所有と適用)。M2は製品実装・実接続受入まで完了した。利用者はGIGASの設定から実行環境を選び、攻略資料やSkillsは作業フォルダーと標準の探索先で管理できる。
 
@@ -45,7 +45,7 @@ J1でruntime契約、J2で保存から開始まで、J3で設定UI、J4で実接
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | done | J1: 起動・新規threadの設定がWeb/記憶/承認の値を使い、標準指示を抑制せず、実効権限の不一致を拒否する | new/regression | unit/integration | 不変値・共通変換、全8組合せ、固定制約・MCP上書きの維持。公開型・docstring・呼出し元も更新 |
-| todo | J2: 保存成功した最新設定だけを次の新規開始へ反映し、開始中・既存threadと機器接続を不用意に変更しない | new/edge | integration | 保存失敗・キャンセル、開始準備中の変更、変更前後の新規開始、映像・入力非再接続 |
+| done | J2: 保存成功した最新設定だけを次の新規開始へ反映し、開始中・既存threadと機器接続を不用意に変更しない | new/edge | integration | 保存失敗・キャンセル、接続前のqueue順、開始準備中の変更、変更前後の新規開始、映像・入力非再接続 |
 | todo | J3: 設定画面から3値を編集し、適用・OK・キャンセルで保存値と一致する | new/regression | integration/GUI | 既存値の表示と操作結果を検証。固定文言だけのassertを追加しない |
 | todo | J4: 実app-serverで標準指示・設定・権限と実モデルI/Oを確認する | acceptance | integration/GUI | AGENTS/Skills、Web/記憶のON/OFF、通常資料編集・別会話資料参照、シェル通信制限、両承認方法。記憶の標準処理と即時生成保証を区別する |
 
@@ -59,9 +59,9 @@ runtime/codexのモデル・設定組立・launch・thread protocol、services�
 
 | command / 確認 | result | 検査対象 |
 |---|---|---|
-| 対象itemのpytest | not run | 設定伝達・要求/応答・GUI操作と副作用 |
+| 対象itemのpytest | J1 148件・transport 22件、J2対象43件・関連164件成功。J3・J4 not run | 設定伝達・要求/応答・GUI操作と副作用 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m3-root -q | not run | 新規開始・停止・機器・GUIの回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型境界 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | J1時点の全体成功、J2対象8ファイルも成功。工程終了時に再確認 | 形式・lint・型境界 |
 | uv lock --check / uv build | not run | 依存・公開API・配布指示 |
 | 実app-server・モデル・設定画面 | not run | 公開実効値と製品経路、標準読込と権限 |
 | git diff --check、文書内容・リンク確認 | not run | 設定の所有・反映単位と公開説明 |
@@ -75,6 +75,14 @@ ExecutionSettingsの3値を起動とthread要求へ渡し、純粋な共通変�
 refactor-skipped: 設定値、変換、開始時の所有を分け、保存やResourcesへ依存を追加していない。重複した変換や不要な管理部品がないことを見直し、追加の構造変更は行わなかった。独立レビューの修正必須指摘なし。全体ruff・format（262ファイル）・ty、スクリプトのty、git diff --checkは成功した。実app-server・モデル・保存後の更新・UIはこの結果に含めない。
 
 Product Designによる変更前確認では、通常権限の実画面で設定→Codexを開き、接続・利用状況・モデル既定値の配置と、スクロール外のOK・キャンセル・適用を確認した。未変更で閉じて正常終了した。記録は`tmp/u08-m3-ui/audit.md`と同ディレクトリのscreenshotsに置いた。
+
+### J2 実装・検証結果
+
+Shellは読込み・保存に成功した3値だけをサービスへ渡し、新規接続には同じ保存値を指定する。サービスのループでqueue順に最新値を保持し、接続準備と保存更新が重なっても古い接続snapshotで後から上書きしない。Executionの設定更新は将来の準備用だけでRPCを送らず、準備開始済みのsnapshotは維持する。
+
+`test_codex_gui.py test_codex_service.py test_settings_accept.py test_settings_apply_contract.py test_settings_recovery.py`を対象に、`-k 'execution_settings or shell_connect_uses_saved_snapshot or apply_effect_depends_on_changed_settings' --basetemp=tmp/pytest-m3-settings -q --tb=short`で検証した。未実装setterと3値のみの変更による映像開始で11 failed / 32 passed、実装後43 passed、構造確認後も43 passed。上記5ファイルと`test_conversation_execution.py`の関連回帰は164 passedだった。
+
+refactor-skipped: 既存の保存成功経路、サービスのループ、Executionの開始時snapshotを使い、3値の純粋抽出以外の管理部品を増やしていない。Resources、新しいworker・lock・完了通知の追加は不要と判断した。独立レビューの修正必須指摘なし。対象8ファイルのruff・format・tyと差分検査は成功。UIの実編集と実app-serverへの反映はJ3・J4へ残す。
 
 ## 9. 先送り事項
 

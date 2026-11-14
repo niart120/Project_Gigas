@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,7 @@ from pytestqt.qtbot import QtBot
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.input.config import resolve_serial_config
 from gigas.game_io.input.serial import SerialPort
+from gigas.runtime.codex.models import ExecutionSettings
 from gigas.storage.settings import load_settings
 from gigas.ui.main_window import MainWindow
 from gigas.ui.notifications import Notice
@@ -23,6 +25,33 @@ from tests.integration.test_settings_apply_contract import (
 
 if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_execution_settings_apply_only_after_successful_save(
+    controlled: tuple[ApplicationShell, ControlledIO],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail: bool,
+) -> None:
+    shell, io = controlled
+    applied: list[ExecutionSettings] = []
+    monkeypatch.setattr(shell.service, "set_execution_settings", applied.append)
+    before = shell.baseline
+    target = replace(
+        before, web_search_enabled=False, memory_enabled=False, approvals_reviewer="user"
+    )
+    io.fail = fail
+    assert shell.apply_settings(target)
+    qtbot.waitUntil(io.entered.is_set)
+    assert applied == []
+    assert shell.baseline == before
+    io.release.set()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert applied == ([] if fail else [ExecutionSettings(False, False, "user")])
+    assert shell.baseline == (before if fail else target)
+    assert load_settings(shell.path) == (before if fail else target)
 
 
 def test_stop_during_save_preserves_submitted_application(

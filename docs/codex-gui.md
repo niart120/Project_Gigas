@@ -136,6 +136,8 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 `set_observation_resolution(value)`は以後の観測へ設定を適用します。`recording_failed(identifier, path, reason)`は保存と記録先準備の失敗を通知します。実行前に記録先を開けなければ送信せず、結合後の個別保存失敗は入力・観測・停止を止めません。
 
+`set_execution_settings(ExecutionSettings)`は保存に成功したWeb検索・自動記憶・承認方法を、サービスのループへ渡します。次の新規会話の準備開始時に値を固定し、同じ値で要求と応答確認を行います。既存会話への設定RPCや再接続は送りません。接続前に渡した値は、後続の`connect_runtime(options)`で指定する設定に従います。アプリは最後に保存に成功した同じ値を両方へ渡します。
+
 GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`answer(token, decision=..., answers=...)`、`set_goal(objective)`、`resume_goal()`、`clear_goal()`、`select_model(model, effort)`、`interrupt()`、`disconnect_runtime()`を呼べます。各呼出しは処理を予約して戻り、`completed`が実際の操作終了を通知します。`interrupt()`の成功結果はサーバー側停止と入力の解除・回収の完了です。`clear_goal()`の成功は目的の削除で、turn中断ではありません。送信処理中でも停止を要求でき、停止中の再操作は同じtaskを待ちます。
 
 `SessionStatus`は接続・認証、`ConversationStatus`はthread・turn・Goalと送信・停止・回答待ちの表示に使います。Goalの変更は対応する通知の反映まで同じ送信taskで扱い、無変化応答ならそのまま終了します。遅い応答で後続のGoal通知を巻き戻しません。実行環境の準備結果も開始受付ではなく、完了通知と準備状態の確認後に返します。
