@@ -202,7 +202,8 @@ class ProjectWriter:
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: The envelope is invalid, unavailable, or cannot be appended.
+            ProjectError: The envelope is invalid, unavailable, cannot be serialized
+                as a UTF-8 JSON row, or cannot be appended.
         """
         payload: dict[str, object] = {
             "thread_id": thread_id,
@@ -254,7 +255,7 @@ class ProjectWriter:
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: Writing is unavailable or appending fails.
+            ProjectError: Writing is unavailable, JSON row encoding fails, or appending fails.
         """
         with self._operation():
             sequence = self._require_writable()
@@ -273,8 +274,9 @@ class ProjectWriter:
         Raises:
             ProjectBusyError: A recording or reload is already running.
             ProjectError: The owner is closed, needs reload, metadata is invalid,
-                or persistence failed. A JSONL failure disables further append
-                until a successful reload.
+                or persistence failed. Row encoding failure preserves the published
+                image and leaves the writer usable. JSONL I/O failure disables
+                further append until a successful reload.
         """
         with self._operation():
             sequence = self._require_writable()
@@ -327,7 +329,11 @@ class ProjectWriter:
             "project_id": self.project_id,
             "payload": payload,
         }
-        row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        try:
+            row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        except (TypeError, ValueError) as error:
+            message = f"{self.path}: 記録をUTF-8のJSON行へ変換できません: {error}"
+            raise ProjectError(message) from error
         try:
             _append_row(self.path / "events.jsonl", row)
         except OSError as error:

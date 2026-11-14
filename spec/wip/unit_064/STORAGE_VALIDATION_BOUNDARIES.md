@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: wip（S1の読込条件縮小へ着手）。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を実装する。到達点は、利用者が既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存できること。
+状態: wip（読込条件縮小と行データ作成のエラー処理を実装）。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を実装する。到達点は、利用者が既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存できること。
 
 ## 2. 対象範囲
 
@@ -27,7 +27,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | S1: ID表記・時刻に依存せず既存projectを読み、原本保持と正しい次採番で追記する | regression | integration | 共通項目不正の拒否は残す。読込検査だけを縮小し、別の構造変更は不要 |
-| todo | S2: 行データの生成失敗をProjectErrorとして報告し、原本・採番を維持して次の保存を受け付ける | edge | integration | 共通の行データ作成で確認。観測では公開済み画像を保持 |
+| refactor-skipped | S2: 行データの生成失敗をProjectErrorとして報告し、原本・採番を維持して次の保存を受け付ける | edge | integration | 共通の行データ作成で確認。観測では公開済み画像を保持。別の構造変更は不要 |
 | todo | S3: 新規内容を再検査せず保存し、画像保存先の逸脱・既存画像上書きを拒否する | regression | integration | 内部値を人為的に壊した拒否試験は削除。S2の共通エラー変換を維持 |
 
 ## 7. 実装方針
@@ -45,6 +45,8 @@ S1→S2→S3の順に進める。対話の事前JSON化を削る前に、S2で�
 S1: `uv run pytest tests/integration/test_observation_storage.py -q -k 'open_preserves_unknown_events_fields_and_sequence_gaps or open_requires_nonempty_project_identity or invalid_event_envelope'`は新しい読込例2件がUUID検査で失敗し、残す条件12件は成功した。読込検査縮小後、同ファイル全体は53 passed。原本のmetadata・行、欠番後の採番、新規生成形式、排他・失敗保全を確認した。
 
 S1の静的確認: 対象2 Pythonファイルのruff format/check、全体の`uv run ty check --no-progress`成功。変更3文書のローカル参照先31件とunit番号64件の一意性を確認した。
+
+S2: `uv run pytest tests/integration/test_observation_storage.py -q -k row_encoding_failure`はUTF-8変換の例外がProjectErrorにならない2件でred、NaN拒否1件は既存処理で成功。共通のエラー変換後は同ファイル全体56 passed。原本・採番・公開済みPNG・次の保存を確認した。ruff formatの改行指摘を直し、ruff check・全体ty成功。
 
 ## 10. 先送り
 

@@ -599,6 +599,39 @@ def test_thread_record_rejects_empty_id_before_appending(tmp_path: Path, invalid
     reopened.close()
 
 
+@pytest.mark.parametrize("value", [float("nan"), "unpaired-\ud800"])
+def test_row_encoding_failure_preserves_log_and_sequence(
+    tmp_path: Path, value: float | str
+) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    try:
+        writer.record_thread("thread")
+        log = writer.path / "events.jsonl"
+        before = log.read_bytes()
+        with pytest.raises(ProjectError):
+            writer.record_dialogue("dialogue.final", {"text": value}, thread_id="thread")
+        assert log.read_bytes() == before
+        writer.record_dialogue("dialogue.final", {"text": "次の記録"}, thread_id="thread")
+        assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 2
+        writer.reload()
+    finally:
+        writer.close()
+
+
+def test_observation_row_encoding_failure_keeps_published_image(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    observation = Observation.from_frame(sample_frame())
+    try:
+        with pytest.raises(ProjectError):
+            writer.record(observation, thread_id="unpaired-\ud800")
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+        writer.record_thread("thread")
+        assert json.loads((writer.path / "events.jsonl").read_bytes())["sequence"] == 1
+    finally:
+        writer.close()
+
+
 def test_memory_bootstrap_preserves_existing_memory_and_records(tmp_path: Path) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
