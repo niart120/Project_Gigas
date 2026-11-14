@@ -112,6 +112,8 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 
 OFFでは起動時生成と標準参照を無効にし、既存ファイルの削除APIを呼びません。generate_memories=falseで作ったthreadの生成対象状態はdisabledとして保存されます。ONへ戻す際に過去threadを一括変更・強制再抽出する処理は追加しません。将来の候補選択・抽出・統合は標準処理に任せます。モデルによる抽出・統合の製品確認はM3・M6で行い、即時生成を開始条件にしません。
 
+[M3](../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)ではON/OFFの実効値、公開参照経路、OFF時の既存記憶保持と、標準統合処理による試験用summaryの形式整理を確認しました。実会話からの抽出は未観測でM6へ引き継ぎます。ゲームMCP利用後の生成対象状態はM6・M7で確認し、条件を変えて抽出を強制する機構は追加しません。
+
 [Skills探索](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/skills/src/host_roots.rs)はcwd側・祖先側の.agents/skills、$HOME/.agents/skills、専用CODEX_HOME/skills等を扱います。独自の探索器は不要です。
 
 workspace-writeを要求しても実効sandboxがreadOnlyになる場合があるため、要求値だけで権限の成功としません。製品はreadinessと実効sandboxを検査し、M2・M3・M6で通常書込み・他会話資料参照・通信制限・auto_review/userの要求応答を検証します。自動審査は無条件許可ではなく、GIGASによる独自審査や拒否後の自動的な人間承認への切替は設けません。

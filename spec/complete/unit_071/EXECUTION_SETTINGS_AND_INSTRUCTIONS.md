@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip（J1〜J3完了、J4受入中）**。[U08親仕様](../unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合する。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。
+状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合した。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。製品実装・実app-server受入を完了し、既存会話の再接続はM4へ引き継ぐ。
 
 起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD4・D5と、[08の設定契約](../../initial/08-sdk-compatibility.md#設定の所有と適用)。M2は製品実装・実接続受入まで完了した。利用者はGIGASの設定から実行環境を選び、攻略資料やSkillsは作業フォルダーと標準の探索先で管理できる。
 
@@ -16,7 +16,7 @@
 
 [04](../../initial/04-agent-memory.md)の自由な攻略資料と記憶、[02](../../initial/02-runtime.md)の所有、[09](../../initial/09-control-flows.md)の明示開始、[10](../../initial/10-ui-interaction.md)とAGENTS.mdのGUI表記、[07](../../initial/07-verification.md)の受入観点に従う。
 
-現状はSettingsに3値の保存があり、launch.pyはWeb・記憶をOFF、AGENTS/Skillsを抑制し、thread要求はreviewer=userに固定している。M2でPythonの固定資料指示とguide/current資材は撤去済み。Shellの保存成功経路は再利用するが、今回の3値だけの変更を映像設定変更とみなさないようにする。
+着手時点ではSettingsに3値の保存があり、launch.pyはWeb・記憶をOFF、AGENTS/Skillsを抑制し、thread要求はreviewer=userに固定していた。M2でPythonの固定資料指示とguide/current資材は撤去済み。Shellの保存成功経路は再利用するが、今回の3値だけの変更を映像設定変更とみなさないようにする。
 
 採用版の公開設定名と要求上書きの順序は08の根拠へ照合する。標準Skillsは専用homeだけでなく$HOME/.agents/skillsも探索する。記憶の候補選択・抽出にはsource・経過時間・残量等の条件があり、ON直後の生成を開始条件にしない。実効設定・実モデル動作はJ4で確認し、静的な成立確認と区別する。
 
@@ -47,7 +47,7 @@ J1でruntime契約、J2で保存から開始まで、J3で設定UI、J4で実接
 | done | J1: 起動・新規threadの設定がWeb/記憶/承認の値を使い、標準指示を抑制せず、実効権限の不一致を拒否する | new/regression | unit/integration | 不変値・共通変換、全8組合せ、固定制約・MCP上書きの維持。公開型・docstring・呼出し元も更新 |
 | done | J2: 保存成功した最新設定だけを次の新規開始へ反映し、開始中・既存threadと機器接続を不用意に変更しない | new/edge | integration | 保存失敗・キャンセル、接続前のqueue順、開始準備中の変更、変更前後の新規開始、映像・入力非再接続 |
 | done | J3: 設定画面から3値を編集し、適用・OK・キャンセルで保存値と一致する | new/regression | integration/GUI | 既存値の表示・変更通知・編集停止・保存結果を検証。native表示とスクロールも確認 |
-| todo | J4: 実app-serverで標準指示・設定・権限と実モデルI/Oを確認する | acceptance | integration/GUI | AGENTS/Skills、Web/記憶のON/OFF、通常資料編集・別会話資料参照、シェル通信制限、両承認方法。記憶の標準処理と即時生成保証を区別する |
+| done | J4: 実app-serverで標準指示・設定・権限と実モデルI/Oを確認する | acceptance | integration/GUI | AGENTS/Skills、Web/記憶のON/OFF、通常資料編集・別会話資料参照、シェル通信制限、両承認方法を確認。会話からの記憶抽出は未観測として後続へ引継ぎ |
 
 ## 7. 対象ファイル
 
@@ -60,11 +60,11 @@ runtime/codexのモデル・設定組立・launch・thread protocol、services�
 | command / 確認 | result | 検査対象 |
 |---|---|---|
 | 対象itemのpytest | J1 148件・transport 22件、J2対象43件・関連164件、J3対象4件・関連134件成功 | 設定伝達・要求/応答・GUI操作と副作用 |
-| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m3-root -q | not run | 新規開始・停止・機器・GUIの回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | J1時点の全体成功、J2対象8ファイルも成功。工程終了時に再確認 | 形式・lint・型境界 |
-| uv lock --check / uv build | not run | 依存・公開API・配布指示 |
-| 実app-server・モデル・設定画面 | not run | 公開実効値と製品経路、標準読込と権限 |
-| git diff --check、文書内容・リンク確認 | not run | 設定の所有・反映単位と公開説明 |
+| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m3-root -q | 900 passed、72.30秒 | 新規開始・停止・機器・GUIの回帰 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | 成功、format対象263ファイル | 形式・lint・型境界 |
+| uv lock --check / uv build | 83依存のlock整合、sdist・wheel生成成功 | 依存・公開API・配布指示 |
+| 実app-server・モデル・設定画面 | J3 native表示・J4の明示3turnで受入。補助の承認応答不備は独立試験で補完 | 公開実効値と製品経路、標準読込と権限 |
+| git diff --check、文書内容・リンク確認 | 各cycleで成功。完了移動後の参照も確認 | 設定の所有・反映単位と公開説明 |
 
 ### J1 実装・検証結果
 
@@ -92,15 +92,42 @@ refactor-skipped: 既存の保存成功経路、サービスのループ、Execu
 
 refactor-skipped: 3部品は既存の設定契約へ結合するだけで、追加の状態・保存処理・helperは不要と判断した。独立レビューの修正必須指摘なし。Product Designで同じサイズの実画面を変更前と比較し、既存欄の順序、スクロール後の3項目、固定の保存ボタンを確認した。nativeでは値を変更せずキャンセルして正常終了し、保存と切替の根拠はQt結合試験と区別した。画像と確認記録は`tmp/u08-m3-ui/`に置いた。
 
+### J4 実app-server・モデルの受入
+
+採用runtime 0.167.0とM1の認証済み隔離homeを使い、製品CodexServiceThread→Execution→thread/startを通した。実機は使わず、ゲームMCPも呼んでいない。記録は`tmp/u08-m3-*.json`、補助は`tmp/live_m3_acceptance.py`。公開config/readは起動/cwdの値であり、thread固有の解決値の読戻しとして扱わない。公開応答・通知・実ファイルと照合した。
+
+ON/OFFの実行commandは次のとおり。認証済みhomeは補助で指定し、製品経路を通常権限で起動した。
+
+```powershell
+uv run python tmp/live_m3_acceptance.py run --case on --execute-model --output tmp/u08-m3-on.json
+uv run python tmp/live_m3_acceptance.py run --case off --execute-model --output tmp/u08-m3-off.json
+```
+
+モデルなしの公開probeはthread開始・resume・送信0回で、Web/記憶OFF、on-request/userとProject Skillのrepo・enabled=true、探索エラー0を確認した。
+
+ON・auto_reviewの新規thread `01a1db31-7fe7-77b2-98da-16dec123f6af`では、明示turn/start 1回がcompletedとなった。AGENTS固有指示、Project Skillの固有出力、通常の資料編集、別会話の資料の読取り・元資料不変更、Web検索1回を確認した。公開自動審査は1件approved、対応する無害な出力コマンドも成功した。記録には提出1件・確定本文2件が残り、実ID・保存先が一致した。
+
+通常sandboxのHTTPS通信1回はSocketException・NativeErrorCode 10013で拒否された。外側のPython urllibは証明書検証に失敗したため対照に使わず、通常権限のPowerShellで同じURLへのHTTP 200・577 bytesを確認した。TLS検証は変更していない。要求だけでなく返却されたworkspaceWrite・networkAccess=false・rootsと、この実行結果を根拠にする。対照結果は`tmp/u08-m3-network-control.json`に残した。
+
+記憶ONでは、summaryが未作成だった専用homeへ参照検証用summaryを置き、thread/memory/readで228 bytesの同一内容を取得した。これはモデルへの注入済みpromptの読戻しや、会話からの抽出成功ではない。ON中に標準統合処理が形式の合わない試験summaryを80 bytesの空の正規形式へ整えた。採用版ソースと読取り専用DB監査では統合ジョブdone・抽出出力0件を確認した。会話からの抽出は未観測であり、候補の休止時間などの標準条件を変更していない。
+
+OFF・userの新規thread `01a1db35-5c1d-7032-a8c5-c385661c0b67`では、Web実行0、標準記憶参照null、memory_mode=disabled、80 bytesの既存summaryのhash保持を確認した。承認要求は届いたが、補助がdecline以外の選択肢へ対応していなかったため回答を送らず中断した。元reportのdecision=declineと件数は補助が記録した予定値で、answer_resultsは空、終端はinterruptedである。Unexpected questionは補助内の処理失敗であり、製品の保存失敗ではない。元reportを保持し、ON/OFF全体は再送していない。
+
+承認のみの追加試験は`uv run python tmp/live_m3_user_approval.py --execute-model --output tmp/u08-m3-user-approval.json`で行った。新thread `01a1db38-d5a5-72d1-88b0-2840f7773331`への明示送信は1回。公開選択肢accept・prefix許可・cancelのうち、製品が対応する一回限りのaccept/cancelを取得した。cancelの実配送はsent、コマンドはdeclined・検証markerの出力なし、turnはinterruptedとなった。記録・補助・終了のエラーはなく、製品変更は不要だった。
+
+明示turn/startは合計3回で、自動審査と標準記憶の背景処理はその回数に含めない。J4は既存製品経路の受入で、製品への構造変更は行っていない。独立レビューで生成資料・記録・公開応答と報告の対応を照合した。
+
+SQLite監査は試験根拠に限り、製品の取得経路へ追加していない。ON会話のsource=vscode・memory_mode=enabledはWeb利用後の確認で、ゲームMCP後の対象資格の実測とは区別する。
+
 ## 9. 先送り事項
 
-既存threadの購読解除後の設定適用・resumeはM4、再開を跨ぐ設定・承認の結合はM6、実機I/Oとの通し受入はM7。記憶の標準生成は候補条件に従い、即時生成やOFF時の過去threadの一括再抽出を追加しない。
+既存threadの購読解除後の設定適用・resumeはM4、再開を跨ぐ設定・承認の結合と会話からの記憶抽出の確認はM6、ゲームMCP利用後の生成対象維持と実機I/Oの通し受入はM6・M7。記憶の標準生成は候補条件に従い、即時生成やOFF時の過去threadの一括再抽出を追加しない。長時間の記憶の有用性はU10で扱う。
 
 ## 10. 完了チェックリスト
 
 - [x] M2完了とM3の範囲・所有を確認した
-- [ ] J1〜J4と各cycleの構造確認を記録した
-- [ ] 3値の保存・起動・新規開始・UIを結合した
-- [ ] 標準指示・設定・権限の実接続受入を完了した
-- [ ] 公開型・docstring・docs・配布資材を整合させた
-- [ ] 品質ゲートと独立レビュー、親・初期設計の進捗更新を終えた
+- [x] J1〜J4と各cycleの構造確認を記録した
+- [x] 3値の保存・起動・新規開始・UIを結合した
+- [x] 標準指示・設定・権限の実接続受入を完了した
+- [x] 公開型・docstring・docs・配布資材を整合させた
+- [x] 品質ゲートと独立レビュー、親・初期設計の進捗更新を終えた

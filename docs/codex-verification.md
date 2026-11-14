@@ -42,4 +42,8 @@ uv run python scripts/check_codex.py file-approval --cwd "$env:TEMP\gigas-codex-
 
 実Codexと64×48の模擬Frameを使った製品サービスの確認では、observe 1回のMCP応答と保存PNGの168 bytes・観測IDが一致しました。進捗を含む確定本文2件、提出1件、観測1件が新形式で残り、保存エラーなく停止・回収・終了しました。これは実機映像・入力の確認とは区別します。
 
+同日の[M3](../spec/complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)では、設定画面のWeb検索・自動記憶・承認方法の表示と保存経路、実CodexによるAGENTS・Skillの利用、攻略資料の編集と別会話資料の参照を確認しました。Web検索のON/OFF、自動審査による承認と本人承認要求への取消しも確認済みです。同じURLに通常のPowerShellではHTTP 200で到達し、sandbox内ではソケットアクセス拒否となりました。
+
+自動記憶はON時の公開参照経路、OFF時の参照停止・既存ファイル保持を確認しました。標準処理による試験用summaryの形式整理は観測しましたが、実会話からの記憶抽出は未観測です。即時生成は保証せず、ゲームMCPを使った会話の生成対象状態とともに後続で確認します。これらはゲーム入力なしの検証であり、実機操作の確認には含めません。
+
 公開Projectと会話別recordsに対応させた本スクリプト自体は、CLI・静的検査までを確認し、実モデルでは未実行です。GUIから実機までの通し受入は[U08](../spec/wip/unit_013/RESUME.md)のM7で確認します。他の入力機器・OS、長時間運転は未検証です。APIキー認証は対象外です。
