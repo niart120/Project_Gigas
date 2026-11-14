@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **complete（調査・設計・初期設計改訂・後続への引継ぎを完了）**。2026-11-14。[U08親仕様](../../wip/unit_013/RESUME.md)のM0を担当する。製品実装・製品経路の実接続・GUI実機受入は未着手であり、親U08はwipを維持する。
+状態: **complete（調査・設計・初期設計改訂・後続への引継ぎを完了）**。[U08親仕様](../../wip/unit_013/RESUME.md)のM0を担当する。製品実装・製品経路の実接続・GUI実機受入はM1以降の対象であり、現在の進捗は親仕様で管理する。
 
 管理機能をapp-serverへ寄せ、GIGASはゲームI/Oと人間の介入を担う。攻略補助は実プレイで不足を確認してから検討する。対話で確定したD1〜D5を採用版の公開契約へ対応させ、初期設計を正本として整理した。議論の経緯や同じ契約を本書へ重複蓄積しない。
 
@@ -10,7 +10,7 @@
 
 対象は責務・保存先・記録形式・指示・設定・再接続・会話管理UIの設計、公開APIと設定の成立条件、初期設計改訂、マイルストーンと受入条件の引継ぎである。U06・unit_061/062・unit_054の会話実行・共通停止・契約整理を前提とする。作業規約は[AGENTS.md](../../../AGENTS.md)に従う。
 
-製品コード・依存・利用者の認証や開発用設定は変更しない。実データの移行・削除、後方互換層、独立MCPサーバーの起動機能、攻略Skills・独自記憶整理・監督エージェントは対象外。方式確認の隔離プローブと製品実装を区別する。後続子仕様を一括生成しない。
+製品コード・依存・利用者の認証や開発用設定は変更しない。実データの移行・削除、後方互換層、独立MCPサーバーの起動機能、攻略Skills・独自記憶整理・監督エージェントは対象外。設計の成立確認と製品受入を区別する。後続子仕様を一括生成しない。
 
 ## 3. 確定した責務と契約の正本
 
@@ -56,21 +56,13 @@ GIGAS所有の設定はsettings.tomlから起動時と新規thread/start・既�
 
 active Goalへの追加指示はresume→turn/startとし、追加指示受付前のGoal進行を許容する。順序保証のためのGoal休止・再有効化・本文事前注入は設けない。失敗時は選択・履歴・本文を保持し、自動再送せず、未受付・停止済みと断定しない。既存通知・詳細と停止・切断を使い、段階別の細部は実装担当へ渡す。
 
-## 5. 成立確認の根拠と限界
+## 5. 外部契約と製品検証の境界
 
-採用版はcodex-cli 0.167.0、公開ソースcommitは086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a。最新版への更新は行っていない。公開schema・実装の参照先と採用設定は[08](../../initial/08-sdk-compatibility.md)に記載した。以下の限定接続は製品コードへの組込み、認証・モデル・Windows権限の成功証明ではない。
+採用版の公開schema・ソースと設定の根拠は[08](../../initial/08-sdk-compatibility.md)を正本とする。settings/updateがロード済みthreadを必要とすること、goal/clearを保存済みthreadへ直接送れること、resumeで現在設定を適用する条件を実装時にも守る。
 
-| 対象 | 確認したこと | 製品側に残る検証 |
-|---|---|---|
-| Project・作業場所 | 1 rootのProject作成・read・再起動後の保持。未所属一覧、保存cwdのread・再起動後の再解決 | 製品の所属一覧・フォルダーピッカー・新規と既存登録・欠損、M1・M2・M5 |
-| 指示・設定 | Web live、記憶ON/OFF、標準文書上限32768を設定結果で確認。隔離作業場所のSkill発見、AGENTS.mdのinstructionSources掲載 | 実モデルでの読込み・Web利用・記憶対象と参照、M3・M6。抽出・統合は今回実行していない |
-| 再接続 | 停止済み・購読解除後のresumeで承認者auto_review→user、MCP URL・認証値・ツール一覧の差替え。プロセス再起動後もresume | 製品の資源回収・実I/O・通常送信・Goal操作、M4・M6 |
-| 履歴・Goal | 公開履歴ページとGoalなしの取得。active Goalの再開順序はソースで確認 | 全履歴項目の描画・新着との結合・active Goalの実再開、M4・M5・M6 |
-| 閲覧中の設定・Goal削除 | 採用版のソースでsettings/updateはロード済みthreadが必要、goal/clearは保存済みthreadを直接操作可能と確認。根拠は08 | 閲覧中のモデル選択で通信しないこと、選択threadへのclearがresumeや実行準備を伴わないこと、M1・M4・M5・M6 |
-| 空thread | 未送信threadのunsubscribe後の指示差替えresumeはno rollout found。公開APIによる試行結果 | 正確なパス案内は要件から外したため解決機構は不要 |
-| 権限 | reviewer指定の受理を確認。未準備homeのworkspace-write要求にreadOnlyが返ることを観測 | readiness・実効設定の検査と実書込み、別会話資料参照、シェル通信制限、審査・人への要求、M2・M3・M6 |
+認証は既存account/login/start・account/read・model/listを専用homeで使う。Windows準備も既存readiness・明示setupを使い、要求した権限と返された実効設定を照合する。専用homeは設定・記憶の保存分離であり、認証やOS権限の完全隔離を保証するものではない。
 
-認証は既存account/login/start・account/read・model/listを専用homeで使う。Windows準備も既存readiness・明示setupを使い、権限低下を黙って採用しない。専用homeは設定・記憶の保存分離であり、認証やOS権限の完全隔離を保証するものではない。
+APIの存在や設定値の受理を、製品経路・実モデル・Windows権限・GUI・実機の受入成功とは扱わない。製品側で確認する項目と期限は第6節と[07](../../initial/07-verification.md)へ引き継ぐ。
 
 ## 6. 初期設計改訂とM1以降への引継ぎ
 
@@ -94,37 +86,21 @@ active Goalへの追加指示はresume→turn/startとし、追加指示受付�
 
 ## 8. 対象ファイル・検証
 
-対象は本書・親仕様・関連初期設計と索引、採用モック、[調査コード](assets/probe_m0.py)、[限定接続の結果](assets/probe-result.json)。src/・tests/・依存・公開利用文書は変更していない。
+対象は本書・親仕様・関連初期設計と索引、採用モック。文書間の操作契約、マイルストーンの依存と完了条件を照合し、独立レビューで追加の修正指摘なし。`uv run python -X utf8 -`による検査で13文書の相対リンク210件・アンカー、JSONL例5行、69 unitの番号一意性を確認し、欠落・仮テキストは0件。`git diff --check -- spec`も成功した。
 
-実行した限定接続のコマンドは次のとおり。出力先は新しい隔離ディレクトリを指定し、以後の試行でも再利用しない。
-
-```powershell
-uv run python -X utf8 spec/wip/unit_068/assets/probe_m0.py --output C:/Users/train/.codex/visualizations/2026/11/14/01a1d926-9c19-7a03-80bc-b38940aa864b/research/m0-final-probe-9
-```
-
-2026-11-14に終了コード0。上のコマンドは実行時の配置で、現在の再現コードは本書と同じunitのassets配下にある。出力JSONは隔離ルートだけを`<probe-root>`へ置換して保存した。調査コードは独立したCODEX_HOMEとローカルのMCP検査用サーバーを使い、既存認証をコピーせず、モデル・ゲーム機器を使わない。履歴永続化のため利用不能なlocalhostのモデル接続先へ1 turnを提出し、中断または既終了を確認する。1秒待機は調査用の永続化待ちで、製品の同期契約・テスト基盤へ持ち込まない。
-
-文書は合意・差分・責務境界・担当段階の整合を読んで確認した。レビュー指摘に対応し、閲覧中のモデル選択、Goal再開の活性条件とresumeしない削除、呼出し元を含む工程境界、初期設計からの過去の実測・経緯の削除を反映した。`uv run python -X utf8 -`による検査で、対象13文書の相対参照・アンカー・JSONL例5行、調査コードのPython構文と結果JSON、68 unitの番号一意性を確認し、欠落・仮テキストは0件だった。`git diff --check`は成功。調査コードのみ`uv run ruff format`で整形し、製品コードは変更していない。製品のunit/integration・型検査・package buildはnot applicable、製品経路・実モデル・GUI・実機はnot runとしてM1〜M7へ割り当てた。
-
-M1着手時の全体lintで本調査コードの53件を検出したため、型注釈・docstring・JSON境界の検査・CLI出力を整えた。動作条件や公開要求の順序は維持し、全体除外は設けていない。2026-11-14に`uv run ruff format --check spec/complete/unit_068/assets/probe_m0.py`、`uv run ruff check spec/complete/unit_068/assets/probe_m0.py`、`uv run ty check --no-progress spec/complete/unit_068/assets/probe_m0.py`が成功した。次の再実行も終了コード0で、Project/cwd永続化、記憶設定、MCP差替え、履歴・Goal取得を再確認した。
-
-```powershell
-uv run python -X utf8 spec/complete/unit_068/assets/probe_m0.py --output tmp/u08-m0-probe-lint-20261114-02
-```
-
-再実行結果は指定先のresult.jsonに保存し、当初のassets/probe-result.jsonは変更していない。repo配下の隔離作業場所のためinstructionSourcesには祖先のrepo AGENTS.mdも含まれる。未準備homeの実効sandboxはreadOnlyであり、権限・モデル推論・本人認証・実機の受入は依然として未実施である。
+製品コード・依存・公開利用文書の変更はM0の対象外。製品のunit/integration・型検査・package buildは本書の文書整理にはnot applicableとし、製品受入の実行結果は各担当子仕様へ記録する。
 
 ## 9. 先送り事項
 
 製品実装・製品経路の検証は第6節の担当と完了条件へ引き継いだ。M0内の未決事項はない。数時間の運転・記録量はU10、正確な保存先パスの案内や攻略補助・資料規約は実プレイで不足が確認された後の作業選定とする。固定の攻略様式や独自記憶整理を先行追加しない。
 
-次の候補はM1の専用home・設定・管理APIの子仕様作成。本M0完了から製品実装へ自動着手しない。
+実装の引継ぎ先は[M1 専用home・設定・管理API](../../wip/unit_069/MANAGEMENT_API.md)。M1以降の進捗と次の実行対象は親仕様・担当子仕様で管理する。
 
 ## 10. 完了チェックリスト
 
 - [x] D1〜D5の合意を確定し、最新の記録先案内方針を反映した
-- [x] 採用版の公開API・設定・制約、限定接続と未検証範囲を記録した
+- [x] 採用版の公開API・設定・制約と製品側に必要な検証を整理した
 - [x] 初期設計を改訂し、M0を議論の経緯から確定契約・根拠・引継ぎへ整理した
-- [x] M1〜M7の依存・受入条件を親仕様と整合させ、製品実装には進んでいない
+- [x] M1〜M7の依存・受入条件を親仕様と整合させ、設計完了と製品受入を区別した
 
-完了に伴いunit_068をspec/wipからspec/completeへ移動し、参照元を更新した。親unit_013はwipのままとする。
+unit_068はcompleteとし、親unit_013は工程全体の受入までwipを維持する。

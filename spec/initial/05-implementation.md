@@ -27,7 +27,7 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 | [U05 入力と即時停止](../complete/unit_010/INPUT_AND_STOP.md) | complete。U04に依存 | 有限の入力列、事後観測、停止・解除 |
 | [U06 Goalによる継続](../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
 | [U07 計画的終了](../planned/unit_012/PLANNED_STOP.md) | 初期版対象外 | 具体的な要求が生じた時点で再検討 |
-| [U08 Project・会話管理と再接続](../wip/unit_013/RESUME.md) | wip、M0完了。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
+| [U08 Project・会話管理と再接続](../wip/unit_013/RESUME.md) | wip、M0完了・M1実装中。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
 | [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
 | [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
 

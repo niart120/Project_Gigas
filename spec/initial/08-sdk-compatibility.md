@@ -78,7 +78,7 @@ Planの公開項目はstepとpending/inProgress/completed、explanationは省略
 
 ## U08の採用契約と確認範囲
 
-Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=trueを維持します。以下は採用版の公開契約です。成立根拠・限定接続結果は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、未実施の製品受入は[07](07-verification.md)へ集約します。
+Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=trueを維持します。以下は採用版の公開契約です。GIGASの責務と後続への引継ぎは[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、製品受入条件は[07](07-verification.md)へ集約します。
 
 | 機能 | 採用する公開経路・制約 |
 |---|---|
@@ -89,7 +89,7 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 | active Goal | resume後に継続し得る。追加指示はturn/startへ送る。受付前のGoal進行を許容し、現在の資源と選択モデル・設定はresume前に準備する |
 | 新規thread | 実thread IDはthread/startの応答で保持する。記録先の正確なパス案内は要件にせず、そのための追加API・再resume・MCP結果拡張は行わない |
 
-根拠は採用版の[Project schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server-protocol/src/protocol/v2/project.rs)、[thread処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/request_processors/thread_processor.rs)、[Goal継続](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/runtime.rs)です。実接続の再現コード・結果・未検証範囲は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)に記録します。
+根拠は採用版の[Project schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server-protocol/src/protocol/v2/project.rs)、[thread処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/request_processors/thread_processor.rs)、[Goal継続](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/runtime.rs)です。製品経路での実行結果と未検証範囲は、担当子仕様へ記録します。
 
 ### 設定の所有と適用
 
