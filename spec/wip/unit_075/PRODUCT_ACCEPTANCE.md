@@ -40,6 +40,7 @@ observeとact_and_observeの両方で、返却画像のbytes・observation_id・
 | todo | P1: GUIから新規・停止・介入後の再開・観測失敗を実機へ通し、画像と記録を照合する | acceptance | GUI/runtime/hardware | 上記の順に実施。目安は通常送信4回、追加入力・再送は自動化しない |
 | todo | P2: 現行の公開手順・配布指示・全受入範囲を照合し、U08を完了整理する | review | docs/package | M1〜M6の証拠を参照し、未実施を成功へ読み替えない |
 | refactor-done | P3: 旧APIキー設定の移行経路を撤去し、対応する認証設定だけを受け付ける | regression | settings/GUI | M0合意の撤去漏れを修正。red 4件→green 63件、構造整理後も63件、関連173件成功 |
+| refactor-skipped | P4: MCP終了中の追加要求でHTTP応答前に切断された場合も拒否として検証する | regression | integration | 全体gateでReadErrorを観測。元observeの成功・PNG・drain条件は維持し、追加POSTの期待だけを修正 |
 
 製品不具合を検出した場合は受入を止め、再現試験のred、修正、green後の責務確認、同じ試験、独立レビューを経て別コミットにする。既存動作の実測を新しいred/greenと偽らない。試験補助はtmpに隔離し、画面操作はComputer Useで行う。
 
@@ -63,6 +64,16 @@ P3は10の「旧APIキー設定からの移行UIは設けない」への適合�
 M0で撤去対象とした旧認証設定の移行UIが、M1以降も残っていた。旧値の読込・保存・既存ファイル保全・GUI初期読込失敗を試験し、4 failed / 59 passedを確認した。設定はchatgptだけを受理し、移行ボタン・編集処理・Shellの表示分岐と公開手順を除去した。runtimeの未対応認証拒否は維持した。
 
 修正後は63 passed。green後、移行ボタンのためだけに残った認証行の特別layoutを通常のボタン配置へ揃え、同じ試験で63 passedを確認した（refactor-done）。設定のroundtrip・未編集値保持・保存失敗は現行項目で引き続き検証する。関連する設定・I/O・GUI・接続・実行設定の回帰173件、対象ruff/format、全体ty、diffチェックも成功した。実データの変換・削除はしていない。実画面の通常認証行はP1で確認する。
+
+63件のcommandは`uv run pytest tests/unit/test_settings.py tests/integration/test_settings_io.py tests/integration/test_app_settings.py --basetemp=tmp/pytest-m7-auth-fix -q`。関連173件は同3ファイルに`tests/unit/test_codex_connection.py tests/integration/test_codex_gui.py tests/integration/test_execution_settings_flow.py`を加え、basetempを`tmp/pytest-m7-auth-regression`として実行した。独立レビューでも必須修正なし。P1起動時の実画面では通常の認証行とログインボタンを確認し、未接続で無効、移行UIなしだった。
+
+### P4の試験修正
+
+`uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m7-final -q`は1 failed / 1017 passed（849.98秒）。唯一の失敗はMCP終了中の追加POSTに対するhttpx.ReadErrorで、処理中の元observeを検証する前に試験が止まった。uvicornはlistenerを閉じ、HTTP応答前の接続も閉じるため、追加要求は503だけでなく読取時の切断でも拒否される。
+
+修正前の単独再実行は1 passed（1.24秒）で、同じ競合は再現しなかった。追加の拒否確認POSTだけReadErrorを許容し、先行observe成功・記録1件・PNG存在・close/drainの必須条件は維持した。製品コードは変更していない。
+
+`uv run pytest tests/integration/test_game_io_mcp.py::test_cancelled_close_keeps_http_and_observation_work_owned --basetemp=tmp/pytest-m7-mcp-close -q`は修正後1 passed（1.39秒）、構造確認後も1 passed（1.29秒）。`uv run pytest tests/integration/test_game_io_mcp.py --basetemp=tmp/pytest-m7-mcp -q`は16 passed（6.44秒）。局所の例外条件だけで済み、helper追加は不要と判断した（refactor-skipped）。対象ruff/format・ty・diff、公開docsとローカルuvicorn実装の照合、独立レビューも成功した。
 
 ### P2の配布確認
 

@@ -657,8 +657,8 @@ def test_cancelled_close_keeps_http_and_observation_work_owned(
                     _ = server.config
                 try:
                     rejected = await client.post(url, json={}, timeout=1)
-                except (httpx.ConnectError, httpx.ConnectTimeout):
-                    pass  # The listening socket may already have closed.
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError):
+                    pass  # The listener or accepted connection may already have closed.
                 else:
                     assert rejected.status_code == 503
                 release.set()
