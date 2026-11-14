@@ -250,7 +250,7 @@ clearの`cleared=true`は削除通知を回収する。`cleared=false`は削除�
 
 ## 10. 対象ファイル・検証・完了条件
 
-親仕様は[unit_054](../../wip/unit_054/KISS_SIMPLIFICATION.md)。第7節の会話実行・GUI・既存テスト・正本仕様を改訂した。機器入力・MCPにGoal固有の実行状態を追加していない。共通の自動検証・配布確認・実機受入・未検証範囲はunit_061第9節へ集約する。
+親仕様は[unit_054](../../complete/unit_054/KISS_SIMPLIFICATION.md)。第7節の会話実行・GUI・既存テスト・正本仕様を改訂した。機器入力・MCPにGoal固有の実行状態を追加していない。共通の自動検証・配布確認・実機受入・未検証範囲はunit_061第9節へ集約する。
 
 `test_conversation_control.py`は作成・編集・再開・削除の要求内容、送信枠、順不同通知、再開拒否、budgetLimitedの無変化応答、停止競合を検査する。Goalの非active通知による入力・質問の非中断、停止自身のpause拒否時の閉鎖、通知待ち中の切断も確認した。`test_codex_gui.py`で第3.5節のボタン活性、失敗後の再操作、下書き保持を検査する。全体はunit_061と合わせて**802 passed**。
 

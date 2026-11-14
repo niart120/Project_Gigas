@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-[契約整理](../wip/unit_054/KISS_SIMPLIFICATION.md)M2ではInputState/InputStepの生成時保証を維持し、parserの重複値域検査・protocol引数、サービスの空列再検査、encoderの機器能力再検査を削除しました。機器能力は開始前にInputServiceが列全体へ確認します。
+[契約整理](../complete/unit_054/KISS_SIMPLIFICATION.md)M2ではInputState/InputStepの生成時保証を維持し、parserの重複値域検査・protocol引数、サービスの空列再検査、encoderの機器能力再検査を削除しました。機器能力は開始前にInputServiceが列全体へ確認します。
 
 [unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で入力・解除を観測・記録から分離し、会話とMCPを新しい所有分担へ結合しました。模擬app-server・機器、Qt、実HTTPの試験と、実app-server・実モデル・CH552による短い入力・停止を確認しました。GUI経由の実機操作や他機器・長時間運転とは区別し、確認範囲をunit_061第9節に記録しています。
 

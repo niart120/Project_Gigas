@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（実装・局所検証・独立レビュー完了）**。[整理親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)のM1第二子として、現在turnの公開通知だけを表示・記録し、終端後の差分保持をなくす。2026-11-13のM0承認とM1実行指示に基づく。構造整理のcommitは`939724d`。M1全体の実接続受入は親へ引き渡した。
+状態: **complete（実装・局所検証・独立レビュー完了）**。[整理親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)のM1第二子として、現在turnの公開通知だけを表示・記録し、終端後の差分保持をなくす。2026-11-13のM0承認とM1実行指示に基づく。構造整理のcommitは`939724d`。M1全体の実接続受入は親へ引き渡した。
 
 Intent Delta: 完了済みturnへの表示・記録更新と、任意のitem・質問・終端通知からのturn採用を廃止する。開始通知が開始RPC応答より先に届く経路と、受信済み履歴・部分記録を維持する。
 
@@ -18,7 +18,7 @@ Intent Delta: 完了済みturnへの表示・記録更新と、任意のitem・�
 
 ## 4. 関連文書・着手条件
 
-- [親の採用設計 5.3・5.4](../../wip/unit_054/KISS_SIMPLIFICATION.md)
+- [親の採用設計 5.3・5.4](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [実行管理](../../initial/02-runtime.md)、[記録](../../initial/04-agent-memory.md)、[UI](../../initial/10-ui-interaction.md)
 - [接続API](../../../docs/codex.md)
 - [前提となる製品専用組立](../../complete/unit_055/PRODUCT_CONNECTION_ASSEMBLY.md)

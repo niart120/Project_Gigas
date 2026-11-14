@@ -10,7 +10,7 @@
 
 | source | 内容 | path |
 |---|---|---|
-| user request | 巨大クラスを、状態と振る舞いの帰属から分ける | [親仕様5.9](../../wip/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
+| user request | 巨大クラスを、状態と振る舞いの帰属から分ける | [親仕様5.9](../../complete/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
 | preceding unit | サービスの資源と入力runの所有を分離 | [unit059](../../complete/unit_059/SERVICE_RESPONSIBILITY_OWNERSHIP.md) |
 | adopted contract | 通知寿命と単一の終了所有 | [unit056](../../complete/unit_056/TURN_NOTIFICATION_LIFETIME.md)、[unit057](../../complete/unit_057/TURN_END_OWNERSHIP.md) |
 
@@ -175,7 +175,7 @@ uv run python -X utf8 tmp/u054/m1_acceptance.py --execute --mode close-wait --se
 
 ## 10. 先送り事項
 
-M2の保存・入力契約は[親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)に残す。この子は初期契約や公開利用形態を追加しない。長時間運転・別機器は今回の受入外。
+M2の保存・入力契約は[親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)に残す。この子は初期契約や公開利用形態を追加しない。長時間運転・別機器は今回の受入外。
 
 ## 11. チェックリスト
 

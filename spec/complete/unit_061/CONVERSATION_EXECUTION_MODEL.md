@@ -372,7 +372,7 @@ Goalと通常指示の混在時の扱いは、[unit_062](../unit_062/GOAL_EXECUT
 
 ## 9. 対象ファイル・検証・完了条件
 
-親仕様は[unit_054](../../wip/unit_054/KISS_SIMPLIFICATION.md)。第6節の製品コード、既存テスト、初期設計、公開文書を改訂した。ConversationRun・InputGrant・旧run記録生成、targeted steer、毎送信のMCP再構築を撤去し、これらを残す互換wrapperは追加していない。過去archiveは共通envelopeと元payloadを読み、新たなrunを生成しない。
+親仕様は[unit_054](../../complete/unit_054/KISS_SIMPLIFICATION.md)。第6節の製品コード、既存テスト、初期設計、公開文書を改訂した。ConversationRun・InputGrant・旧run記録生成、targeted steer、毎送信のMCP再構築を撤去し、これらを残す互換wrapperは追加していない。過去archiveは共通envelopeと元payloadを読み、新たなrunを生成しない。
 
 ### 自動検証
 

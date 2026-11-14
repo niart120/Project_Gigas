@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: wip。[unit_054](../unit_054/KISS_SIMPLIFICATION.md) M2の残件を処置する。[unit_063](../../complete/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)の保存・入力整理と803件の全体試験、静的・package gateが完了したことを着手条件とする。
+状態: complete。[unit_054](../unit_054/KISS_SIMPLIFICATION.md) M2の残件を処置した。[unit_063](../../complete/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)の保存・入力整理と全体gate通過後に着手し、R1〜R3を別commitで完了した。
 
 ## 2. 対象範囲・対象外
 
@@ -26,7 +26,7 @@ StdioTransportはsubprocess起動で得たprotocolをreaderへ渡す。reader自
 |---|---|---|---|---|
 | refactor-done | R1: 解決済み設定で現在のportを照合し、接続と初期neutralを行う | characterization | unit | c2cabaa。設定・接続の37試験と静的検査成功 |
 | refactor-done | R2: 取得要求を一度取り出し、待機と取得の終了を回収する | characterization | integration | 6ffd9f8。取得関連47試験と静的検査成功 |
-| green | R3: 起動したprotocolで通知を受け、EOF・起動取消し・close時に処理を回収する | characterization | integration | 起動で得たprotocolをreaderへ渡す。transport 22試験と静的検査成功、commit後に完了扱いとする |
+| refactor-done | R3: 起動したprotocolで通知を受け、EOF・起動取消し・close時に処理を回収する | characterization | integration | 6fa7e8d。transport 22試験と静的検査成功 |
 
 ## 6. 対象ファイル
 
@@ -42,6 +42,8 @@ R2は`uv run pytest tests/integration/test_capture_service.py tests/integration/
 
 R3は`uv run pytest tests/integration/test_codex_transport.py -q`が変更前後とも22 passed（各1.47秒）。subprocess起動で得たprotocolをreaderの引数へ渡し、未設定なら黙って終了する分岐を削った。模擬子プロセスで通知・応答の配送、EOF、不正frame、起動取消し、close、子孫がpipeを保持した場合の回収を確認した。対象ruff format/check、全体ty、差分検査も成功し、新しい状態・型検査の抑制・public APIの変更はない。
 
+最終製品commit `6fa7e8d`で全unit/integrationは803 passed（66.37秒）。sync・lock、全体ruff format/check・ty、build、独立環境の配布物・起動確認も成功した。command・確認範囲・配布確認の初回環境エラーは親unit_054第9節へ集約する。
+
 ## 8. 先送り事項
 
 none。unit_054で既にU08/U10等へ割り当てた長時間・通常復帰の機能を本作業へ取り込まない。
@@ -49,5 +51,5 @@ none。unit_054で既にU08/U10等へ割り当てた長時間・通常復帰の�
 ## 9. 完了チェックリスト
 
 - [x] 保存・入力の完了と残件の範囲を確認した
-- [ ] R1〜R3の整理と対応試験を完了した
-- [ ] 最終gateと親unit_054の完了条件を確認した
+- [x] R1〜R3の整理と対応試験を完了した
+- [x] 最終gateと親unit_054の完了条件を確認した

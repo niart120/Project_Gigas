@@ -14,7 +14,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 
 ## 4. 関連文書・着手条件
 
-[親unit_054](../../wip/unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認し、ユーザーの実装指示に従って着手した。
+[親unit_054](../../complete/unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認し、ユーザーの実装指示に従って着手した。
 
 ## 5. 振る舞い
 
