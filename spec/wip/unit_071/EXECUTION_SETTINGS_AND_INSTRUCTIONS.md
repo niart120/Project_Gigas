@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip（J1・J2完了、次はJ3）**。[U08親仕様](../unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合する。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。
+状態: **wip（J1〜J3完了、J4受入中）**。[U08親仕様](../unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合する。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。
 
 起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD4・D5と、[08の設定契約](../../initial/08-sdk-compatibility.md#設定の所有と適用)。M2は製品実装・実接続受入まで完了した。利用者はGIGASの設定から実行環境を選び、攻略資料やSkillsは作業フォルダーと標準の探索先で管理できる。
 
@@ -46,7 +46,7 @@ J1でruntime契約、J2で保存から開始まで、J3で設定UI、J4で実接
 |---|---|---|---|---|
 | done | J1: 起動・新規threadの設定がWeb/記憶/承認の値を使い、標準指示を抑制せず、実効権限の不一致を拒否する | new/regression | unit/integration | 不変値・共通変換、全8組合せ、固定制約・MCP上書きの維持。公開型・docstring・呼出し元も更新 |
 | done | J2: 保存成功した最新設定だけを次の新規開始へ反映し、開始中・既存threadと機器接続を不用意に変更しない | new/edge | integration | 保存失敗・キャンセル、接続前のqueue順、開始準備中の変更、変更前後の新規開始、映像・入力非再接続 |
-| todo | J3: 設定画面から3値を編集し、適用・OK・キャンセルで保存値と一致する | new/regression | integration/GUI | 既存値の表示と操作結果を検証。固定文言だけのassertを追加しない |
+| done | J3: 設定画面から3値を編集し、適用・OK・キャンセルで保存値と一致する | new/regression | integration/GUI | 既存値の表示・変更通知・編集停止・保存結果を検証。native表示とスクロールも確認 |
 | todo | J4: 実app-serverで標準指示・設定・権限と実モデルI/Oを確認する | acceptance | integration/GUI | AGENTS/Skills、Web/記憶のON/OFF、通常資料編集・別会話資料参照、シェル通信制限、両承認方法。記憶の標準処理と即時生成保証を区別する |
 
 ## 7. 対象ファイル
@@ -59,7 +59,7 @@ runtime/codexのモデル・設定組立・launch・thread protocol、services�
 
 | command / 確認 | result | 検査対象 |
 |---|---|---|
-| 対象itemのpytest | J1 148件・transport 22件、J2対象43件・関連164件成功。J3・J4 not run | 設定伝達・要求/応答・GUI操作と副作用 |
+| 対象itemのpytest | J1 148件・transport 22件、J2対象43件・関連164件、J3対象4件・関連134件成功 | 設定伝達・要求/応答・GUI操作と副作用 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m3-root -q | not run | 新規開始・停止・機器・GUIの回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | J1時点の全体成功、J2対象8ファイルも成功。工程終了時に再確認 | 形式・lint・型境界 |
 | uv lock --check / uv build | not run | 依存・公開API・配布指示 |
@@ -83,6 +83,14 @@ Shellは読込み・保存に成功した3値だけをサービスへ渡し、�
 `test_codex_gui.py test_codex_service.py test_settings_accept.py test_settings_apply_contract.py test_settings_recovery.py`を対象に、`-k 'execution_settings or shell_connect_uses_saved_snapshot or apply_effect_depends_on_changed_settings' --basetemp=tmp/pytest-m3-settings -q --tb=short`で検証した。未実装setterと3値のみの変更による映像開始で11 failed / 32 passed、実装後43 passed、構造確認後も43 passed。上記5ファイルと`test_conversation_execution.py`の関連回帰は164 passedだった。
 
 refactor-skipped: 既存の保存成功経路、サービスのループ、Executionの開始時snapshotを使い、3値の純粋抽出以外の管理部品を増やしていない。Resources、新しいworker・lock・完了通知の追加は不要と判断した。独立レビューの修正必須指摘なし。対象8ファイルのruff・format・tyと差分検査は成功。UIの実編集と実app-serverへの反映はJ3・J4へ残す。
+
+### J3 実装・検証結果
+
+設定のCodexタブへ「実行」を追加し、Web検索・自動記憶のcheckboxと承認方法の選択を既存の値取得・反映・変更通知・編集停止へ結合した。ウィンドウサイズ620×440、スクロール領域、OK・キャンセル・適用の配置は維持した。
+
+`uv run pytest tests/integration/test_execution_settings_gui.py --basetemp=tmp/pytest-m3-j3 -q`は未実装部品のAttributeErrorで4 failed、実装後4 passed、構造確認後も4 passed。既存の`test_app_settings.py test_settings_apply_contract.py test_settings_recovery.py test_settings_accept.py test_codex_gui.py --basetemp=tmp/pytest-m3-j3-regression -q`は134 passed。対象ruff・format・ty、差分検査も成功した。
+
+refactor-skipped: 3部品は既存の設定契約へ結合するだけで、追加の状態・保存処理・helperは不要と判断した。独立レビューの修正必須指摘なし。Product Designで同じサイズの実画面を変更前と比較し、既存欄の順序、スクロール後の3項目、固定の保存ボタンを確認した。nativeでは値を変更せずキャンセルして正常終了し、保存と切替の根拠はQt結合試験と区別した。画像と確認記録は`tmp/u08-m3-ui/`に置いた。
 
 ## 9. 先送り事項
 
