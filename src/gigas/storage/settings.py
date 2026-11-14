@@ -29,7 +29,7 @@ class Settings:
         serial_baudrate: Supported rate, or None for the protocol default.
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
-        auth_method: Authentication preference, either chatgpt or api_key.
+        auth_method: Authentication preference. Only chatgpt is supported.
         capture_fps: Requested integer capture rate, from 1 to 120 frames per second.
         preview_fps: GUI update limit, from 1 to 60 frames per second.
         window_size_preset: Display size key: hd, full_hd, wqhd, or four_k.
@@ -133,8 +133,8 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
     agent = _table(document, "agent", path)
     gui = _table(document, "gui", path)
     auth_method = _text(agent, "auth_method", path, default="chatgpt")
-    if auth_method not in ("chatgpt", "api_key"):
-        msg = f"{path}: auth_method must be chatgpt or api_key"
+    if auth_method != "chatgpt":
+        msg = f"{path}: auth_method must be chatgpt"
         raise SettingsError(msg)
 
     try:

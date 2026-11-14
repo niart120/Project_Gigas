@@ -159,10 +159,6 @@ class SettingsDialog(QDialog):
         self.effort = self._text_field()
         self.model.setPlaceholderText("既定")
         self.effort.setPlaceholderText("既定")
-        self.auth_migration_button = QPushButton("APIキーからChatGPTに変更", self)
-        self.auth_migration_button.setAutoDefault(False)
-        self.auth_migration_button.hide()
-        self.auth_migration_button.clicked.connect(self._use_chatgpt)
         agent_form.addRow("モデル", self.model)
         agent_form.addRow("推論レベル", self.effort)
         execution_form = self._group(self.codex_form, "実行")
@@ -242,10 +238,6 @@ class SettingsDialog(QDialog):
         self._set_rate(field, default)
         field.currentIndexChanged.connect(self.changed)
         return field
-
-    def _use_chatgpt(self) -> None:
-        self._snapshot = replace(self._snapshot, auth_method="chatgpt")
-        self.changed.emit()
 
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
@@ -415,7 +407,6 @@ class SettingsDialog(QDialog):
         """Control editing during I/O while retaining copying and dialog closure."""
         for field in (self.model, self.effort):
             field.setReadOnly(not enabled)
-        self.auth_migration_button.setEnabled(enabled)
         for field in (
             self.serial_port,
             self.serial_protocol,

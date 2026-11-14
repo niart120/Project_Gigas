@@ -39,8 +39,11 @@ observeとact_and_observeの両方で、返却画像のbytes・observation_id・
 |---|---|---|---|---|
 | todo | P1: GUIから新規・停止・介入後の再開・観測失敗を実機へ通し、画像と記録を照合する | acceptance | GUI/runtime/hardware | 上記の順に実施。目安は通常送信4回、追加入力・再送は自動化しない |
 | todo | P2: 現行の公開手順・配布指示・全受入範囲を照合し、U08を完了整理する | review | docs/package | M1〜M6の証拠を参照し、未実施を成功へ読み替えない |
+| refactor-done | P3: 旧APIキー設定の移行経路を撤去し、対応する認証設定だけを受け付ける | regression | settings/GUI | M0合意の撤去漏れを修正。red 4件→green 63件、構造整理後も63件、関連173件成功 |
 
 製品不具合を検出した場合は受入を止め、再現試験のred、修正、green後の責務確認、同じ試験、独立レビューを経て別コミットにする。既存動作の実測を新しいred/greenと偽らない。試験補助はtmpに隔離し、画面操作はComputer Useで行う。
+
+P3は10の「旧APIキー設定からの移行UIは設けない」への適合修正である。旧設定の移行ボタン・専用分岐・利用手順を除き、設定は対応するchatgptだけを受け付ける。実ファイルの変換・削除は行わない。既存の設定保存失敗・未編集値保持の検証は、現行の設定項目を使って維持する。
 
 ## 6. 対象ファイル
 
@@ -54,6 +57,18 @@ observeとact_and_observeの両方で、返却画像のbytes・observation_id・
 | 配布指示・利用手順 | not run。現行ソース・配布成果物と操作結果を読む。`uv run python scripts/check_package.py`でwheel/sdist同梱指示の一致、隔離環境からの資材読取・起動終了を確認する |
 | 回帰・静的・build | M6の1015件・ruff/ty・lock/build成功を基準とする。製品変更がなければ文書品質のために繰り返さず、変更時は対応するgateを追加する |
 | 文書レビュー・リンク・git diff --check | 着手時は成功（3文書80リンク、75 unit）。独立レビューで4送信の範囲と既存受入の分担を確認した。完了整理時に再確認する |
+
+### P3の修正・検証
+
+M0で撤去対象とした旧認証設定の移行UIが、M1以降も残っていた。旧値の読込・保存・既存ファイル保全・GUI初期読込失敗を試験し、4 failed / 59 passedを確認した。設定はchatgptだけを受理し、移行ボタン・編集処理・Shellの表示分岐と公開手順を除去した。runtimeの未対応認証拒否は維持した。
+
+修正後は63 passed。green後、移行ボタンのためだけに残った認証行の特別layoutを通常のボタン配置へ揃え、同じ試験で63 passedを確認した（refactor-done）。設定のroundtrip・未編集値保持・保存失敗は現行項目で引き続き検証する。関連する設定・I/O・GUI・接続・実行設定の回帰173件、対象ruff/format、全体ty、diffチェックも成功した。実データの変換・削除はしていない。実画面の通常認証行はP1で確認する。
+
+### P2の配布確認
+
+READMEの再開予定・旧設定ボタンの記載と、映像API文書のJSONL保存項目を現行契約へ修正した。配布smokeのアイコン検査を表示中のsidebarへ合わせた。`uv run python scripts/check_package.py`は、wheel/sdistの共通指示一致、隔離環境からの資材読取、取得worker、module/consoleの両起動・通常終了に成功した。P3の製品変更前（2abe0a3＋当該3ファイル）での確認であり、最終製品のgateはP3後に再確認する。
+
+関連GUI15件は構造確認の前後とも成功。検査対象1箇所だけの変更で追加の抽象化は不要と判断した（refactor-skipped）。README/API文書のローカルリンク12件、ruff/format・ty・diffも成功した。
 
 ## 8. 先送り事項
 

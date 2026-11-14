@@ -42,13 +42,24 @@ def test_settings_round_trip(tmp_path: Path) -> None:
         "COM3",
         "sample-model",
         "medium",
-        "api_key",
+        "chatgpt",
         last_project_path=str(tmp_path / "前回のプロジェクト"),
     )
 
     settings.save_settings(path, chosen)
 
     assert settings.load_settings(path) == chosen
+
+
+def test_unsupported_auth_cannot_replace_saved_settings(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    settings.save_settings(path, settings.Settings(model="selected"))
+    original = path.read_bytes()
+
+    with pytest.raises(settings.SettingsError, match="auth_method"):
+        settings.save_settings(path, settings.Settings(auth_method="api_key"))
+
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize(

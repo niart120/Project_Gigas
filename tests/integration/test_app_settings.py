@@ -80,13 +80,12 @@ def test_all_settings_round_trip_and_offline_clears_device(
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
-    dialog.set_values(Settings(auth_method="api_key"))
     values = Settings(
         " 映像\n入力 ",
         " COM3 ",
         "unknown-model",
         "custom-effort",
-        "api_key",
+        "chatgpt",
         serial_protocol="pokecon",
         serial_baudrate=57600,
         show_reasoning=False,
@@ -117,7 +116,6 @@ def test_all_settings_round_trip_and_offline_clears_device(
         assert other.dialog.capture_choices.currentData() == values.capture_device
         assert other.dialog.capture_choices.findData(values.capture_device) >= 0
         assert other.dialog.model.text() == values.model
-        assert not other.dialog.auth_migration_button.isHidden()
         assert not other.dialog.show_reasoning.isChecked()
         other.window.connection.transcript.update_item(
             "summary", "読込後の公開要約", kind="reasoning"
@@ -130,7 +128,6 @@ def test_all_settings_round_trip_and_offline_clears_device(
         other.dialog.save_button.click()
         qtbot.waitUntil(lambda: other.operation is None)
         assert load_settings(shell.path) == Settings(
-            auth_method="api_key",
             serial_protocol="pokecon",
             serial_baudrate=57600,
             show_reasoning=False,
@@ -148,45 +145,6 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     assert shell.dirty
     shell.dialog.model.clear()
     assert not shell.dirty
-
-
-@pytest.mark.parametrize("shell", [Settings(auth_method="api_key")], indirect=True)
-def test_legacy_auth_changes_only_on_explicit_save(
-    shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    shell.open_settings()
-    dialog = shell.dialog
-    assert dialog is not None
-    dialog.tabs.setCurrentIndex(dialog.codex_tab)
-    panel = shell.window.connection
-    connections = []
-    logins = []
-    monkeypatch.setattr(
-        shell.service, "connect_runtime", lambda options: connections.append(options) or 1
-    )
-    panel.login_requested.connect(lambda: logins.append(True))
-    assert dialog.auth_migration_button.isVisible()
-    assert not panel.account_button.isVisible()
-    dialog.auth_migration_button.click()
-    assert dialog.values().auth_method == "chatgpt"
-    assert shell.baseline.auth_method == "api_key"
-    assert load_settings(shell.path).auth_method == "api_key"
-    assert panel.account_button.isVisible()
-    assert not panel.account_button.isEnabled()
-    assert not connections
-    assert not logins
-    dialog.close_button.click()
-    shell.open_settings()
-    assert dialog.values().auth_method == "api_key"
-    assert dialog.auth_migration_button.isVisible()
-    dialog.auth_migration_button.click()
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    assert load_settings(shell.path).auth_method == "chatgpt"
-    assert not dialog.auth_migration_button.isVisible()
-    panel.server_button.click()
-    assert connections[0].auth_method == "chatgpt"
-    assert not logins
 
 
 @pytest.mark.parametrize("choice", ["save", "discard", "cancel"])
@@ -247,34 +205,33 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     assert dialog.show_reasoning.isChecked()
 
 
-@pytest.mark.parametrize("shell", ["[broken"], indirect=True)
+@pytest.mark.parametrize("shell", ["[broken", '[agent]\nauth_method = "api_key"\n'], indirect=True)
 def test_failed_initial_load_preserves_original_and_exposes_details(
     shell: ApplicationShell,
 ) -> None:
+    original = shell.path.read_bytes()
     shell.open_settings()
     assert shell.dialog is not None
     assert not shell.ready
     assert not shell.dialog.save_button.isEnabled()
+    assert not shell.window.connection.server_button.isEnabled()
     shell.dialog.error_details_button.click()
     details = shell.window.notifications.dialog
     assert details is not None
     assert str(shell.path) in details.details.toPlainText()
-    assert shell.path.read_text(encoding="utf-8") == "[broken"
+    assert shell.path.read_bytes() == original
     details.close()
     shell.dialog.close_button.click()
     assert not shell.dialog.isVisible()
 
 
-@pytest.mark.parametrize(
-    "shell", [Settings(model="original", auth_method="api_key")], indirect=True
-)
+@pytest.mark.parametrize("shell", [Settings(model="original")], indirect=True)
 def test_save_failure_preserves_edits_and_reports_cleanup(
     shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     shell.open_settings()
     assert shell.dialog is not None
     shell.dialog.model.setText("edited")
-    shell.dialog.auth_migration_button.click()
     history = shell.window.connection.transcript
     history.update_item("summary", "保存前の公開要約", kind="reasoning")
     shell.dialog.show_reasoning.setChecked(False)
@@ -292,8 +249,6 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         assert shell.dialog.save_button.isEnabled()
         assert "remove temporary file" in shell.window.notifications.notices["settings"].details
         assert load_settings(shell.path).model == "original"
-        assert load_settings(shell.path).auth_method == shell.baseline.auth_method == "api_key"
-        assert shell.dialog.values().auth_method == "chatgpt"
         assert load_settings(shell.path).show_reasoning
         assert not shell.dialog.show_reasoning.isChecked()
         assert "保存前の公開要約" in history.toPlainText()
