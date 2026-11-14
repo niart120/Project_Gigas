@@ -4,7 +4,7 @@ from threading import Event
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -127,7 +127,8 @@ def test_new_project_persists_selection_without_starting_capture(
         assert capture.connections == []
         assert shell.window.project_menu.isEnabled()
         assert [method for method, _ in peer.calls if method.startswith("project/")] == [
-            "project/create"
+            "project/list",
+            "project/create",
         ]
     finally:
         close(qtbot, shell)
@@ -162,6 +163,7 @@ def test_open_preserves_materials_and_restart_does_not_select_the_saved_path(
         shell.window.open_project_action.trigger()
         qtbot.waitUntil(lambda: str(target) in shell.window.windowTitle())
         assert [method for method, _ in peer.calls if method.startswith("project/")] == [
+            "project/list",
             "project/list",
             "project/create",
         ]
@@ -213,7 +215,7 @@ def test_missing_selection_hint_is_not_opened_or_reported_as_an_error(
 
 
 @pytest.mark.parametrize("authenticated", [False, True])
-def test_project_selection_requires_an_idle_connection_without_a_thread(
+def test_project_selection_requires_an_idle_connection_even_after_a_thread(
     qtbot: QtBot, tmp_path: Path, *, authenticated: bool
 ) -> None:
     shell, _peer, _capture = make_shell(tmp_path / "settings.toml", authenticated=authenticated)
@@ -222,16 +224,16 @@ def test_project_selection_requires_an_idle_connection_without_a_thread(
         qtbot.waitUntil(lambda: shell.ready)
         assert not shell.window.project_menu.isEnabled()
         generation = connect(qtbot, shell)
-        assert shell.window.connection.can_select_project
+        assert shell.conversations.can_switch
         assert shell.window.project_menu.isEnabled()
         for conversation in (
             ConversationStatus(sending=True),
             ConversationStatus(stopping=True),
-            ConversationStatus("thread-1"),
+            ConversationStatus("thread-1", "turn-1"),
         ):
             shell.service.received.emit(ServiceEvent(generation, conversation))
             assert not shell.window.project_menu.isEnabled()
-        shell.service.received.emit(ServiceEvent(generation, ConversationStatus()))
+        shell.service.received.emit(ServiceEvent(generation, ConversationStatus("thread-1")))
         assert shell.window.project_menu.isEnabled()
         shell.window.connection.disconnect_action.trigger()
         assert not shell.window.project_menu.isEnabled()
@@ -305,16 +307,21 @@ def test_pending_selection_blocks_execution_but_allows_stop_and_close(
     target.mkdir()
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_args: str(target))
     shell, peer, _capture = make_shell(tmp_path / "settings.toml")
-    peer.list_release = Event()
     results: list[ServiceResult] = []
     shell.service.completed.connect(results.append)
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
         connect(qtbot, shell)
+        qtbot.waitUntil(lambda: not shell.window.sidebar.loading.isVisible())
+        peer.list_entered.clear()
+        peer.list_release = Event()
         shell.window.connection.prompt.setPlainText("画面を確認して")
         qtbot.waitUntil(shell.window.connection.send_button.isEnabled)
         shell.window.open_project_action.trigger()
+        box = shell.conversations.confirmation
+        assert box is not None
+        box.button(QMessageBox.StandardButton.Discard).click()
         qtbot.waitUntil(peer.list_entered.is_set)
         assert not shell.window.connection.send_button.isEnabled()
         shell.window.connection.composer.goal_mode.setChecked(True)
@@ -325,7 +332,8 @@ def test_pending_selection_blocks_execution_but_allows_stop_and_close(
         assert not shell.committed
         assert shell.window.isVisible()
     finally:
-        peer.list_release.set()
+        if peer.list_release is not None:
+            peer.list_release.set()
         if not shell.committed:
             shell.request_close()
         qtbot.waitUntil(lambda: not shell.window.isVisible())

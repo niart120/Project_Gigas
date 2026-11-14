@@ -35,3 +35,23 @@ def changes_confirmation(parent: QWidget, *, allow_save: bool) -> QMessageBox:
     box.setEscapeButton(QMessageBox.StandardButton.Cancel)
     box.setWindowModality(Qt.WindowModality.WindowModal)
     return box
+
+
+def draft_confirmation(parent: QWidget) -> QMessageBox:
+    """Ask before discarding the current draft, without starting a nested loop."""
+    box = QMessageBox(parent)
+    box.setWindowTitle("会話の切替")
+    box.setText("入力中の下書きを破棄しますか？")  # noqa: RUF001 -- agreed Japanese question.
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setStandardButtons(QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+    button = box.button(QMessageBox.StandardButton.Discard)
+    if button is not None:
+        button.setText("破棄して切替")
+    cancel = box.button(QMessageBox.StandardButton.Cancel)
+    if cancel is not None:
+        cancel.setText("キャンセル")
+    box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+    box.setEscapeButton(QMessageBox.StandardButton.Cancel)
+    box.setWindowModality(Qt.WindowModality.WindowModal)
+    return box

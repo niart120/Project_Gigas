@@ -103,6 +103,8 @@ class FakePeer:
             return {"started": True}
         if method == "config/read":
             return {"config": {"mcp_servers": {"existing": {"enabled": True}}}}
+        if method in {"project/list", "thread/list"}:
+            return {"data": [], "nextCursor": None}
         if method == "model/list":
             if params and params.get("cursor") == "page-2":
                 return {"data": [_model("catalog-default", default=True)], "nextCursor": None}

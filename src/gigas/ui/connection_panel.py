@@ -99,6 +99,7 @@ class ConnectionPanel(QWidget):
         self._sandbox = SandboxEvent()
         self._status = SessionStatus("closed")
         self._conversation = ConversationStatus()
+        self._input_busy = False
         self._management_availability: tuple[bool, bool] | None = None
         self._pending: set[str] = set()
         self._submitted = ""
@@ -139,6 +140,7 @@ class ConnectionPanel(QWidget):
         self.plan_panel = self._display.plan_panel
         self.heading = self._display.heading
         self.transcript = self._display.transcript
+        self.history_button = self._display.history_button
         layout.addWidget(self._display, 1)
         self.composer = MessageComposer(self)
         self.composer.model_selected.connect(self._select_model)
@@ -234,6 +236,15 @@ class ConnectionPanel(QWidget):
         self._display.set_goal(goal)
         self._render()
 
+    def update_target_heading(self, project: str, title: str) -> None:
+        """Update confirmed names without clearing live text or request controls."""
+        self._display.set_heading(project, title)
+
+    def set_input_busy(self, busy: bool) -> None:
+        """Project input ownership across Codex generations and keep stop available."""
+        self._input_busy = busy
+        self._render()
+
     def begin_loading(self, project: str, title: str) -> None:
         """Hide retained content while fetching the named candidate's first page.
 
@@ -270,6 +281,7 @@ class ConnectionPanel(QWidget):
             self.can_list_conversations
             and self._settings_ready
             and not self._display.loading
+            and not self._input_busy
             and not state.sending
             and not state.stopping
             and state.turn_id is None
@@ -288,21 +300,6 @@ class ConnectionPanel(QWidget):
         self._available = available
         self._settings_ready = settings_ready
         self._render()
-
-    @property
-    def can_select_project(self) -> bool:
-        """Whether the idle connection can select a workspace before starting a thread."""
-        return (
-            self._available
-            and self._settings_ready
-            and self._connected
-            and self._status.phase in {"ready", "login_required"}
-            and self._conversation.thread_id is None
-            and not self._conversation.sending
-            and not self._conversation.stopping
-            and not self._pending
-            and not self._sandbox.setting_up
-        )
 
     def service_finished(self) -> None:
         """Disable commands after an unexpected service-thread exit."""
@@ -451,7 +448,11 @@ class ConnectionPanel(QWidget):
 
     def interrupt(self) -> None:
         """Immediately block repeated interruption and enqueue a stop request."""
-        if not self._connected or "stop" in self._pending or "disconnect" in self._pending:
+        if (
+            (not self._connected and not self._input_busy)
+            or "stop" in self._pending
+            or "disconnect" in self._pending
+        ):
             return
         self._pending.add("stop")
         if self._conversation.turn_id is not None:
@@ -661,7 +662,8 @@ class ConnectionPanel(QWidget):
         for view in self.request_views.values():
             view.refresh(available=self._answers_available)
         running = (
-            goal_active
+            self._input_busy
+            or goal_active
             or conversation.turn_id is not None
             or conversation.sending
             or submitted
@@ -669,7 +671,9 @@ class ConnectionPanel(QWidget):
         )
         self.composer.render_actions(
             send_enabled=ready and bool(self._message_draft.strip()),
-            interrupt_enabled=(available and self._connected and running and not stopping),
+            interrupt_enabled=(
+                available and (self._connected or self._input_busy) and running and not stopping
+            ),
             running=running,
             has_draft=bool(self._message_draft.strip()),
         )

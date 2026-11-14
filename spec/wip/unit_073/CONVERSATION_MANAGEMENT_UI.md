@@ -56,7 +56,7 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 | done | L2: 合意配置のサイドバー・所属別新規・対象見出しが開閉と操作可否を分けて表示する | new/regression | integration/GUI | 部品と配置、空/局所読込/ページ、幅復帰、既存メニューとサイズ。サービス結合はL3c |
 | done | L3a: 再接続と表示対象の交換を分け、閲覧Goal・初回読込・下書きの表示操作を成立させる | new/regression/edge | integration/GUI | 再接続で履歴・下書き・表示Goalを保持。実行のactive Goalと閲覧Goalを混同せず、Goal削除は共通の受付条件だけで活性化 |
 | done | L3b: Project選択結果と入力回収状態をUIへ渡し、停止済み会話からのProject選択を成立させる | new/regression/edge | unit/integration | 公開Project metadata・接続世代を結果へ添え、遅い結果の選択上書きを防ぐ。入力所有者のbusyを通知し、独自の実行状態台帳を増やさない |
-| todo | L3c: 会話UI調整役で一覧・新規・選択・履歴・picker・下書き確認を結合する | new/regression/edge | integration | Project/未所属、世代/選択参照の照合、局所読込、初回読込失敗、閲覧Goal更新、停止・入力回収前の切替禁止、開始時の実IDへの表示同期 |
+| done | L3c: 会話UI調整役で一覧・新規・選択・履歴・picker・下書き確認を結合する | new/regression/edge | integration | Project/未所属、世代/選択参照の照合、局所読込、初回読込失敗、閲覧Goal更新、停止・入力回収前の切替禁止、開始時の実IDへの表示同期 |
 | todo | L4: 実画面と実app-serverで履歴閲覧・停止後切替・新規/再開のUIが成立する | acceptance | GUI/integration | native撮影、合意モックとの照合、操作・活性・回収。実機はM7 |
 
 ## 7. 対象ファイルと検証
@@ -65,7 +65,7 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 
 | gate | 状態 | 検査する内容 |
 |---|---|---|
-| 各itemのpytestと独立レビュー | L1・L2・L3a/b完了、L3c以降not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
+| 各itemのpytestと独立レビュー | L1・L2・L3a/b/c完了、L4 not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | not run | M5結合後の全体回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型/所有境界 |
 | uv lock --check / uv build | not run | 配布資材と公開APIの整合 |
@@ -130,6 +130,21 @@ Refactor status: **refactor-done**。文書・見出し・Goal/Plan・読込時�
 | `uv lock --check` / `uv build` | 成功。83依存、sdist・wheelを生成 |
 
 Refactor status: **refactor-done**。旧Project専用の開始前制限を共通の切替条件と解放経路へ統合し、green後は遅延試験名と結果型を契約へ整理した。独立レビューで所有者・世代・回収完了の境界を確認し、必須修正なし。GUIでの世代照合、Project待機の解放、入力回収中の停止表示・切替禁止はL3cで結合する。native画面・実app-server・実機はこのitemでは使用していない。
+
+### L3cの実装・検証
+
+ConversationControllerが公開一覧・履歴・選択結果をUIへ結合する。取得済みmetadata、要求中の表示、破棄確認だけを保持し、選択の正本と実行はサービスへ残した。初回送信の実IDは表示だけへ同期し、受付後の一覧更新でもlive本文と次の原稿を消さない。先行する一覧があれば完了後に一度更新する。Shellは設定・機器・終了とProject pickerの所有を保ち、古い世代のpicker結果でも待機解除を行う。
+
+空の確定原稿にIME未確定文字だけがある場合も、確認なしの切替で編集中状態を持ち越さない。対象変更後の見出しとタイトルバーは確定した所属・作業場所へ揃え、読込候補で先行変更しない。入力回収中は切替・新規・pickerを禁止して停止入口を保ち、同じ会話への追加指示とGoal削除は既存の受付条件に従う。
+
+| command | 結果・範囲 |
+|---|---|
+| `uv run pytest tests/integration/test_conversation_controller.py --basetemp=tmp/pytest-m5-conversations -q --tb=short` | 初回1 failed→1 passed。境界追加時に古い履歴結果による待機解除とIME持越しを検出して修正。整理前・整理後・最終すべて6 passed |
+| `uv run pytest tests/integration/test_conversation_controller.py tests/integration/test_project_gui.py tests/integration/test_conversation_view.py tests/integration/test_conversation_sidebar.py tests/integration/test_codex_gui.py tests/integration/test_inline_transcript.py tests/integration/test_saved_history_gui.py tests/integration/test_app_settings.py tests/integration/test_settings_apply_contract.py tests/integration/test_settings_recovery.py tests/integration/test_settings_accept.py tests/integration/test_settings_source_menu.py tests/integration/test_window_presets.py --basetemp=tmp/pytest-m5-conversations-regression -q --tb=short` | 最終180 passed。途中の1件はstdio模擬peerが追加の一覧取得を次turnと誤認したため、対話中も読み取り専用一覧へ応答するよう修正。既存の追加指示・要求配送を維持 |
+| 変更Python 10ファイルへの`ruff format --check` / `ruff check`、`uv run ty check --no-progress` | 成功。公開型・docstringと利用文書を確認 |
+| `uv lock --check` / `uv build` | 成功。83依存、sdist・wheelを生成 |
+
+Refactor status: **refactor-done**。green後に旧can_select_projectの開始前制限を撤去し、UIの切替判定をcan_switchへ統一した。確定した閲覧結果の表示交換を一つの処理へまとめ、独自の会話状態機械や全文キャッシュは追加していない。独立レビューで初回/局所読込・原稿・通知参照・停止・終了・責務を確認し、必須修正なし。native画面と実app-serverの確認はL4で行う。
 
 ## 8. 先送り事項
 

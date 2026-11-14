@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QPushButton, QVBoxLayout, QWidget
 
 from gigas.ui.conversation_sidebar import ConversationHeading
 from gigas.ui.plan_panel import PlanPanel
@@ -32,6 +32,9 @@ class ConversationDisplay(QWidget):
         self.transcript.setAccessibleName("会話")
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.heading)
+        self.history_button = QPushButton("以前の履歴", self)
+        self.history_button.hide()
+        layout.addWidget(self.history_button)
         layout.addWidget(self.transcript, 1)
         self.plan_panel = PlanPanel(self)
         self.plan_panel.hide()  # MainWindow places this in the right pane.
@@ -68,6 +71,13 @@ class ConversationDisplay(QWidget):
         """Display a confirmed Goal or its confirmed absence."""
         self.goal = goal
         self.plan_panel.set_goal(goal)
+
+    def set_heading(self, project: str, title: str) -> None:
+        """Update confirmed metadata without replacing the conversation documents."""
+        self._target = project, title
+        if not self.loading:
+            self.heading.set_target(project, title)
+            self.heading.show()
 
     def begin_loading(self, project: str, title: str) -> None:
         """Show the candidate name while hiding the unchanged documents."""

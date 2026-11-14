@@ -287,6 +287,11 @@ class ConversationSidebar(QScrollArea):
         else:
             group.set_name(project.name)
 
+    @property
+    def expanded_projects(self) -> tuple[str | None, ...]:
+        """Return the currently expanded assignments without starting retrieval."""
+        return tuple(key for key, group in self._groups.items() if group.heading.isChecked())
+
     def set_projects(self, page: "ProjectPage", *, append: bool = False) -> None:
         """Display a public page, retaining matching groups' expansion and selection.
 

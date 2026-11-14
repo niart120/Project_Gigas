@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
+from gigas.app.conversations import ConversationController
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
@@ -150,6 +151,8 @@ class ApplicationShell(QObject):
         self.service.input_ports.connect(self._input_ports_received)
         self.service.input_changed.connect(self._input_changed)
         self.service.finished.connect(self._service_finished)
+        self.conversations = ConversationController(self.window, self.service, self)
+        panel.state_changed.connect(self._render)
 
     def start(self) -> None:
         """Display the window and load settings without connecting capture."""
@@ -314,7 +317,7 @@ class ApplicationShell(QObject):
             self.baseline.auth_method,
             execution_settings=_execution_settings(self.baseline),
         )
-        self.window.connection.activate(self.service.connect_runtime(options))
+        self.conversations.activate(self.service.connect_runtime(options))
         self._render()
 
     @Slot()
@@ -343,6 +346,9 @@ class ApplicationShell(QObject):
             self._select_project(Path(selected))
 
     def _select_project(self, path: Path, *, create: bool = False) -> None:
+        self.conversations.confirm_switch(lambda: self._submit_project(path, create=create))
+
+    def _submit_project(self, path: Path, *, create: bool) -> None:
         self._project_pending = True
         self._render()
         if create:
@@ -355,7 +361,8 @@ class ApplicationShell(QObject):
         if not isinstance(result, ProjectResult):
             return
         self._project_pending = False
-        if result.error:
+        current = result.generation == self.conversations.generation
+        if current and result.error:
             self.window.notifications.publish(
                 Notice(
                     "settings",
@@ -365,12 +372,14 @@ class ApplicationShell(QObject):
                     f"{result.path}\n{result.error}",
                 )
             )
-        else:
-            self.window.setWindowTitle(f"GIGAS · {result.path}")
-            if str(result.path) != self.baseline.last_project_path:
-                self._request(
-                    _SettingsRequest(replace(self.baseline, last_project_path=str(result.path)))
-                )
+        elif (
+            current
+            and self.conversations.adopt_project(result)
+            and str(result.path) != self.baseline.last_project_path
+        ):
+            self._request(
+                _SettingsRequest(replace(self.baseline, last_project_path=str(result.path)))
+            )
         if self._exit_requested and self._io_request is None:
             self._resolve_close()
         self._render()
@@ -626,9 +635,12 @@ class ApplicationShell(QObject):
             not closing and not self._service_unavailable,
             settings_ready=self.ready and not closing and not self._project_pending,
         )
+        self.conversations.set_available(
+            not closing and not self._service_unavailable, project_pending=self._project_pending
+        )
         self.window.project_menu.setEnabled(
             self._can_edit
-            and self.window.connection.can_select_project
+            and self.conversations.can_switch
             and (self.dialog is None or not self.dialog.isVisible())
         )
         self.video.set_available(not closing)
