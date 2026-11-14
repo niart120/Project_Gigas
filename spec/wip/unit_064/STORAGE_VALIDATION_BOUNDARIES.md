@@ -26,7 +26,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | S1: ID表記・時刻に依存せず既存projectを読み、原本保持と正しい次採番で追記する | regression | integration | 共通項目不正の拒否は残す |
+| refactor-skipped | S1: ID表記・時刻に依存せず既存projectを読み、原本保持と正しい次採番で追記する | regression | integration | 共通項目不正の拒否は残す。読込検査だけを縮小し、別の構造変更は不要 |
 | todo | S2: 行データの生成失敗をProjectErrorとして報告し、原本・採番を維持して次の保存を受け付ける | edge | integration | 共通の行データ作成で確認。観測では公開済み画像を保持 |
 | todo | S3: 新規内容を再検査せず保存し、画像保存先の逸脱・既存画像上書きを拒否する | regression | integration | 内部値を人為的に壊した拒否試験は削除。S2の共通エラー変換を維持 |
 
@@ -40,7 +40,11 @@ S1→S2→S3の順に進める。対話の事前JSON化を削る前に、S2で�
 
 ## 9. 検証
 
-事前準備の記録: `uv sync --dev`・`uv lock --check`成功。今回の設計レビューでは実装順と親仕様との整合を静的に確認し、文書検査の結果はunit_063第9節へ記録した。製品変更のred/greenは未実行。完了時に対応integration、ruff、ty、lock/build、文書参照・diffを確認する。実機・電源断試験は対象外。
+事前準備の記録: `uv sync --dev`・`uv lock --check`成功。設計レビューの文書検査はunit_063第9節へ記録した。完了時に対応integration、ruff、ty、lock/build、文書参照・diffを確認する。実機・電源断試験は対象外。
+
+S1: `uv run pytest tests/integration/test_observation_storage.py -q -k 'open_preserves_unknown_events_fields_and_sequence_gaps or open_requires_nonempty_project_identity or invalid_event_envelope'`は新しい読込例2件がUUID検査で失敗し、残す条件12件は成功した。読込検査縮小後、同ファイル全体は53 passed。原本のmetadata・行、欠番後の採番、新規生成形式、排他・失敗保全を確認した。
+
+S1の静的確認: 対象2 Pythonファイルのruff format/check、全体の`uv run ty check --no-progress`成功。変更3文書のローカル参照先31件とunit番号64件の一意性を確認した。
 
 ## 10. 先送り
 

@@ -101,6 +101,10 @@ class ProjectWriter:
     def open(cls, path: Path) -> Self:
         """Open a supported project without rewriting its existing data.
 
+        The project identity must be a nonempty string. Record schema, identity,
+        sequence order, type and payload presence are checked; historical event
+        IDs, timestamps and payload contents are not revalidated.
+
         Args:
             path: Existing project directory.
 
@@ -446,8 +450,10 @@ def _read_metadata(path: Path) -> str:
         )
     )
     _version(metadata.get("schema_version"))
-    project_id = _identifier(metadata.get("project_id"), "project-")
-    _timestamp(metadata.get("created_at"))
+    project_id = metadata.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        message = "空でないproject_idが必要です"
+        raise ValueError(message)
     if not (path / "observations").is_dir():
         message = "observationsディレクトリがありません"
         raise ValueError(message)
@@ -484,8 +490,6 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         raise ValueError(message)
     record = _object(json.loads(raw.decode("utf-8"), parse_constant=_reject_constant))
     _version(record.get("schema_version"))
-    _identifier(record.get("event_id"), "evt-")
-    _timestamp(record.get("occurred_at"))
     sequence = _positive(record.get("sequence"))
     kind = record.get("type")
     if (

@@ -171,12 +171,21 @@ def event(project_id: str, sequence: int = 3) -> dict[str, object]:
     }
 
 
-def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) -> None:
+@pytest.mark.parametrize("metadata_extra", [{}, {"created_at": {"legacy": "time"}}])
+def test_open_preserves_unknown_events_fields_and_sequence_gaps(
+    tmp_path: Path, metadata_extra: dict[str, object]
+) -> None:
     path = tmp_path / "existing"
     writer = ProjectWriter.create(path)
-    project_id = writer.project_id
     writer.close()
-    original = "".join(json.dumps(event(project_id, number)) + "\n" for number in (3, 9))
+    project_id = "legacy-game"
+    metadata = json.dumps({"schema_version": 1, "project_id": project_id, **metadata_extra})
+    (path / "project.json").write_text(metadata, encoding="utf-8")
+    first, second = event(project_id, 3), event(project_id, 9)
+    first.pop("event_id")
+    first.pop("occurred_at")
+    second.update(event_id=["legacy", "id"], occurred_at=False)
+    original = "".join(json.dumps(row) + "\n" for row in (first, second))
     (path / "events.jsonl").write_text(original, encoding="utf-8")
     opened = ProjectWriter.open(path)
     try:
@@ -187,6 +196,7 @@ def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) 
         lines = (path / "events.jsonl").read_text(encoding="utf-8").splitlines()
         assert json.loads(lines[-1])["sequence"] == 10
         assert "\n".join(lines[:-1]) + "\n" == original
+        assert (path / "project.json").read_text(encoding="utf-8") == metadata
     finally:
         opened.close()
 
@@ -215,11 +225,11 @@ def test_bad_log_reports_line_and_preserves_prefix_and_tail(
         ("schema_version", 2),
         ("schema_version", True),
         ("sequence", True),
+        ("sequence", 0),
         ("sequence", 3),
-        ("event_id", "evt-invalid"),
         ("type", ""),
+        ("type", None),
         ("project_id", "project-wrong"),
-        ("occurred_at", "2026-11-12T00:00:00"),
     ],
 )
 def test_invalid_event_envelope_is_rejected(tmp_path: Path, key: str, value: object) -> None:
@@ -246,19 +256,16 @@ def test_unknown_or_invalid_project_is_not_initialized(tmp_path: Path, metadata:
     assert (path / "project.json").read_text(encoding="utf-8") == metadata
 
 
-@pytest.mark.parametrize(
-    "timestamp",
-    ["20261112T00Z", "2026-W46-4T00:00:00Z", "2026-11-12T00:00Z", "2026-11-12T00:00:00,1Z"],
-)
-def test_non_rfc3339_time_is_rejected(tmp_path: Path, timestamp: str) -> None:
+@pytest.mark.parametrize("project_id", [None, "", 1, True])
+def test_open_requires_nonempty_project_identity(tmp_path: Path, project_id: object) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     writer.close()
     path = writer.path / "project.json"
     metadata = json.loads(path.read_bytes())
-    metadata["created_at"] = timestamp
+    metadata["project_id"] = project_id
     original = json.dumps(metadata).encode()
     path.write_bytes(original)
-    with pytest.raises(ProjectError, match="RFC 3339"):
+    with pytest.raises(ProjectError):
         ProjectWriter.open(writer.path)
     assert path.read_bytes() == original
 
