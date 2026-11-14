@@ -235,14 +235,3 @@ def test_duration_is_a_positive_integer(duration: object) -> None:
 def test_whole_sequence_rejects_invalid_later_input(invalid: object) -> None:
     with pytest.raises(InvalidSequenceError):
         parse_sequence([{"kind": "press", "buttons": ["A"], "duration_ms": 1}, invalid])
-
-
-@pytest.mark.parametrize("protocol", ["ch552", "pokecon"])
-def test_direct_state_encoding_rejects_unsupported_touch(protocol: str) -> None:
-    with pytest.raises(InvalidSequenceError):
-        encode_state(InputState(touch=(1, 1)), get_protocol(protocol))
-
-
-def test_direct_state_encoding_rejects_other_console_button() -> None:
-    with pytest.raises(InvalidSequenceError):
-        encode_state(InputState(buttons=("PLUS",)), get_protocol("3ds"))

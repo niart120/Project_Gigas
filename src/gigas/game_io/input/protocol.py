@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from gigas.game_io.input.models import InvalidSequenceError, validate_state
+from gigas.game_io.input.models import InvalidSequenceError
 
 if TYPE_CHECKING:
     from gigas.game_io.input.config import InputProtocol
@@ -73,7 +73,8 @@ def encode_state(state: "InputState", protocol: "InputProtocol") -> bytes:
     """Return one complete firmware frame, including neutral for InputState().
 
     Args:
-        state: Immutable buttons, sticks and touch in common input units.
+        state: Constructed InputState already compatible with the selected device.
+            Common invariants and device capabilities are not revalidated here.
         protocol: A supported protocol from the shared configuration definitions.
 
     Returns:
@@ -81,10 +82,8 @@ def encode_state(state: "InputState", protocol: "InputProtocol") -> bytes:
         firmware's 14 bytes. The encoder retains no state and performs no I/O.
 
     Raises:
-        InvalidSequenceError: Inputs or the protocol are unsupported. No button
-            aliasing, coordinate clipping or ignored unsupported input occurs.
+        InvalidSequenceError: The protocol key is unsupported.
     """
-    validate_state(state, protocol)
     lx, ly = (_axis(value) for value in state.left_stick)
     rx, ry = (_axis(value) for value in state.right_stick)
     if protocol.key == "3ds":

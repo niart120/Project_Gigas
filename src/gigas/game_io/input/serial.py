@@ -130,10 +130,13 @@ class SerialInput:
     async def send(self, state: InputState) -> None:
         """Encode and send one full state, with no retry or flush.
 
+        Args:
+            state: Constructed InputState compatible with this connection's
+                fixed protocol. The caller checks capabilities before execution.
+
         Raises:
             SerialInputError: The port is unavailable, busy, or the write fails
                 or returns a partial byte count. Partial delivery is possible.
-            InvalidSequenceError: The state is unsupported by this protocol.
         """
         data = encode_state(state, self.protocol)
         await self._call(lambda: self._write(data))

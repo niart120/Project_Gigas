@@ -24,7 +24,7 @@ steps = parse_sequence(
 
 `InputState`は直接構築する場合も、buttonsと座標の不変tuple・要素型・整数範囲・重複・反対方向を検査します。neutralを許し、touchの`(0, 0)`は接触として扱います。`InputStep`は正の整数時間、press/wait種別、InputState型、pressは入力あり・waitはneutralという整合を保証します。生成後はフィールドを変更できません。どちらの構築も機器能力は検査しません。
 
-`encode_state`は対応入力を検査してから毎回完全なフレームを作り、以前の状態を保持しません。`InputStep.to_json()`は記録に使える独立したJSON値を返します。byte列への変換成功は実機の受信・操作・解除の確認を意味しません。
+`encode_state(state, protocol)`には、選択機器に適合する生成済みInputStateを渡します。共通条件や機器能力を再検査せず、毎回完全なフレームを作り、以前の状態を保持しません。単独利用で能力確認が必要なら`validate_state(state, protocol)`を明示的に呼べます。非対応状態を単独encoderが必ず拒否する保証はありません。`InputStep.to_json()`は記録に使える独立したJSON値を返します。byte列への変換成功は実機の受信・操作・解除の確認を意味しません。
 
 ## シリアル接続API
 
@@ -32,7 +32,7 @@ steps = parse_sequence(
 
 `gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。WindowsのCH552・9600 baudで短い操作・解除送出・画面変化を確認済みです。PokeCon・3DSの実機、他OS、通信断・長時間運転は未検証です。
 
-`SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`は完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
+`SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`にはその機器に適合する生成済みInputStateを渡し、完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
 送信の全byte数が返った場合だけ完了します。部分送出や例外は`SerialInputError`となり、自動再送・flush・ACK待ちは行いません。取消しは開始済みwriteが戻るまで回収し、その間の別の送信・closeは拒否します。保持時間の待機・停止後のneutralは操作実行側が担当します。
 
@@ -45,6 +45,7 @@ steps = parse_sequence(
 ```python
 import asyncio
 
+from gigas.game_io.input.serial import SerialInput
 from gigas.services.input import InputService, OperationResult
 
 service = InputService()
