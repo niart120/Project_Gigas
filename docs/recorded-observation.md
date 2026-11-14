@@ -148,7 +148,7 @@ async def close_project(
 | PNG符号化の失敗 | 観測が失敗します。画像とJSONLは書きません |
 | 画像保存の失敗 | 観測成功は変えず、保存失敗を通知します。JSONLへまだ触れていないため、writerは引き続き使用できます |
 | 記録のJSON化・UTF-8変換の失敗 | `ProjectError`を報告し、JSONLと次のsequenceを変えません。writerは引き続き使用でき、公開済み画像は残ります |
-| JSONLの追記・flush・fsyncの失敗 | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
+| JSONLのopen・write・closeの失敗、短いwrite | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
 | 保存完了後の要求取消し | 観測記録は保持します。保存成功を応答配送の成功とは扱いません |
 
 観測エラーの`code`は`DEVICE_UNAVAILABLE`、`BUSY`、`OBSERVATION_ENCODING_ERROR`です。作成・読込・保存の失敗は`ProjectError`、同期処理中の二重書込・再読込・終了はその派生型`ProjectBusyError`です。エラー後の自動再試行はありません。
@@ -157,4 +157,4 @@ async def close_project(
 
 このロックは、画像・ログの読取や別ファイルの`memory/`編集を禁止するものではありません。対話記録も同じアプリ所有writerを使い、MCPや通知処理がそれぞれ別writerを開く構成にはしません。アプリのCodex接続は`memory/`だけを書込先にしたworkspace-writeで動作します。原記録はアプリが書き込み、Codexへは読取用に渡します。接続条件と確認範囲は[Codex接続API](codex.md)を参照してください。
 
-画像は同じディレクトリの一時ファイルへ書き込み、flush・fsync後、既存画像を上書きせず確定します。その後にJSONLへ追記・flush・fsyncします。電源断時にも画像とログが必ず一括で更新される保証はありません。
+metadata・画像・JSONLは通常のwrite/closeで保存を終え、明示flush/fsyncによる安定記憶への同期は行いません。画像は同じディレクトリの一時ファイルをcloseしてから既存画像を上書きせず確定し、その後にJSONLへ追記します。異常終了・電源断では直近の画像や記録が欠ける場合があり、画像とログの一括更新も保証しません。

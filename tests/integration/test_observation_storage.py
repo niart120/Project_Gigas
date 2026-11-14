@@ -1,12 +1,11 @@
 import json
-import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import cv2
@@ -18,9 +17,12 @@ from gigas.game_io.capture.models import Frame
 from gigas.game_io.input.config import InputProtocol, get_protocol
 from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, parse_sequence
 from gigas.game_io.observation import Observation
-from gigas.storage import project
 from gigas.storage.input_events import OperationFinished, OperationStarted
 from gigas.storage.project import ProjectError, ProjectWriter
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from typing import BinaryIO
 
 
 def test_input_records_keep_sequence_results_and_observation_reference(
@@ -487,7 +489,7 @@ def test_observation_path_cannot_escape_storage(tmp_path: Path, observation_id: 
     reopened.close()
 
 
-@pytest.mark.parametrize("failure", ["png_sync", "collision"])
+@pytest.mark.parametrize("failure", ["publish", "collision"])
 def test_image_failure_preserves_log_and_writer_remains_usable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -502,11 +504,11 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
                 patch.setattr(observation_module, "uuid4", lambda: UUID(first.observation_id[4:]))
             else:
 
-                def broken_sync(_descriptor: int) -> None:
-                    message = "image sync failure"
+                def broken_publish(_path: Path, _target: Path) -> Path:
+                    message = "image publish failure"
                     raise OSError(message)
 
-                patch.setattr(project.os, "fsync", broken_sync)
+                patch.setattr(Path, "rename", broken_publish)
             with pytest.raises(ProjectError):
                 writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == before
@@ -518,60 +520,42 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
         writer.close()
 
 
-@pytest.mark.parametrize("failure", ["partial", "sync"])
-@pytest.mark.parametrize("kind", ["observation", "thread", "input"])
+@pytest.mark.parametrize("failure", ["partial", "close"])
 def test_uncertain_log_preserves_data_and_requires_explicit_reload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, kind: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
         writer.record(Observation.from_frame(sample_frame()))
         log = writer.path / "events.jsonl"
         before = log.read_bytes()
-        fsync = os.fsync
+        open_file = Path.open
         with monkeypatch.context() as patch:
-            if failure == "partial":
 
-                def partial_append(path: Path, row: bytes) -> None:
-                    with path.open("ab", buffering=0) as stream:
-                        stream.write(row[: len(row) // 2])
-                    message = "partial append failure"
+            @contextmanager
+            def failing_open(path: Path, mode: str, *, buffering: int) -> "Generator[BinaryIO]":
+                assert path == log
+                assert mode == "ab"
+                with open_file(path, "ab", buffering=buffering) as stream:
+                    if failure == "partial":
+                        write = stream.write
+                        patch.setattr(stream, "write", lambda row: write(row[: len(row) // 2]))
+                    yield stream
+                if failure == "close":
+                    message = "log close failure"
                     raise OSError(message)
 
-                patch.setattr(project, "_append_row", partial_append)
-            else:
-                inode = log.stat().st_ino
-
-                def broken_log_sync(descriptor: int) -> None:
-                    if os.fstat(descriptor).st_ino == inode:
-                        message = "log sync failure"
-                        raise OSError(message)
-                    fsync(descriptor)
-
-                patch.setattr(project.os, "fsync", broken_log_sync)
-            if kind == "observation":
-                append = partial(writer.record, Observation.from_frame(sample_frame()))
-            elif kind == "thread":
-                append = partial(writer.record_thread, "thread-1")
-            else:
-                append = partial(
-                    writer.record_input,
-                    OperationStarted("operation", (InputStep("wait", 1),), "thread"),
-                )
+            patch.setattr(Path, "open", failing_open)
             with pytest.raises(ProjectError, match="未確定"):
-                append()
+                writer.record(Observation.from_frame(sample_frame()))
         after = log.read_bytes()
         assert after.startswith(before)
         assert len(after) > len(before)
-        assert len(list((writer.path / "observations").glob("*.png"))) == (
-            2 if kind == "observation" else 1
-        )
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
         with pytest.raises(ProjectError, match="再読込"):
             writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == after
-        assert len(list((writer.path / "observations").glob("*.png"))) == (
-            2 if kind == "observation" else 1
-        )
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
         if failure == "partial":
             with pytest.raises(ProjectError, match="行2"):
                 writer.reload()

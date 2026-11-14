@@ -1,7 +1,6 @@
 """Single-owner project storage for recorded observations."""
 
 import json
-import os
 import sys
 from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime
@@ -87,8 +86,6 @@ class ProjectWriter:
                 }
                 with (path / "project.json").open("x", encoding="utf-8", newline="\n") as stream:
                     stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
                 owner = cls(path, project_id, lock_file)
                 resources.pop_all()
                 return owner
@@ -379,8 +376,6 @@ def _publish_image(path: Path, data: bytes) -> None:
         ) as stream:
             temporary = Path(stream.name)
             stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
         temporary.rename(path)  # Windows rename refuses an existing destination.
     finally:
         if temporary is not None:
@@ -393,8 +388,6 @@ def _append_row(path: Path, row: bytes) -> None:
         if stream.write(row) != len(row):
             message = "JSONLへの書込が途中で終了しました"
             raise OSError(message)
-        stream.flush()
-        os.fsync(stream.fileno())
 
 
 def _reject_constant(value: str) -> None:

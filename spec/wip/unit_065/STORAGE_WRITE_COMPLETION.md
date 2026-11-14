@@ -22,7 +22,7 @@ metadataは排他的作成、PNGは同じディレクトリの一時ファイル
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | W1: 通常の書込・closeで保存し、公開失敗・不完全追記・書込後のclose失敗で原本と追記可否を保つ | characterization | integration | fsync故障とイベント種別の総当たりを削り、実ファイルへの部分write・close時の模擬失敗を確認 |
+| refactor-done | W1: 通常の書込・closeで保存し、公開失敗・不完全追記・書込後のclose失敗で原本と追記可否を保つ | characterization | integration | fsync故障とイベント種別の総当たりを削り、実ファイルへの部分write・close時の模擬失敗を確認 |
 
 ## 6. 実装方針・対象ファイル
 
@@ -31,6 +31,10 @@ metadataは排他的作成、PNGは同じディレクトリの一時ファイル
 ## 7. 検証
 
 保存・RecordingService・入力観測結合の試験、ruff format/check、ty、lock/build、文書参照・diffを実施する。実機・電源断・性能試験は対象外。実績は実行後に記録する。
+
+W1では、故障注入を実際の短いwriteとfile closeへ変更した基準が保存49 passed。明示同期の撤去後、`uv run pytest tests/integration/test_observation_storage.py tests/integration/test_observation_service.py tests/integration/test_input_observation_path.py -q`は68 passed。画像公開失敗時の一時ファイル回収、部分行によるreload拒否、完全行が残る場合のreload成功と採番、入力結果と保存失敗の独立を確認した。同期呼出回数を固定する代替テストは作らず、明示同期の削除は差分で確認した。
+
+対象Pythonのruff format/check、全体ty、`uv lock --check`・`uv build`成功。変更3文書のローカル参照31件・unit番号65件と`git diff --check`を確認した。型検査が指摘した試験用contextmanagerの戻り値はGeneratorへ修正し、ignore/castは追加していない。
 
 ## 8. 先送り事項
 
