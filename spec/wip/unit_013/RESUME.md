@@ -4,7 +4,7 @@
 
 Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し、新規プレイと既存会話からの継続をGIGASの画面から扱えるようにする。GIGASはゲームI/Oと人間の介入を担い、既存会話を現在の機器・MCP・記録先へ接続する。独自ログから会話やGoalを復元する工程にはしない。
 
-状態: **wip（M0〜M4完了、M5着手中）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。[M1 専用home・設定・管理API](../../complete/unit_069/MANAGEMENT_API.md)、[M2 記録と新規会話開始の結合](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)、[M3 実行設定・標準指示の結合](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)、[M4 切替・既存会話の再接続](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)は製品実装・実接続の受入を完了した。[M5 会話管理UI](../unit_073/CONVERSATION_MANAGEMENT_UI.md)に着手した。製品全体の受入は未完了である。
+状態: **wip（M0〜M5完了、M6未着手）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。[M1 専用home・設定・管理API](../../complete/unit_069/MANAGEMENT_API.md)、[M2 記録と新規会話開始の結合](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)、[M3 実行設定・標準指示の結合](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)、[M4 切替・既存会話の再接続](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)は製品実装・実接続の受入を完了した。[M5 会話管理UI](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)も、実画面での閲覧・新規・再開・停止後切替まで完了した。製品全体の受入は未完了である。
 
 作業規約は[AGENTS.md](../../../AGENTS.md)と[配置・運用](../../initial/06-repository.md)に従う。攻略補助は実プレイで不足を観測してから検討する。
 
@@ -12,7 +12,7 @@ Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し�
 
 ## 2. 現行設計との差分・前提
 
-製品は専用homeと公開Projectを使い、Projectあり・なしの会話を作業場所と実thread IDの記録先へ結合する。独自のproject.jsonと固定攻略資料の生成は撤去済み。攻略資料の材料となる提出本文・確定本文は04の本文保存契約の範囲で残す。会話の持出し用複製、GIGAS独自ログによる会話・Goal再構成、固定メモからの専用コールドスタートは採用しない。既存会話の選択・再接続はM4でサービスへ結合済みで、会話一覧・履歴のUIはM5で追加する。
+製品は専用homeと公開Projectを使い、Projectあり・なしの会話を作業場所と実thread IDの記録先へ結合する。独自のproject.jsonと固定攻略資料の生成は撤去済み。攻略資料の材料となる提出本文・確定本文は04の本文保存契約の範囲で残す。会話の持出し用複製、GIGAS独自ログによる会話・Goal再構成、固定メモからの専用コールドスタートは採用しない。既存会話の選択・再接続はM4でサービスへ結合済みで、会話一覧・履歴のUIもM5で結合済み。
 
 本書は改訂後の到達点を定める。M0で合意と公開経路を整理し、関連する`spec/initial`を改訂した。採用予定の契約と現行実装を区別し、文書更新を製品の移行完了としない。完了済み仕様は過去の実装・検証記録として保持する。
 
@@ -115,7 +115,8 @@ M0で改訂する初期設計は、[01 概要](../../initial/01-overview.md)、[
 | M2の製品検証 | 完了。全体871件、公開型・配布起動、実GUIの新規開始・Goal停止・停止後送信、実Codexと模擬FrameのMCP画像・保存bytes対応、公開metadataと記録先の一致を確認。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)に証拠と未検証範囲を記録 |
 | M3の製品検証 | 完了。全体900件、設定GUI、実Codexの標準指示・Skill・資料編集と参照・Web/記憶切替・両承認方法・sandbox通信制限を確認。[M3](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)に補助の失敗と追加検証、記憶抽出の未観測範囲を記録 |
 | M4の製品検証 | 完了。全体968件、選択と実行の分離、早期通知・停止・切断、実app-serverの再起動後と同一プロセス内の再開・設定変更・同じrecordsへの追記、active Goalへの追加指示と停止を確認。[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)に補助の失敗と修正・実測範囲を記録 |
-| M5〜M6の製品検証 | not run。会話管理UIと、状態を跨ぐ単体・結合試験、実app-server・モデル、権限・承認、公開設定と保存の検証を担当段階で行う |
+| M5の製品検証 | 完了。全体1007件、実画面での公開履歴・Web activity、所属別新規・既存再開・Goal停止・停止後切替・再接続時の表示保持を確認。[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)にnativeで検出した3件の修正と実測範囲を記録 |
+| M6の製品検証 | not run。状態を跨ぐモデル/設定・障害のUI結合と、実resumeの権限・承認・記憶の残確認を行う |
 | M7のGUI・実機受入 | not run。新規開始、再起動後の継続、手動変更、停止、代表障害を確認する。模擬接続と実機の成功を区別する |
 
 仕様・初期設計だけの改訂では製品のPythonテスト・型検査・package buildはnot applicableとする。製品実装時はAGENTS.mdに従ってゲートを選び、公開API・依存・配布変更の検証も各子仕様へ記録する。限定的な公開API試行を、製品経路や長時間攻略の受入済みへ広げない。
@@ -133,7 +134,8 @@ M0で改訂する初期設計は、[01 概要](../../initial/01-overview.md)、[
 - [x] M0の合意事項・実現方式・公開経路の成立性を記録し、関連初期設計を改訂した
 - [x] M1〜M3の管理API・保存部品と新規開始・実行設定を各段階で検証した
 - [x] M4のサービスからの切替・再接続と実接続を検証した
-- [ ] M5の会話管理UI、M6の状態を跨ぐ操作・設定・障害を検証した
+- [x] M5の会話管理UIを実画面・実接続で検証した
+- [ ] M6の状態を跨ぐ操作・設定・障害を検証した
 - [ ] M7のGUI・実機受入と利用手順を完了し、未検証事項を後続へ引き継いだ
 
 親仕様は工程全体の受入が揃ったときにcompleteへ移す。文書の改訂完了や一つの子仕様の完了だけでは移動しない。

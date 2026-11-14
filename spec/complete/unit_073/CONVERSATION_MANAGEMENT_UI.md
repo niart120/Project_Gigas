@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip**。[U08親仕様](../unit_013/RESUME.md)のM5を担当する。[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)で完成した選択・履歴取得・切替・再接続のサービスを、合意済みの開閉式サイドバーと既存の対話画面へ結合する。
+状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM5を担当し、[M4](../unit_072/CONVERSATION_SELECTION_AND_RESUME.md)の選択・履歴取得・切替・再接続サービスを、合意済みの開閉式サイドバーと既存の対話画面へ結合した。
 
 Intent Delta: none。配置と操作は[10 UI](../../initial/10-ui-interaction.md)、[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、[採用モック](../../complete/unit_068/assets/conversation-sidebar-proposal.png)を正とする。画像は配置資料であり、例文・ゲーム名・モデル値・色・寸法を製品の固定値にしない。管理・実行の所有は[02](../../initial/02-runtime.md)、手順は[09](../../initial/09-control-flows.md)に従う。
 
@@ -57,7 +57,7 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 | done | L3a: 再接続と表示対象の交換を分け、閲覧Goal・初回読込・下書きの表示操作を成立させる | new/regression/edge | integration/GUI | 再接続で履歴・下書き・表示Goalを保持。実行のactive Goalと閲覧Goalを混同せず、Goal削除は共通の受付条件だけで活性化 |
 | done | L3b: Project選択結果と入力回収状態をUIへ渡し、停止済み会話からのProject選択を成立させる | new/regression/edge | unit/integration | 公開Project metadata・接続世代を結果へ添え、遅い結果の選択上書きを防ぐ。入力所有者のbusyを通知し、独自の実行状態台帳を増やさない |
 | done | L3c: 会話UI調整役で一覧・新規・選択・履歴・picker・下書き確認を結合する | new/regression/edge | integration | Project/未所属、世代/選択参照の照合、局所読込、初回読込失敗、閲覧Goal更新、停止・入力回収前の切替禁止、開始時の実IDへの表示同期 |
-| todo | L4: 実画面と実app-serverで履歴閲覧・停止後切替・新規/再開のUIが成立する | acceptance | GUI/integration | native撮影、合意モックとの照合、操作・活性・回収。実機はM7 |
+| done | L4: 実画面と実app-serverで履歴閲覧・停止後切替・新規/再開のUIが成立する | acceptance | GUI/integration | native撮影、合意モックとの照合、操作・活性・回収。実機はM7 |
 
 ## 7. 対象ファイルと検証
 
@@ -65,12 +65,12 @@ L1→L2→L3a→L3b→L3c→L4の順で進める。L2の表示部品だけでは
 
 | gate | 状態 | 検査する内容 |
 |---|---|---|
-| 各itemのpytestと独立レビュー | L1・L2・L3a/b/c完了、L4 not run | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
-| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-root -q | L3c後1002 passed（87.62秒）。L4の配置修正前 | M5結合後の全体回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | L3c後成功、format対象284ファイル | 形式・lint・型/所有境界 |
-| uv lock --check / uv build | L3c後成功、83依存・sdist/wheel | 配布資材と公開APIの整合 |
-| 実画面・実app-server | L4初回接続で一覧取得と配置不良を確認し、修正後の再撮影で解消を確認 | 実モデル提出0。閲覧・新規/再開・停止の受入を続ける |
-| git diff --check・文書/リンク検査 | 着手時に実施 | 合意・実装範囲・根拠・unitの一意性 |
+| 各itemのpytestと独立レビュー | L1〜L4完了。nativeで見つけた3件も個別に修正・レビュー | 表示と操作の振る舞い、既存選択/IME/カード/サイズの回帰 |
+| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m5-final -q | 最終1007 passed（87.67秒） | nativeで検出した3件の修正を含む全体回帰 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | 最終成功、format対象284ファイル | 形式・lint・型/所有境界 |
+| uv lock --check / uv build | 最終成功、83依存・sdist/wheel | 配布資材と公開APIの整合 |
+| 実画面・実app-server | L4完了。通常送信3回と保存Goal再開1回、実turn/interrupt 1回 | 閲覧・Project/未所属新規・既存再開・停止後切替・再接続保持。実機は未接続 |
+| git diff --check・uv run python tmp/validate_m2_docs.py | 完了整理時に実施 | 合意・実装範囲・根拠・unitの一意性 |
 
 公開型・docstring変更は対応skillを使う。Product Designでは現画面・合意モック・実装後の画面を照合し、説明文を追加せずに対象と操作が識別できることを確認する。スクリーンショットだけでキーボードや支援技術の適合を断定しない。
 
@@ -166,6 +166,16 @@ Refactor status: **refactor-done**。green後に旧can_select_projectの開始�
 
 独立レビューで掲載確認・取得中の合流・世代/対象照合・本文と原稿の不変を確認し、必須修正なし。修正後の実app-serverでも、未所属の初回応答確定からthread/listが新IDを返し、`18-l4-new-row-fixed.jpeg`で一覧の行と見出しの更新を確認した。個別turn終了時には追加の取得を発生させなかった。実行中も所属とサイドバーの開閉ができ、新規/切替は無効だった（`16-l4-running-folded.jpeg`、`17-l4-running-sidebar-closed.jpeg`）。停止ボタン操作は応答の自然終了と重なり、このturnではinterruptが送信されていないため、停止の成功根拠には含めない。
 
+最終processでは未所属新規の1回に続き、既存未所属の通常再開を1回実施し、保存済み3turnの末尾へ新しい提出と確定本文が続いた。選択時は候補名と読込中を表示し、以前の本文・Goalを隠した。保存Goalは明示的な再開で実行を始め、共通停止から`turn/interrupt`とGoalのpausedへの更新が成功した。停止後に別会話の保存履歴を選べた。`19-l4-loading.jpeg`〜`23-l4-switch-after-stop.jpeg`に各画面を保存した。
+
+未送信の検証用下書きを入力して別会話を選ぶと破棄確認が開き、取消しで元の対象・履歴・下書きが残った。Codexを切断・再接続して待機まで戻しても同じ内容を維持した（`24-l4-draft-confirmation.jpeg`〜`26-l4-reconnected-draft.jpeg`）。この下書きは送信していない。アプリは通常終了し、終了コード0を確認した。
+
+`l4-20261114T205553Z-02f726bd-report.json`と同名のeventsに実接続の結果を記録した。新規thread/start 1回、通常turn/start 2回、既存thread/resume 2回（通常送信とGoal再開）、Goal更新2回、interrupt 1回。既存未所属の同じrecordsへ提出・確定本文を各1件追記し、旧JSONL prefixと3枚のPNGは不変。新規未所属の作業場所は1件だけ増え、そのrecordsに提出・確定本文を各1件保存した。ほかの既存記録は不変で、再接続による追加実行はない。M5全体のモデル利用は前processのProject新規を合わせて通常送信3回と保存Goal再開1回だった。
+
+nativeで観測したのは公開履歴の最初のページと保存Web activityであり、実データの複数ページ取得、ライブWeb検索、Goal削除、IME、故障応答、支援技術全体をこの受入で確認したとはしない。ページ契約・IME・カード失効・初回読込失敗はQt/模擬peer試験の根拠を用い、状態を跨ぐ故障・設定はM6、実機はM7へ引き継ぐ。設計の追加や実プレイの性能評価は行っていない。
+
+最終の独立監査では、34件のRPCとすべてのサービス結果が成功し、記録失敗がないこと、実ファイルから旧prefix/PNGを再計算して一致することを確認した。再接続後は公開一覧の取得だけで、記録と作業場所一覧は不変だった。ゲームツールの実行は0回。下書きと表示の保持は受動ログの記録対象外であり、上記native画面を根拠にした。
+
 ## 8. 先送り事項
 
 M6は新規/閲覧/実行を跨ぐ設定・権限・承認・障害の結合と記憶生成対象を確認し、M7はUSB Video DeviceとCOM8で通し受入を行う。M3で未観測の記憶抽出は標準条件の範囲で確認し、強制抽出を製品へ加えない。長時間履歴の性能と攻略の有用性はU10。
@@ -173,7 +183,7 @@ M6は新規/閲覧/実行を跨ぐ設定・権限・承認・障害の結合と�
 ## 9. 完了チェックリスト
 
 - [x] M4完了と合意モック・現画面・UI責務を確認した
-- [ ] L1〜L4と構造確認・独立レビューを記録した
-- [ ] 公開文書・画面・配布資材を整合させた
-- [ ] 品質ゲート・native UI・実接続の範囲を分けて記録した
-- [ ] 親・初期設計へ完了範囲とM6以降の引継ぎを反映した
+- [x] L1〜L4と構造確認・独立レビューを記録した
+- [x] 公開文書・画面・配布資材を整合させた
+- [x] 品質ゲート・native UI・実接続の範囲を分けて記録した
+- [x] 親・初期設計へ完了範囲とM6以降の引継ぎを反映した
