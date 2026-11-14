@@ -10,7 +10,7 @@
 
 | source | 内容 | path |
 |---|---|---|
-| user request | 状態と責務を往復し、帰属を見つける | [親仕様 5.9](../../wip/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
+| user request | 状態と責務を往復し、帰属を見つける | [親仕様 5.9](../../complete/unit_054/KISS_SIMPLIFICATION.md#59-巨大クラスの責務状態所有を分ける) |
 | preceding unit | 操作文脈と束縛関数、GUI 拒否の保存境界 | [unit058](../../complete/unit_058/SERVICE_OPERATION_DISPATCH.md) |
 
 ### 1.3 use case
@@ -36,7 +36,7 @@
 
 ## 4. 関連 docs
 
-- [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)
+- [親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [Codex 利用手順](../../../docs/codex.md)
 - [会話と機器の GUI](../../../docs/codex-gui.md)
 - [保存 API](../../../docs/recorded-observation.md)

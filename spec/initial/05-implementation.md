@@ -6,7 +6,7 @@
 
 この文書は工程の入口、依存関係、推奨順を所有します。各工程の調査項目、子工程の分割、受入条件はリンク先の親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
-[契約・状態・分岐の整理](../wip/unit_054/KISS_SIMPLIFICATION.md)のM1を経て、[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で通常指示・会話・機器入力・停止を、[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)でGoalの作成・編集・再開・削除を再編しています。両unitの実装・検証を完了してから後続へ進みます。共通ID・時刻検査やflush/fsync撤去等、残るM2の保存・入力縮小は別の未実装範囲です。
+[契約・状態・分岐の整理](../complete/unit_054/KISS_SIMPLIFICATION.md)のM1を経て、[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で通常指示・会話・機器入力・停止を、[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)でGoalの作成・編集・再開・削除を再編しました。M2の保存・入力は[unit_063](../complete/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)で検査所有と保証を整理し、実装・結合確認を完了しました。接続・取得境界の残件は[unit_067](../complete/unit_067/M2_BOUNDARY_CLEANUP.md)で整理し、親M2の最終受入も完了しました。次はU08の保存参照・再起動後復帰の調査・設計です。
 
 2026-11-11の実装棚卸しを受けた[実装整理](../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[M1](../complete/unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)・[M2](../complete/unit_029/DISPLAY_AND_REMAINDER_SIMPLIFICATION.md)は完了しました。続くUI/UX議論の合意を[10-ui-interaction.md](10-ui-interaction.md)へまとめ、共通入力・公開表示・Goal操作をU06、追加指示による計画的終了をU07へ反映しました。APIの未確認事項は[08](08-sdk-compatibility.md#ui-api-open)へ分離しています。この時点の親仕様の先行更新は工程への着手を意味しません。現在の進捗は第3節と各親仕様に従います。
 
@@ -60,7 +60,7 @@ flowchart TD
     U03 --> U04
     U04 --> U05["U05 操作・即時停止"]
     U05 --> U06["U06 対話UI・Goal継続・同一セッション再開"]
-    U06 --> K["unit_054 契約・状態・分岐の整理"]
+    U06 --> K["unit_054 契約・状態・分岐の整理：完了"]
     K -->|"再開経路を共用"| U08["U08 保存参照・再起動後の再開"]
     U08 --> U10["U10 連続運転"]
 ```

@@ -1,12 +1,11 @@
 import json
-import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import cv2
@@ -15,17 +14,18 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
-from gigas.game_io.input.config import InputProtocol, get_protocol
-from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, parse_sequence
+from gigas.game_io.input.config import get_protocol
+from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
 from gigas.game_io.observation import Observation
-from gigas.storage import project
 from gigas.storage.input_events import OperationFinished, OperationStarted
 from gigas.storage.project import ProjectError, ProjectWriter
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from typing import BinaryIO
 
-def test_input_records_keep_sequence_results_and_observation_reference(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+
+def test_input_records_keep_sequence_results_and_observation_reference(tmp_path: Path) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     observation = Observation.from_frame(sample_frame())
     sequence = (
@@ -49,12 +49,10 @@ def test_input_records_keep_sequence_results_and_observation_reference(
     finally:
         writer.close()
     # A later capability change must affect new input, not existing archive rows.
-    with monkeypatch.context() as patch:
-        patch.setattr(InputProtocol, "touch", False)
-        with pytest.raises(InvalidSequenceError):
-            parse_sequence([step.to_json() for step in sequence], get_protocol("3ds"))
-        reopened = ProjectWriter.open(writer.path)
-        reopened.close()
+    with pytest.raises(InvalidSequenceError):
+        validate_state(sequence[0].state, replace(get_protocol("3ds"), touch=False))
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
     records = [json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()]
     assert [row["sequence"] for row in records] == list(range(1, 5))
     assert [row["type"] for row in records] == [
@@ -171,12 +169,21 @@ def event(project_id: str, sequence: int = 3) -> dict[str, object]:
     }
 
 
-def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) -> None:
+@pytest.mark.parametrize("metadata_extra", [{}, {"created_at": {"legacy": "time"}}])
+def test_open_preserves_unknown_events_fields_and_sequence_gaps(
+    tmp_path: Path, metadata_extra: dict[str, object]
+) -> None:
     path = tmp_path / "existing"
     writer = ProjectWriter.create(path)
-    project_id = writer.project_id
     writer.close()
-    original = "".join(json.dumps(event(project_id, number)) + "\n" for number in (3, 9))
+    project_id = "legacy-game"
+    metadata = json.dumps({"schema_version": 1, "project_id": project_id, **metadata_extra})
+    (path / "project.json").write_text(metadata, encoding="utf-8")
+    first, second = event(project_id, 3), event(project_id, 9)
+    first.pop("event_id")
+    first.pop("occurred_at")
+    second.update(event_id=["legacy", "id"], occurred_at=False)
+    original = "".join(json.dumps(row) + "\n" for row in (first, second))
     (path / "events.jsonl").write_text(original, encoding="utf-8")
     opened = ProjectWriter.open(path)
     try:
@@ -187,6 +194,7 @@ def test_open_preserves_unknown_events_fields_and_sequence_gaps(tmp_path: Path) 
         lines = (path / "events.jsonl").read_text(encoding="utf-8").splitlines()
         assert json.loads(lines[-1])["sequence"] == 10
         assert "\n".join(lines[:-1]) + "\n" == original
+        assert (path / "project.json").read_text(encoding="utf-8") == metadata
     finally:
         opened.close()
 
@@ -215,11 +223,11 @@ def test_bad_log_reports_line_and_preserves_prefix_and_tail(
         ("schema_version", 2),
         ("schema_version", True),
         ("sequence", True),
+        ("sequence", 0),
         ("sequence", 3),
-        ("event_id", "evt-invalid"),
         ("type", ""),
+        ("type", None),
         ("project_id", "project-wrong"),
-        ("occurred_at", "2026-11-12T00:00:00"),
     ],
 )
 def test_invalid_event_envelope_is_rejected(tmp_path: Path, key: str, value: object) -> None:
@@ -246,19 +254,16 @@ def test_unknown_or_invalid_project_is_not_initialized(tmp_path: Path, metadata:
     assert (path / "project.json").read_text(encoding="utf-8") == metadata
 
 
-@pytest.mark.parametrize(
-    "timestamp",
-    ["20261112T00Z", "2026-W46-4T00:00:00Z", "2026-11-12T00:00Z", "2026-11-12T00:00:00,1Z"],
-)
-def test_non_rfc3339_time_is_rejected(tmp_path: Path, timestamp: str) -> None:
+@pytest.mark.parametrize("project_id", [None, "", 1, True])
+def test_open_requires_nonempty_project_identity(tmp_path: Path, project_id: object) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     writer.close()
     path = writer.path / "project.json"
     metadata = json.loads(path.read_bytes())
-    metadata["created_at"] = timestamp
+    metadata["project_id"] = project_id
     original = json.dumps(metadata).encode()
     path.write_bytes(original)
-    with pytest.raises(ProjectError, match="RFC 3339"):
+    with pytest.raises(ProjectError):
         ProjectWriter.open(writer.path)
     assert path.read_bytes() == original
 
@@ -463,25 +468,24 @@ def test_historical_observation_payload_is_not_reinterpreted(tmp_path: Path) -> 
     assert log.read_bytes() == original
 
 
-@pytest.mark.parametrize("field", ["generation", "sequence"])
-def test_invalid_source_identifiers_cannot_create_unreadable_records(
-    tmp_path: Path, field: str
-) -> None:
+@pytest.mark.parametrize("observation_id", ["../escaped", "obs-../../escaped"])
+def test_observation_path_cannot_escape_storage(tmp_path: Path, observation_id: str) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
-        invalid = replace(sample_frame(), **{field: True})
+        observation = Observation.from_frame(sample_frame())
         with pytest.raises(ProjectError):
-            writer.record(Observation.from_frame(invalid))
+            writer.record(replace(observation, observation_id=observation_id))
         assert (writer.path / "events.jsonl").read_bytes() == b""
         assert list((writer.path / "observations").iterdir()) == []
-        writer.record(Observation.from_frame(sample_frame()))
+        assert not (tmp_path / "escaped.png").exists()
+        writer.record(observation)
     finally:
         writer.close()
     reopened = ProjectWriter.open(writer.path)
     reopened.close()
 
 
-@pytest.mark.parametrize("failure", ["png_sync", "collision"])
+@pytest.mark.parametrize("failure", ["publish", "collision"])
 def test_image_failure_preserves_log_and_writer_remains_usable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -496,11 +500,11 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
                 patch.setattr(observation_module, "uuid4", lambda: UUID(first.observation_id[4:]))
             else:
 
-                def broken_sync(_descriptor: int) -> None:
-                    message = "image sync failure"
+                def broken_publish(_path: Path, _target: Path) -> Path:
+                    message = "image publish failure"
                     raise OSError(message)
 
-                patch.setattr(project.os, "fsync", broken_sync)
+                patch.setattr(Path, "rename", broken_publish)
             with pytest.raises(ProjectError):
                 writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == before
@@ -512,60 +516,42 @@ def test_image_failure_preserves_log_and_writer_remains_usable(
         writer.close()
 
 
-@pytest.mark.parametrize("failure", ["partial", "sync"])
-@pytest.mark.parametrize("kind", ["observation", "thread", "input"])
+@pytest.mark.parametrize("failure", ["partial", "close"])
 def test_uncertain_log_preserves_data_and_requires_explicit_reload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, kind: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
         writer.record(Observation.from_frame(sample_frame()))
         log = writer.path / "events.jsonl"
         before = log.read_bytes()
-        fsync = os.fsync
+        open_file = Path.open
         with monkeypatch.context() as patch:
-            if failure == "partial":
 
-                def partial_append(path: Path, row: bytes) -> None:
-                    with path.open("ab", buffering=0) as stream:
-                        stream.write(row[: len(row) // 2])
-                    message = "partial append failure"
+            @contextmanager
+            def failing_open(path: Path, mode: str, *, buffering: int) -> "Generator[BinaryIO]":
+                assert path == log
+                assert mode == "ab"
+                with open_file(path, "ab", buffering=buffering) as stream:
+                    if failure == "partial":
+                        write = stream.write
+                        patch.setattr(stream, "write", lambda row: write(row[: len(row) // 2]))
+                    yield stream
+                if failure == "close":
+                    message = "log close failure"
                     raise OSError(message)
 
-                patch.setattr(project, "_append_row", partial_append)
-            else:
-                inode = log.stat().st_ino
-
-                def broken_log_sync(descriptor: int) -> None:
-                    if os.fstat(descriptor).st_ino == inode:
-                        message = "log sync failure"
-                        raise OSError(message)
-                    fsync(descriptor)
-
-                patch.setattr(project.os, "fsync", broken_log_sync)
-            if kind == "observation":
-                append = partial(writer.record, Observation.from_frame(sample_frame()))
-            elif kind == "thread":
-                append = partial(writer.record_thread, "thread-1")
-            else:
-                append = partial(
-                    writer.record_input,
-                    OperationStarted("operation", (InputStep("wait", 1),), "thread"),
-                )
+            patch.setattr(Path, "open", failing_open)
             with pytest.raises(ProjectError, match="未確定"):
-                append()
+                writer.record(Observation.from_frame(sample_frame()))
         after = log.read_bytes()
         assert after.startswith(before)
         assert len(after) > len(before)
-        assert len(list((writer.path / "observations").glob("*.png"))) == (
-            2 if kind == "observation" else 1
-        )
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
         with pytest.raises(ProjectError, match="再読込"):
             writer.record(Observation.from_frame(sample_frame()))
         assert log.read_bytes() == after
-        assert len(list((writer.path / "observations").glob("*.png"))) == (
-            2 if kind == "observation" else 1
-        )
+        assert len(list((writer.path / "observations").glob("*.png"))) == 2
         if failure == "partial":
             with pytest.raises(ProjectError, match="行2"):
                 writer.reload()
@@ -578,18 +564,37 @@ def test_uncertain_log_preserves_data_and_requires_explicit_reload(
         writer.close()
 
 
-@pytest.mark.parametrize("invalid", ["", "  ", "\n"])
-def test_thread_record_rejects_empty_id_before_appending(tmp_path: Path, invalid: str) -> None:
+@pytest.mark.parametrize("value", [float("nan"), "unpaired-\ud800"])
+def test_row_encoding_failure_preserves_log_and_sequence(
+    tmp_path: Path, value: float | str
+) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     try:
+        writer.record_thread("thread")
+        log = writer.path / "events.jsonl"
+        before = log.read_bytes()
         with pytest.raises(ProjectError):
-            writer.record_thread(invalid)
-        assert (writer.path / "events.jsonl").read_bytes() == b""
-        writer.record_thread("opaque-runtime-id")
+            writer.record_dialogue("dialogue.final", {"text": value}, thread_id="thread")
+        assert log.read_bytes() == before
+        writer.record_dialogue("dialogue.final", {"text": "次の記録"}, thread_id="thread")
+        assert json.loads(log.read_bytes().splitlines()[-1])["sequence"] == 2
+        writer.reload()
     finally:
         writer.close()
-    reopened = ProjectWriter.open(writer.path)
-    reopened.close()
+
+
+def test_observation_row_encoding_failure_keeps_published_image(tmp_path: Path) -> None:
+    writer = ProjectWriter.create(tmp_path / "game")
+    observation = Observation.from_frame(sample_frame())
+    try:
+        with pytest.raises(ProjectError):
+            writer.record(observation, thread_id="unpaired-\ud800")
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+        assert (writer.path / "events.jsonl").read_bytes() == b""
+        writer.record_thread("thread")
+        assert json.loads((writer.path / "events.jsonl").read_bytes())["sequence"] == 1
+    finally:
+        writer.close()
 
 
 def test_memory_bootstrap_preserves_existing_memory_and_records(tmp_path: Path) -> None:

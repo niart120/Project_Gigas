@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-[契約整理](../wip/unit_054/KISS_SIMPLIFICATION.md)のうち、内部値・encoder等の追加検査縮小はM2の未実装案です。本書の現行APIと区別し、実装前に対応試験とともに見直します。
+[契約整理](../complete/unit_054/KISS_SIMPLIFICATION.md)M2ではInputState/InputStepの生成時保証を維持し、parserの重複値域検査・protocol引数、サービスの空列再検査、encoderの機器能力再検査を削除しました。機器能力は開始前にInputServiceが列全体へ確認します。
 
 [unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で入力・解除を観測・記録から分離し、会話とMCPを新しい所有分担へ結合しました。模擬app-server・機器、Qt、実HTTPの試験と、実app-server・実モデル・CH552による短い入力・停止を確認しました。GUI経由の実機操作や他機器・長時間運転とは区別し、確認範囲をunit_061第9節に記録しています。
 
@@ -44,7 +44,7 @@ U04では観測だけを接続し、U05で操作後観測を追加します。�
 
 press/waitとも正の整数ms、1要素以上の有限配列です。内部APIは入力時間・要素数・合計時間の固定上限を設けず、ループや期限なしholdを受け付けません。開始前に列全体と機器の能力を検査し、未対応ボタンや無効時間があれば最初の入力も送らず拒否します。長い待機も途中停止で残りを破棄し解除します。ゲームが1 msの押下を認識する保証ではありません。writeの完了時間にも固定上限を設けません。公開は同期MCPを使い、Codexのtool_timeout_secとGigas側のact_and_observeの待機期限を300秒にします。内部入力の上限とは分け、暗黙の分割・dynamic tool・非同期受付・ポーリングは採用しません。詳細は[08](08-sdk-compatibility.md)を参照します。
 
-外部JSONは`parse_sequence(value)`で全列の形式・共通値域・重複・反対方向・press/wait条件を検査します。任意のprotocol引数を指定すれば能力も検査できますが、製品MCPは指定せず、`InputService.start()`が現在の機器能力を列全体へ検査します。MCPは共通の入力形式を公開し、機器の接続・切替に合わせた入口の再生成を行いません。現行のInputState/InputStepの直接構築とencoderにも検査は残っており、その追加縮小はunit_054 M2で扱います。
+外部JSONは`parse_sequence(value)`が非空配列・項目・JSON型を読み取り、InputState/InputStepを生成します。共通値域・重複・反対方向・press/waitの整合は通常のコンストラクタが保証し、直接構築も同じ処理を通ります。parserはprotocolを受け取らず、`InputService.start()`が現在の機器能力を列全体へ検査します。サービスには生成済みInputStepの非空tupleを渡し、共通条件・非空条件は再検査しません。MCPは共通の入力形式を公開し、機器の接続・切替に合わせた入口の再生成を行いません。encoder・SerialInput.sendには機器適合済みのInputStateを渡し、生成後の値域や能力の再検査は行いません。
 
 入力は名前付きボタン・方向キーに加え、省略可能な左右stick（各軸整数-100〜100、右/下が正）と3DS用touch（320×240座標）を一つの完全状態として扱います。CH552/PokeCon/3DS S2/T3 New Firmwareの能力差、neutralとbyte変換、protocol別baudは[U05 M0](../complete/unit_036/INPUT_AND_STOP_DESIGN.md)で確定し、[M1](../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)で内部APIへ実装しました。COMポート名や通信bytesをCodexの引数へ含めません。期限なしhold、keyboard、3DS管理コマンドは対象外です。Bluetoothの追加時も有限列・停止とtransportの変換を分けます。GUI・MCPとの結合とシリアル実機受入はM2です。内部APIの利用方法は[入力API](../../docs/input-api.md)を参照します。
 

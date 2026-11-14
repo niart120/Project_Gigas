@@ -11,22 +11,26 @@ class InvalidSequenceError(ValueError):
     """An input sequence or state cannot be sent without changing its meaning."""
 
 
-def _integer(value: object, name: str, minimum: int, maximum: int | None = None) -> int:
+def _integer(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         message = f"{name}: 整数が必要です"
         raise InvalidSequenceError(message)
-    if value < minimum or (maximum is not None and value > maximum):
+    return value
+
+
+def _check_integer(value: object, name: str, minimum: int, maximum: int | None = None) -> None:
+    number = _integer(value, name)
+    if number < minimum or (maximum is not None and number > maximum):
         message = f"{name}: 値が範囲外です"
         raise InvalidSequenceError(message)
-    return value
 
 
 def _check_pair(value: tuple[int, int], name: str, minimum: int, xmax: int, ymax: int) -> None:
     if not isinstance(value, tuple) or len(value) != 2:
         message = f"{name}: x, yの整数タプルが必要です"
         raise InvalidSequenceError(message)
-    _integer(value[0], f"{name}.x", minimum, xmax)
-    _integer(value[1], f"{name}.y", minimum, ymax)
+    _check_integer(value[0], f"{name}.x", minimum, xmax)
+    _check_integer(value[1], f"{name}.y", minimum, ymax)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +107,7 @@ class InputStep:
 
     def __post_init__(self) -> None:
         """Validate the step's duration and input semantics."""
-        _integer(self.duration_ms, "duration_ms", 1)
+        _check_integer(self.duration_ms, "duration_ms", 1)
         if self.kind not in ("press", "wait") or not isinstance(self.state, InputState):
             message = "kind/state: pressまたはwaitと入力状態が必要です"
             raise InvalidSequenceError(message)
@@ -128,13 +132,13 @@ class InputStep:
         return value
 
 
-def _coordinates(value: object, name: str, minimum: int, xmax: int, ymax: int) -> tuple[int, int]:
+def _coordinates(value: object, name: str) -> tuple[int, int]:
     if not isinstance(value, dict) or value.keys() != {"x", "y"}:
         message = f"{name}: xとyだけを持つオブジェクトが必要です"
         raise InvalidSequenceError(message)
     return (
-        _integer(value["x"], f"{name}.x", minimum, xmax),
-        _integer(value["y"], f"{name}.y", minimum, ymax),
+        _integer(value["x"], f"{name}.x"),
+        _integer(value["y"], f"{name}.y"),
     )
 
 
@@ -151,7 +155,7 @@ def _buttons(value: object) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _step(value: object, protocol: "InputProtocol | None") -> InputStep:
+def _step(value: object) -> InputStep:
     if not isinstance(value, dict):
         message = "sequence: 各要素にはオブジェクトが必要です"
         raise InvalidSequenceError(message)
@@ -162,51 +166,41 @@ def _step(value: object, protocol: "InputProtocol | None") -> InputStep:
     if kind not in ("press", "wait") or value.keys() - allowed:
         message = "sequence: 未知の入力種別または項目があります"
         raise InvalidSequenceError(message)
-    duration = _integer(value.get("duration_ms"), "duration_ms", 1)
+    duration = _integer(value.get("duration_ms"), "duration_ms")
     if kind == "wait":
         return InputStep("wait", duration)
     state = InputState(
         buttons=_buttons(value.get("buttons", [])),
         left_stick=(
-            _coordinates(value["left_stick"], "left_stick", -100, 100, 100)
-            if "left_stick" in value
-            else (0, 0)
+            _coordinates(value["left_stick"], "left_stick") if "left_stick" in value else (0, 0)
         ),
         right_stick=(
-            _coordinates(value["right_stick"], "right_stick", -100, 100, 100)
-            if "right_stick" in value
-            else (0, 0)
+            _coordinates(value["right_stick"], "right_stick") if "right_stick" in value else (0, 0)
         ),
-        touch=(
-            _coordinates(value["touch"], "touch", 0, 319, 239)
-            if value.get("touch") is not None
-            else None
-        ),
+        touch=(_coordinates(value["touch"], "touch") if value.get("touch") is not None else None),
     )
-    if protocol is not None:
-        validate_state(state, protocol)
     return InputStep("press", duration, state)
 
 
-def parse_sequence(value: object, protocol: "InputProtocol | None" = None) -> tuple[InputStep, ...]:
-    """Validate an entire JSON sequence and return detached immutable steps.
+def parse_sequence(value: object) -> tuple[InputStep, ...]:
+    """Parse an entire JSON sequence into detached immutable steps.
+
+    InputState and InputStep construction establishes common input invariants.
+    The execution service checks device capabilities before starting any step.
 
     Args:
         value: Nonempty JSON array of press/wait objects. Generators, tuples,
             loops, unknown keys and implicit numeric conversions are rejected.
-        protocol: Selected device capabilities, applied to every state when given.
-            None checks the input format without requiring a supported device,
-            for example when reading an archived sequence.
 
     Returns:
-        Structurally valid finite steps, checked against protocol when given.
-        Durations, count and sum have no fixed limit.
+        Nonempty finite steps satisfying common invariants, without choosing a
+        device. Durations, count and sum have no fixed limit.
 
     Raises:
-        InvalidSequenceError: Any part of the sequence is invalid or unsupported.
+        InvalidSequenceError: JSON structure or a common input invariant is invalid.
             No input or other I/O occurs while parsing.
     """
     if not isinstance(value, list) or not value:
         message = "sequence: 1要素以上の有限配列が必要です"
         raise InvalidSequenceError(message)
-    return tuple(_step(item, protocol) for item in value)
+    return tuple(_step(item) for item in value)

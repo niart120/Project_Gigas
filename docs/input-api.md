@@ -1,25 +1,19 @@
 # 入力状態と操作列API
 
-`gigas.game_io.input.models.parse_sequence(value, protocol=None)` は、JSONの`sequence`配列全体を検査し、不変の`tuple[InputStep, ...]`へ変換します。protocol省略時は共通形式だけを検査し、指定時はその機器能力も検査します。製品MCPは形式検査を行い、実行時の機器能力は`InputService.start()`が列全体へ確認します。機器への送信は行いません。プロトコルは`gigas.game_io.input.config.get_protocol("ch552")`、`"pokecon"`、`"3ds"`から選びます。
+`gigas.game_io.input.models.parse_sequence(value)`は、JSONの`sequence`配列を読み、不変の`tuple[InputStep, ...]`へ変換します。各値はInputState/InputStepの構築時に共通の条件を満たします。解析時は機器を選択せず、送信もしません。実行時の機器能力は`InputService.start()`が列全体へ確認します。プロトコルは`gigas.game_io.input.config.get_protocol("ch552")`、`"pokecon"`、`"3ds"`から選びます。
 
 ```python
-from gigas.game_io.input.config import get_protocol
-from gigas.game_io.input.models import InputState, parse_sequence
-from gigas.game_io.input.protocol import encode_state
+from gigas.game_io.input.models import parse_sequence
 
-protocol = get_protocol("ch552")
 steps = parse_sequence(
     [
         {"kind": "press", "buttons": ["A"], "duration_ms": 100},
         {"kind": "wait", "duration_ms": 250},
-    ],
-    protocol,
+    ]
 )
-pressed = encode_state(steps[0].state, protocol)
-neutral = encode_state(InputState(), protocol)
 ```
 
-`press`は完全状態を保持してから解除する入力、`wait`は未押下での待機を表します。時間は正の整数ミリ秒です。配列の要素数、入力時間、合計時間の固定上限は設けません。無限生成器、期限なしhold、未知の項目、非対応ボタン、小数・文字列・boolの時間や座標は`InvalidSequenceError`で拒否します。
+`press`は完全状態を保持してから解除する入力、`wait`は未押下での待機を表します。時間は正の整数ミリ秒です。配列の要素数、入力時間、合計時間の固定上限は設けません。無限生成器、期限なしhold、未知の項目、小数・文字列・boolの時間や座標は`InvalidSequenceError`で拒否します。未知・非対応ボタンと非対応touchは、サービスの開始前検査で列全体を`INVALID_SEQUENCE`として拒否します。
 
 ボタンは重複なしの名前配列です。`UP/RIGHT/DOWN/LEFT`は隣接2方向まで同時指定でき、反対方向は拒否します。左右stickは`{"x": -100..100, "y": -100..100}`、右と下が正で、省略時は中心です。3DSのtouchは`{"x": 0..319, "y": 0..239}`、省略またはnullで解除を表し、映像の座標とは独立しています。入力のないpressは拒否します。
 
@@ -28,7 +22,9 @@ neutral = encode_state(InputState(), protocol)
 | CH552 / PokeCon | A/B/X/Y/L/R/ZL/ZR/HOME、PLUS/MINUS/LS/RS/CAPTURE、方向 | 非対応 |
 | 3DS S2/T3 New Firmware | A/B/X/Y/L/R/ZL/ZR/HOME、START/SELECT、方向 | 対応 |
 
-`InputState`は直接構築する場合も整数範囲・重複・反対方向を検査します。`encode_state`は対応入力を検査してから毎回完全なフレームを作り、以前の状態を保持しません。`InputStep.to_json()`は記録に使える独立したJSON値を返します。byte列への変換成功は実機の受信・操作・解除の確認を意味しません。
+`InputState`は直接構築する場合も、buttonsと座標の不変tuple・要素型・整数範囲・重複・反対方向を検査します。neutralを許し、touchの`(0, 0)`は接触として扱います。`InputStep`は正の整数時間、press/wait種別、InputState型、pressは入力あり・waitはneutralという整合を保証します。生成後はフィールドを変更できません。どちらの構築も機器能力は検査しません。
+
+`encode_state(state, protocol)`には、選択機器に適合する生成済みInputStateを渡します。共通条件や機器能力を再検査せず、毎回完全なフレームを作り、以前の状態を保持しません。単独利用で能力確認が必要なら`validate_state(state, protocol)`を明示的に呼べます。非対応状態を単独encoderが必ず拒否する保証はありません。`InputStep.to_json()`は記録に使える独立したJSON値を返します。byte列への変換成功は実機の受信・操作・解除の確認を意味しません。
 
 ## シリアル接続API
 
@@ -36,7 +32,7 @@ neutral = encode_state(InputState(), protocol)
 
 `gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。WindowsのCH552・9600 baudで短い操作・解除送出・画面変化を確認済みです。PokeCon・3DSの実機、他OS、通信断・長時間運転は未検証です。
 
-`SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`は完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
+`SerialInput(config)`には`resolve_serial_config()`で解決した設定を渡します。接続側は設定を再解決せず、単一workerで`await open()`を実行し、現在の一覧からport識別子が一意に一致する機器を開いてneutralを送出します。`await send(state)`にはその機器に適合する生成済みInputStateを渡し、完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
 送信の全byte数が返った場合だけ完了します。部分送出や例外は`SerialInputError`となり、自動再送・flush・ACK待ちは行いません。取消しは開始済みwriteが戻るまで回収し、その間の別の送信・closeは拒否します。保持時間の待機・停止後のneutralは操作実行側が担当します。
 
@@ -49,6 +45,7 @@ neutral = encode_state(InputState(), protocol)
 ```python
 import asyncio
 
+from gigas.game_io.input.serial import SerialInput
 from gigas.services.input import InputService, OperationResult
 
 service = InputService()
@@ -66,7 +63,7 @@ finally:
     await service.close()
 ```
 
-`start(sequence)`は同期的に受付とtask登録を行います。受理時は`(operation_id, task)`、拒否時はoperation_idのない`OperationResult`を返します。別の列が解除中まで含めて実行中なら`BUSY`、機器が使用不能なら`INPUT_DISABLED`です。待ち行列や自動再送はありません。機器能力は入力前に列全体へ確認します。
+`start(sequence)`へはparserの戻り値、または生成済みInputStepの非空tupleを渡します。サービスは共通条件や非空条件を検査し直しません。同期的に受付とtask登録を行い、受理時は`(operation_id, task)`、拒否時はoperation_idのない`OperationResult`を返します。別の列が解除中まで含めて実行中なら`BUSY`、機器が使用不能なら`INPUT_DISABLED`です。待ち行列や自動再送はありません。機器能力は入力前に列全体へ確認します。
 
 返されたtaskは`asyncio.shield`で待ちます。要求を取り消す場合は、捕捉したそのtaskが未完了かつ取消し未要求のときだけ`cancel()`し、同じtaskから送信・解除の結果を回収します。後から始まった別の操作へ取消しを送ってはいけません。開始前の取消しではtaskが`CancelledError`で終わり、入力は送られません。
 

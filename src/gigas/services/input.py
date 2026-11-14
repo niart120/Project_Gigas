@@ -184,6 +184,11 @@ class InputService:
     ) -> tuple[str, asyncio.Task[OperationResult]] | OperationResult:
         """Admit a finite sequence and register its task without yielding.
 
+        Args:
+            sequence: Nonempty tuple of constructed InputStep values. Common
+                invariants and nonemptiness are not revalidated here; every
+                state is checked against the selected device's capabilities.
+
         Returns:
             The operation ID and owned task, or an immediate rejection with no
             operation ID and no input. Await the task through shield; on request
@@ -195,8 +200,6 @@ class InputService:
             return OperationResult("INPUT_DISABLED", message="入力機器を使用できません")
         if self._operation is not None and not self._operation.done():
             return OperationResult("BUSY", message="入力操作を実行中です")
-        if not sequence:
-            return OperationResult("INVALID_SEQUENCE", message="1要素以上の入力が必要です")
         try:
             for step in sequence:
                 validate_state(step.state, device.protocol)

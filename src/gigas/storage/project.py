@@ -1,8 +1,6 @@
 """Single-owner project storage for recorded observations."""
 
 import json
-import os
-import re
 import sys
 from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime
@@ -88,8 +86,6 @@ class ProjectWriter:
                 }
                 with (path / "project.json").open("x", encoding="utf-8", newline="\n") as stream:
                     stream.write(json.dumps(metadata, ensure_ascii=False) + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
                 owner = cls(path, project_id, lock_file)
                 resources.pop_all()
                 return owner
@@ -100,6 +96,10 @@ class ProjectWriter:
     @classmethod
     def open(cls, path: Path) -> Self:
         """Open a supported project without rewriting its existing data.
+
+        The project identity must be a nonempty string. Record schema, identity,
+        sequence order, type and payload presence are checked; historical event
+        IDs, timestamps and payload contents are not revalidated.
 
         Args:
             path: Existing project directory.
@@ -188,6 +188,9 @@ class ProjectWriter:
     ) -> None:
         """Append application-selected public dialogue using the shared event envelope.
 
+        The caller owns content selection and semantic correctness. Values are
+        serialized once without revalidating dialogue fields or identifiers.
+
         Args:
             kind: Event name beginning with dialogue.; never a raw RPC method.
             content: Public fields selected by the caller, excluding secrets and drafts.
@@ -198,46 +201,37 @@ class ProjectWriter:
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: The envelope is invalid, unavailable, or cannot be appended.
+            ProjectError: Writing is unavailable, the event cannot be serialized
+                as a UTF-8 JSON row, or appending fails.
         """
         payload: dict[str, object] = {
             "thread_id": thread_id,
             "content": content,
-            "received_at": received_at or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "received_at": (
+                received_at
+                if received_at is not None
+                else datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            ),
         }
         if turn_id is not None:
             payload["turn_id"] = turn_id
         with self._operation():
             sequence = self._require_writable()
-            if not kind.startswith("dialogue.") or not kind.removeprefix("dialogue."):
-                message = "対話イベント名が不正です"
-                raise ProjectError(message)
-            try:
-                _validate_dialogue(payload)
-                json.dumps(content, allow_nan=False)
-            except (ValueError, TypeError) as error:
-                message = f"対話記録が不正です。記録していません: {error}"
-                raise ProjectError(message) from error
             self._append_event(kind, payload, sequence)
 
     def record_thread(self, thread_id: str) -> None:
         """Record a real Codex thread before its first turn is submitted.
 
         Args:
-            thread_id: Opaque runtime ID, not empty or whitespace-only.
+            thread_id: Runtime ID already adopted by the caller; not revalidated here.
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: The ID is invalid, the writer is unavailable, or appending
+            ProjectError: The writer is unavailable, JSON row encoding or appending
                 fails. Uncertain appends require an explicit successful reload.
         """
         with self._operation():
             sequence = self._require_writable()
-            try:
-                _thread_id(thread_id)
-            except (ValueError, TypeError) as error:
-                message = f"会話IDが不正です。記録していません: {error}"
-                raise ProjectError(message) from error
             self._append_event(
                 "thread.started", {"runtime": "codex", "thread_id": thread_id}, sequence
             )
@@ -250,7 +244,7 @@ class ProjectWriter:
 
         Raises:
             ProjectBusyError: Another synchronous operation owns the writer.
-            ProjectError: Writing is unavailable or appending fails.
+            ProjectError: Writing is unavailable, JSON row encoding fails, or appending fails.
         """
         with self._operation():
             sequence = self._require_writable()
@@ -263,22 +257,31 @@ class ProjectWriter:
         Args:
             observation: Immutable PNG and source metadata from Observation.from_frame.
                 The bytes are saved unchanged; this method does not encode an image.
+                Only its ID is checked to determine the fixed storage path;
+                other content is the caller's responsibility.
             thread_id: Real runtime conversation associated with this observation.
                 None means a standalone observation without a chat context.
 
         Raises:
             ProjectBusyError: A recording or reload is already running.
-            ProjectError: The owner is closed, needs reload, metadata is invalid,
-                or persistence failed. A JSONL failure disables further append
-                until a successful reload.
+            ProjectError: The owner is closed, needs reload, the image ID is invalid,
+                or persistence failed. Row encoding failure preserves the published
+                image and leaves the writer usable. JSONL I/O failure disables
+                further append until a successful reload.
         """
         with self._operation():
             sequence = self._require_writable()
+            try:
+                observation_id = _identifier(observation.observation_id, "obs-")
+            except ValueError as error:
+                message = f"観測画像の保存先IDが不正です: {error}"
+                raise ProjectError(message) from error
+            image_path = f"observations/{observation_id}.png"
             frame = observation.source_frame
             payload: dict[str, object] = {
-                "observation_id": observation.observation_id,
+                "observation_id": observation_id,
                 "captured_at": observation.captured_at.isoformat().replace("+00:00", "Z"),
-                "image_path": observation.image_path,
+                "image_path": image_path,
                 "image": {
                     "mime_type": observation.mime_type,
                     "width": observation.width,
@@ -294,12 +297,7 @@ class ProjectWriter:
             if thread_id is not None:
                 payload["thread_id"] = thread_id
             try:
-                _validate_observation(payload)
-            except (ValueError, TypeError) as error:
-                message = f"観測項目が不正です。記録していません: {error}"
-                raise ProjectError(message) from error
-            try:
-                _publish_image(self.path / observation.image_path, observation.png_bytes)
+                _publish_image(self.path / image_path, observation.png_bytes)
             except OSError as error:
                 message = f"{self.path}: 観測画像の保存失敗: {error}"
                 raise ProjectError(message) from error
@@ -313,7 +311,7 @@ class ProjectWriter:
         return self._next_sequence
 
     def _append_event(self, kind: str, payload: dict[str, object], sequence: int) -> None:
-        # Caller owns _operation and has validated this record before any writes.
+        # Caller owns _operation; serialize before touching the JSONL file.
         event = {
             "schema_version": 1,
             "event_id": f"evt-{uuid4()}",
@@ -323,7 +321,11 @@ class ProjectWriter:
             "project_id": self.project_id,
             "payload": payload,
         }
-        row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        try:
+            row = (json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        except (TypeError, ValueError) as error:
+            message = f"{self.path}: 記録をUTF-8のJSON行へ変換できません: {error}"
+            raise ProjectError(message) from error
         try:
             _append_row(self.path / "events.jsonl", row)
         except OSError as error:
@@ -374,8 +376,6 @@ def _publish_image(path: Path, data: bytes) -> None:
         ) as stream:
             temporary = Path(stream.name)
             stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
         temporary.rename(path)  # Windows rename refuses an existing destination.
     finally:
         if temporary is not None:
@@ -388,8 +388,6 @@ def _append_row(path: Path, row: bytes) -> None:
         if stream.write(row) != len(row):
             message = "JSONLへの書込が途中で終了しました"
             raise OSError(message)
-        stream.flush()
-        os.fsync(stream.fileno())
 
 
 def _reject_constant(value: str) -> None:
@@ -415,17 +413,6 @@ def _identifier(value: object, prefix: str) -> str:
     return value
 
 
-def _timestamp(value: object) -> None:
-    if (
-        not isinstance(value, str)
-        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z", value)
-        is None
-        or datetime.fromisoformat(value).tzinfo != UTC
-    ):
-        message = "UTCのRFC 3339時刻が必要です"
-        raise ValueError(message)
-
-
 def _positive(value: object) -> int:
     if type(value) is not int or value <= 0:
         message = "正整数が必要です"
@@ -446,8 +433,10 @@ def _read_metadata(path: Path) -> str:
         )
     )
     _version(metadata.get("schema_version"))
-    project_id = _identifier(metadata.get("project_id"), "project-")
-    _timestamp(metadata.get("created_at"))
+    project_id = metadata.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        message = "空でないproject_idが必要です"
+        raise ValueError(message)
     if not (path / "observations").is_dir():
         message = "observationsディレクトリがありません"
         raise ValueError(message)
@@ -484,8 +473,6 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         raise ValueError(message)
     record = _object(json.loads(raw.decode("utf-8"), parse_constant=_reject_constant))
     _version(record.get("schema_version"))
-    _identifier(record.get("event_id"), "evt-")
-    _timestamp(record.get("occurred_at"))
     sequence = _positive(record.get("sequence"))
     kind = record.get("type")
     if (
@@ -498,42 +485,3 @@ def _read_record(raw: bytes, project_id: str, previous: int) -> int:
         message = "イベント共通項目または追記順が不正です"
         raise ValueError(message)
     return sequence
-
-
-def _validate_dialogue(value: object) -> None:
-    payload = _object(value)
-    _thread_id(payload.get("thread_id"))
-    _timestamp(payload.get("received_at"))
-    if "turn_id" in payload:
-        _thread_id(payload["turn_id"])
-    _object(payload.get("content"))
-
-
-def _validate_observation(value: object) -> None:
-    payload = _object(value)
-    if "thread_id" in payload:
-        _thread_id(payload["thread_id"])
-    observation_id = _identifier(payload.get("observation_id"), "obs-")
-    _timestamp(payload.get("captured_at"))
-    if payload.get("image_path") != f"observations/{observation_id}.png":
-        message = "観測画像パスが不正です"
-        raise ValueError(message)
-    frame = _object(payload.get("source_frame"))
-    _positive(frame.get("generation"))
-    _positive(frame.get("sequence"))
-    width, height = _positive(frame.get("width")), _positive(frame.get("height"))
-    if not (16 <= width <= 3840 and 16 <= height <= 2160):
-        message = "観測画像寸法が範囲外です"
-        raise ValueError(message)
-    image = _object(payload.get("image"))
-    image_width = _positive(image.get("width"))
-    image_height = _positive(image.get("height"))
-    if image.get("mime_type") != "image/png" or image_width > width or image_height > height:
-        message = "観測出力画像の形式または寸法が不正です"
-        raise ValueError(message)
-
-
-def _thread_id(value: object) -> None:
-    if not isinstance(value, str) or not value.strip():
-        message = "空でないthread_idが必要です"
-        raise ValueError(message)

@@ -264,6 +264,11 @@ def test_same_endpoint_uses_current_device_capabilities(io_harness: Harness) -> 
             {"kind": "press", "touch": {"x": 1, "y": 2}, "duration_ms": 1},
         ],
         [{"kind": "press", "buttons": ["A"], "duration_ms": True}],
+        [
+            {"kind": "press", "buttons": ["A"], "duration_ms": 1},
+            {"kind": "press", "left_stick": {"x": 101, "y": 0}, "duration_ms": 1},
+        ],
+        [],
     ],
 )
 def test_http_invalid_sequence_sends_no_input(io_harness: Harness, sequence: object) -> None:

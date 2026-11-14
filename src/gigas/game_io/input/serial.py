@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol
 import serial
 from serial.tools import list_ports
 
-from gigas.game_io.input.config import resolve_serial_config
 from gigas.game_io.input.models import InputState
 from gigas.game_io.input.protocol import encode_state
 
@@ -59,7 +58,6 @@ def list_serial_ports() -> tuple[SerialPort, ...]:
 
 
 def _open_native(config: "SerialConfig") -> SerialConnection:
-    resolve_serial_config(config.port, config.protocol.key, config.baudrate)
     if sum(port.identifier == config.port for port in list_serial_ports()) != 1:
         message = f"選択したシリアルポートが一意に見つかりません: {config.port}"
         raise SerialInputError(message)
@@ -130,10 +128,13 @@ class SerialInput:
     async def send(self, state: InputState) -> None:
         """Encode and send one full state, with no retry or flush.
 
+        Args:
+            state: Constructed InputState compatible with this connection's
+                fixed protocol. The caller checks capabilities before execution.
+
         Raises:
             SerialInputError: The port is unavailable, busy, or the write fails
                 or returns a partial byte count. Partial delivery is possible.
-            InvalidSequenceError: The state is unsupported by this protocol.
         """
         data = encode_state(state, self.protocol)
         await self._call(lambda: self._write(data))

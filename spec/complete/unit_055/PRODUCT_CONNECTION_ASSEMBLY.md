@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete（製品実装・局所検証・review完了、実装commit `6d10407`）**。[整理親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止した。2026-11-13にユーザーがM0案とM1の実行を承認した。M1全体の実接続・実機受入は親の後続作業に残る。
+状態: **complete（製品実装・局所検証・review完了、実装commit `6d10407`）**。[整理親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)のM1最初の子作業として、製品で使用していない単独read-only接続の保証を廃止した。2026-11-13にユーザーがM0案とM1の実行を承認した。M1全体の実接続・実機受入は親の後続作業に残る。
 
 Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した原記録先の`memory/`だけをCodexの書込対象にする。コールバック省略時の起動cwd利用、memoryなしのread-only送信、二回目の準備省略は提供しない。
 
@@ -18,7 +18,7 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 
 ## 4. 関連文書・着手条件
 
-- [親の採用設計](../../wip/unit_054/KISS_SIMPLIFICATION.md)
+- [親の採用設計](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [実行管理](../../initial/02-runtime.md)
 - [記録とmemory](../../initial/04-agent-memory.md)
 - [接続API](../../../docs/codex.md)

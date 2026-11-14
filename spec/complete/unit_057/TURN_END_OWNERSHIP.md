@@ -10,7 +10,7 @@
 
 | source | 内容 | path |
 |---|---|---|
-| 承認済み親仕様 | 停止のローカル受付、終端後一回回収、切断、状態寿命 | [unit054](../../wip/unit_054/KISS_SIMPLIFICATION.md) |
+| 承認済み親仕様 | 停止のローカル受付、終端後一回回収、切断、状態寿命 | [unit054](../../complete/unit_054/KISS_SIMPLIFICATION.md) |
 | 先行子 | 製品準備必須化、通知採用元と表示締切 | [unit055](../../complete/unit_055/PRODUCT_CONNECTION_ASSEMBLY.md)、[unit056](../../complete/unit_056/TURN_NOTIFICATION_LIFETIME.md) |
 
 ### 1.3 use case

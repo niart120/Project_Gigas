@@ -112,13 +112,17 @@ async def close_project(
 
 `open()`と`reload()`は管理情報とJSONLを検査します。未知のイベント種別や余剰項目は共通形式が正常なら保持し、連番の欠番も許容します。次の記録は最後のsequenceに1を加えて追記します。過去の画像を全件読み込む検査はせず、過去画像の欠損だけでは新規記録を拒否しません。
 
+管理情報のproject IDは非空文字列なら読み込めます。JSONLでは対応schema・同じproject ID・bool以外の正整数で増加するsequence・非空文字列のtype・payloadキーを要求します。管理情報の作成時刻とイベントのID・発生時刻は、欠落や型違いでも読込拒否の条件にしません。新しく生成するID・時刻の形式は変わりません。
+
 未知のスキーマ版、不正なUTF-8・JSON・共通項目・追記順、改行で終わらない末尾行は読込失敗になります。payloadは意味を再検査せず、過去の入力列・画像パス・旧イベントも値のまま保持します。JSONLでは問題行と、その前の正常に読めた行数をエラーに示します。原本の切り詰め、自動修復、不完全なプロジェクトの再初期化は行いません。
 
 ## 会話と観測の対応
 
 `writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにturnまたはGoalの要求へ進みます。失敗は既存の通知へ残し、入力の受付とは分離します。
 
-`writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
+`writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。会話IDは呼出側で採用した値を渡し、writerは空白や実在・帰属を検査し直しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
+
+対話・観測・入力の内容は呼出側の責任で組み立てます。writerはID・時刻・寸法などの内容を再検査せず、イベント全体を一度だけJSON化します。任意の不正値を必ず拒否する保証はありません。画像の書込先だけは`obs-UUID4`のIDを確認して`observations/<ID>.png`へ固定し、保存先と記録するパスを一致させます。PNGの再符号化・再デコードは行いません。
 
 ## 入力の開始・結果を記録する
 
@@ -143,7 +147,8 @@ async def close_project(
 |---|---|
 | PNG符号化の失敗 | 観測が失敗します。画像とJSONLは書きません |
 | 画像保存の失敗 | 観測成功は変えず、保存失敗を通知します。JSONLへまだ触れていないため、writerは引き続き使用できます |
-| JSONLの追記・flush・fsyncの失敗 | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
+| 記録のJSON化・UTF-8変換の失敗 | `ProjectError`を報告し、JSONLと次のsequenceを変えません。writerは引き続き使用でき、公開済み画像は残ります |
+| JSONLのopen・write・closeの失敗、短いwrite | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
 | 保存完了後の要求取消し | 観測記録は保持します。保存成功を応答配送の成功とは扱いません |
 
 観測エラーの`code`は`DEVICE_UNAVAILABLE`、`BUSY`、`OBSERVATION_ENCODING_ERROR`です。作成・読込・保存の失敗は`ProjectError`、同期処理中の二重書込・再読込・終了はその派生型`ProjectBusyError`です。エラー後の自動再試行はありません。
@@ -152,6 +157,4 @@ async def close_project(
 
 このロックは、画像・ログの読取や別ファイルの`memory/`編集を禁止するものではありません。対話記録も同じアプリ所有writerを使い、MCPや通知処理がそれぞれ別writerを開く構成にはしません。アプリのCodex接続は`memory/`だけを書込先にしたworkspace-writeで動作します。原記録はアプリが書き込み、Codexへは読取用に渡します。接続条件と確認範囲は[Codex接続API](codex.md)を参照してください。
 
-画像は同じディレクトリの一時ファイルへ書き込み、flush・fsync後、既存画像を上書きせず確定します。その後にJSONLへ追記・flush・fsyncします。電源断時にも画像とログが必ず一括で更新される保証はありません。
-
-事後観測の`thread_id`には受付済みrunの会話IDを渡します。単独観測用の`service.thread_id`を書き換えず、操作に対応する記録文脈を保持します。入力記録の再読込は共通入力形式を検査し、現在の通信機器で実行できるかは検査しません。
+metadata・画像・JSONLは通常のwrite/closeで保存を終え、明示flush/fsyncによる安定記憶への同期は行いません。画像は同じディレクトリの一時ファイルをcloseしてから既存画像を上書きせず確定し、その後にJSONLへ追記します。異常終了・電源断では直近の画像や記録が欠ける場合があり、画像とログの一括更新も保証しません。

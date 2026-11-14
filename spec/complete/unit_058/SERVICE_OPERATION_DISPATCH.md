@@ -10,7 +10,7 @@
 
 | source | 内容 | path |
 |---|---|---|
-| user request | KISS に沿った契約削減と責務整理 | [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md) |
+| user request | KISS に沿った契約削減と責務整理 | [親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md) |
 | preceding unit | 停止の受付結果、終了の単一所有 | [unit057](../../complete/unit_057/TURN_END_OWNERSHIP.md) |
 
 ### 1.3 use case
@@ -35,7 +35,7 @@
 
 ## 4. 関連 docs
 
-- [親仕様](../../wip/unit_054/KISS_SIMPLIFICATION.md)
+- [親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [Codex 利用手順](../../../docs/codex.md)
 - [品質規約](../../initial/README.md)
 

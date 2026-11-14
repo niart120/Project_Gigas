@@ -1,7 +1,9 @@
+from dataclasses import FrozenInstanceError, replace
+
 import pytest
 
 from gigas.game_io.input.config import get_protocol
-from gigas.game_io.input.models import InputState, InvalidSequenceError, parse_sequence
+from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, parse_sequence
 from gigas.game_io.input.protocol import encode_state
 
 
@@ -38,7 +40,6 @@ def test_switch_protocols_encode_complete_simultaneous_input(
                 "duration_ms": 100,
             }
         ],
-        selected,
     )
     assert encode_state(steps[0].state, selected) == expected
     # Encoding another full state must not retain the previous buttons or sticks.
@@ -62,7 +63,6 @@ def test_3ds_encodes_buttons_directions_sticks_and_touch_together() -> None:
                 "touch": {"x": 319, "y": 239},
             }
         ],
-        selected,
     )[0]
     assert encode_state(step.state, selected) == bytes.fromhex(
         "A1 1C 08 A2 C0 3F A4 00 7F B2 01 01 3F EF"
@@ -115,34 +115,92 @@ def test_hat_directions(buttons: tuple[str, ...], hat: int, three_ds_bits: int) 
 
 def test_sequence_is_detached_immutable_and_serializable() -> None:
     buttons = ["A"]
+    axes = {"x": 10, "y": -10}
     payload = [
-        {"kind": "press", "buttons": buttons, "duration_ms": 100},
+        {"kind": "press", "buttons": buttons, "left_stick": axes, "duration_ms": 100},
         {"kind": "wait", "duration_ms": 200},
     ]
-    steps = parse_sequence(payload, get_protocol("ch552"))
+    steps = parse_sequence(payload)
     buttons.append("B")
+    axes["x"] = 99
     assert steps[0].state.buttons == ("A",)
     assert steps[1].state == InputState()
     assert [step.to_json() for step in steps] == [
-        {"kind": "press", "buttons": ["A"], "duration_ms": 100},
+        {"kind": "press", "buttons": ["A"], "left_stick": {"x": 10, "y": -10}, "duration_ms": 100},
         {"kind": "wait", "duration_ms": 200},
     ]
+    for instance, field, value in (
+        (steps[0], "duration_ms", 1),
+        (steps[0].state, "buttons", ("B",)),
+    ):
+        with pytest.raises(FrozenInstanceError):
+            setattr(instance, field, value)
 
 
 def test_sequence_structure_is_independent_of_selected_capabilities() -> None:
     payload = [{"kind": "press", "buttons": ["START"], "duration_ms": 100}]
     steps = parse_sequence(payload)
     assert steps[0].state.buttons == ("START",)
-    assert parse_sequence(payload, get_protocol("3ds")) == steps
+
+
+def test_generated_states_allow_neutral_touch_origin_and_device_specific_buttons() -> None:
+    assert InputStep("wait", 1, InputState()).to_json() == {"kind": "wait", "duration_ms": 1}
+    step = InputStep(
+        "press", 1, InputState(buttons=("FUTURE_BUTTON",), left_stick=(-100, 100), touch=(0, 0))
+    )
+    assert step.to_json() == {
+        "kind": "press",
+        "duration_ms": 1,
+        "buttons": ["FUTURE_BUTTON"],
+        "left_stick": {"x": -100, "y": 100},
+        "touch": {"x": 0, "y": 0},
+    }
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"buttons": ["A"]},
+        {"buttons": (True,)},
+        {"buttons": ("A", "A")},
+        {"buttons": ("UP", "DOWN")},
+        {"buttons": ("LEFT", "RIGHT")},
+        {"left_stick": (-101, 0)},
+        {"left_stick": (101, 0)},
+        {"left_stick": (True, 0)},
+        {"left_stick": (1,)},
+        {"left_stick": [0, 0]},
+        {"right_stick": (0, 0.5)},
+        {"touch": (320, 0)},
+        {"touch": (0, 240)},
+        {"touch": (-1, 0)},
+        {"touch": (0, False)},
+        {"touch": [0, 0]},
+    ],
+)
+def test_state_construction_rejects_invalid_values(changes: dict[str, object]) -> None:
     with pytest.raises(InvalidSequenceError):
-        parse_sequence(payload, get_protocol("ch552"))
+        replace(InputState(), **changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"kind": "hold"},
+        {"kind": "press"},
+        {"state": None},
+        {"state": {}},
+        {"state": InputState(buttons=("A",))},
+    ],
+)
+def test_step_construction_rejects_invalid_kind_and_state(changes: dict[str, object]) -> None:
     with pytest.raises(InvalidSequenceError):
-        parse_sequence([{"kind": "press", "duration_ms": 100}])
+        replace(InputStep("wait", 1), **changes)
 
 
 def test_long_finite_sequence_and_durations_have_no_fixed_limits() -> None:
     raw = [{"kind": "wait", "duration_ms": 10**100}] * 10001
-    steps = parse_sequence(raw, get_protocol("ch552"))
+    steps = parse_sequence(raw)
     assert len(steps) == 10001
     assert steps[-1].duration_ms == 10**100
 
@@ -150,13 +208,13 @@ def test_long_finite_sequence_and_durations_have_no_fixed_limits() -> None:
 @pytest.mark.parametrize("value", [None, [], {}, (), "wait", iter([1])])
 def test_sequence_requires_a_nonempty_finite_array(value: object) -> None:
     with pytest.raises(InvalidSequenceError):
-        parse_sequence(value, get_protocol("ch552"))
+        parse_sequence(value)
 
 
 @pytest.mark.parametrize("duration", [True, False, 1.0, "1", 0, -1, None])
 def test_duration_is_a_positive_integer(duration: object) -> None:
     with pytest.raises(InvalidSequenceError):
-        parse_sequence([{"kind": "wait", "duration_ms": duration}], get_protocol("ch552"))
+        replace(InputStep("wait", 1), duration_ms=duration)
 
 
 @pytest.mark.parametrize(
@@ -166,58 +224,14 @@ def test_duration_is_a_positive_integer(duration: object) -> None:
         {"kind": "hold", "duration_ms": 1},
         {"kind": "wait", "duration_ms": 1, "buttons": []},
         {"kind": "press", "duration_ms": 1},
-        {"kind": "press", "duration_ms": 1, "buttons": ["A", "A"]},
-        {"kind": "press", "duration_ms": 1, "buttons": ["UP", "DOWN"]},
-        {"kind": "press", "duration_ms": 1, "buttons": ["LEFT", "RIGHT"]},
         {"kind": "press", "duration_ms": 1, "buttons": "A"},
         {"kind": "press", "duration_ms": 1, "buttons": [True]},
-        {"kind": "press", "duration_ms": 1, "buttons": ["SL"]},
-        {"kind": "press", "duration_ms": 1, "buttons": ["START"]},
         {"kind": "press", "duration_ms": 1, "buttons": ["A"], "port": "COM3"},
         {"kind": "press", "duration_ms": 1, "buttons": ["A"], "left_stick": {"x": 0}},
-        {"kind": "press", "duration_ms": 1, "left_stick": {"x": 0, "y": 0}},
-        {"kind": "press", "duration_ms": 1, "left_stick": {"x": 101, "y": 0}},
-        {"kind": "press", "duration_ms": 1, "left_stick": {"x": True, "y": 0}},
-        {"kind": "press", "duration_ms": 1, "right_stick": {"x": 0.5, "y": 0}},
         {"kind": "press", "duration_ms": 1, "right_stick": {"x": 1, "y": 0, "z": 0}},
-        {"kind": "press", "duration_ms": 1, "touch": {"x": 1, "y": 1}},
+        {"kind": "press", "duration_ms": 1, "touch": [1, 2]},
     ],
 )
 def test_whole_sequence_rejects_invalid_later_input(invalid: object) -> None:
     with pytest.raises(InvalidSequenceError):
-        parse_sequence(
-            [{"kind": "press", "buttons": ["A"], "duration_ms": 1}, invalid], get_protocol("ch552")
-        )
-
-
-@pytest.mark.parametrize(
-    "touch",
-    [
-        {"x": 320, "y": 0},
-        {"x": 0, "y": 240},
-        {"x": -1, "y": 0},
-        {"x": 1, "y": False},
-        {"x": 1, "y": "2"},
-        {"x": 1},
-        [1, 2],
-    ],
-)
-def test_touch_coordinates_are_strict(touch: object) -> None:
-    with pytest.raises(InvalidSequenceError):
-        parse_sequence([{"kind": "press", "duration_ms": 1, "touch": touch}], get_protocol("3ds"))
-
-
-@pytest.mark.parametrize("protocol", ["ch552", "pokecon"])
-def test_direct_state_encoding_rejects_unsupported_touch(protocol: str) -> None:
-    with pytest.raises(InvalidSequenceError):
-        encode_state(InputState(touch=(1, 1)), get_protocol(protocol))
-
-
-def test_direct_state_encoding_rejects_other_console_button() -> None:
-    with pytest.raises(InvalidSequenceError):
-        encode_state(InputState(buttons=("PLUS",)), get_protocol("3ds"))
-
-
-def test_direct_state_rejects_out_of_range_coordinates() -> None:
-    with pytest.raises(InvalidSequenceError):
-        encode_state(InputState(left_stick=(-101, 0)), get_protocol("ch552"))
+        parse_sequence([{"kind": "press", "buttons": ["A"], "duration_ms": 1}, invalid])
