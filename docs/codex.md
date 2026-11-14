@@ -83,7 +83,9 @@ Goalのcomplete・paused・blocked・制限状態、turnの自然終了・失敗
 
 ## 制約と検証範囲
 
-`codex_home`を指定すると認証・履歴の保存先を分離できます。資格情報をその場所へコピーしません。プロセスのcwdは絶対パスの既存フォルダーを指定し、開発リポジトリから分けてください。
+GIGASアプリはsettings.tomlと同じディレクトリの`codex_home`を使います。既定配置は`%LOCALAPPDATA%/GIGAS/codex_home`です。普段のCodexの認証・設定・会話・記憶は引き継がず、GIGASの認証操作からログインします。起動だけではCodexへ接続しません。
+
+部品として`create_connection`を使う場合は`codex_home`で保存先を指定できます。省略時はCodexの標準homeを使います。資格情報をその場所へコピーしません。プロセスのcwdはhomeとは別に絶対パスの既存フォルダーを指定し、開発リポジトリから分けてください。
 
 標準入出力のJSON一行は末尾改行を含め受信2 MiB、送信1 MiBまでです。MCP画像はHTTP応答で配送し、stdioのpreviewから元画像を復元しません。
 

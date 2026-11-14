@@ -1,0 +1,23 @@
+{
+  "runtime_package_version": "0.167.0",
+  "factory": "gigas.runtime.codex.launch.create_connection",
+  "home_initially_absent": true,
+  "credential_copy": false,
+  "login_requested": false,
+  "thread_created": false,
+  "model_inference_requested": false,
+  "game_device_used": false,
+  "home_created_by_factory": true,
+  "open_returned": true,
+  "phase_after_open": "login_required",
+  "authenticated": false,
+  "selection_available": true,
+  "phase_after_close": "closed",
+  "phases": [
+    "connecting",
+    "login_required",
+    "closed"
+  ],
+  "auth_file_created": false,
+  "success": true
+}

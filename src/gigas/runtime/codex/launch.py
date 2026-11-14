@@ -27,13 +27,15 @@ def create_connection(
     Args:
         options: Runtime working directory and model/authentication preferences.
         emit: Fast synchronous callback receiving connection facts and conversation RPC events.
-        codex_home: Optional isolated runtime home. None preserves the runtime default.
+        codex_home: Optional isolated runtime home, created here if absent.
+            None preserves the runtime default. Existing credentials are not copied.
 
     Returns:
         A connection whose open method launches the pinned app-server.
 
     Raises:
         FileNotFoundError: The installed runtime package is incomplete.
+        OSError: The explicit runtime home cannot be created as a directory.
     """
     command = [str(bundled_codex_path())]
     for override in (
@@ -54,6 +56,7 @@ def create_connection(
     command.extend(["app-server", "--listen", "stdio://"])
     env: dict[str, str] = {}
     if codex_home is not None:
+        codex_home.mkdir(parents=True, exist_ok=True)
         env["CODEX_HOME"] = str(codex_home)
     path_dir = bundled_path_dir()
     if path_dir is not None:

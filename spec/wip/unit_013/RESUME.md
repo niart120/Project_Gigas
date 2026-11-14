@@ -4,7 +4,7 @@
 
 Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し、新規プレイと既存会話からの継続をGIGASの画面から扱えるようにする。GIGASはゲームI/Oと人間の介入を担い、既存会話を現在の機器・MCP・記録先へ接続する。独自ログから会話やGoalを復元する工程にはしない。
 
-状態: **wip（M0の調査・設計完了、製品実装は未着手）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。製品実装・受入は未着手である。親工程はM0の完了だけでは完了しない。
+状態: **wip（M0完了、M1実装中）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。M1は[専用home・設定・管理API](../unit_069/MANAGEMENT_API.md)で実装中。M2以降と製品全体の受入は未着手である。親工程はM0の完了だけでは完了しない。
 
 作業規約は[AGENTS.md](../../../AGENTS.md)と[配置・運用](../../initial/06-repository.md)に従う。攻略補助は実プレイで不足を観測してから検討する。
 

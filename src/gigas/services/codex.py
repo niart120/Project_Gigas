@@ -3,6 +3,7 @@
 import asyncio
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from threading import Lock
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
@@ -180,7 +181,8 @@ class CodexServiceThread(QThread):
         factory: Creates the runtime on the service loop when connecting.
             The conversation directory is prepared on the first send.
             Receives options and the synchronous runtime event callback.
-            The default creates the bundled runtime connection.
+            None creates the bundled runtime using data_root/codex_home, without
+            copying credentials or inheriting the developer's runtime home.
     """
 
     received = Signal(object)
@@ -194,7 +196,7 @@ class CodexServiceThread(QThread):
         self,
         data_root: "Path",
         reader: "CaptureReader",
-        factory: ConnectionFactory = create_connection,
+        factory: ConnectionFactory | None = None,
         *,
         input_factory: "Callable[[SerialConfig], InputDevice]" = SerialInput,
     ) -> None:
@@ -203,7 +205,11 @@ class CodexServiceThread(QThread):
         self._recording_operation: ContextVar[_OperationContext | None] = ContextVar(
             "gigas_operation", default=None
         )
-        self._factory = factory
+        self._factory = (
+            partial(create_connection, codex_home=data_root / "codex_home")
+            if factory is None
+            else factory
+        )
         self._input_factory = input_factory
         self._input = InputService()
         self._input_config: SerialConfig | None = None
