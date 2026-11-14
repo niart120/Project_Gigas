@@ -2,7 +2,7 @@
 
 Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイムを使用します。Python SDKは使用せず、公開app-serverプロトコルの標準入出力で接続します。Goalによるターンの開始・継続はapp-serverへ任せ、GIGASは指示の配送、公開情報の表示・記録、機器操作、明示停止を担当します。
 
-認証情報はCodexランタイムが管理します。既定では標準のCodex homeに保存されたChatGPT認証を利用し、GIGASの設定へ資格情報を保存しません。APIキー認証は未対応です。切断はログアウトではありません。
+認証情報はCodexランタイムが管理します。GIGASアプリは専用のcodex_homeでChatGPTへログインし、GIGASのsettings.tomlへ資格情報を保存しません。APIキー認証は未対応です。切断はログアウトではありません。
 
 モデルと推論レベルは接続時のモデル一覧に照合します。空欄は一覧の既定値を使い、無効な値を別の候補へ自動変更しません。無効な既定値でも接続・ログインを維持し、入力欄から選び直せます。有効な選択まで送信・Goal操作はできません。モデル一覧の取得失敗では診断を確認し、明示的に切断・再接続してください。
 
@@ -21,6 +21,22 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 `SessionStatus`は接続・認証の状態で、phaseは`connecting / login_required / authenticating / ready / error / closed`です。`ConversationStatus(thread_id, turn_id, goal, sending, stopping, waiting_for_answer)`は会話実行が保持するサーバー情報と処理中taskの投影です。送信、停止、回答待ちを接続phaseへ混ぜず、表示側に独立した実行状態機械を持ちません。
 
 `AccountInfo`は公開アカウント情報、`UsageEvent`は利用枠の取得結果です。`available`は直近取得の成否、`ordinary_usage_allowed`は公開された通常利用の可否です。背景取得taskは接続側が回収し、部分通知から値を推測せず情報を再取得します。これらは表示情報であり、会話の受付条件には使いません。
+
+## Project管理API
+
+`gigas.runtime.codex.management.CodexManagement(connection)`は、開いている`CodexConnection`を通してProjectを作成・一覧・取得します。接続の終了は呼出し側が担当します。管理操作はモデルの選択やWindows実行環境の準備を要求せず、threadの開始・resume、MCPや記録部品の準備を行いません。
+
+| メソッド | 入力と結果 |
+| --- | --- |
+| `create_project(name, root, *, idempotency_key)` | 呼出し側が決めた作成操作のキーと絶対パスの`Path`を渡し、`ProjectInfo`を取得する |
+| `list_projects(*, cursor=None, limit=None)` | サーバー順の1ページを`ProjectPage`として取得する。省略した値はサーバーの既定値を使う |
+| `read_project(project_id)` | 指定IDの最新の`ProjectInfo`を取得する |
+
+`ProjectInfo`は`id`、`name`、`root: Path`を持ちます。作業フォルダーは1件に限り、複数rootsのProjectは対応対象外です。フォルダーの作成・選択・存在確認は呼出し側が行います。管理APIはディレクトリを作成せず、Projectの位置や一覧を別途保存しません。
+
+`ProjectPage.projects`は`ProjectInfo`のtuple、`next_cursor`は次ページ用の文字列または`None`です。cursorの内容は解析せず、次の`list_projects(cursor=page.next_cursor)`へそのまま渡します。ページの自動取得・キャッシュ・失敗時の自動再送は行いません。
+
+相対rootの入力は`ValueError`、不正な応答や非対応のrootsは`CodexConnectionError`です。接続が閉じている場合も`CodexConnectionError`になります。通信失敗・サーバー拒否は既存の`TransportError`・`RpcError`として伝えます。
 
 ## 実行環境と初回準備
 

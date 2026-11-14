@@ -38,7 +38,7 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 |---|---|---|---|---|
 | refactor-skipped | I1: 既定サービス接続はGIGAS専用homeを使い、接続前は作成せず、開発用homeを変更しない | new | integration | 起動・終了と既存接続の回帰を確認、70bc1f7 |
 | refactor-skipped | I2: Web・記憶・承認者の既定値、保存往復、不正値拒否、他設定の保持 | new | unit/integration | UIと実行への適用はM3/M5。red10→関連70件green、全814件green |
-| todo | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | schema照合、管理部品として実装 |
+| refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、commit待ち |
 | todo | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | cursorと公開履歴の境界型 |
 | todo | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 選択対象とのUI結合はM4/M5 |
 | todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | 実接続・認証は模擬試験と区別 |
@@ -58,6 +58,12 @@ I1の構造確認はrefactor-skipped。専用homeは既存factoryへpartialで�
 I1の全unitは349 passed、全integrationは455 passed。全体ruffではM0の既存調査資材に53件の違反があり、別の資材修正として解消済み。全体ruff・format・tyも成功。I1の製品・テスト・調査資材のruff、全体format、tyは成功。実機入力はM1のAPI確認には不要。M7でUSB Video Device・COM8を使えることはユーザー承認済み。
 
 I2: Web・記憶の既定ON、承認者auto_review/userをSettingsとTOMLへ追加。新規10件は未実装フィールドと不正値未検査でred、既存設定・アプリ設定を含む70件がgreen。構造確認はrefactor-skipped（既存bool検査を項目名付きへ一般化して共用し、永続化へruntimeや記憶削除を持ち込んでいない）。独立レビューで修正必須指摘なし。全体ruff・format・tyとbuildは成功。全unit/integrationの814件成功後、並走させた追加試験が共通basetempと競合したため、pytestを直列化して全814件を再実行し、63.74秒・終了コード0で確認した。
+
+I3: `CodexManagement`と不変の`ProjectInfo`・`ProjectPage`を追加。採用版schemaの`idempotencyKey`、`roots=[{path: ...}]`、`projectId`、`data`と`nextCursor`に照合した。`uv run pytest tests/unit/test_codex_management.py --basetemp=tmp/pytest-m1-projects -q`は管理モジュール未実装によるcollection errorでred、実装後19 passed。未認証・無効モデル・Sandbox未準備でも管理要求を配送し、相対root、不正応答、複数roots、RPC拒否を検査した。
+
+I3の構造確認はrefactor-skipped。管理部品は既存の接続requestとProject応答変換だけを所有し、ファイル作成・選択状態・位置台帳・再試行を持たない。create/readで同じ応答変換を共用し、接続・会話実行・サービスへ管理責務を追加していない。`uv run pytest tests/unit/test_codex_management.py tests/unit/test_codex_connection.py --basetemp=tmp/pytest-m1-projects -q`は65 passed。全unitは368 passed、全体ruff・format・ty、実runtimeプローブのty、build・差分検査も成功。公開型とGoogle形式docstring、`docs/codex.md`の入力・戻り値・例外を照合した。
+
+I3の[実runtimeプローブ](assets/probe_projects.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_projects.py --output-root tmp/u08-m1-projects-20261114-01 --result spec/wip/unit_069/assets/probe-projects-result.json`で実行し、終了コード0。[結果](assets/probe-projects-result.json)は製品APIによるProject作成・一覧・read、再起動後のID・名前・rootの保持、未認証と両接続の正常終了を示す。新規の隔離homeを使い、認証コピー・モデル実行・機器操作は行っていない。I6の本人認証と全管理APIの確認は別途必要。
 
 ## 9. 先送り事項
 
