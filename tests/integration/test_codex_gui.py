@@ -604,12 +604,75 @@ def test_late_turn_notifications_after_stop_do_not_reopen_instruction_delivery(
     assert instructions == ["現在地を確認", "現在地を確認", "次の指示"]
 
 
+@pytest.mark.parametrize("editable", [True, False])
+def test_login_browser_failure_keeps_url_and_authentication_for_manual_retry(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, editable: bool
+) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.connection
+    dialog = SettingsDialog(tmp_path / "settings.toml", window)
+    qtbot.addWidget(dialog)
+    dialog.codex_form.insertRow(0, panel.codex_settings)
+    panel.codex_settings.show()
+    dialog.tabs.setCurrentIndex(dialog.codex_tab)
+    dialog.set_editable(editable)
+    opened: list[QUrl] = []
+    logins: list[bool] = []
+
+    def open_url(url: QUrl) -> bool:
+        opened.append(url)
+        return len(opened) > 1
+
+    monkeypatch.setattr(panel, "_open_url", open_url)
+    panel.login_requested.connect(lambda: logins.append(True))
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.login_action.trigger()
+    panel.handle_event(ServiceEvent(1, SessionStatus("authenticating")))
+    login_url = "https://example.invalid/auth"
+    panel.handle_event(ServiceEvent(1, LoginEvent(login_url)))
+    status = panel.status.text()
+    window.show()
+    dialog.show()
+    qtbot.waitUntil(panel.open_login_button.isVisible)
+    assert panel.open_login_button.isEnabled()
+    assert not opened
+    qtbot.mouseClick(panel.open_login_button, Qt.MouseButton.LeftButton)
+    assert opened == [QUrl(login_url)]
+    assert "codex" in window.notifications.notices
+    notice = window.notifications.notices["codex"]
+    assert login_url not in "\n".join((notice.title, notice.explanation, notice.details))
+    assert window.notifications.entry_action.isEnabled()
+    assert window.notifications.banner.isVisible()
+    assert panel.login_url.text() == login_url
+    assert panel.login_url.isEnabled()
+    panel.login_url.selectAll()
+    assert panel.login_url.selectedText() == login_url
+    assert panel.status.text() == status
+    assert panel.disconnect_action.isEnabled()
+    assert not panel.login_action.isEnabled()
+    assert panel.open_login_button.isVisible()
+    qtbot.mouseClick(panel.open_login_button, Qt.MouseButton.LeftButton)
+    assert opened == [QUrl(login_url), QUrl(login_url)]
+    assert window.notifications.notices["codex"] is notice
+    assert panel.login_url.text() == login_url
+    assert panel.status.text() == status
+    assert logins == [True]
+
+
 @pytest.mark.parametrize("edited_draft", [False, True])
 def test_panel_login_text_send_failure_interrupt_and_disconnect(
     qtbot: QtBot, *, edited_draft: bool
 ) -> None:
     opened: list[QUrl] = []
-    panel = ConnectionPanel(open_url=lambda url: bool(opened.append(url)))
+
+    def open_url(url: QUrl) -> bool:
+        opened.append(url)
+        return True
+
+    panel = ConnectionPanel(open_url=open_url)
     qtbot.addWidget(panel)
     panel.show()
     sent: list[str] = []

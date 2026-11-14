@@ -381,8 +381,18 @@ class ConnectionPanel(QWidget):
 
     def _open_login(self) -> None:
         url = QUrl(self.login_url.text())
-        if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
-            self._open_url(url)
+        if self._status.phase != "authenticating" or url.scheme() not in {"http", "https"}:
+            return
+        if not self._open_url(url):
+            self.failed.emit(
+                Notice(
+                    "codex",
+                    "ブラウザを開けない",
+                    "ログイン用URLをブラウザで開けませんでした。"
+                    "表示中のURLをコピーして、ブラウザで開いてください。",
+                    "",
+                )
+            )
 
     def _setup_sandbox(self) -> None:
         if not self.sandbox_action.isEnabled():

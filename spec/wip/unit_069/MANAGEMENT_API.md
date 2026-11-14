@@ -41,7 +41,8 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 | refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、0f955d2 |
 | refactor-done | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | 新規17件red→I3込み36件green、接続を含む82件green。公開型・クライアント・応答変換を分離、298c5e8 |
 | refactor-skipped | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 新規11件red→green、管理・接続・既存Goal解析を含め131件green。実runtimeのcold get/clearも確認、87e88af。UI結合はM4/M5 |
-| todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | GUIの接続と明示ログイン開始まで確認。本人認証後の送信・停止・再接続は未確認 |
+| refactor-done | B1: ブラウザ起動APIが失敗したときに通知し、URL・認証待ち・接続を保持する | bug | integration | I6で見つかった既存ログイン経路の修正。新規2件red→対象4件green、関連65件green。ブラウザの実起動失敗原因は未確定 |
+| todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | 本人ログイン、プロセス再起動後の保存済み認証と接続を確認。sandbox準備・通常送信・停止は未確認 |
 
 ## 7. 対象ファイル
 
@@ -77,9 +78,15 @@ I5の構造確認はrefactor-skipped。要求生成・Goal解析・削除結果�
 
 I5の[実runtimeプローブ](assets/probe_goals.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_goals.py --history-root tmp/u08-m1-history-20261115-02 --result spec/wip/unit_069/assets/probe-goals-result.json`で実行し、終了コード0。[結果](assets/probe-goals-result.json)は、隔離homeの保存済みGoalをプロセス再起動後に未認証・モデル未選択で取得・削除でき、threadがnotLoadedのまま維持されること、削除後のgetと再clearが不在を返すことを示す。実モデルや機器操作は行っていない。`uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m1-root -q`は861 passed（66.07秒）。全体ruff・format・ty、lock・build・差分検査も成功した。
 
+B1: `QDesktopServices.openUrl`がFalseを返しても結果を捨てる欠陥を修正した。既存の`ConnectionPanel.failed`→`Notice`→`NotificationCenter`で失敗とURLの手動コピー手順を通知し、認証URLを通知履歴へ複製しない。認証待ち・接続状態・URLを保持し、自動再試行や原因の推測は加えていない。設定ダイアログの編集可／不可を通した新規2件が通知なしでred、実装後は既存ログイン経路と合わせ4件green。green後に早期returnで条件のネストを整理し、同じ4件でgreenを確認した（refactor-done）。`uv run pytest tests/integration/test_codex_gui.py tests/integration/test_conversation_notifications.py --basetemp=tmp/pytest-browser-diagnosis -q`は65 passed。対象ruff・format・全体ty・差分検査も成功した。
+
+Product Designの画面検査では、実際の設定部品・通知部品に合成URLと起動失敗を与え、①設定を開いたまま主画面上部に失敗通知が見え、URLが残ること、②設定を閉じて通知の詳細を開くと回復手順を確認できることを確認した。詳細の閲覧には設定を閉じる既存の操作が必要で、通知時に別ダイアログを自動表示しない。実ブラウザの起動成否を再現した検証ではなく、ユーザー報告時の失敗原因もこの試験では確定していない。
+
 ## 9. 先送り事項
 
-I6は実GUIの接続で`login_required`、明示ログインで`authenticating`とLoginEventを確認した。検証用のApplicationShellには`tmp/u08-m1-acceptance-20261115/settings.toml`を渡し、同じ親のcodex_homeを使う既定サービスで起動した。開発用の認証・設定はコピーしていない。本人のブラウザ認証とWindows実行環境の準備、実モデルの通常送信・停止・再接続は未確認であり、M1をcompleteにしない。
+I6の検証用ApplicationShellには`tmp/u08-m1-acceptance-20261115/settings.toml`を渡し、同じ親のcodex_homeを使う既定サービスで起動した。開発用の認証・設定はコピーしていない。本人が認証URLを手動で開いてログインし、公開イベントの`AccountInfo.authenticated=true`と`SessionStatus.phase=ready`を確認した。アプリ終了・再起動後も、ログイン操作なしの接続で同じ状態になった。
+
+sandbox準備は、低整合性の検証プロセスから起動した場合に`orchestrator_helper_launch_canceled: ShellExecuteExW failed to launch setup helper: 1223`で失敗し、Windowsには同梱setup helperへのアクセス拒否が表示された。採用版はhelperの起動失敗時に1223をcancel扱いするため、本人のキャンセル操作とは断定しない。通常権限で起動した同じ検証用homeとの比較を行う。Windows実行環境の準備、実モデルの通常送信・停止は未確認であり、M1をcompleteにしない。
 
 M2〜M7は親仕様の順序に従う。記録先結合・設定適用・再接続・UI・通し受入をM1の完了へ読み替えない。
 
