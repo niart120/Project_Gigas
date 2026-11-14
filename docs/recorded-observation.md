@@ -100,7 +100,7 @@ async def close_project(
 
 操作列の最後の解除・末尾waitが完了した後に、単独observeと同じ処理で最新キャッシュを一度取得する。新しいFrameを待たず、操作前や前回観測と同じFrameも許容する。画像取得時刻やゲームへの入力反映は保証しない。
 
-`service.observe(thread_id=...)`で操作の会話IDを明示できます。省略時はサービスの会話IDを使います。入力枠は列と解除の終了時に解放し、直後に最新Frameを選ぶ。符号化中は次の入力を許可する。停止は観測応答を取り消し、開始済みの符号化・保存は観測側で継続する。停止時に観測IDの完成を待たず、後から操作記録へ追記しない。観測サービス自体の取消しは応答だけを取り消し、開始済み符号化と保存は継続します。生成したPNGは応答と非同期保存で共用します。
+`service.observe(thread_id=...)`で操作の会話IDを明示できます。省略時はサービスの会話IDを使います。入力枠は列と解除の終了時に解放するため、画像を選ぶ前や符号化中に次の入力が始まる場合があります。共通停止は入力列の解除・回収を待ち、画像や保存の完成は待ちません。観測要求の取消し・期限は当該応答だけを取り消し、開始済み符号化・保存と別の入力列を維持します。操作結果は応答組立の終了時に一度記録し、取得できた観測IDだけを対応付けます。生成したPNGは応答と非同期保存で共用します。
 
 ## 保存形式と読込
 
@@ -108,15 +108,15 @@ async def close_project(
 
 `observation.recorded`のpayloadには、観測ID、元Frameの取得UTC時刻、画像相対パス、元Frameの世代・連番・幅・高さを記録します。`image`には確定したPNGの`mime_type`・`width`・`height`を記録し、元寸法と区別します。世代・連番は取得サービスの寿命内の補助情報で、観測の永続識別には観測IDを使います。記録時刻と画像取得時刻は別です。
 
-`analysis`欄は生成しません。Codexの解釈を後から原観測へ埋める欄も設けません。開発途中の旧保存形式の読込・移行には対応しません。
+`analysis`欄は生成しません。Codexの解釈を後から原観測へ埋める欄も設けません。過去payloadは共通形式のまま読み、移行・再書込み・新旧の二重書込みは行いません。
 
 `open()`と`reload()`は管理情報とJSONLを検査します。未知のイベント種別や余剰項目は共通形式が正常なら保持し、連番の欠番も許容します。次の記録は最後のsequenceに1を加えて追記します。過去の画像を全件読み込む検査はせず、過去画像の欠損だけでは新規記録を拒否しません。
 
-未知のスキーマ版、不正なUTF-8・JSON・項目・追記順・画像パス、改行で終わらない末尾行は読込失敗になります。JSONLでは問題行と、その前の正常に読めた行数をエラーに示します。原本の切り詰め、自動修復、不完全なプロジェクトの再初期化は行いません。
+未知のスキーマ版、不正なUTF-8・JSON・共通項目・追記順、改行で終わらない末尾行は読込失敗になります。payloadは意味を再検査せず、過去の入力列・画像パス・旧イベントも値のまま保持します。JSONLでは問題行と、その前の正常に読めた行数をエラーに示します。原本の切り詰め、自動修復、不完全なプロジェクトの再初期化は行いません。
 
 ## 会話と観測の対応
 
-`writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにrunを開始します。失敗は既存の通知へ残し、入力許可とは分離します。
+`writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにturnまたはGoalの要求へ進みます。失敗は既存の通知へ残し、入力の受付とは分離します。
 
 `writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。IDは空・空白のみでない文字列として扱い、UUID形式に限定しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
 
@@ -126,14 +126,12 @@ async def close_project(
 
 | 型 | 保存する内容 |
 |---|---|
-| `RunStarted(request_id, run_id, thread_id, message)` | 通常依頼本文と実会話IDを`input.run_started`へ記録 |
-| `OperationStarted(request_id, run_id, operation_id, sequence, turn_id=None)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
-| `OperationFinished(run_id, operation_id, result, completed_steps, ...)` | 完了要素数、結果、確定した`observation_id`を`input.operation_finished`へ記録 |
-| `RunFinished(request_id, run_id, reason, turn_id=None)` | 停止・通常終端・開始失敗の理由を`input.run_finished`へ記録 |
+| `OperationStarted(operation_id, sequence, thread_id, turn_id=None)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
+| `OperationFinished(operation_id, result, completed_steps, ...)` | 完了要素数、結果、確定した`observation_id`を`input.operation_finished`へ記録 |
 
 `OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。`turn_id`は実値が判明している場合だけ指定します。port・baud・protocolは入力イベントへ含めません。
 
-非同期の入力所有者は観測と同じ`recording`を組立側から受け取ります。開始・結果ともに、変更不能なイベントを`recording.submit_input(event)`で投入します。入力開始・停止・解除は保存完了を待ちません。受付済み保存は窓口が所有し、入力要求の取消し後も継続します。保存成功を、失効した入力権限の復活条件にはしません。
+入力と観測の応答を組み立てる会話側の処理が、共通の`recording`へ記録を提出します。入力サービス自身は記録先や会話IDを持ちません。開始・結果ともに、変更不能なイベントを`recording.submit_input(event)`で投入します。入力開始・停止・解除は保存完了を待ちません。受付済み保存は窓口が所有し、入力要求の取消し後も継続します。保存の成否で入力受付を切り替えません。操作記録はoperation_idで対応付け、特定のユーザー指示やturnへの帰属を推定しません。
 
 `recording.on_failure`へ設定した関数は、会話・入力・画像のすべての保存失敗を`Exception`として受け取ります。アプリは失敗を診断へ残し、保存失敗だけで入力を止めません。観測固有の`on_save_error`も通知されます。コールバックは同じイベントループで速やかに戻してください。`submit_input`は保存を待たないため、後で起きた保存例外を呼出側へ返しません。同期の`writer.record_input`を直接呼ぶ場合は、その呼出しから保存例外が返ります。
 

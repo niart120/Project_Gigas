@@ -1,6 +1,6 @@
 # 入力状態と操作列API
 
-`gigas.game_io.input.models.parse_sequence(value, protocol)` は、JSONの`sequence`配列全体を検査し、不変の`tuple[InputStep, ...]`へ変換します。機器への送信は行いません。プロトコルは`gigas.game_io.input.config.get_protocol("ch552")`、`"pokecon"`、`"3ds"`から選びます。
+`gigas.game_io.input.models.parse_sequence(value, protocol=None)` は、JSONの`sequence`配列全体を検査し、不変の`tuple[InputStep, ...]`へ変換します。protocol省略時は共通形式だけを検査し、指定時はその機器能力も検査します。製品MCPは形式検査を行い、実行時の機器能力は`InputService.start()`が列全体へ確認します。機器への送信は行いません。プロトコルは`gigas.game_io.input.config.get_protocol("ch552")`、`"pokecon"`、`"3ds"`から選びます。
 
 ```python
 from gigas.game_io.input.config import get_protocol
@@ -42,41 +42,46 @@ neutral = encode_state(InputState(), protocol)
 
 接続所有者はI/O終了後に`await close()`を呼びます。close自体は追加のneutralを送信しません。open失敗後もworkerを解放するためcloseが必要です。実ドライバーの停止時間やゲーム側の解除は、これらのAPIの成功だけでは保証しません。
 
-## 記録付き実行API
+## 入力実行API
 
-`gigas.services.input.InputService()`は、一つの入力接続・操作権・実行中の列を所有します。チャットや記録先を作らずに入力接続を開けます。組立側はrun開始時に、その記録先の`ObservationService`と共通の`RecordingService`を渡します。保存失敗のcallbackは診断通知に使い、入力サービスの構築では他サービスのcallbackや会話IDを変更しません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として受け取り、`SerialInput`をそのまま渡せます。
+`gigas.services.input.InputService()`は、一つの入力接続と実行中の操作列を所有します。観測・記録先・会話IDは受け取りません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として渡し、`SerialInput`をそのまま使えます。
 
 ```python
+import asyncio
+
+from gigas.services.input import InputService, OperationResult
+
 service = InputService()
 await service.connect(SerialInput(config))
-recording = RecordingService(writer)
-observations = ObservationService(reader, recording)
-grant = await service.begin_run("Aを押して画面を確認", thread_id, observations, recording)
-# runtimeから実turn IDを取得した時点で関連付ける。
-service.bind_turn(grant, turn_id)
-result = await service.act(grant, parse_sequence(sequence, config.protocol))
-await service.finish_run("completed")
-await service.close()
-await observations.drain()
-await recording.drain()
+try:
+    started = service.start(steps)
+    if isinstance(started, OperationResult):
+        result = started  # 拒否。入力は送られていない。
+    else:
+        operation_id, task = started
+        result = await asyncio.shield(task)
+finally:
+    service.stop()
+    await service.drain_input()
+    await service.close()
 ```
 
-`connect(device)`は旧列を停止して旧接続を閉じ、その後に新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。操作停止は接続処理を取り消しません。closeは未開始のopenを抑止し、開始済みopenは収束してから閉じます。接続だけでは操作権を発行しません。
+`start(sequence)`は同期的に受付とtask登録を行います。受理時は`(operation_id, task)`、拒否時はoperation_idのない`OperationResult`を返します。別の列が解除中まで含めて実行中なら`BUSY`、機器が使用不能なら`INPUT_DISABLED`です。待ち行列や自動再送はありません。機器能力は入力前に列全体へ確認します。
 
-`begin_run(message, thread_id, observations, recording)`は観測・記録サービスをそのrunのInputGrantへ固定し、開始記録を非同期投入して返します。保存成功を待ちません。入力未接続のrunは入力不可で、停止済みGrantは復活しません。前runのfinish_run後に次のrunを開始します。run終了だけでは入力接続を閉じません。チャット切断や記録先変更でも同じ入力所有者を使い、旧runの観測・記録をdrainしてから旧writerを閉じます。
+返されたtaskは`asyncio.shield`で待ちます。要求を取り消す場合は、捕捉したそのtaskが未完了かつ取消し未要求のときだけ`cancel()`し、同じtaskから送信・解除の結果を回収します。後から始まった別の操作へ取消しを送ってはいけません。開始前の取消しではtaskが`CancelledError`で終わり、入力は送られません。
 
-`bind_turn(grant, turn_id)`は現在のrunへ実turn IDを対応付け、以後の操作開始・run終端記録へ使います。終了済み・別runのGrantにはFalseを返します。停止中のrunへの対応付けでも操作権は復活しません。
+`OperationResult`は入力だけの結果です。`code`、`phase`、`operation_id`、`completed_steps`、`input_sent`、`neutral`、`message`を持ち、観測画像は含みません。`code="OK"`は列と解除の処理が完了した意味で、実機のACKやゲームへの反映を保証しません。開始済みpress・neutralの全byte送出が確認できた場合は、取消し中でも`sent`として結果へ残します。
 
-`act`は操作権・接続・列全体を検査し、一つの入力列を実行します。入力の受付・継続は映像と保存の成功を条件にしない。観測・保存の失敗は操作権を失効させず、それぞれのエラーとして返す・通知する。入力枠は列と解除の終了時に解放し、直後に最新Frameを選ぶ。符号化中は次の入力を許可する。停止は観測応答を取り消し、開始済みの符号化・保存は観測側で継続する。停止時に観測IDの完成を待たず、後から操作記録へ追記しない。
+`stop()`は現在の操作taskへ一度だけ取消しを要求し、捕捉した`asyncio.Task[OperationResult]`を返します。操作がなければ`None`です。停止呼出し側がこのtaskを保持すれば、通常の完了処理が入力サービスの現在枠を解放した後も、対象の解除結果を回収できます。`await drain_input()`は開始済みwriteと必要なneutral送出まで待ち、`OperationResult`を返します。操作なし・coroutine開始前の取消しでは`None`です。この待機の取消しで入力taskを放棄しません。正常な停止後は、同じ入力接続で新しい操作列を開始できます。会話全体の停止中に新規要求を拒否するのは、会話の受付側の責務です。
 
-`OperationResult.code`は要求全体の成否です。受付拒否はoperation_idなし・入力0回です。入力後は完了要素数・送出結果・解除結果を保持します。操作記録のresultは入力列の実行結果を示す。入力完了後の観測失敗・応答取消しでもcompletedを維持し、phase=observeと理由を添える。要求全体のcodeとは区別し、正常に返せた画像だけobservation_idを対応付ける。
+`connect(device)`は旧列を止めて回収し、旧機器を閉じてから新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。操作停止は接続処理を取り消しません。`close()`は未開始のopenを抑止し、開始済みopenも回収して機器を閉じます。送信・解除失敗後は機器を使用不能とし、明示的な接続の適用で復旧します。
 
-`stop()`は同期で権限を失効させ、実行中の列を一度だけ取り消します。`await drain_input()`で操作列の送信・解除と取消した観測要求の収束を待ちます。接続処理の収束は`close()`が待ちます。正常な停止は接続を維持し、送信・解除失敗では接続を閉じて明示的な再適用を待ちます。`suspend()`は同runの一時保留で、実行中の列を取り消し、新規入力を拒否します。`resume()`は保留を解除しますが、停止済みGrantや取消した列を復活させません。
+## 観測・記録との組合せ
 
-呼出し側による`act`の取消しは、入力実行中なら共通停止を行い、入力完了後の観測待ちならその要求の観測応答だけを取り消します。観測待ちの取消しでは、操作権や後続の入力を維持します。どちらも呼出し側には`CancelledError`を返します。内部の終了処理はサービスが保持するので、`drain_input`で回収してください。
+会話のツール応答組立側が、受理した操作の開始記録を提出し、入力taskの完了後に`ObservationService.observe()`で最新画像を取得します。画像を選ぶ前に次の入力が始まる場合があります。Frameの取得時刻・識別情報を保持し、入力が画面へ反映された保証にはしません。
 
-run・操作の開始と終端は同じ記録窓口へ順に非同期投入します。保存完了を入力開始の前提にせず、保存失敗でも入力を止めません。記録が欠けたまま操作される場合を許容し、失敗は診断へ残します。
+画像・保存の失敗は入力結果を変更しません。操作の開始・結果はoperation_idで対応付け、既知のthread_idと取得できたobservation_idを記録します。機器操作を特定のユーザー指示やturnへ推定で所属させません。保存完了を入力開始・応答・停止の前提にしません。
 
-`finish_run(reason)`は先に失効させ、入力終了後にrun終了記録を依頼します。`close()`は進行中の接続処理も回収して機器を閉じます。保存は別の所有者が保持するため、終了時は続けて`observations.drain()`で符号化を回収し、`recording.drain()`で保存を回収してからwriterとイベントループを閉じてください。符号化失敗時も保存の回収は必要です。これらの内部APIはGUI・MCPへの配線や実機受入を含みません。
+観測応答の取消しでは、開始済み符号化・保存はそれぞれの所有者が保持します。資源終了時は、入力を止めて要求を回収し、`observations.drain()`と`recording.drain()`を終えてからwriterとイベントループを閉じます。観測の失敗があっても保存の回収は必要です。
 
-保存済み入力列には`parse_sequence(value)`で共通の形式・値域だけを検査できます。実行受付ではprotocolを指定して対応能力も検査します。停止時も開始済みpress・neutralの送信結果を回収し、全byte成功は送出済みとして記録します。
+入力・MCPに加え、会話とGUIの配線は模擬app-server・機器、Qt、実HTTPで検証しています。実モデルからCH552への短いゲーム操作・中断も確認済みです。GUIから実機までの通し操作、他の入力機器・OS、長時間運転は未検証です。詳細は[実接続の確認](codex-verification.md)を参照してください。
