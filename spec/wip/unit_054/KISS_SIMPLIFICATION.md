@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **wip（M1・追加の会話再編は完了、M2の保存・入力設計を通読レビュー済み）**。M1はunit_055〜060、会話再編はunit_061・062で完了した。M2の範囲・契約・実装順は[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)に整理した。M2の製品実装・受入は未着手。
+状態: **wip（M1・追加の会話再編は完了、M2の保存整理へ着手）**。M1はunit_055〜060、会話再編はunit_061・062で完了した。M2の範囲・契約・実装順は[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)に整理し、最初の保存作業をunit_064で進める。M2の製品受入は未完了。
 
 目的は、個人用のゲーム操作アプリに必要な利用場面へ契約を絞り、独立に管理する状態と判断箇所を減らすこと。単なるファイル分割、既存分岐の移設、コード行数・テスト件数の削減だけでは完了しない。既存仕様・公開API・テストの期待も見直し対象とする。
 
@@ -26,7 +26,7 @@ Intent Delta: 全既存期待を維持するリファクタリングから、利
 
 ## 3. 対象外
 
-U07〜U10の新機能実装、Bluetooth、認証方式追加、UIの見た目の再設計、依存更新、公開・配布作業は含めない。U09は初期版から外し、代わりの整理機構は実装しない。M2は現行実装を踏まえた設計の具体化を進めており、製品実装にはまだ着手しない。
+U07〜U10の新機能実装、Bluetooth、認証方式追加、UIの見た目の再設計、依存更新、公開・配布作業は含めない。U09は初期版から外し、代わりの整理機構は実装しない。
 
 汎用状態機械、イベントバス、ハンドラ登録基盤、プラグイン機構、自動再試行・修復、互換用の二重実装を追加しない。クラス・ファイル・テスト数の目標値を置かない。
 
@@ -42,7 +42,7 @@ M1後の追加再編は[unit_061 通常指示の送信・ゲーム操作・停�
 |---|---|
 | M0 契約と所有の確定 | 完了。残す保証、失う挙動、終了遷移、状態寿命、仕様・試験の改訂対応を2026-11-13にユーザーと確認した |
 | M1 接続・サービスの整理 | 完了。製品専用の組立、通知寿命、終了所有、操作配送、責務と状態の所有を整理し、全847試験と必要な実接続・実機受入を確認した |
-| M2 保存・入力・残件の整理 | 保存・入力の設計レビューと作業順整理を実施。製品実装は未着手。保存保証・検証所有を見直し、別作業で小さい残件を処置する。独立したUI分割は含めない |
+| M2 保存・入力・残件の整理 | 設計レビューを終え、保存から製品実装へ着手。保存保証・検証所有を見直し、別作業で小さい残件を処置する。独立したUI分割は含めない |
 
 ### 4.1 M1の完了実績
 
@@ -232,7 +232,7 @@ unit_059でサービスのResources/Runを分け、unit_060で接続側の担当
 | 準備中停止・開始通知先行・遅い正当turn・通信不明を扱い、切断で所有処理を回収できる | 既存preparation・answer lifecycle・service/transportの試験へ分担。started→質問/本文/終端→開始応答、自然待ちから手動停止、turn終端なしのcloseを代表例にする | 開始通知なしの質問から未知turnを採用する`started_notice=False`の経路、全組合せの機械的追加 |
 | 表示締切と秘密値除外を守る | `test_public_progress_preserves_turn_identity_and_excludes_private_payloads`の旧turn追加表示を「更新なし」へ改訂。中断時の途中本文一回確定は残す | 終端後のPlan・要約・MCP完了の反映、全履歴からの再構成 |
 | 製品準備でmemoryだけを書込対象にする | connectionのreadiness/準備失敗/書込範囲検査、GUI・transport peerの正常経路を同じ準備fixtureへ揃える | callback省略・read-only・二回目の準備省略を製品保証とする期待。peerの二種類sandbox許容 |
-| 原本を保持し、採番・排他・保存失敗を扱う | observation storageの正常保存・再読込・未知イベント保持・上書き拒否を残す。`test_invalid_event_envelope_is_rejected`はschema/project/sequence/type等の残す条件だけへ。`test_uncertain_log_preserves_data_and_requires_explicit_reload`は実際の部分追記一例に統合 | 種別×同じ追記失敗の総当たり、fsync専用ケース、時刻形式だけの拒否 |
+| 原本を保持し、採番・排他・保存失敗を扱う | observation storageの正常保存・再読込・未知イベント保持・上書き拒否を残す。`test_invalid_event_envelope_is_rejected`はschema/project/sequence/type等の残す条件だけへ。追記失敗は不完全行が残ってreloadを拒否する例と、全行書込後のfile close失敗からreloadで再開する例を残す | 種別×同じ追記失敗の総当たり、fsync専用ケース、時刻形式だけの拒否 |
 | 過去payloadと型付き内部値を再検証しない | `test_input_record_read_rejects_invalid_known_payload`はpayloadを不透明な値として保持する代表例へ変更 | `test_invalid_input_record_is_rejected_before_append`、`test_invalid_recorded_observation_is_rejected_without_rewriting`、`test_invalid_source_identifiers_cannot_create_unreadable_records`の内部不正値・旧payload検査。ただし新規画像IDの保存先検査は残す |
 | 不正な全入力列は物理入力前に拒否する | parserのJSON形式、InputState/InputStepの生成時保証、serviceの機器能力、MCPの`test_http_invalid_sequence_sends_no_input`を分担。後方要素が不正でも送信0回、有効な記録との対応を残す | parserのprotocol引数、単独encoderによる機器非対応の拒否期待。直接構築の不変条件と正常なプロトコルbyte変換試験は残す |
 | サービスの配送結果と世代失効を守る | GUI公開メソッドとsignalによる既存試験、not_sent/unknown、質問待ちと停止後の旧Grant拒否を残す | `_Command`を直接作る試験は公開入口へ変更。新しい内部クラスの形を固定する代替assertは作らない |

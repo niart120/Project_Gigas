@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: wip。ユーザーが合意した[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の実装単位。利用者は既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存できる。
+状態: wip（S1の読込条件縮小へ着手）。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を実装する。到達点は、利用者が既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存できること。
 
 ## 2. 対象範囲
 
@@ -14,7 +14,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 
 ## 4. 関連文書・着手条件
 
-[親unit_054](../unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認して着手した。
+[親unit_054](../unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認し、ユーザーの実装指示に従って着手する。
 
 ## 5. 振る舞い
 
@@ -27,12 +27,12 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | todo | S1: ID表記・時刻に依存せず既存projectを読み、原本保持と正しい次採番で追記する | regression | integration | 共通項目不正の拒否は残す |
-| todo | S2: 新規内容を再検査せず保存し、画像保存先の逸脱・既存画像上書きを拒否する | regression | integration | 内部値を人為的に壊した拒否試験は削除 |
-| todo | S3: 行データの生成失敗をProjectErrorとして報告し、原本・採番を維持して次の保存を受け付ける | edge | integration | 観測では公開済み画像を保持 |
+| todo | S2: 行データの生成失敗をProjectErrorとして報告し、原本・採番を維持して次の保存を受け付ける | edge | integration | 共通の行データ作成で確認。観測では公開済み画像を保持 |
+| todo | S3: 新規内容を再検査せず保存し、画像保存先の逸脱・既存画像上書きを拒否する | regression | integration | 内部値を人為的に壊した拒否試験は削除。S2の共通エラー変換を維持 |
 
 ## 7. 実装方針
 
-既存writerの中で不要な検査を削る。新しいvalidator・dataclass・状態は追加しない。各itemを検証して別commitにする。
+S1→S2→S3の順に進める。対話の事前JSON化を削る前に、S2で共通の行データ作成にあるTypeError/ValueErrorの変換を確認する。S3で事前検査と二重JSON化を削り、一度だけ直列化する構成へ揃える。新しいvalidator・dataclass・状態は追加しない。各itemを検証して別commitにする。
 
 ## 8. 対象ファイル
 
@@ -40,7 +40,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 
 ## 9. 検証
 
-着手時: `uv sync --dev`・`uv lock --check`成功。製品変更のred/greenは未実行。完了時に対応integration、ruff、ty、lock/build、文書参照・diffを確認する。実機・電源断試験は対象外。
+事前準備の記録: `uv sync --dev`・`uv lock --check`成功。今回の設計レビューでは実装順と親仕様との整合を静的に確認し、文書検査の結果はunit_063第9節へ記録した。製品変更のred/greenは未実行。完了時に対応integration、ruff、ty、lock/build、文書参照・diffを確認する。実機・電源断試験は対象外。
 
 ## 10. 先送り
 
