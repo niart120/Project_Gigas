@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: wip（読込条件縮小と行データ作成のエラー処理を実装）。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を実装する。到達点は、利用者が既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存できること。
+状態: complete。[unit_063](../../wip/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を完了した。既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存する。
 
 ## 2. 対象範囲
 
@@ -14,7 +14,7 @@ flush/fsyncの撤去、入力検証、所有・回収・保存形式の変更、
 
 ## 4. 関連文書・着手条件
 
-[親unit_054](../unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認し、ユーザーの実装指示に従って着手する。
+[親unit_054](../../wip/unit_054/KISS_SIMPLIFICATION.md)、[保存の正本](../../initial/04-agent-memory.md)、[公開API](../../../docs/recorded-observation.md)。M1と会話再編は完了し、unit_063の保存方針は合意済み。現行コード・対応試験を確認し、ユーザーの実装指示に従って着手した。
 
 ## 5. 振る舞い
 
@@ -59,6 +59,6 @@ S3: 拒否保証の削除を、不正な内部値の必ず受理される保証�
 ## 11. 完了チェックリスト
 
 - [x] 対象範囲と合意した契約を確認した
-- [ ] TDD itemと対応試験を完了した
-- [ ] 公開仕様・docstringと検証結果を更新した
-- [ ] 親仕様と参照先を更新した
+- [x] TDD itemと対応試験を完了した（S1: 7a5f398、S2: 15ecaa3、S3: 976f8e4）
+- [x] 公開仕様・docstringと検証結果を更新した
+- [x] 親仕様と参照先を更新した
