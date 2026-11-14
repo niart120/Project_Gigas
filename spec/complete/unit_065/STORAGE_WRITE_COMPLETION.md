@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: wip。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位2。metadata・PNG・JSONLの明示flush/fsyncを撤去し、通常のwrite/closeを保存の完了条件とする。
+状態: complete。[unit_063](../../wip/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位2。metadata・PNG・JSONLの明示flush/fsyncを撤去し、通常のwrite/closeを保存の完了条件とした。実装commitは690a6a5。
 
 ## 2. 対象範囲・対象外
 
@@ -10,7 +10,7 @@
 
 ## 3. 前提・関連文書
 
-[unit_064](../../complete/unit_064/STORAGE_VALIDATION_BOUNDARIES.md)の検査縮小は完了し、関連72試験と静的・package gateを確認済み。[保存の正本](../../initial/04-agent-memory.md)と[公開API](../../../docs/recorded-observation.md)を同時更新する。
+[unit_064](../unit_064/STORAGE_VALIDATION_BOUNDARIES.md)の検査縮小は完了し、関連72試験と静的・package gateを確認済み。[保存の正本](../../initial/04-agent-memory.md)と[公開API](../../../docs/recorded-observation.md)を同時更新した。
 
 ## 4. 振る舞い
 
@@ -43,5 +43,5 @@ W1では、故障注入を実際の短いwriteとfile closeへ変更した基準
 ## 9. 完了チェックリスト
 
 - [x] 保存の完了条件と失う保証を確認した
-- [ ] 残すI/O失敗と正常保存・回収を検証した
-- [ ] 公開仕様・実績・参照を更新した
+- [x] 残すI/O失敗と正常保存・回収を検証した
+- [x] 公開仕様・実績・参照を更新した
