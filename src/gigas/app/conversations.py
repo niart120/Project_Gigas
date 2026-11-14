@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from gigas.runtime.codex.history import history_entries
 from gigas.runtime.codex.management_models import ProjectPage, ThreadPage
-from gigas.runtime.codex.models import ConversationStatus, SessionStatus
+from gigas.runtime.codex.models import ConversationStatus, DialogueEvent, SessionStatus
 from gigas.services.codex import ProjectResult, ServiceEvent, ServiceResult
 from gigas.services.conversations import (
     BrowseGoalEvent,
@@ -62,7 +62,7 @@ class ConversationController(QObject):
         self._selection_pending: str | None = None
         self._history_pending: StoredConversationTarget | None = None
         self._history_cursor: str | None = None
-        self._started_target: StoredConversationTarget | None = None
+        self._unlisted_target: StoredConversationTarget | None = None
         self.sidebar.group_opened.connect(self._open_group)
         self.sidebar.new_requested.connect(self.new_conversation)
         self.sidebar.thread_requested.connect(self.select_conversation)
@@ -190,7 +190,7 @@ class ConversationController(QObject):
         self._target = target
         self._history_pending = None
         self._history_cursor = None
-        self._started_target = None
+        self._unlisted_target = None
         self.panel.replace_target(self._project_name(target.project_id), "新しい会話")
         self._update_heading()
         self.sidebar.set_selection(target.project_id, None)
@@ -237,7 +237,7 @@ class ConversationController(QObject):
         self._threads[result.thread.id] = result.thread
         self._history_pending = None
         self._history_cursor = result.history.next_cursor
-        self._started_target = None
+        self._unlisted_target = None
         self.panel.replace_target(
             self._project_name(result.thread.project_id),
             thread_title(result.thread),
@@ -272,6 +272,11 @@ class ConversationController(QObject):
                 self._threads_loaded.add(result.project_id)
                 self.sidebar.set_threads(result.project_id, value, append=cursor is not None)
                 self._update_heading()
+                if self._unlisted_target is not None and any(
+                    thread.id == self._unlisted_target.thread_id for thread in value.threads
+                ):
+                    self._unlisted_target = None
+                    self._refresh_threads.discard(result.project_id)
             if result.project_id in self._refresh_threads:
                 self._refresh_threads.remove(result.project_id)
                 self._list_threads(result.project_id)
@@ -341,9 +346,17 @@ class ConversationController(QObject):
                 target, StoredConversationTarget
             ):
                 self._target = target
-                self._started_target = target
+                self._unlisted_target = target
                 self.sidebar.set_selection(target.project_id, target.thread_id)
                 self._update_heading()
+        if isinstance(envelope.event, DialogueEvent) and (
+            envelope.event.kind == "turn_completed"
+            or (
+                envelope.event.kind in {"message", "activity"}
+                and envelope.event.payload.get("partial") is False
+            )
+        ):
+            self._refresh_unlisted()
         self._render()
 
     @Slot(object)
@@ -356,16 +369,17 @@ class ConversationController(QObject):
             result.operation in {"send", "goal_set"}
             and result.message is not None
             and result.message.outcome == "accepted"
-            and self._started_target is self.service.selected_target
         ):
-            target = self._started_target
-            if target is not None:
-                self._started_target = None
-                if target.project_id in self._thread_requests:
-                    self._refresh_threads.add(target.project_id)
-                else:
-                    self._list_threads(target.project_id)
+            self._refresh_unlisted()
         self._render()
+
+    def _refresh_unlisted(self) -> None:
+        target = self._unlisted_target
+        if target is not None and target is self.service.selected_target:
+            if target.project_id in self._thread_requests:
+                self._refresh_threads.add(target.project_id)
+            else:
+                self._list_threads(target.project_id)
 
     def _update_heading(self) -> None:
         target = self._target

@@ -3,6 +3,7 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QInputMethodEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -11,9 +12,9 @@ from pytestqt.qtbot import QtBot
 from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.management_models import ProjectInfo, ProjectPage, TurnPage
-from gigas.runtime.codex.models import ConnectionOptions, GoalState
+from gigas.runtime.codex.models import ConnectionOptions, DialogueEvent, GoalState
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
-from gigas.services.codex import CodexServiceThread, ProjectResult
+from gigas.services.codex import CodexServiceThread, ProjectResult, ServiceEvent
 from gigas.services.conversations import (
     BrowseGoalEvent,
     HistoryResult,
@@ -47,6 +48,7 @@ class ConversationPeer(ProjectsPeer):
         self.thread_list_entered = Event()
         self.thread_list_release: Event | None = None
         self.project_pages: dict[str | None, JsonValue] = {}
+        self.pending_thread: JsonObject | None = None
 
     async def request(self, method: str, params: JsonObject | None) -> JsonValue:
         """Return the requested page with an opaque history continuation."""
@@ -97,7 +99,7 @@ class ConversationPeer(ProjectsPeer):
             self.responses[method] = {"status": "notLoaded"}
         elif method == "thread/start":
             assert params is not None
-            self.threads["thread-1"] = {
+            self.pending_thread = {
                 **_thread(Path(str(params["cwd"]))),
                 "name": "新規の会話",
                 "projectId": params["projectId"],
@@ -320,6 +322,8 @@ def test_first_accepted_send_refreshes_an_inflight_list_without_clearing_live_te
         before = panel.transcript.toPlainText()
         assert "初回指示" in before
         panel.prompt.setPlainText("次の原稿")
+        assert peer.pending_thread is not None
+        peer.threads["thread-1"] = peer.pending_thread
         release.set()
         rows = shell.window.sidebar._groups[None].threads
         qtbot.waitUntil(
@@ -337,6 +341,111 @@ def test_first_accepted_send_refreshes_an_inflight_list_without_clearing_live_te
         qtbot.waitUntil(shell.window.sidebar._groups[None].new_button.isEnabled)
     finally:
         release.set()
+        close(qtbot, shell)
+
+
+@pytest.mark.parametrize("confirmation", ["message", "activity", "turn_completed"])
+def test_first_confirmation_lists_a_thread_missing_when_send_was_accepted(
+    qtbot: QtBot, tmp_path: Path, confirmation: str
+) -> None:
+    shell, peer = _shell(qtbot, tmp_path)
+    confirmed: list[DialogueEvent] = []
+
+    def receive(envelope: ServiceEvent) -> None:
+        if isinstance(envelope.event, DialogueEvent):
+            confirmed.append(envelope.event)
+
+    shell.service.received.connect(receive)
+    try:
+        connect(qtbot, shell)
+        group = shell.window.sidebar._groups[None]
+        qtbot.waitUntil(lambda: group.threads.count() == 1)
+        panel = shell.window.connection
+        panel.prompt.setPlainText("初回指示")
+        panel.send_button.click()
+        qtbot.waitUntil(lambda: panel.draft == "")
+        qtbot.waitUntil(
+            lambda: (
+                len([m for m, _ in peer.calls if m == "thread/list"]) == 2
+                and not group.loading.isVisible()
+            )
+        )
+        assert group.threads.count() == 1
+        assert panel.heading.title.text() == "名前のない会話"
+        panel.prompt.setPlainText("次の原稿")
+
+        def confirm() -> None:
+            assert peer.pending_thread is not None
+            peer.threads["thread-1"] = peer.pending_thread
+            peer.events.put_nowait(
+                RpcNotification(
+                    "thread/goal/updated",
+                    {
+                        "threadId": "thread-1",
+                        "goal": {
+                            "objective": "継続中の目的",
+                            "status": "active",
+                            "tokensUsed": 0,
+                            "timeUsedSeconds": 0,
+                        },
+                    },
+                )
+            )
+            if confirmation == "turn_completed":
+                event = RpcNotification(
+                    "turn/completed",
+                    {"threadId": "thread-1", "turn": {"id": "turn-1", "status": "completed"}},
+                )
+            else:
+                item: JsonObject = (
+                    {"type": "agentMessage", "id": "message-1", "text": "確定した進捗"}
+                    if confirmation == "message"
+                    else {
+                        "type": "commandExecution",
+                        "id": "command-1",
+                        "command": "echo result",
+                        "status": "completed",
+                        "exitCode": 0,
+                    }
+                )
+                event = RpcNotification(
+                    "item/completed", {"threadId": "thread-1", "turnId": "turn-1", "item": item}
+                )
+            peer.events.put_nowait(event)
+
+        shell.service._enqueue(confirm)
+        qtbot.waitUntil(lambda: group.threads.count() == 2, timeout=1000)
+        assert panel.heading.title.text() == "新規の会話"
+        assert "初回指示" in panel.transcript.toPlainText()
+        assert panel.draft == "次の原稿"
+        assert panel.plan_panel.goal_value.toPlainText() == "継続中の目的"
+        assert not group.new_button.isEnabled()
+        calls = len([method for method, _ in peer.calls if method == "thread/list"])
+        received = len(confirmed)
+
+        def next_progress() -> None:
+            peer.events.put_nowait(
+                RpcNotification(
+                    "turn/started",
+                    {"threadId": "thread-1", "turn": {"id": "turn-2", "status": "inProgress"}},
+                )
+            )
+            peer.events.put_nowait(
+                RpcNotification(
+                    "item/completed",
+                    {
+                        "threadId": "thread-1",
+                        "turnId": "turn-2",
+                        "item": {"type": "agentMessage", "id": "later", "text": "次の進捗"},
+                    },
+                )
+            )
+
+        shell.service._enqueue(next_progress)
+        qtbot.waitUntil(lambda: len(confirmed) > received)
+        assert not group.loading.isVisible()
+        assert len([method for method, _ in peer.calls if method == "thread/list"]) == calls
+    finally:
         close(qtbot, shell)
 
 

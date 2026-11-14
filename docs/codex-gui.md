@@ -162,7 +162,7 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 `gigas.app.conversations.ConversationController(window, service, parent)`は一覧・選択・履歴結果と表示部品を結びます。`activate(generation)`で接続世代を渡し、`set_available(available, project_pending=False)`で終了・picker待機を反映します。選択の正本はサービスの`selected_target`です。取得済みmetadataと要求中のUIだけを保持し、追加履歴とGoal通知は世代・対象参照を照合します。`confirm_switch(action)`は現在の原稿破棄を確認し、受付条件を再確認してから操作を呼びます。`adopt_project(result)`は現在世代の公開Projectだけを採用します。
 
-新規開始の実IDは見出しと選択表示へ反映し、最初の送信・Goal操作の受付後に公開一覧を更新します。先行する一覧要求があれば、その終了後に一度更新します。再接続時は取得済みの所属と開閉状態を保持して公開ページを更新し、全件の自動収集はしません。
+新規開始の実IDは見出しと選択表示へ反映し、最初の送信・Goal操作の受付後に公開一覧を更新します。まだ掲載されていなければ、確定した本文・活動、または個別turnの終了を受けて再取得します。Goal全体の完了は待ちません。先行する一覧要求があれば、その終了後の一度の取得にまとめ、掲載後はこの更新を終了します。公開情報の取得は表示済み本文や原稿を消しません。再接続時は取得済みの所属と開閉状態を保持して公開ページを更新し、全件の自動収集はしません。
 
 `gigas.services.conversations`の`NewConversationTarget(project_id=None)`は、まだ開始していない会話の所属だけを表します。`StoredConversationTarget(thread_id, cwd, project_id=None)`は、公開応答で確認した既存ID・保存作業場所・所属を表します。どちらも選択対象の値であり、接続済み・実行準備済みを意味しません。`None`の所属は未所属です。
 

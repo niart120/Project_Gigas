@@ -156,6 +156,16 @@ Refactor status: **refactor-done**。green後に旧can_select_projectの開始�
 
 表示名の修正は既存の共通関数`thread_title`で空白をまとめ、name・preview・既定名の優先順を維持した。本文と公開metadataは変更しない。`uv run pytest tests/integration/test_conversation_sidebar.py -k multiline_thread --basetemp=tmp/pytest-m5-title -q --tb=short`は84pxの複数行表示を検出してred→green、最終も1 passed。上記と同じSidebar/Controller/Window/Project/Codex/Viewの6ファイルを`--basetemp=tmp/pytest-m5-title`で検査し、95 passed。変更2ファイルのruff/format、全体ty、lock/build、文書リンクが成功した。Refactor status: **refactor-skipped**。既存の純粋な共通表示関数へ変更を収め、重複した整形や新しい所有者はない。独立レビューで必須修正なし。再起動した実画面の`10-l4-titles-fixed.jpeg`では、同じProjectの2会話が各1行となり、所属見出しと新規操作が隣接していることを確認した。
 
+3回目のprocessではM3の保存会話を選び、提出・確定本文、commandとWebのactivityを表示した。M2の保存Goalは一時停止として表示され、閲覧中の再開・削除の入口を確認した。Project内の新規選択では本文・Goalを交換し、入力欄へ移った。ここまでstart/resume/turn/startとMCP開始は0回、既存4会話のJSONL/PNGと未所属3フォルダー・各records一覧は不変だった。画面は`11-l4-saved-history.jpeg`〜`14-l4-project-new.jpeg`。
+
+続くProject初回送信はthread/start・turn/start各1回で成功し、`01a1dbd2-aadb-7d51-9f43-12ba73e111d0`を同じProject/cwdへ作成した。新recordsに提出1件・確定1件、画像0件を保存し、既存記録は不変だった。ただし受付直後のthread/listが最初のuserMessage確定より先に完了し、新会話の行を含まなかった。応答後も一覧に現れず、見出しが既定名のまま残る問題を`15-l4-new-missing-row.jpeg`で確認した。通常終了後の`l4-20261114T204244Z-69cd154d-report.json`にshutdown失敗・RPC失敗はない。基本経路の不具合として更新契機を修正してからL4を続ける。
+
+新会話の一覧更新は、送信受付で追跡を解除せず、公開一覧に当該IDが載ったときに終了する方式へ修正した。未掲載中は既存の確定本文・活動・個別turn終了の通知から一覧を取得し、取得中の通知は既存の1回分の更新へ合流する。掲載後は通知が続いても取得を増やさない。新しい通知型・固定待ち・定期取得・本文からのmetadata生成は追加していない。
+
+`uv run pytest tests/integration/test_conversation_controller.py -k first_confirmation --basetemp=tmp/pytest-m5-publication -q --tb=short`はnativeと同じ未掲載状態で3 failed→3 passed、掲載後の重複取得を検査して3 passed、構造整理後も3 passed。active Goalを残したまま本文・活動・個別turn終了で一覧と見出しが更新され、本文・原稿を維持する。`uv run pytest tests/integration/test_conversation_controller.py tests/integration/test_conversation_view.py tests/integration/test_conversation_sidebar.py tests/integration/test_project_gui.py tests/integration/test_codex_gui.py tests/integration/test_conversation_notifications.py --basetemp=tmp/pytest-m5-publication-regression -q --tb=short`は96 passed。対象ruff/format、全体ty、diff検査は成功。Refactor status: **refactor-done**。追跡値と取得処理を「開始済み」ではなく「未掲載」の意味へ改名し、公開APIや実行所有者は増やしていない。nativeの修正確認は次の未所属新規送信で行う。
+
+独立レビューで掲載確認・取得中の合流・世代/対象照合・本文と原稿の不変を確認し、必須修正なし。修正後の実app-serverでも、未所属の初回応答確定からthread/listが新IDを返し、`18-l4-new-row-fixed.jpeg`で一覧の行と見出しの更新を確認した。個別turn終了時には追加の取得を発生させなかった。実行中も所属とサイドバーの開閉ができ、新規/切替は無効だった（`16-l4-running-folded.jpeg`、`17-l4-running-sidebar-closed.jpeg`）。停止ボタン操作は応答の自然終了と重なり、このturnではinterruptが送信されていないため、停止の成功根拠には含めない。
+
 ## 8. 先送り事項
 
 M6は新規/閲覧/実行を跨ぐ設定・権限・承認・障害の結合と記憶生成対象を確認し、M7はUSB Video DeviceとCOM8で通し受入を行う。M3で未観測の記憶抽出は標準条件の範囲で確認し、強制抽出を製品へ加えない。長時間履歴の性能と攻略の有用性はU10。
