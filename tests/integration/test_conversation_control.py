@@ -139,6 +139,7 @@ def test_goal_creation_waits_for_notifications_and_edit_sends_only_objective(
         c = Conversation(tmp_path)
         await c.connection.open()
         try:
+            await c.execution.select_model("other", "low")
             creating = asyncio.create_task(c.execution.set_goal("タマムシシティへ"))
             await until(lambda: bool(calls(c, "thread/goal/set")))
             assert c.execution.snapshot.goal is None
@@ -152,6 +153,13 @@ def test_goal_creation_waits_for_notifications_and_edit_sends_only_objective(
             ]
             notify_goal(c, c.peer.goal)
             assert await creating
+            start = calls(c, "thread/start")[0]
+            assert start is not None
+            assert start["model"] == "other"
+            config = start["config"]
+            assert isinstance(config, dict)
+            assert config["model_reasoning_effort"] == "low"
+            assert calls(c, "thread/settings/update") == []
             c.turn("turn/started")
             original = c.execution.snapshot.goal
             editing = asyncio.create_task(c.execution.set_goal("クチバシティへ"))

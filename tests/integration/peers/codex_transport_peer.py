@@ -179,6 +179,7 @@ def dialogue() -> None:
             result = {
                 "thread": {"id": thread_id, "projectId": params["projectId"]},
                 "model": params["model"],
+                "reasoningEffort": params["config"]["model_reasoning_effort"],
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": params["approvalsReviewer"],
                 "cwd": params["cwd"],

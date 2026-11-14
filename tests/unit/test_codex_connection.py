@@ -109,11 +109,14 @@ class FakePeer:
             return {"data": [_model("other")], "nextCursor": "page-2"}
         if method == "thread/start":
             assert params is not None
+            config = params["config"]
+            assert isinstance(config, dict)
             return {
                 "thread": {"id": "thread-1", "projectId": params["projectId"]},
                 "approvalPolicy": params["approvalPolicy"],
                 "approvalsReviewer": params["approvalsReviewer"],
                 "model": params["model"],
+                "reasoningEffort": config["model_reasoning_effort"],
                 "cwd": params["cwd"],
                 "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
                 "sandbox": {

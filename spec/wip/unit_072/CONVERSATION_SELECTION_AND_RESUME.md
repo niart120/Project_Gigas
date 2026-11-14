@@ -55,7 +55,7 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | K1: start/resumeが選択モデル・推論レベル・最新設定を渡し、ID・所属・作業場所・権限の不一致を拒否する | new/regression | unit/integration | 共通設定変換、resume固有項目、Goal開始前のeffort、余分な設定更新の整理 |
+| refactor-skipped | K1: start/resumeが選択モデル・推論レベル・最新設定を渡し、ID・所属・作業場所・権限の不一致を拒否する | new/regression | unit/integration | 共通設定変換、resume固有項目、Goal開始前のeffort、余分な設定更新の整理 |
 | todo | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
 | todo | K3: 公開履歴の選択と所属別新規を実行から分け、停止後だけ切り替えられる | new/edge | integration | 取得失敗時保持、unsubscribeと旧要求・資源の回収、遅い結果の失効、閲覧モデル選択・Goal削除 |
 | todo | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
@@ -80,6 +80,16 @@ runtime/codexの要求組立・管理/表示型、servicesの会話選択・実�
 公開型・docstringは対応skillで確認する。実接続ではM1の認証済み隔離homeを使い、資格情報を複製しない。自動試験の模擬MCP・入力と実モデルの結果を区別し、途中失敗や未観測範囲を残す。
 
 K5は履歴・Goalの閲覧が実行を始めないことを先に確認し、同一プロセス内の停止・切替後とプロセス再起動後で、現在のMCPによる観測と同じthreadのrecordsへの追記を確認する。active Goalへの追加指示はresume→turn/startで確認し、先行するGoal turnの有無を成功条件にはしない。公開APIだけの照合を、この製品経路の受入に代用しない。
+
+### K1 実装・検証結果
+
+start/resumeは共通の設定組立を使い、config.model_reasoning_effortを開始前に渡す。resume固有のthreadId・excludeTurnsを組み立て、保存所属は変更しない。返却ID・所属・選択推論レベルと既存の権限条件を検査する。初回Goal直前の補助settings/updateを撤去し、ロード済み対象のモデル変更時の更新は維持した。既存サービスへのresume結合はK4で行う。
+
+`uv run pytest tests/unit/test_conversation_protocol.py tests/unit/test_execution_configuration.py tests/integration/test_conversation_control.py --basetemp=tmp/pytest-m4-k1 -q`は未実装resume・推論レベル欠落等で20 failed/75 passed、実装後95 passed（7.56秒）、構造確認後95 passed（7.46秒）。
+
+`uv run pytest tests/unit/test_codex_connection.py tests/integration/test_codex_transport.py tests/integration/test_conversation_execution.py tests/integration/test_conversation_notifications.py tests/integration/test_codex_service.py --basetemp=tmp/pytest-m4-k1-regression -q`は122 passed（12.88秒）。全体ty、対象7ファイルのruff・format、差分検査は成功した。
+
+refactor-skipped: 共通設定を一か所へ集約し、start/resume固有値だけの入口とした。追加状態・転送層は不要と判断した。独立レビューの修正必須指摘なし。公開文書は新規開始時の推論レベル伝達・返却検査を更新し、再接続サービスを実装済みとして記していない。
 
 ## 9. 先送り事項
 

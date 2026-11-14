@@ -267,18 +267,6 @@ class ConversationExecution:
                 raise
             if self._stopping is not None or self._closing():
                 return False
-            if self._goal is None:
-                selection = self._connection.selection
-                await self._connection.request(
-                    "thread/settings/update",
-                    {
-                        "threadId": thread_id,
-                        "model": selection.model,
-                        "effort": selection.effort,
-                    },
-                )
-            if self._stopping is not None or self._closing():
-                return False
             submission.submitted = True
             self._emit(TextEvent(uuid4().hex, objective, "user", True))
             await self._change_goal(

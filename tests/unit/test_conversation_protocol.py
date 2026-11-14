@@ -13,8 +13,9 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("project_id", [None, "project-1"])
+@pytest.mark.parametrize("resume", [False, True])
 def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp(
-    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, project_id: str | None
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, project_id: str | None, *, resume: bool
 ) -> None:
     packaged_instructions = "packaged instructions"
     monkeypatch.setattr(protocol, "read_play_instructions", lambda: packaged_instructions)
@@ -28,25 +29,41 @@ def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp
         project_id=project_id,
     )
     selection = ModelSelection((), "selected-model", "high")
+    settings = ExecutionSettings(False, False, "user")
     server_config: JsonObject = {
         "config": {"mcp_servers": {"existing": {}, "name.with.dot": {}, "game": {}}}
     }
 
-    params = protocol.thread_start_params(
-        configuration, selection, server_config, settings=ExecutionSettings()
-    )
+    if resume:
+        params = protocol.thread_resume_params(
+            "saved-thread", configuration, selection, server_config, settings=settings
+        )
+        assert params["threadId"] == "saved-thread"
+        assert params["excludeTurns"] is True
+        assert "projectId" not in params
+        assert "ephemeral" not in params
+        assert "path" not in params
+        assert "history" not in params
+    else:
+        params = protocol.thread_start_params(
+            configuration, selection, server_config, settings=settings
+        )
+        assert params["projectId"] == project_id
+        assert params["ephemeral"] is False
 
-    assert params["projectId"] == project_id
     assert params["cwd"] == str(tmp_path)
     assert params["runtimeWorkspaceRoots"] == [str(tmp_path)]
     assert params["model"] == "selected-model"
-    assert params["ephemeral"] is False
+    assert "effort" not in params
     assert params["sandbox"] == "workspace-write"
     assert params["approvalPolicy"] == "on-request"
-    assert params["approvalsReviewer"] == "auto_review"
+    assert params["approvalsReviewer"] == "user"
     config = params["config"]
     assert isinstance(config, dict)
     expected: JsonObject = {
+        "model_reasoning_effort": "high",
+        "web_search": "disabled",
+        "features.memories": False,
         "mcp_servers.existing.enabled": False,
         'mcp_servers."name.with.dot".enabled': False,
         **configuration.mcp_config,
@@ -70,6 +87,7 @@ def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
     return {
         "thread": {"id": "thread-1", "projectId": configuration.project_id},
         "model": "selected-model",
+        "reasoningEffort": "high",
         "cwd": str(configuration.cwd),
         "runtimeWorkspaceRoots": [str(configuration.cwd)],
         "approvalPolicy": "on-request",
@@ -85,14 +103,19 @@ def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
 
 
 @pytest.mark.parametrize("project_id", [None, "project-1"])
+@pytest.mark.parametrize("expected_thread_id", [None, "thread-1"])
 def test_confirmed_thread_returns_only_its_identity(
-    tmp_path: "Path", project_id: str | None
+    tmp_path: "Path", project_id: str | None, expected_thread_id: str | None
 ) -> None:
     configuration = ThreadConfiguration(tmp_path, project_id=project_id)
     selection = ModelSelection((), "selected-model", "high")
 
     assert protocol.validate_thread(
-        _thread_result(configuration), configuration, selection, settings=ExecutionSettings()
+        _thread_result(configuration),
+        configuration,
+        selection,
+        settings=ExecutionSettings(),
+        expected_thread_id=expected_thread_id,
     ) == ("thread-1")
 
 
@@ -102,6 +125,8 @@ def test_confirmed_thread_returns_only_its_identity(
         {"approvalPolicy": "never"},
         {"approvalsReviewer": "user"},
         {"model": "different-model"},
+        {"reasoningEffort": "low"},
+        {"reasoningEffort": None},
         {"cwd": "other-directory"},
         {"runtimeWorkspaceRoots": None},
         {"runtimeWorkspaceRoots": []},
@@ -122,6 +147,18 @@ def test_thread_rejects_unconfirmed_configuration(tmp_path: "Path", override: "J
             configuration,
             selection,
             settings=ExecutionSettings(),
+        )
+
+
+def test_resume_rejects_a_different_thread_identity(tmp_path: "Path") -> None:
+    configuration = ThreadConfiguration(tmp_path)
+    with pytest.raises(CodexConnectionError, match="実行設定"):
+        protocol.validate_thread(
+            _thread_result(configuration),
+            configuration,
+            ModelSelection((), "selected-model", "high"),
+            settings=ExecutionSettings(),
+            expected_thread_id="different-thread",
         )
 
 

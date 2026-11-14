@@ -49,6 +49,53 @@ def thread_start_params(
         OSError: Packaged play instructions cannot be read.
         UnicodeError: Packaged play instructions are not UTF-8.
     """
+    return {
+        **_thread_params(configuration, selection, server_config, settings),
+        "projectId": configuration.project_id,
+        "ephemeral": False,
+    }
+
+
+def thread_resume_params(
+    thread_id: str,
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    *,
+    settings: "ExecutionSettings",
+) -> "JsonObject":
+    """Build an ID-based resume request with current settings and no history hydration.
+
+    Args:
+        thread_id: Saved server identity; no rollout path or reconstructed history is used.
+        configuration: Existing workspace and current application-owned MCP endpoint.
+            Project assignment is checked in the response, not changed by this request.
+        selection: Confirmed model and effort captured for this preparation.
+        server_config: Complete config/read response for the existing workspace.
+        settings: Execution options captured before preparation began.
+
+    Returns:
+        Parameters for thread/resume with excludeTurns enabled. The caller owns
+        prior subscription cleanup, resource binding and response validation.
+
+    Raises:
+        CodexConnectionError: The identity, runtime config or packaged instructions are invalid.
+        OSError: Packaged play instructions cannot be read.
+        UnicodeError: Packaged play instructions are not UTF-8.
+    """
+    return {
+        **_thread_params(configuration, selection, server_config, settings),
+        "threadId": _text(thread_id),
+        "excludeTurns": True,
+    }
+
+
+def _thread_params(
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    settings: "ExecutionSettings",
+) -> "JsonObject":
     servers = _object(_object(_object(server_config).get("config")).get("mcp_servers", {}))
     config: JsonObject = {}
     for name in servers:
@@ -56,12 +103,12 @@ def thread_start_params(
         config[f"mcp_servers.{key}.enabled"] = False
     config.update(configuration.mcp_config)
     config.update(config_overrides(settings))
+    config["model_reasoning_effort"] = selection.effort
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")
     cwd = str(configuration.cwd)
     return {
-        "projectId": configuration.project_id,
         "cwd": cwd,
         "model": selection.model,
         "developerInstructions": instructions,
@@ -70,7 +117,6 @@ def thread_start_params(
         "approvalsReviewer": settings.approvals_reviewer,
         "config": config,
         "runtimeWorkspaceRoots": [cwd],
-        "ephemeral": False,
     }
 
 
@@ -80,14 +126,16 @@ def validate_thread(
     selection: "ModelSelection",
     *,
     settings: "ExecutionSettings",
+    expected_thread_id: str | None = None,
 ) -> str:
     """Return the thread ID after confirming the requested execution boundaries.
 
     Args:
-        result: Complete thread/start response.
+        result: Complete thread/start or thread/resume response.
         configuration: Workspace and Project assignment used to construct the request.
         selection: Model selection submitted with the request.
         settings: The same immutable options used to construct the request.
+        expected_thread_id: Required identity for resume; None accepts the new ID from start.
 
     Returns:
         Confirmed thread identity, without adopting execution state.
@@ -108,9 +156,11 @@ def validate_thread(
     if (
         "projectId" not in thread
         or thread.get("projectId") != configuration.project_id
+        or (expected_thread_id is not None and thread.get("id") != expected_thread_id)
         or response.get("approvalPolicy") != "on-request"
         or response.get("approvalsReviewer") != settings.approvals_reviewer
         or response.get("model") != selection.model
+        or response.get("reasoningEffort") != selection.effort
         or response.get("cwd") != str(configuration.cwd)
         or response.get("runtimeWorkspaceRoots") != [str(configuration.cwd)]
         or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
