@@ -41,7 +41,7 @@ N1→N2→N3の順とする。画面は表示と操作、サービスは選択�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | N1: 設定・モデルを変更し、新規/閲覧から明示実行、ロード後変更へ進める | characterization/regression | integration/GUI | 本サービスと公開peerを使い、保存・実要求・確定表示を結ぶ。履歴と新着、active Goalへの追加指示も同じ境界で確認 |
+| refactor-skipped | N1: 設定・モデルを変更し、新規/閲覧から明示実行、ロード後変更へ進める | characterization/regression | integration/GUI | 本サービスと公開peerで3件成功、関連150件成功。製品変更なし |
 | todo | N2: 追加履歴・準備・resume・Goal・通信の失敗後に内容を保持して明示再操作できる | characterization/edge | integration/GUI | 追加履歴、cwd欠落、resume送信後失敗、Goal拒否、通信断の代表経路。下位層の全故障組合せは複製しない |
 | todo | N3: 実resumeへ現在の設定・権限・承認方法を適用し、標準記憶の残条件を確認する | acceptance | integration/runtime | 既存専用home、ON/auto_reviewとOFF/user。模擬FrameのMCP観測を併設。実機はM7 |
 
@@ -53,11 +53,25 @@ N1→N2→N3の順とする。画面は表示と操作、サービスは選択�
 
 | gate | 状態・検査範囲 |
 |---|---|
-| itemごとのpytest・構造確認・独立レビュー | not run。状態を跨ぐ製品境界と故障後の操作 |
+| itemごとのpytest・構造確認・独立レビュー | N1完了、N2/N3 not run。状態を跨ぐ製品境界と故障後の操作 |
 | 全unit/integration・ruff format/check・ty | not run。追加/修正後の全体回帰と静的検査 |
 | uv lock --check / uv build | not run。依存整合・配布資材 |
 | 実app-server・モデル | not run。実resume・権限・承認・標準記憶。認証資材と本文を検証reportへ転載しない |
 | 文書レビュー・リンク・git diff --check | 着手時に実施。仕様・既存証拠・後続境界の整合 |
+
+### N1の結果
+
+設定UIの保存から本ApplicationShell・CodexServiceThreadを通し、新規/閲覧中のモデル候補がstart/resumeへ渡ること、ロード後のモデル変更はsettings/update受理まで確定せず拒否後も元の値を使うことを確認した。Web・記憶・承認方法の変更はロード中に差し替わらず、次の明示再開へ反映された。保存モデル既定値は不変、保存履歴に新着を加え、active Goalへの追加送信でも独自のGoal更新を送らない。製品コードの修正は不要だった。
+
+| command | 結果・範囲 |
+|---|---|
+| `uv run pytest tests/integration/test_execution_settings_flow.py --basetemp=tmp/pytest-m6-settings -q --tb=short` | characterization 3 passed（2.14秒）。拒否後の次turn・Goal不変も確認して3 passed、構造確認後も3 passed（2.00秒） |
+| `uv run pytest tests/integration/test_execution_settings_flow.py tests/integration/test_execution_settings_gui.py tests/integration/test_codex_gui.py tests/integration/test_conversation_switching.py tests/integration/test_conversation_controller.py tests/integration/test_settings_apply_contract.py tests/integration/test_settings_recovery.py tests/integration/test_settings_accept.py --basetemp=tmp/pytest-m6-settings-regression -q --tb=short` | 150 passed（13.28秒）。既存の設定・対話・切替・保存失敗との回帰 |
+| 追加2ファイルのruff check/format、全体ty、git diff --check | 成功。実app-server・モデル・native画面・機器は未使用 |
+
+初期の失敗は試験側のSettings属性名と閉じたpeerの再利用に起因し、製品のredとは扱わない。接続ごとに新peerを作り、公開の保存Goalだけを次接続へ持たせた。Refactor status: **refactor-skipped**。既存ResumePeerが公開RPC/通知、共通ConversationGuiがShell寿命と結果待ち、試験が操作と期待値を持ち、新しい状態管理はない。公開API・文書契約は変更していない。
+
+独立レビューで公開要求・受理前後・拒否後の次送信・試験責務を確認し、必須修正なし。仕様のgate行はN1完了と後続未実行を分けて更新した。
 
 ## 9. 先送り事項
 
