@@ -301,7 +301,9 @@ class StdioTransport:
             self._finish("Process start failed")
             message = "Process start failed"
             raise TransportError(message) from None
-        self._reader = asyncio.create_task(self._read_stdout(), name="gigas-codex-stdout")
+        self._reader = asyncio.create_task(
+            self._read_stdout(self._protocol), name="gigas-codex-stdout"
+        )
 
     async def request(self, method: str, params: JsonObject | None) -> JsonValue:
         """Send a request and return the result corresponding to its ID.
@@ -469,10 +471,7 @@ class StdioTransport:
         if self._closed is not None:
             raise TransportError(self._closed.reason)
 
-    async def _read_stdout(self) -> None:
-        protocol = self._protocol
-        if protocol is None:
-            return
+    async def _read_stdout(self, protocol: _ProcessProtocol) -> None:
         try:
             while raw := await protocol.stdout.readline():
                 if self._closed is None:
