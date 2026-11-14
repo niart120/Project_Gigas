@@ -414,7 +414,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         assert isinstance(old_observation, dict)
         assert isinstance(old_started, dict)
         assert isinstance(old_finished, dict)
-        assert old_observation["thread_id"] == old_started["thread_id"] == "thread-1"
+        assert old_observation["thread_id"] == "thread-1"
+        assert "thread_id" not in old_started
         assert (
             old_finished["operation_id"]
             == old_started["operation_id"]
@@ -474,7 +475,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         assert isinstance(new_observation, dict)
         assert isinstance(new_started, dict)
         assert isinstance(new_finished, dict)
-        assert new_observation["thread_id"] == new_started["thread_id"] == "thread-2"
+        assert new_observation["thread_id"] == "thread-2"
+        assert "thread_id" not in new_started
         assert (
             new_finished["operation_id"]
             == new_started["operation_id"]

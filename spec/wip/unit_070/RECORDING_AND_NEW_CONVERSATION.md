@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip（設計・着手準備）**。[U08親仕様](../unit_013/RESUME.md)のM2を担当する。管理APIの利用とゲームI/O保存を分離し、Projectあり・なしの新規会話で、実際のthread IDに結び付いた記録を残す。
+状態: **wip（I1完了、次はI2）**。[U08親仕様](../unit_013/RESUME.md)のM2を担当する。管理APIの利用とゲームI/O保存を分離し、Projectあり・なしの新規会話で、実際のthread IDに結び付いた記録を残す。
 
 起点は[M0の確定設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と[M1の完了](../../complete/unit_069/MANAGEMENT_API.md)。利用者は保存場所や資料の形式を準備しなくても未所属で始められ、Projectを選んだ場合はその作業資料と記録を同じフォルダーで扱える。単独Python利用では呼出し側が指定した記録先だけを必要とする。
 
@@ -47,7 +47,7 @@ I1で単独保存API、I2で公開Projectと作業場所の解決を試験し、
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | I1: 単独Python利用で指定先へ5種のJSONLとPNGを残し、履歴破損・単発の書込失敗後も新規追記できる | new/edge | unit/integration | 正確なpayload、PNG一致・上書き拒否、writer排他・終了、祖先非作成。入力記録型の不要なthread/turnを削除し、影響する既存生成元・試験も同時更新する |
+| refactor-done | I1: 単独Python利用で指定先へ5種のJSONLとPNGを残し、履歴破損・単発の書込失敗後も新規追記できる | new/edge | unit/integration | red collection error→新規22件・関連106件green。ID検査の例外範囲を整理し同じ試験でgreen。入力記録型・既存生成元・試験を同時更新 |
 | todo | I2: 公開Projectの選択・登録と未所属の新規作業場所を解決し、既存資料を保持する | new/edge | unit/integration | root照合・ページ継続、登録済み再選択、新規パス衝突、欠落した作業場所の非再作成、位置台帳なし |
 | todo | I3: 製品の通常送信・Goal開始がcwd/MCP→実thread ID→records結合を通り、限定本文・観測・入力を新形式へ保存する | new/regression | unit/integration | 非同期保存と全呼出し元を置換。所属・実効権限と汎用保存案内、既存Projectメニュー、固定指示撤去、bind失敗・取消し、停止・drain。旧ProjectWriterと旧契約試験を撤去 |
 | todo | I4: 実app-serverと既存GUIからProjectあり／なしの新規開始・保存・停止を確認する | acceptance | integration/GUI | 所属と作業場所・実効権限を実runtimeで確認。模擬フレームによる保存bytes確認と実runtime応答を区別。USB Video Device・COM8の通し受入はM7 |
@@ -62,12 +62,24 @@ storageの記録API・入力記録型、servicesの記録・観測・会話資�
 
 | command / 確認 | result | 検査対象 |
 |---|---|---|
-| 対象itemのpytest | not run | 保存・公開API・開始順序・資源回収の振る舞い |
-| uv run pytest tests/unit tests/integration | not run | 既存の実行・停止・UIを含む回帰 |
-| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・型境界 |
-| uv lock --check / uv build | not run | 依存整合と新公開API・配布指示資材 |
+| 対象itemのpytest | I1成功、I2以降not run | 保存・公開API・開始順序・資源回収の振る舞い |
+| uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m2-root -q | I1で885 passed | 既存の実行・停止・UIを含む回帰 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | I1成功 | 形式・lint・型境界 |
+| uv lock --check / uv build | I1成功 | 依存整合と新公開API・配布指示資材 |
 | 実app-server・既存GUIによる新規開始と停止 | not run | 製品経路の実行・記録・閉鎖 |
 | git diff --check、文書内容・参照の確認 | 設計時の差分検査・78リンク成功 | 独立レビューの入力型変更と所属・権限の工程境界に関する指摘2点を反映。製品実装は未着手 |
+
+I1のred: `uv run pytest tests/integration/test_game_io_records.py --basetemp=tmp/pytest-m2-writer -q`は、gigas.storage.records未実装によるcollection errorを確認した。5種の形式・画像対応、破損の無修復保持、書込失敗後の継続、排他・終了を対象とする。
+
+I1では`GameIoRecordWriter`・`RecordError`・`RecordBusyError`を旧ProjectWriterから独立して実装した。型からthread/turnを削除し、入力生成元と影響する既存試験も更新した。新規22件と関連106件でgreen後、観測ID検査の例外範囲をUUID変換へ絞る構造整理を行い、同じ22件・106件でgreenを確認した（refactor-done）。旧ProjectWriterと現在の非同期保存はI3で置換するまで使用し、新旧を接続する互換処理は追加していない。
+
+関連試験のコマンドは`uv run pytest tests/integration/test_game_io_records.py tests/integration/test_observation_storage.py tests/integration/test_observation_service.py tests/integration/test_input_observation_path.py tests/integration/test_game_io_mcp.py --basetemp=tmp/pytest-m2-writer -q`。
+
+公開型・docstringと新しい単独利用節を照合し、文書の最初のPython例を実行して5種記録・PNG bytes一致を確認した。全体ruff・format（260ファイル）・ty、lock・build・差分検査は成功。独立レビューでは保存形式、PNGの上書き拒否、排他、初期化失敗時の資源回収、部分書込み後の継続に修正必須指摘なし。
+
+全unit/integrationの初回は883 passed・2 failed。切断後の回収試験に入力開始payloadのthread_idを参照する旧期待が残っていたため、削除後の契約へ更新した。操作ID・観測ID・PNGと別会話へ混入しないことの検査は保持した。対象の`uv run pytest tests/integration/test_codex_service.py -k disconnect_drains_old_results --basetemp=tmp/pytest-m2-root -q`は2 passed。
+
+更新後の全体再実行は885 passed（66.21秒）。変更した既存試験のruff・formatも成功。製品の新規開始と新writerの結合はI3、実接続受入はI4で行うため、I1の成功をM2完了とは扱わない。
 
 ## 9. 先送り事項
 

@@ -41,7 +41,7 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
     monkeypatch.setattr(project, "_append_row", delayed_append)
 
     async def scenario() -> None:
-        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),)))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
             observation = Observation.from_frame(sample_frame())
@@ -110,7 +110,7 @@ def test_record_failure_reaches_shared_failure_callback(
 
     async def scenario() -> None:
         recording.on_failure = failures.append
-        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),)))
         recording.submit_dialogue("dialogue.delivery", {"outcome": "unknown"}, thread_id="thread")
         await recording.drain()
         assert len(failures) == 2

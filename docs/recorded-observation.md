@@ -2,6 +2,62 @@
 
 Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](codex-gui.md)に結合し、MCP経由で同じ画像をCodexへ返します。
 
+## 単独のゲームI/O記録
+
+`gigas.storage.records.GameIoRecordWriter`は、呼出し側が指定したフォルダーへゲームI/Oと本文を記録する同期APIです。Project・Codexの会話や接続は不要です。呼出し側が保存先と開始・終了を管理し、writerは`events.jsonl`と`observations/<observation-id>.png`を保存します。`.gigas.lock`は同じ保存先への書込所有権に使います。
+
+`GameIoRecordWriter.create(path)`は、親が既にあり、保存先自体は存在しない場合に作成します。`open(path)`は既存の保存先を開き、events.jsonl・observationsがなければ作成します。祖先フォルダーの作成、既存資料の初期化、過去ログの読込・検査は行いません。どちらも成功時はwriterを返し、使用後は`close()`で所有権を解放してください。同期処理なのでGUIスレッドやイベントループ上で直接呼ばないでください。
+
+次の例は機器を使わず、一時フォルダーへ提出本文・入力開始・観測・入力結果・確定本文を保存します。入力結果は例示用の値で、物理入力を行っていません。
+
+```python
+from contextlib import closing
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from gigas.game_io.capture.models import Frame
+from gigas.game_io.input.models import InputStep
+from gigas.game_io.observation import Observation
+from gigas.storage.input_events import OperationFinished, OperationStarted
+from gigas.storage.records import GameIoRecordWriter
+
+frame = Frame(
+    bgr=bytes([255, 0, 0]) * (16 * 16),
+    width=16,
+    height=16,
+    generation=1,
+    sequence=1,
+    captured_at=datetime.now(UTC),
+    monotonic_ns=0,
+)
+with TemporaryDirectory(dir=Path.cwd()) as temporary:
+    with closing(GameIoRecordWriter.create(Path(temporary) / "records")) as writer:
+        writer.record_dialogue("dialogue.submitted", "現在の画面を確認してください")
+        writer.record_input(OperationStarted("operation-1", (InputStep("wait", 100),)))
+        observation = Observation.from_frame(frame)
+        writer.record(observation)
+        writer.record_input(
+            OperationFinished(
+                "operation-1", "completed", 1, observation_id=observation.observation_id
+            )
+        )
+        writer.record_dialogue("dialogue.message", "画面を確認しました。")
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
+```
+
+各メソッドは成功時に`None`を返します。`record_dialogue(kind, text)`のkindは`dialogue.submitted`または`dialogue.message`です。提出の受付結果や最終回答をwriterが判定することはありません。`record_input(event)`の開始と結果はoperation_idで対応付け、画像があればobservation_idを残します。`record(observation)`は元のPNG bytesを再符号化せずに保存し、同じIDの画像が既にあれば上書きを拒否します。
+
+JSONLの共通項目は`schema_version: 1`、行組立時のUTC時刻`recorded_at`、`type`、`payload`です。本文payloadは`{"text": "本文"}`だけです。入力開始payloadはoperation_idと操作配列sequence、結果payloadはoperation_id・result・completed_steps・input_sent・neutral、指定されたobservation_idと空でないphase・reasonです。観測payloadはobservation_id・captured_at・image_path・image・source_frameを持ち、imageとsource_frameはそれぞれwidth・heightだけです。captured_atは元Frameの取得時刻を保持します。イベント連番、Project・thread・turn・eventのID、取得サービスのgeneration・sequence、MIMEは保存しません。
+
+追記は標準ライブラリでJSON一行と改行を末尾へ書きます。既存の壊れた行や末尾に改行がなくても検査・修復せず、そのまま追記します。その結果、新しい行も読めなくなる可能性があります。復旧は利用者がwriter終了後に行ってください。記録のJSON化・UTF-8変換、画像公開、JSONLのopen・write・closeの失敗や短いwriteは`RecordError`で通知し、次の新しい記録は受け付けます。失敗した記録を自動再送せず、JSONL失敗前に公開した画像も残します。
+
+同じwriterへの同期処理の重複・書込中のcloseは`RecordBusyError`（RecordErrorの派生型）になります。呼出し側で直列化し、処理を回収してからcloseしてください。close後の記録は拒否し、closeの再呼出しは何もしません。OSロックは協調するwriter間の排他であり、画像・ログの閲覧は妨げません。稼働中の原記録の編集とロックファイルの削除は避けてください。保存は通常のwrite/closeで、fsyncや画像・JSONLの一括更新は保証しません。
+
+## アプリと非同期観測の保存API
+
+現在のアプリと以下の非同期観測経路は`ProjectWriter`を使用します。`GameIoRecordWriter`とは保存形式と公開メソッドが異なり、`RecordingService`のwriterとして渡すことはできません。
+
 入口は`gigas.storage.project.ProjectWriter`と`gigas.services.observation.ObservationService`です。共通の非同期保存は`gigas.services.recording.RecordingService`が担当します。元画像には[映像取得API](video-api.md)の不変な`Frame`を使います。
 
 `ProjectWriter`はアプリが原記録を書き込むための所有者です。アプリが現在の記録先に一つ保持し、観測サービスはその参照を借ります。プロジェクト未選択のチャットにもアプリ管理の記録先を用意します。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
@@ -130,10 +186,10 @@ async def close_project(
 
 | 型 | 保存する内容 |
 |---|---|
-| `OperationStarted(operation_id, sequence, thread_id, turn_id=None)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
+| `OperationStarted(operation_id, sequence)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
 | `OperationFinished(operation_id, result, completed_steps, ...)` | 完了要素数、結果、確定した`observation_id`を`input.operation_finished`へ記録 |
 
-`OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。`turn_id`は実値が判明している場合だけ指定します。port・baud・protocolは入力イベントへ含めません。
+`OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。thread・turn・port・baud・protocolは入力イベントへ含めません。
 
 入力と観測の応答を組み立てる会話側の処理が、共通の`recording`へ記録を提出します。入力サービス自身は記録先や会話IDを持ちません。開始・結果ともに、変更不能なイベントを`recording.submit_input(event)`で投入します。入力開始・停止・解除は保存完了を待ちません。受付済み保存は窓口が所有し、入力要求の取消し後も継続します。保存の成否で入力受付を切り替えません。操作記録はoperation_idで対応付け、特定のユーザー指示やturnへの帰属を推定しません。
 

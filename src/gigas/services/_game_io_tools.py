@@ -49,7 +49,7 @@ async def act_and_observe(
     if isinstance(admitted, OperationResult):
         return admitted, None
     operation_id, task = admitted
-    recording.submit_input(OperationStarted(operation_id, sequence, thread_id))
+    recording.submit_input(OperationStarted(operation_id, sequence))
     result = OperationResult("INTERRUPTED", "input", operation_id)
     observation = None
     observation_error = None

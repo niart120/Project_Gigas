@@ -34,7 +34,7 @@ def test_input_records_keep_sequence_results_and_observation_reference(tmp_path:
     )
     try:
         writer.record_thread("runtime-thread")
-        writer.record_input(OperationStarted("operation-1", sequence, "runtime-thread"))
+        writer.record_input(OperationStarted("operation-1", sequence))
         writer.record(observation, thread_id="runtime-thread")
         writer.record_input(
             OperationFinished(
@@ -62,7 +62,7 @@ def test_input_records_keep_sequence_results_and_observation_reference(tmp_path:
         "input.operation_finished",
     ]
     assert records[1]["payload"]["sequence"] == [step.to_json() for step in sequence]
-    assert records[1]["payload"]["thread_id"] == "runtime-thread"
+    assert "thread_id" not in records[1]["payload"]
     assert records[1]["payload"]["operation_id"] == records[3]["payload"]["operation_id"]
     assert "turn_id" not in records[1]["payload"]
     assert records[3]["payload"]["observation_id"] == observation.observation_id

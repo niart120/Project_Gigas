@@ -103,7 +103,7 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
         )
         assert (writer.path / recorded["image_path"]).read_bytes() == observation.png_bytes
         assert rows[0]["payload"]["sequence"] == [step.to_json() for step in sequence]
-        assert rows[0]["payload"]["thread_id"] == "real-thread-id"
+        assert "thread_id" not in rows[0]["payload"]
         assert all("run_id" not in row["payload"] for row in rows)
         assert all(
             "port" not in row["payload"] and "baudrate" not in row["payload"] for row in rows
