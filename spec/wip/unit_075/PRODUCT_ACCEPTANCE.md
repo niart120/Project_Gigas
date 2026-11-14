@@ -54,9 +54,9 @@ P3は10の「旧APIキー設定からの移行UIは設けない」への適合�
 
 | gate | 状態・範囲 |
 |---|---|
-| 実画面・実モデル・実機 | not run。画面、RPC、入力結果、MCP画像、保存JSONL/PNGを照合する |
-| 配布指示・利用手順 | not run。現行ソース・配布成果物と操作結果を読む。`uv run python scripts/check_package.py`でwheel/sdist同梱指示の一致、隔離環境からの資材読取・起動終了を確認する |
-| 回帰・静的・build | M6の1015件・ruff/ty・lock/build成功を基準とする。製品変更がなければ文書品質のために繰り返さず、変更時は対応するgateを追加する |
+| 実画面・実モデル・実機 | 実画面で通常認証行、USB Video DeviceとCOM8の接続、app-serverの認証・sandbox準備済みを確認。映像がAVerMediaのNo Signalのためゲーム画面の復帰待ち。モデル送信・ゲーム入力は未実施 |
+| 配布指示・利用手順 | P3・P4反映後の`uv run python scripts/check_package.py`成功。wheel/sdist同梱指示の一致、隔離環境からの資材読取・起動終了を確認。実機操作に関する公開文書の最終更新はP1後 |
+| 回帰・静的・build | P3・P4反映後の全体1018件、ruff/format・ty・lock/build成功。下記にcommandと範囲を記録 |
 | 文書レビュー・リンク・git diff --check | 着手時は成功（3文書80リンク、75 unit）。独立レビューで4送信の範囲と既存受入の分担を確認した。完了整理時に再確認する |
 
 ### P3の修正・検証
@@ -80,6 +80,27 @@ M0で撤去対象とした旧認証設定の移行UIが、M1以降も残って�
 READMEの再開予定・旧設定ボタンの記載と、映像API文書のJSONL保存項目を現行契約へ修正した。配布smokeのアイコン検査を表示中のsidebarへ合わせた。`uv run python scripts/check_package.py`は、wheel/sdistの共通指示一致、隔離環境からの資材読取、取得worker、module/consoleの両起動・通常終了に成功した。P3の製品変更前（2abe0a3＋当該3ファイル）での確認であり、最終製品のgateはP3後に再確認する。
 
 関連GUI15件は構造確認の前後とも成功。検査対象1箇所だけの変更で追加の抽象化は不要と判断した（refactor-skipped）。README/API文書のローカルリンク12件、ruff/format・ty・diffも成功した。
+
+### 最終製品の自動検査とP1の現在地
+
+P3・P4反映後（17c969a）に、次のgateが成功した。初期設計04・06・09・10の実装予定表現も現行契約へ揃え、独立レビューで実装済み範囲との整合と要件追加がないことを確認した。
+
+| command | 結果 |
+|---|---|
+| `uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m7-final -q` | 1018 passed、115.22秒 |
+| `uv run ruff format --check .` | 289ファイル成功 |
+| `uv run ruff check .` | 成功 |
+| `uv run ty check --no-progress` | 成功 |
+| `uv lock --check` | 83パッケージ成功 |
+| `uv build` | wheel・sdist生成成功 |
+| `uv run python scripts/check_package.py` | 26.332秒で成功。隔離インストール、同梱play.md一致、資材読取、存在しない取得元の拒否・worker終了、module/console両入口のoffscreen起動・sidebarアイコン・通常終了を確認 |
+| `git diff --check` | 成功 |
+
+配布検査では当該プロセスだけ`UV_CACHE_DIR`を検証用領域、`TEMP/TMP`を通常のTempへ指定した。先行試行ではinterpreter cacheへの一時ファイル書込み権限エラー、sandboxのTempパス解釈エラー、GUI起動検査の15秒タイムアウトが発生した。最後の失敗時には全体pytest等も大幅に遅延していたが、原因は特定していない。単独再実行の成功と区別する。
+
+更新した7文書のローカルリンク119件・unit番号75件の一意性を`uv run python tmp/validate_m2_docs.py`で確認した。独立レビューで最終gate実績と失敗記録を照合し、キャッシュ書込みエラーの表記と取得worker試験の範囲を明確にした。文書のみの追記に対して製品試験は繰り返していない。
+
+実画面は`tmp/u08-m7-ui/`へ保存した。USB Video Deviceの取得開始、COM8（CH552、9600 baud）の接続、専用homeへのapp-server接続は成功した。プレビューはAVerMediaのNo Signalであり、ゲーム機側の映像復帰を依頼している。接続時の中立化を除き、モデルからも直接APIからもゲーム入力は送っていない。P1とU08全体は未完了である。
 
 ## 8. 先送り事項
 

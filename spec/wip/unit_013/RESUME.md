@@ -117,7 +117,7 @@ M0で改訂する初期設計は、[01 概要](../../initial/01-overview.md)、[
 | M4の製品検証 | 完了。全体968件、選択と実行の分離、早期通知・停止・切断、実app-serverの再起動後と同一プロセス内の再開・設定変更・同じrecordsへの追記、active Goalへの追加指示と停止を確認。[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)に補助の失敗と修正・実測範囲を記録 |
 | M5の製品検証 | 完了。全体1007件、実画面での公開履歴・Web activity、所属別新規・既存再開・Goal停止・停止後切替・再接続時の表示保持を確認。[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)にnativeで検出した3件の修正と実測範囲を記録 |
 | M6の製品検証 | 完了。全体1015件、設定/モデルと故障後のUI、実resumeの両承認方法・記憶ON/OFFとゲームMCP後の生成対象維持を確認。[M6](../../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)にONの補助終了待ち不備・修正後OFFの正常終了・記憶抽出未観測を分けて記録 |
-| M7のGUI・実機受入 | not run。新規開始、再起動後の継続、手動変更、停止、代表障害を確認する。模擬接続と実機の成功を区別する |
+| M7のGUI・実機受入 | 実画面で機器接続とapp-server準備済みを確認。映像はNo Signalのためゲーム画面の復帰待ち。新規開始、再起動後の継続、手動変更、停止、代表障害は未実施。最終自動検査1018件・静的検査・配布検査は成功。[M7](../unit_075/PRODUCT_ACCEPTANCE.md)に実績と未完了範囲を記録 |
 
 仕様・初期設計だけの改訂では製品のPythonテスト・型検査・package buildはnot applicableとする。製品実装時はAGENTS.mdに従ってゲートを選び、公開API・依存・配布変更の検証も各子仕様へ記録する。限定的な公開API試行を、製品経路や長時間攻略の受入済みへ広げない。
 
