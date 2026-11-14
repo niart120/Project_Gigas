@@ -4,7 +4,7 @@
 
 Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し、新規プレイと既存会話からの継続をGIGASの画面から扱えるようにする。GIGASはゲームI/Oと人間の介入を担い、既存会話を現在の機器・MCP・記録先へ接続する。独自ログから会話やGoalを復元する工程にはしない。
 
-状態: **wip（M0〜M3完了、次はM4）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。[M1 専用home・設定・管理API](../../complete/unit_069/MANAGEMENT_API.md)、[M2 記録と新規会話開始の結合](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)、[M3 実行設定・標準指示の結合](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)は製品実装・実接続の受入を完了した。次はM4の切替・既存会話の再接続。製品全体の受入は未完了である。
+状態: **wip（M0〜M3完了、M4着手中）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映した。[M1 専用home・設定・管理API](../../complete/unit_069/MANAGEMENT_API.md)、[M2 記録と新規会話開始の結合](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)、[M3 実行設定・標準指示の結合](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)は製品実装・実接続の受入を完了した。[M4の切替・既存会話の再接続](../unit_072/CONVERSATION_SELECTION_AND_RESUME.md)に着手した。製品全体の受入は未完了である。
 
 作業規約は[AGENTS.md](../../../AGENTS.md)と[配置・運用](../../initial/06-repository.md)に従う。攻略補助は実プレイで不足を観測してから検討する。
 
