@@ -362,6 +362,7 @@ class GoalState:
     status: GoalStatus
     tokens_used: int = 0
     time_used_seconds: int = 0
+    token_budget: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
