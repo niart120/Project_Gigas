@@ -47,9 +47,11 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 
 選択の所有者は公開metadata・取得中taskと表示対象を扱い、全文履歴・実行状態の正本を持たない。Executionはロードした対象のturn・Goal・要求・送信と共通停止を担当する。Resourcesは解決された作業場所、MCP・観測・writerの取得と回収を担当し、履歴・会話選択の判断をしない。ServiceはQt配送・接続世代・部品の組立と接続全体の終了を維持する。
 
+選択先は新規の所属、または既存のthread ID・保存cwd・所属を表す不変値として保持する。新規startの検査直後、records結合前に実IDと解決済みcwdを選択へ渡し、追加readを行わない。初回結合失敗・明示切断・通信断でも既知の選択先を維持し、接続し直しただけでは実行せず、次の明示操作を既存IDのresumeへ進める。閲覧Goalがactiveでもロード済み実行へ合成せず、閲覧だけの会話を停止・終了でpausedへ変えない。
+
 選択と実行準備を既存の大きなclassへ継ぎ足さず、同じ情報を複数の所有者で更新しない。通知は現在の実行対象へ配送し、接続開始時の古いExecutionをclosureに固定しない。Goal変更の通知相関・停止は既存の契約を再利用する。新しい部品は具体的な所有境界に限り、単なる転送層を増やさない。
 
-各itemをred→green→refactor-after-greenによる構造確認→同じ試験の再実行→独立レビュー→commitで進める。TDD itemは同じM4の中で順に完了させ、M5のUIを先行させない。
+各itemをred→green→refactor-after-greenによる構造確認→同じ試験の再実行→独立レビュー→commitで進める。K3aで選択部品、K3bで既存所有者とサービスへ結合する。K3aだけでは製品の会話選択対応とは扱わず、未結合の入口をGUIへ出さない。選択から既存会話の明示実行までの結合はK4完了をゲートにする。TDD itemは同じM4の中で順に完了させ、M5のUIを先行させない。
 
 ## 6. TDD Test List
 
@@ -57,7 +59,8 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 |---|---|---|---|---|
 | refactor-skipped | K1: start/resumeが選択モデル・推論レベル・最新設定を渡し、ID・所属・作業場所・権限の不一致を拒否する | new/regression | unit/integration | 共通設定変換、resume固有項目、Goal開始前のeffort、余分な設定更新の整理 |
 | refactor-done | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
-| todo | K3: 公開履歴の選択と所属別新規を実行から分け、停止後だけ切り替えられる | new/edge | integration | 取得失敗時保持、unsubscribeと旧要求・資源の回収、遅い結果の失効、閲覧モデル選択・Goal削除 |
+| refactor-done | K3a: 公開履歴と所属別新規の選択候補を取得し、失敗時に以前の対象を保持する | new/edge | unit/integration | 新規/既存target・閲覧/ページ結果、取得は一件、履歴を蓄積せず、実行資源を作らない |
+| todo | K3b: 選択部品をサービスへ結合し、停止後だけ切替え、閲覧モデル選択・Goal削除を実行せず扱う | new/edge | integration | unsubscribeと旧要求・資源の回収、遅い結果の失効、start後・切断後の対象保持、Goal相関共用 |
 | todo | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
 | todo | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
 
@@ -100,6 +103,14 @@ Resources.prepare_existingは公開metadataの保存cwdを変更せず検査し�
 `uv run pytest tests/integration/test_conversation_resources.py tests/integration/test_conversation_execution.py tests/integration/test_codex_service.py tests/integration/test_workspaces.py --basetemp=tmp/pytest-m4-resources -q --tb=short`は82 passed（15.17秒）。変更2ファイルのruff format/check・tyと差分検査は成功した。
 
 refactor-done: 試験の初期writer命名を整理し、同じ試験が成功した。MCP組立は実装時に共用済みで、追加fixture層やthread台帳は不要と判断した。独立レビューの修正必須指摘なし。同じcwdの別threadへの切替でも旧endpointの入力呼出し先を残さないため、K3では必ずResources.closeを経由する。実app-server・実機はこのitemでは未使用。
+
+### K3a 実装・検証結果
+
+新規/既存を分ける不変targetとBrowseResult・HistoryResult、privateな選択所有者を追加した。metadata・Goal・初回履歴を取得し、呼出し元による旧実行の解放成功後に候補を採用する。取得/解放の失敗・取消しでは以前の選択を維持する。追加ページは初回選択を妨げず、要求時のtargetを付けて返す。保存cwdが欠けていても閲覧でき、選択部品は実行資源を作らない。
+
+`uv run pytest tests/integration/test_conversation_selection.py --basetemp=tmp/pytest-m4-k3a -q --tb=short`は未実装moduleでcollection 1 error、実装後11 passed（0.08秒）、構造確認後11 passed（0.09秒）。`uv run pytest tests/integration/test_conversation_selection.py tests/unit/test_codex_history.py tests/unit/test_codex_management_goals.py --basetemp=tmp/pytest-m4-k3a-regression -q --tb=short`は39 passed（0.14秒）。変更3ファイルのruff・format、全体ty、差分検査は成功した。
+
+refactor-done: 試験のpoll待ちを明示Event付きRPC gateへ置換し、async context managerの型をAsyncGeneratorで表した。同じ試験は成功し、Any・cast・型抑制を追加していない。独立レビューの修正必須指摘なし。履歴結果はtargetの値等価ではなく同じ選択instanceで照合することをdocstring・公開文書に明記した。A→B→Aへの切替後に古いAのページが届く場合も、K3bで採用しないことを確認する。サービス・GUIへの結合、再接続の製品利用はまだ未実装である。
 
 ## 9. 先送り事項
 

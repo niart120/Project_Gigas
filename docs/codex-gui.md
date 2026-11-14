@@ -128,6 +128,10 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 ## サービスAPI
 
+`gigas.services.conversations`の`NewConversationTarget(project_id=None)`は、まだ開始していない会話の所属だけを表します。`StoredConversationTarget(thread_id, cwd, project_id=None)`は、公開応答で確認した既存ID・保存作業場所・所属を表します。どちらも選択対象の値であり、接続済み・実行準備済みを意味しません。`None`の所属は未所属です。
+
+`BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の履歴ページ、`HistoryResult(target, page)`は取得開始時の対象と追加ページを保持します。履歴は`TurnPage`の全文項目とcursorをそのまま使い、全件収集や表示用の本文への変換はしません。追加ページの完了時には`target`が現在の選択と同じインスタンスかを照合してください。同じ会話へ選び直した場合も、以前の選択で要求したページは採用しません。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
+
 `gigas.services.codex.CodexServiceThread(data_root, reader, factory=..., input_factory=...)` は専用QThread内のasyncioループでCodex・入力接続・ゲームI/O MCP・保存先を所有します。`data_root`は未選択チャットの親となるアプリデータフォルダー、`reader`は既存映像取得サービスの`CaptureReader`です。`input_factory`は解決済み入力設定から機器を作り、既定では`SerialInput`を使います。`start()`だけではCodexにも入力機器にも接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
 
 注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で入力を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
