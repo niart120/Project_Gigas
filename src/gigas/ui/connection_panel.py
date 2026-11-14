@@ -189,11 +189,26 @@ class ConnectionPanel(QWidget):
 
         Args:
             available: Whether application lifetime permits session commands.
-            settings_ready: Whether settings permit a new connection.
+            settings_ready: Whether settings and workspace selection permit new execution.
         """
         self._available = available
         self._settings_ready = settings_ready
         self._render()
+
+    @property
+    def can_select_project(self) -> bool:
+        """Whether the idle connection can select a workspace before starting a thread."""
+        return (
+            self._available
+            and self._settings_ready
+            and self._connected
+            and self._status.phase in {"ready", "login_required"}
+            and self._conversation.thread_id is None
+            and not self._conversation.sending
+            and not self._conversation.stopping
+            and not self._pending
+            and not self._sandbox.setting_up
+        )
 
     def service_finished(self) -> None:
         """Disable commands after an unexpected service-thread exit."""
@@ -555,6 +570,7 @@ class ConnectionPanel(QWidget):
         stopping = conversation.stopping or "stop" in self._pending
         accepting = (
             available
+            and self._settings_ready
             and self._connected
             and can_submit(self._status, conversation)
             and not submitted

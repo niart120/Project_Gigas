@@ -1,17 +1,19 @@
-"""Own a conversation's archive, observations and MCP endpoint on one loop."""
+"""Own a conversation's workspace, recording and MCP endpoint on one loop."""
 
 import asyncio
 from functools import partial
+from pathlib import PureWindowsPath
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
+from gigas.game_io.observation import ObservationError
 from gigas.mcp.game_io import TOOL_TIMEOUT_SECONDS, GameIoMcpServer
 from gigas.runtime.codex.models import ThreadConfiguration
 from gigas.services._game_io_tools import act_and_observe
+from gigas.services._workspaces import _require_directory, resolve_workspace
 from gigas.services.input import OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage.project import ProjectError, ProjectWriter
+from gigas.storage.records import GameIoRecordWriter, RecordError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -19,13 +21,14 @@ if TYPE_CHECKING:
 
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.input.models import InputStep
-    from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
-    from gigas.runtime.codex.transport import JsonObject
+    from gigas.game_io.observation import Observation, ObservationResolution
+    from gigas.runtime.codex.management import CodexManagement
     from gigas.services._game_io_tools import InputStart
+    from gigas.storage.records import DialogueRecordType
 
 
 class ConversationResources:
-    """Acquire and close archive resources; the service serializes connection changes."""
+    """Acquire and close resources without owning a runtime connection or thread ID."""
 
     def __init__(
         self,
@@ -33,16 +36,22 @@ class ConversationResources:
         reader: "CaptureReader",
         failed: "Callable[[str, str, str], None]",
     ) -> None:
-        """Retain dependencies without opening an archive or HTTP listener."""
-        self._data_root = data_root.resolve()
+        """Retain dependencies without opening directories or an HTTP listener."""
+        self._data_root = data_root
         self._reader = reader
         self._failed = failed
-        self._project_selected = False
-        self._writer: ProjectWriter | None = None
+        self._project_id: str | None = None
+        self._cwd: Path | None = None
+        self._writer: GameIoRecordWriter | None = None
         self._observations: ObservationService | None = None
         self._recording: RecordingService | None = None
         self._mcp: GameIoMcpServer | None = None
         self._resolution: ObservationResolution = "full_hd"
+
+    @property
+    def records_bound(self) -> bool:
+        """Whether game I/O can use this conversation's recording services."""
+        return self._observations is not None and self._recording is not None
 
     def set_resolution(self, resolution: "ObservationResolution") -> None:
         """Apply the setting to later observations, including an existing session."""
@@ -50,57 +59,32 @@ class ConversationResources:
         if self._observations is not None:
             self._observations.resolution = resolution
 
-    async def select_project(self, path: "Path", *, create: bool) -> None:
-        """Select a writer while preserving the current one if acquisition fails."""
-        if self._writer is not None and self._writer.path == path:
-            if create:
-                message = f"{path}: 既存のプロジェクトは新規作成できません"
-                raise ProjectError(message)
-            await asyncio.to_thread(self._writer.reload)
-        else:
-            operation = ProjectWriter.create if create else ProjectWriter.open
-            candidate = await asyncio.to_thread(operation, path)
-            try:
-                if self._writer is not None:
-                    await asyncio.to_thread(self._writer.close)
-            except BaseException:
-                await asyncio.to_thread(candidate.close)
-                raise
-            self._writer = candidate
-        self._project_selected = True
+    def select_project(self, project_id: str) -> None:
+        """Adopt an identity before a thread starts; the caller checks admission."""
+        if self._writer is not None:
+            raise RecordError("会話の記録中はプロジェクトを変更できません")
+        self._project_id = project_id
+        self._cwd = None
 
-    async def prepare(self, start_input: "InputStart") -> ThreadConfiguration:
-        """Prepare conversation resources, reusing the endpoint until it is closed."""
+    async def prepare(
+        self, management: "CodexManagement", start_input: "InputStart"
+    ) -> ThreadConfiguration:
+        """Prepare the workspace and MCP endpoint without creating recording files."""
         try:
-            if self._writer is None:
-                creation = asyncio.create_task(asyncio.to_thread(self._create_chat_archive))
+            if self._cwd is None:
+                preparation = asyncio.create_task(
+                    resolve_workspace(management, self._data_root, project_id=self._project_id)
+                )
                 try:
-                    self._writer = await asyncio.shield(creation)
+                    self._cwd = await asyncio.shield(preparation)
                 except asyncio.CancelledError:
-                    # The filesystem operation cannot be canceled once submitted.
-                    # Adopt its result so disconnect can close the acquired writer.
-                    self._writer = await creation
+                    self._cwd = await preparation
                     raise
-            writer = self._writer
-            if self._recording is None:
-                self._recording = RecordingService(writer)
-                self._recording.on_failure = lambda error: self._failed(
-                    "", str(writer.path), recording_reason(error)
-                )
-            await self._recording.ensure_memory()
-            if self._observations is None:
-                self._observations = ObservationService(
-                    self._reader, self._recording, resolution=self._resolution
-                )
+            else:
+                await asyncio.to_thread(_require_directory, self._cwd)
             if self._mcp is None:
                 self._mcp = GameIoMcpServer(
-                    self._observations.observe,
-                    partial(
-                        _conversation_input,
-                        start_input=start_input,
-                        observations=self._observations,
-                        recording=self._recording,
-                    ),
+                    self._observe, partial(self._act, start_input=start_input)
                 )
                 try:
                     await self._mcp.start()
@@ -110,8 +94,8 @@ class ConversationResources:
                     raise
             prefix = f"mcp_servers.{self._mcp.server_name}."
             endpoint = self._mcp.config
-            configuration = ThreadConfiguration(
-                writer.path,
+            return ThreadConfiguration(
+                self._cwd,
                 {
                     prefix + "url": endpoint["url"],
                     prefix + "http_headers": dict(endpoint["http_headers"]),
@@ -122,50 +106,53 @@ class ConversationResources:
                     prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
                     prefix + "tools.act_and_observe.approval_mode": "approve",
                 },
+                project_id=self._project_id,
             )
         except Exception as error:
-            path = self._writer.path if self._writer is not None else self._data_root / "chats"
-            self._failed("", str(path), recording_reason(error))
+            self.report_failure(error)
             raise
-        return configuration
 
-    def _create_chat_archive(self) -> ProjectWriter:
-        parent = self._data_root / "chats"
-        parent.mkdir(parents=True, exist_ok=True)
-        return ProjectWriter.create(parent / str(uuid4()))
+    async def bind_records(self, thread_id: str) -> None:
+        """Acquire records for the adopted thread before allowing game I/O or submission."""
+        if self._cwd is None:
+            raise RecordError("会話の作業場所が準備されていません")
+        try:
+            if self._writer is None:
+                acquisition = asyncio.create_task(
+                    asyncio.to_thread(_open_records, self._cwd, thread_id)
+                )
+                try:
+                    self._writer = await asyncio.shield(acquisition)
+                except asyncio.CancelledError:
+                    # A worker can acquire the OS lock after cancellation; retain
+                    # its result so stop/retry and disconnect share the same owner.
+                    self._writer = await acquisition
+                    raise
+            else:
+                await asyncio.to_thread(_require_directory, self._cwd)
+            writer = self._writer
+            if self._recording is None:
+                self._recording = RecordingService(writer)
+                self._recording.on_failure = lambda error: self._failed(
+                    "", str(writer.path), recording_reason(error)
+                )
+            if self._observations is None:
+                self._observations = ObservationService(
+                    self._reader, self._recording, resolution=self._resolution
+                )
+        except Exception as error:
+            self.report_failure(error)
+            raise
 
-    def record_thread(self, thread_id: str) -> None:
-        """Associate observation and recording with the adopted thread."""
-        if self._observations is None or self._recording is None:
-            raise ProjectError("チャットの記録先が準備されていません")
-        self._recording.submit_thread(thread_id)
-        self._observations.thread_id = thread_id
-
-    def record_dialogue(
-        self,
-        kind: str,
-        payload: "JsonObject",
-        *,
-        turn_id: str | None,
-    ) -> None:
-        """Submit public dialogue for the thread held by the observation service."""
-        observations = self._observations
-        if (
-            self._recording is not None
-            and observations is not None
-            and observations.thread_id is not None
-        ):
-            self._recording.submit_dialogue(
-                "dialogue." + kind,
-                payload,
-                thread_id=observations.thread_id,
-                turn_id=turn_id,
-            )
+    def record_dialogue(self, kind: "DialogueRecordType", text: str) -> None:
+        """Queue an already selected body without interpreting submission acceptance."""
+        if self._recording is not None:
+            self._recording.submit_dialogue(kind, text)
 
     def report_failure(self, error: BaseException) -> None:
-        """Report a failure with the current archive, when available."""
-        path = str(self._writer.path) if self._writer is not None else ""
-        self._failed("", path, recording_reason(error))
+        """Report a failure with the current record destination or workspace."""
+        path = self._writer.path if self._writer is not None else self._cwd
+        self._failed("", str(path) if path is not None else "", recording_reason(error))
 
     async def close_endpoint(self) -> None:
         """Close HTTP intake while the service joins the runtime independently."""
@@ -179,7 +166,6 @@ class ConversationResources:
                 try:
                     await self._mcp.close()
                 except Exception:
-                    # The failed server task has already closed its listener.
                     self._mcp = None
                     raise
                 self._mcp = None
@@ -195,47 +181,49 @@ class ConversationResources:
                 self._recording = None
 
     async def disconnect(self) -> None:
-        """Recover session resources, retaining an explicitly selected project writer."""
-        try:
-            await self.drain()
-        finally:
-            if not self._project_selected:
-                await self._close_writer()
+        """Close all thread resources, retaining only the selected Project identity."""
+        await self.close()
 
     async def close(self) -> None:
-        """Recover the session and close even an explicitly selected project writer."""
+        """Drain accepted work and release the writer even when HTTP shutdown fails."""
         try:
             await self.drain()
         finally:
-            await self._close_writer()
+            if self._writer is not None:
+                await asyncio.to_thread(self._writer.close)
+                self._writer = None
+            self._cwd = None
 
-    async def _close_writer(self) -> None:
-        if self._writer is not None:
-            await asyncio.to_thread(self._writer.close)
-            self._writer = None
+    async def _observe(self) -> "Observation":
+        if self._observations is None:
+            raise ObservationError("BUSY", "会話の記録先が準備されていません")
+        return await self._observations.observe()
+
+    async def _act(
+        self, sequence: "tuple[InputStep, ...]", *, start_input: "InputStart"
+    ) -> "tuple[OperationResult, Observation | ObservationError | None]":
+        if self._observations is None or self._recording is None:
+            return OperationResult("INPUT_DISABLED", message="会話が準備されていません"), None
+        return await act_and_observe(
+            sequence,
+            start_input=start_input,
+            observations=self._observations,
+            recording=self._recording,
+        )
+
+
+def _open_records(workspace: "Path", thread_id: str) -> GameIoRecordWriter:
+    if not thread_id or thread_id in {".", ".."} or PureWindowsPath(thread_id).name != thread_id:
+        raise RecordError("会話IDを記録先のフォルダー名として使用できません")
+    _require_directory(workspace)
+    parent = workspace / "records"
+    parent.mkdir(exist_ok=True)
+    path = parent / thread_id
+    return GameIoRecordWriter.open(path) if path.exists() else GameIoRecordWriter.create(path)
 
 
 def recording_reason(error: BaseException) -> str:
     """Return display-safe storage failure details."""
-    if isinstance(error, ProjectError | OSError):
+    if isinstance(error, RecordError | OSError):
         return str(error)
     return f"記録処理に失敗しました ({type(error).__name__})"
-
-
-async def _conversation_input(
-    sequence: "tuple[InputStep, ...]",
-    *,
-    start_input: "InputStart",
-    observations: ObservationService,
-    recording: RecordingService,
-) -> "tuple[OperationResult, Observation | ObservationError | None]":
-    thread_id = observations.thread_id
-    if thread_id is None:
-        return OperationResult("INPUT_DISABLED", message="会話が準備されていません"), None
-    return await act_and_observe(
-        sequence,
-        start_input=start_input,
-        observations=observations,
-        recording=recording,
-        thread_id=thread_id,
-    )

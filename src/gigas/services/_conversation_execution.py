@@ -13,6 +13,7 @@ from gigas.runtime.codex.connection import (
     CodexConnectionError,
     MessageDeliveryError,
 )
+from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import (
     ConversationStatus,
     DialogueEvent,
@@ -25,6 +26,7 @@ from gigas.runtime.codex.models import (
 )
 from gigas.runtime.codex.transport import RpcError, RpcNotification, ServerRequest, TransportError
 from gigas.services.input import OperationResult
+from gigas.storage.records import RecordError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -166,20 +168,23 @@ class ConversationExecution:
 
     async def _prepare(self) -> str:
         await self._connection.require_ready()
-        if self._thread_id is not None:
-            return self._thread_id
-        configuration = await self._resources.prepare(self.start_input)
-        selection = self._connection.selection
-        config = await self._connection.request(
-            "config/read", {"includeLayers": False, "cwd": str(configuration.cwd)}
-        )
-        params = protocol.thread_start_params(configuration, selection, config)
-        result = await self._connection.request("thread/start", params)
-        thread_id = protocol.validate_thread(result, configuration, selection)
-        self._resources.record_thread(thread_id)
-        self._thread_id = thread_id
-        self._publish()
-        return thread_id
+        try:
+            if self._thread_id is None:
+                configuration = await self._resources.prepare(
+                    CodexManagement(self._connection), self.start_input
+                )
+                selection = self._connection.selection
+                config = await self._connection.request(
+                    "config/read", {"includeLayers": False, "cwd": str(configuration.cwd)}
+                )
+                params = protocol.thread_start_params(configuration, selection, config)
+                result = await self._connection.request("thread/start", params)
+                self._thread_id = protocol.validate_thread(result, configuration, selection)
+                self._publish()
+            await self._resources.bind_records(self._thread_id)
+        except (OSError, RecordError) as error:
+            raise CodexConnectionError("会話の作業場所・記録先を準備できません") from error
+        return self._thread_id
 
     async def send(self, prompt: str) -> str | None:
         """Submit ordinary or additional text once through turn/start.
@@ -490,7 +495,12 @@ class ConversationExecution:
         self, sequence: "tuple[InputStep, ...]"
     ) -> "tuple[str, asyncio.Task[OperationResult]] | OperationResult":
         """Synchronously reject closing/stopping requests or register input with its owner."""
-        if self._thread_id is None or self._closing() or self._stopping is not None:
+        if (
+            self._thread_id is None
+            or not self._resources.records_bound
+            or self._closing()
+            or self._stopping is not None
+        ):
             return OperationResult("INPUT_DISABLED", message="会話を停止・切断しています")
         return self._inputs.start(sequence)
 

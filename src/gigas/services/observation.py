@@ -25,7 +25,6 @@ class ObservationService:
         reader: Read-only access to the existing capture service.
         recording: Application-owned persistence service shared with input and chat.
         resolution: Image size used by the next observation; defaults to FullHD.
-        thread_id: Conversation for latest-frame observations, or None when standalone.
         on_save_error: Optional callback receiving the observation and storage
             exception on this event loop. It must return promptly. Without a
             callback, failures are logged with the observation ID and archive path.
@@ -33,9 +32,6 @@ class ObservationService:
     Attributes:
         resolution: Applied size for subsequent observations. Each observe call
             snapshots it once, so an in-progress image is unaffected by changes.
-        thread_id: Chat context for subsequent observe() calls. Post-operation
-            observations receive their fixed context explicitly. Later changes do
-            not change the context of submitted encoding or persistence.
     """
 
     def __init__(
@@ -44,22 +40,17 @@ class ObservationService:
         recording: "RecordingService",
         *,
         resolution: "ObservationResolution" = "full_hd",
-        thread_id: str | None = None,
         on_save_error: "Callable[[Observation, Exception], None] | None" = None,
     ) -> None:
         """Keep existing owners without starting a device or event loop."""
         self.resolution = resolution
-        self.thread_id = thread_id
         self._recording = recording
         self._reader = reader
         self._on_save_error = on_save_error
         self._worker: asyncio.Task[Observation] | None = None
 
-    async def observe(self, *, thread_id: str | None = None) -> "Observation":
+    async def observe(self) -> "Observation":
         """Encode the latest streaming frame without waiting for persistence.
-
-        Args:
-            thread_id: Explicit conversation context; defaults to the service context.
 
         Returns:
             Final PNG bytes, observation ID, and source metadata. The matching
@@ -79,25 +70,13 @@ class ObservationService:
         if snapshot.phase != "streaming" or snapshot.frame is None:
             message = "観測できる映像がありません"
             raise ObservationError("DEVICE_UNAVAILABLE", message)
-        return await asyncio.shield(
-            self._start_encoding(snapshot.frame, self.thread_id if thread_id is None else thread_id)
-        )
-
-    def _start_encoding(self, frame: "Frame", thread_id: str | None) -> "asyncio.Task[Observation]":
-        if self._worker is not None and not self._worker.done():
-            message = "観測画像の符号化中です"
-            raise ObservationError("BUSY", message)
-        self._worker = asyncio.create_task(self._encode(frame, self.resolution, thread_id))
+        self._worker = asyncio.create_task(self._encode(snapshot.frame, self.resolution))
         self._worker.add_done_callback(_retrieve_exception)
-        return self._worker
+        return await asyncio.shield(self._worker)
 
-    async def _encode(
-        self, frame: "Frame", resolution: "ObservationResolution", thread_id: str | None
-    ) -> Observation:
+    async def _encode(self, frame: "Frame", resolution: "ObservationResolution") -> Observation:
         observation = await asyncio.to_thread(Observation.from_frame, frame, resolution=resolution)
-        self._recording.submit_observation(
-            observation, thread_id=thread_id, on_error=self._on_save_error
-        )
+        self._recording.submit_observation(observation, on_error=self._on_save_error)
         return observation
 
     async def drain(self) -> None:

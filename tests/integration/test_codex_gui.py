@@ -185,6 +185,10 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         panel.prompt.setPlainText("開始 日本語🙂")
         panel.send_button.click()
         panel.send_button.click()
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        sent = next(result for result in results if result.operation == "send")
+        assert sent.error == ""
+        assert sent.message == MessageResult("accepted", "dialogue-turn")
         qtbot.waitUntil(lambda: len(panel.requests) == 1)
         question = next(iter(panel.requests.values()))
         token = question.request.token
@@ -194,7 +198,6 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert "fixture/observe" in panel.transcript.toPlainText()
         assert "観測完了" in panel.transcript.toPlainText()
         assert "INTERNAL_CONTENT" not in panel.transcript.toPlainText()
-        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         panel.prompt.setPlainText("質問は保留し、門の前で止まる")
         panel.send_button.click()
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)

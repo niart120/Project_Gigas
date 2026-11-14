@@ -26,16 +26,17 @@ def _text(value: "JsonValue") -> str:
 def thread_start_params(
     configuration: "ThreadConfiguration", selection: "ModelSelection", server_config: "JsonValue"
 ) -> "JsonObject":
-    """Build one thread request using the prepared archive and runtime configuration.
+    """Build one thread request using the prepared workspace and runtime configuration.
 
     Args:
-        configuration: Prepared archive directory and Gigas-owned MCP overrides.
+        configuration: Prepared workspace, Project assignment, and Gigas-owned MCP overrides.
         selection: Confirmed model selection from the connection's catalog.
-        server_config: Complete config/read response for the archive directory.
+        server_config: Complete config/read response for the workspace.
 
     Returns:
-        Parameters for thread/start. Only memory is writable; inherited MCP servers
-        are disabled before applying the application's endpoint overrides.
+        Parameters for thread/start with an explicit Project assignment. The workspace
+        is writable; inherited MCP servers are disabled before applying the application's
+        endpoint overrides. Packaged instructions contain no conversation-specific path.
 
     Raises:
         CodexConnectionError: Runtime configuration or packaged instructions are invalid.
@@ -59,26 +60,17 @@ def thread_start_params(
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")
-    instructions += (
-        f"\n\n観測の記録先: {configuration.cwd}\n"
-        "observeが返す観測IDの画像はobservations/<観測ID>.png、"
-        "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
-        "返された画像と保存画像は同じPNGです。保存は非同期なので、"
-        "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
-        "必要な過去画像は保存されている場合に参照してください。"
-        "\n案内は ../guide.md、現状メモは current.md、知識は notes/。"
-        "書込はこのmemory内だけに限定し、親の原記録は編集しない。"
-    )
-    memory = str(configuration.cwd / "memory")
+    cwd = str(configuration.cwd)
     return {
-        "cwd": memory,
+        "projectId": configuration.project_id,
+        "cwd": cwd,
         "model": selection.model,
         "developerInstructions": instructions,
         "sandbox": "workspace-write",
         "approvalPolicy": "on-request",
         "approvalsReviewer": "user",
         "config": config,
-        "runtimeWorkspaceRoots": [memory],
+        "runtimeWorkspaceRoots": [cwd],
         "ephemeral": False,
     }
 
@@ -90,7 +82,7 @@ def validate_thread(
 
     Args:
         result: Complete thread/start response.
-        configuration: Archive used to construct the request.
+        configuration: Workspace and Project assignment used to construct the request.
         selection: Model selection submitted with the request.
 
     Returns:
@@ -100,6 +92,7 @@ def validate_thread(
         CodexConnectionError: The response omits or changes the requested settings.
     """
     response = _object(result)
+    thread = _object(response.get("thread"))
     sandbox = _object(response.get("sandbox"))
     expected_sandbox: JsonObject = {
         "type": "workspaceWrite",
@@ -109,14 +102,17 @@ def validate_thread(
         "excludeSlashTmp": True,
     }
     if (
-        response.get("approvalPolicy") != "on-request"
+        "projectId" not in thread
+        or thread.get("projectId") != configuration.project_id
+        or response.get("approvalPolicy") != "on-request"
         or response.get("approvalsReviewer") != "user"
         or response.get("model") != selection.model
-        or response.get("cwd") != str(configuration.cwd / "memory")
+        or response.get("cwd") != str(configuration.cwd)
+        or response.get("runtimeWorkspaceRoots") != [str(configuration.cwd)]
         or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
     ):
         raise CodexConnectionError("Codexの実行設定が要求と不一致")
-    return _text(_object(response.get("thread")).get("id"))
+    return _text(thread.get("id"))
 
 
 def turn_start_params(thread_id: str, prompt: str, selection: "ModelSelection") -> "JsonObject":

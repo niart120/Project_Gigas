@@ -12,7 +12,12 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
-def test_thread_preparation_limits_workspace_and_replaces_inherited_mcp(tmp_path: "Path") -> None:
+@pytest.mark.parametrize("project_id", [None, "project-1"])
+def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp(
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, project_id: str | None
+) -> None:
+    packaged_instructions = "packaged instructions"
+    monkeypatch.setattr(protocol, "read_play_instructions", lambda: packaged_instructions)
     configuration = ThreadConfiguration(
         tmp_path,
         {
@@ -20,6 +25,7 @@ def test_thread_preparation_limits_workspace_and_replaces_inherited_mcp(tmp_path
             "mcp_servers.game.url": "http://127.0.0.1:3210/mcp",
             "mcp_servers.game.http_headers": {"Authorization": "Bearer private-value"},
         },
+        project_id=project_id,
     )
     selection = ModelSelection((), "selected-model", "high")
     server_config: JsonObject = {
@@ -28,8 +34,9 @@ def test_thread_preparation_limits_workspace_and_replaces_inherited_mcp(tmp_path
 
     params = protocol.thread_start_params(configuration, selection, server_config)
 
-    assert params["cwd"] == str(tmp_path / "memory")
-    assert params["runtimeWorkspaceRoots"] == [str(tmp_path / "memory")]
+    assert params["projectId"] == project_id
+    assert params["cwd"] == str(tmp_path)
+    assert params["runtimeWorkspaceRoots"] == [str(tmp_path)]
     assert params["model"] == "selected-model"
     assert params["ephemeral"] is False
     assert params["sandbox"] == "workspace-write"
@@ -46,8 +53,7 @@ def test_thread_preparation_limits_workspace_and_replaces_inherited_mcp(tmp_path
     }
     instructions = params["developerInstructions"]
     assert isinstance(instructions, str)
-    assert protocol.read_play_instructions() in instructions
-    assert str(tmp_path) in instructions
+    assert instructions == packaged_instructions
     assert "private-value" not in instructions
     assert server_config == {
         "config": {"mcp_servers": {"existing": {}, "name.with.dot": {}, "game": {}}}
@@ -56,9 +62,10 @@ def test_thread_preparation_limits_workspace_and_replaces_inherited_mcp(tmp_path
 
 def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
     return {
-        "thread": {"id": "thread-1"},
+        "thread": {"id": "thread-1", "projectId": configuration.project_id},
         "model": "selected-model",
-        "cwd": str(configuration.cwd / "memory"),
+        "cwd": str(configuration.cwd),
+        "runtimeWorkspaceRoots": [str(configuration.cwd)],
         "approvalPolicy": "on-request",
         "approvalsReviewer": "user",
         "sandbox": {
@@ -71,8 +78,11 @@ def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
     }
 
 
-def test_confirmed_thread_returns_only_its_identity(tmp_path: "Path") -> None:
-    configuration = ThreadConfiguration(tmp_path)
+@pytest.mark.parametrize("project_id", [None, "project-1"])
+def test_confirmed_thread_returns_only_its_identity(
+    tmp_path: "Path", project_id: str | None
+) -> None:
+    configuration = ThreadConfiguration(tmp_path, project_id=project_id)
     selection = ModelSelection((), "selected-model", "high")
 
     assert protocol.validate_thread(_thread_result(configuration), configuration, selection) == (
@@ -87,8 +97,13 @@ def test_confirmed_thread_returns_only_its_identity(tmp_path: "Path") -> None:
         {"approvalsReviewer": "auto_review"},
         {"model": "different-model"},
         {"cwd": "other-directory"},
+        {"runtimeWorkspaceRoots": None},
+        {"runtimeWorkspaceRoots": []},
+        {"runtimeWorkspaceRoots": ["other-directory"]},
         {"sandbox": {"type": "dangerFullAccess"}},
-        {"thread": {"id": ""}},
+        {"thread": {"id": "", "projectId": None}},
+        {"thread": {"id": "thread-1"}},
+        {"thread": {"id": "thread-1", "projectId": "unexpected-project"}},
     ],
 )
 def test_thread_rejects_unconfirmed_configuration(tmp_path: "Path", override: "JsonObject") -> None:

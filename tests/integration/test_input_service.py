@@ -14,7 +14,7 @@ from gigas.services import input as input_module
 from gigas.services.input import InputService, InputServiceError, OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage.project import ProjectWriter
+from gigas.storage.records import GameIoRecordWriter
 from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
@@ -57,7 +57,7 @@ class Device:
 class Harness:
     """Actual recording and observation services with a controllable input boundary."""
 
-    def __init__(self, writer: ProjectWriter) -> None:
+    def __init__(self, writer: GameIoRecordWriter) -> None:
         """Borrow the test writer and a streaming frame."""
         self.writer = writer
         self.frame = sample_frame()
@@ -92,7 +92,7 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path: Path) -> "Iterator[Harness]":
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     value = Harness(writer)
 
     try:

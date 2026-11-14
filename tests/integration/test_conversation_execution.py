@@ -16,7 +16,7 @@ from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
 from gigas.services.input import InputService
-from gigas.storage.project import ProjectWriter
+from gigas.storage.records import GameIoRecordWriter
 from tests.unit.test_codex_connection import FakePeer, _until
 
 if TYPE_CHECKING:
@@ -209,14 +209,15 @@ def test_stop_during_preparation_prevents_submission_without_discarding_resource
     asyncio.run(scenario())
 
 
-def test_stop_then_disconnect_recovers_archive_creation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("after_stop", ["disconnect", "retry"])
+def test_stop_during_bind_recovers_writer_for_retry_or_disconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_stop: str
 ) -> None:
     entered, release, created = Event(), Event(), Event()
-    writers: list[ProjectWriter] = []
-    create = ProjectWriter.create
+    writers: list[GameIoRecordWriter] = []
+    create = GameIoRecordWriter.create
 
-    def delayed_create(_cls: type[ProjectWriter], path: Path) -> ProjectWriter:
+    def delayed_create(_cls: type[GameIoRecordWriter], path: Path) -> GameIoRecordWriter:
         entered.set()
         if not release.wait(5):
             raise TimeoutError
@@ -225,7 +226,7 @@ def test_stop_then_disconnect_recovers_archive_creation(
         created.set()
         return writer
 
-    monkeypatch.setattr(ProjectWriter, "create", classmethod(delayed_create))
+    monkeypatch.setattr(GameIoRecordWriter, "create", classmethod(delayed_create))
 
     async def scenario() -> None:
         c = Conversation(tmp_path)
@@ -236,14 +237,20 @@ def test_stop_then_disconnect_recovers_archive_creation(
             stopping = asyncio.create_task(c.execution.stop())
             await _until(lambda: c.execution.snapshot.stopping)
             await asyncio.sleep(0)  # Let preparation enter its resource-recovery await.
-            closing = c.close()
+            closing = c.close() if after_stop == "disconnect" else None
             release.set()
-            await closing
+            if closing is not None:
+                await closing
             await asyncio.gather(sending, stopping, return_exceptions=True)
             assert await asyncio.to_thread(created.wait, 5)
             assert not any(method == "turn/start" for method, _ in c.peer.calls)
-            archive = next((tmp_path / "chats").iterdir())
-            ProjectWriter.open(archive).close()
+            if after_stop == "retry":
+                assert c.execution.snapshot.thread_id == "thread-1"
+                assert await c.execution.send("次へ") == "turn-1"
+                assert sum(method == "thread/start" for method, _ in c.peer.calls) == 1
+                await c.close()
+            archive = writers[0].path
+            GameIoRecordWriter.open(archive).close()
         finally:
             release.set()
             await c.close()

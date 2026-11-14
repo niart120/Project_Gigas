@@ -1,12 +1,10 @@
 """Bridge GUI commands to one thread-owned asyncio Codex connection."""
 
 import asyncio
-from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from threading import Lock
 from typing import TYPE_CHECKING, Literal
-from uuid import uuid4
 
 from PySide6.QtCore import QThread, Signal
 
@@ -18,21 +16,12 @@ from gigas.runtime.codex.connection import (
     MessageDeliveryError,
 )
 from gigas.runtime.codex.launch import create_connection
-from gigas.runtime.codex.models import (
-    DialogueEvent,
-    GoalEvent,
-    HumanRequest,
-    ModelSelection,
-    PlanEvent,
-    RequestResolved,
-    SessionStatus,
-    TextEvent,
-    TurnStarted,
-)
+from gigas.runtime.codex.management import CodexManagement
+from gigas.runtime.codex.models import DialogueEvent, TextEvent
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
+from gigas.services._workspaces import select_project
 from gigas.services.input import InputService
-from gigas.storage.project import ProjectError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -46,7 +35,6 @@ if TYPE_CHECKING:
         ConnectionEvent,
         ConnectionOptions,
     )
-    from gigas.runtime.codex.transport import JsonObject
     from gigas.services.input import InputDevice
 
 type ServiceOperation = Literal[
@@ -81,10 +69,10 @@ class InputConnectionResult:
 
 @dataclass(frozen=True, slots=True)
 class ProjectResult:
-    """A project selection attempt; an empty error confirms ownership of path.
+    """A Project selection attempt; an empty error confirms the selected server root.
 
     Attributes:
-        path: Requested absolute directory, also the selected path on success.
+        path: Requested directory on failure; server-reported root on success.
         error: Display-safe failure details; failure preserves the previous selection.
     """
 
@@ -158,7 +146,6 @@ class _OperationContext:
     generation: int
     operation: ServiceOperation
     token: str = ""
-    request_id: str = field(default_factory=lambda: f"message-{uuid4()}")
 
 
 type _ConversationCall = Callable[[ConversationExecution], Awaitable[str | bool | None]]
@@ -172,14 +159,14 @@ class CodexServiceThread(QThread):
     this thread does not connect to Codex. shutdown rejects new work and returns
     immediately; finished and wait(0) confirm thread exit. shutdown_error must be
     empty before treating exit as successful cleanup.
-    Rejections reported on the GUI thread do not write to the archive.
+    Rejections on the GUI thread emit completion results without recording a body.
 
     Args:
-        data_root: Persistent application data directory; unselected chats use chats/.
+        data_root: Persistent application data directory; unassigned chats use unassigned/.
         reader: Shared read-only view of the existing capture service.
         input_factory: Creates an input device on the service loop from resolved settings.
         factory: Creates the runtime on the service loop when connecting.
-            The conversation directory is prepared on the first send.
+            The conversation directory is prepared on the first send or Goal creation.
             Receives options and the synchronous runtime event callback.
             None creates the bundled runtime using data_root/codex_home, without
             copying credentials or inheriting the developer's runtime home.
@@ -202,9 +189,6 @@ class CodexServiceThread(QThread):
     ) -> None:
         """Prepare command routing without creating a loop or connection."""
         super().__init__()
-        self._recording_operation: ContextVar[_OperationContext | None] = ContextVar(
-            "gigas_operation", default=None
-        )
         self._factory = (
             partial(create_connection, codex_home=data_root / "codex_home")
             if factory is None
@@ -240,28 +224,38 @@ class CodexServiceThread(QThread):
         self._enqueue(lambda: self._track(asyncio.create_task(self._refresh_input_ports())))
 
     def create_project(self, path: "Path") -> None:
-        """Queue exclusive creation of a new project while disconnected.
+        """Queue exclusive directory creation and Project selection before a thread starts.
+
+        Requires an open connection. project_completed reports the server root on
+        success; failure preserves the previous selection without deleting files.
 
         Args:
             path: New directory whose parent already exists.
         """
-        path = path.resolve()
+        generation = self._generation
         self._enqueue(
             lambda: self._track(
-                asyncio.create_task(_finish_io(self._change_project(path, create=True)))
+                asyncio.create_task(
+                    _finish_io(self._change_project(path, generation=generation, create=True))
+                )
             )
         )
 
     def open_project(self, path: "Path") -> None:
-        """Queue validation and selection of an existing project while disconnected.
+        """Queue server Project lookup or registration for an existing directory.
+
+        Requires an open connection and no started conversation. The first matching
+        server root is reused; an unregistered directory becomes a new Project.
 
         Args:
-            path: Existing project directory. Reopening the held path reloads it.
+            path: Existing workspace directory, selected before a thread starts.
         """
-        path = path.resolve()
+        generation = self._generation
         self._enqueue(
             lambda: self._track(
-                asyncio.create_task(_finish_io(self._change_project(path, create=False)))
+                asyncio.create_task(
+                    _finish_io(self._change_project(path, generation=generation, create=False))
+                )
             )
         )
 
@@ -306,7 +300,7 @@ class CodexServiceThread(QThread):
 
     def select_model(self, model: str, effort: str) -> None:
         """Submit next-turn settings through the shared conversation send operation."""
-        self._submit("select_model", lambda execution: self._select_model(execution, model, effort))
+        self._submit("select_model", lambda execution: execution.select_model(model, effort))
 
     def login(self) -> None:
         """Queue explicit ChatGPT login on the connection owner."""
@@ -343,7 +337,7 @@ class CodexServiceThread(QThread):
         copied_answers = None if answers is None else dict(answers)
         self._submit(
             "answer",
-            lambda connection: self._answer(connection, token, decision, copied_answers),
+            lambda execution: execution.answer(token, decision=decision, answers=copied_answers),
             token=token,
         )
 
@@ -364,7 +358,7 @@ class CodexServiceThread(QThread):
                 self._loop.call_soon_threadsafe(self._signal_shutdown)
         for _start, context in queued:
             if context is not None:
-                self._reject_submission(context, record_delivery=False)
+                self._reject_submission(context)
 
     def run(self) -> None:
         """Run and finally close the private asyncio loop on this QThread."""
@@ -408,7 +402,7 @@ class CodexServiceThread(QThread):
                 else:
                     self._loop.call_soon_threadsafe(self._dispatch, start, context)
         if ending and context is not None:
-            self._reject_submission(context, record_delivery=False)
+            self._reject_submission(context)
 
     async def _serve(self) -> None:
         self._done = asyncio.Event()
@@ -465,15 +459,12 @@ class CodexServiceThread(QThread):
             # _execute handles cancellation once entered; this call never started.
             self._reject_submission(context)
 
-    def _reject_submission(
-        self, command: _OperationContext, *, record_delivery: bool = True
-    ) -> None:
+    def _reject_submission(self, command: _OperationContext) -> None:
         if command.operation == "setup_windows_sandbox":
             self._complete(
                 command,
                 "実行環境の準備を開始していない",
                 "not_sent",
-                record_delivery=record_delivery,
             )
             return
         if command.operation in {
@@ -484,7 +475,7 @@ class CodexServiceThread(QThread):
             "goal_resume",
             "goal_clear",
         }:
-            self._complete(command, "送信されていない", "not_sent", record_delivery=record_delivery)
+            self._complete(command, "送信されていない", "not_sent")
 
     def _complete(
         self,
@@ -494,8 +485,6 @@ class CodexServiceThread(QThread):
         failure_id: int | None = None,
         turn_id: str | None = None,
         goal_accepted: bool = False,
-        *,
-        record_delivery: bool = True,
     ) -> None:
         answer = AnswerResult(command.token, outcome) if command.operation == "answer" else None
         message = None
@@ -513,22 +502,6 @@ class CodexServiceThread(QThread):
                 MessageResult("accepted" if goal_accepted else "not_sent")
                 if outcome == "sent"
                 else MessageResult(outcome)
-            )
-        if record_delivery and command.generation == self._active_generation:
-            self._record_dialogue(
-                "delivery",
-                {
-                    "request_id": command.request_id,
-                    "operation": command.operation,
-                    "outcome": "accepted"
-                    if command.operation in {"stop", "goal_clear"} and not error
-                    else message.outcome
-                    if message
-                    else outcome,
-                    "error": error,
-                    "token": command.token if command.operation == "answer" else "",
-                },
-                turn_id=turn_id,
             )
         self.completed.emit(
             ServiceResult(command.generation, command.operation, error, answer, failure_id, message)
@@ -580,13 +553,6 @@ class CodexServiceThread(QThread):
             self.input_changed.emit(InputConnectionResult(config, self._input.connected, error))
 
     async def _execute(self, command: _OperationContext, call: _OperationCall) -> None:
-        token = self._recording_operation.set(command)
-        try:
-            await self._execute_operation(command, call)
-        finally:
-            self._recording_operation.reset(token)
-
-    async def _execute_operation(self, command: _OperationContext, call: _OperationCall) -> None:
         error = ""
         failure_id: int | None = None
         outcome: AnswerOutcome = "sent"
@@ -674,86 +640,61 @@ class CodexServiceThread(QThread):
                 await self._input.drain_input()
                 return None
             raise CodexConnectionError("この接続では送信を受け付けない")
-        if command.operation in {"goal_resume", "goal_clear", "stop"}:
-            self._record_submission({})
         return await call(execution)
-
-    def _record_submission(self, payload: "JsonObject") -> None:
-        context = self._recording_operation.get()
-        if context is not None:
-            payload.update({"request_id": context.request_id, "operation": context.operation})
-        self._record_dialogue("submitted", payload)
-
-    async def _select_model(
-        self, execution: ConversationExecution, model: str, effort: str
-    ) -> None:
-        self._record_submission({"model": model, "effort": effort})
-        await execution.select_model(model, effort)
-
-    async def _answer(
-        self,
-        execution: ConversationExecution,
-        token: str,
-        decision: str | None,
-        answers: "Mapping[str, str] | None",
-    ) -> None:
-        self._record_submission(
-            {
-                "token": token,
-                "decision": decision,
-                "answers": dict(answers) if answers is not None else None,
-            }
-        )
-        await execution.answer(token, decision=decision, answers=answers)
 
     def _receive(self, generation: int, event: "ConnectionEvent") -> None:
         if generation == self._active_generation:
             self._record_event(event)
         self.received.emit(ServiceEvent(generation, event))
 
-    def _record_dialogue(
-        self, kind: str, payload: "JsonObject", *, turn_id: str | None = None
-    ) -> None:
-        self._resources.record_dialogue(kind, payload, turn_id=turn_id)
-
     def _record_event(self, event: "ConnectionEvent") -> None:
-        kinds = {
-            GoalEvent: "goal",
-            PlanEvent: "plan",
-            HumanRequest: "request",
-            RequestResolved: "resolved",
-            TurnStarted: "turn_started",
-            SessionStatus: "status",
-        }
-        kind = kinds.get(type(event))
-        if kind is not None:
-            self._record_dialogue(
-                kind,
-                asdict(event),
-                turn_id=event.turn_id
-                if isinstance(event, PlanEvent | HumanRequest | TurnStarted)
-                else None,
-            )
-        elif isinstance(event, DialogueEvent):
-            self._record_dialogue(event.kind, event.payload, turn_id=event.turn_id)
-        elif isinstance(event, ModelSelection):
-            self._record_dialogue("selection", {"model": event.model, "effort": event.effort})
-        elif isinstance(event, TextEvent) and event.role == "user":
-            self._record_submission(asdict(event))
+        if isinstance(event, TextEvent) and event.role == "user":
+            self._resources.record_dialogue("dialogue.submitted", event.text)
+        elif (
+            isinstance(event, DialogueEvent)
+            and event.kind == "message"
+            and event.payload.get("partial") is False
+            and isinstance(text := event.payload.get("text"), str)
+        ):
+            self._resources.record_dialogue("dialogue.message", text)
 
-    async def _change_project(self, path: "Path", *, create: bool) -> None:
+    async def _change_project(self, path: "Path", *, generation: int, create: bool) -> None:
         error = ""
         try:
-            await self._select_project(path, create=create)
+            path = await self._select_project(path, generation=generation, create=create)
+        except CodexConnectionError as failure:
+            error = str(failure)
         except Exception as failure:  # noqa: BLE001 -- sanitize unexpected failures at GUI boundary
             error = recording_reason(failure)
         self.project_completed.emit(ProjectResult(path, error))
 
-    async def _select_project(self, path: "Path", *, create: bool) -> None:
-        async with self._resources_lock:
-            if self._connection is not None:
-                raise ProjectError("Codexを切断してからプロジェクトを変更してください")
-            await self._resources.select_project(path, create=create)
+    async def _select_project(self, path: "Path", *, generation: int, create: bool) -> "Path":
+        if generation != self._active_generation:
+            raise CodexConnectionError("この接続ではプロジェクトを選択できません")
+        connection = self._connection
+        execution = self._conversation
+        connection = self._require_project_selection(connection, execution)
+        project = await select_project(CodexManagement(connection), path, create=create)
+        self._require_project_selection(connection, execution)
+        self._resources.select_project(project.id)
+        return project.root
+
+    def _require_project_selection(
+        self, connection: CodexConnection | None, execution: ConversationExecution | None
+    ) -> CodexConnection:
+        if (
+            connection is None
+            or execution is None
+            or self._connection is not connection
+            or self._conversation is not execution
+            or self._closing is not None
+            or self._ending
+        ):
+            raise CodexConnectionError("Codexへ接続してからプロジェクトを選択してください")
+        state = execution.snapshot
+        if state.thread_id is not None or state.sending or state.stopping:
+            raise CodexConnectionError("会話の開始前にプロジェクトを選択してください")
+        return connection
 
     async def _close_connection(self) -> None:
         connection, execution = self._connection, self._conversation

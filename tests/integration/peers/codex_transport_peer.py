@@ -177,11 +177,12 @@ def dialogue() -> None:
             assert params["approvalPolicy"] == "on-request"
             assert params["approvalsReviewer"] == "user"
             result = {
-                "thread": {"id": thread_id},
+                "thread": {"id": thread_id, "projectId": params["projectId"]},
                 "model": params["model"],
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
                 "cwd": params["cwd"],
+                "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
                 "sandbox": {
                     "type": "workspaceWrite",
                     "writableRoots": [],

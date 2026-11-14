@@ -38,17 +38,19 @@ class ConnectionOptions:
 
 @dataclass(frozen=True, slots=True)
 class ThreadConfiguration:
-    """Prepared chat location and application-owned MCP overrides.
+    """Prepared workspace, Project assignment, and application-owned MCP overrides.
 
     Attributes:
-        cwd: Prepared absolute archive directory, independent of the process cwd.
-            Its existing memory subdirectory is the thread's workspace and only write root.
+        cwd: Prepared absolute workspace, independent of the process cwd.
+            This directory is the thread's workspace and only normal write root.
         mcp_config: App-server config overrides for the application's MCP server.
             May contain credentials; omitted from repr and never emitted as events.
+        project_id: Server-owned Project identity, or None for an unassigned thread.
     """
 
     cwd: "Path"
     mcp_config: "JsonObject" = field(default_factory=dict, repr=False)
+    project_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,8 +21,8 @@ from gigas.services._game_io_tools import act_and_observe
 from gigas.services.input import OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage import project
-from gigas.storage.project import ProjectWriter
+from gigas.storage import records as records_module
+from gigas.storage.records import GameIoRecordWriter
 from tests.integration.test_input_service import Device, Harness
 from tests.integration.test_observation_storage import sample_frame
 
@@ -133,7 +133,6 @@ def server_for(h: Harness) -> GameIoMcpServer:
             start_input=h.service.start,
             observations=h.observations,
             recording=h.recording,
-            thread_id="thread",
         )
 
     return GameIoMcpServer(h.observations.observe, execute)
@@ -141,7 +140,7 @@ def server_for(h: Harness) -> GameIoMcpServer:
 
 @pytest.fixture
 def io_harness(tmp_path: Path) -> "Iterator[Harness]":
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     try:
         yield Harness(writer)
     finally:
@@ -365,7 +364,6 @@ def test_http_same_endpoint_rejects_during_stop_and_accepts_after_drain(
                 start_input=start,
                 observations=h.observations,
                 recording=h.recording,
-                thread_id="thread",
             )
 
         await h.service.connect(h.device)
@@ -471,10 +469,10 @@ def test_http_deadline_returns_unknown_result_and_leaves_input_cleanup_owned(
 def test_http_observations_return_same_images_before_saving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "project")
+    writer = GameIoRecordWriter.create(tmp_path / "project")
     frame = sample_frame()
     entered, release = Event(), Event()
-    publish = project._publish_image
+    publish = records_module._publish_image
 
     def delayed_publish(path: Path, data: bytes) -> None:
         entered.set()
@@ -483,7 +481,7 @@ def test_http_observations_return_same_images_before_saving(
             raise TimeoutError(message)
         publish(path, data)
 
-    monkeypatch.setattr(project, "_publish_image", delayed_publish)
+    monkeypatch.setattr(records_module, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
         recording = RecordingService(writer)
@@ -525,7 +523,14 @@ def test_http_observations_return_same_images_before_saving(
                         == (writer.path / row["payload"]["image_path"]).read_bytes()
                     )
                     assert metadata == {
-                        key: value for key, value in row["payload"].items() if key != "image_path"
+                        "observation_id": row["payload"]["observation_id"],
+                        "captured_at": row["payload"]["captured_at"],
+                        "image": {"mime_type": "image/png", **row["payload"]["image"]},
+                        "source_frame": {
+                            "generation": frame.generation,
+                            "sequence": frame.sequence,
+                            **row["payload"]["source_frame"],
+                        },
                     }
                 assert rows[0]["payload"]["observation_id"] != rows[1]["payload"]["observation_id"]
         finally:
@@ -541,7 +546,7 @@ def test_http_observations_return_same_images_before_saving(
 
 
 def test_http_authentication_host_origin_and_old_connection(tmp_path: Path) -> None:
-    writer = ProjectWriter.create(tmp_path / "project")
+    writer = GameIoRecordWriter.create(tmp_path / "project")
 
     async def scenario() -> None:
         recording = RecordingService(writer)
@@ -593,7 +598,7 @@ def test_failed_lifespan_is_an_error_without_exiting_process(
         return Starlette(lifespan=failed_lifespan)
 
     monkeypatch.setattr(MCPServer, "streamable_http_app", failed_app)
-    writer = ProjectWriter.create(tmp_path / "project")
+    writer = GameIoRecordWriter.create(tmp_path / "project")
 
     async def scenario() -> None:
         recording = RecordingService(writer)
@@ -614,7 +619,7 @@ def test_failed_lifespan_is_an_error_without_exiting_process(
 def test_cancelled_close_keeps_http_and_observation_work_owned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "project")
+    writer = GameIoRecordWriter.create(tmp_path / "project")
     frame = sample_frame()
     entered, release = Event(), Event()
     encode = Observation.from_frame

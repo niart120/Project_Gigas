@@ -110,11 +110,12 @@ class FakePeer:
         if method == "thread/start":
             assert params is not None
             return {
-                "thread": {"id": "thread-1"},
+                "thread": {"id": "thread-1", "projectId": params["projectId"]},
                 "approvalPolicy": params["approvalPolicy"],
                 "approvalsReviewer": params["approvalsReviewer"],
                 "model": params["model"],
                 "cwd": params["cwd"],
+                "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
                 "sandbox": {
                     "type": "workspaceWrite",
                     "writableRoots": [],

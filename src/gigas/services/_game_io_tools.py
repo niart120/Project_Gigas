@@ -26,7 +26,6 @@ async def act_and_observe(
     start_input: InputStart,
     observations: "ObservationService",
     recording: "RecordingService",
-    thread_id: str,
 ) -> "tuple[OperationResult, Observation | ObservationError | None]":
     """Return input facts and a separate observation outcome without awaiting saves.
 
@@ -35,7 +34,6 @@ async def act_and_observe(
         start_input: Synchronous admission supplied by the conversation owner.
         observations: Observation service fixed for this conversation.
         recording: Persistence destination fixed before admission.
-        thread_id: Actual conversation ID, not an inferred user-request association.
 
     Returns:
         Input result and, on successful input, its latest image or observation error.
@@ -71,7 +69,7 @@ async def act_and_observe(
                 raise
         if result.code == "OK":
             try:
-                observation = await observations.observe(thread_id=thread_id)
+                observation = await observations.observe()
             except asyncio.CancelledError:
                 cancelled_observation = True
                 raise

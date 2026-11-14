@@ -15,8 +15,8 @@ from gigas.game_io.capture.config import CaptureOptions
 from gigas.game_io.capture.models import DeviceInfo
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage import project
-from gigas.storage.project import ProjectWriter
+from gigas.storage import records as records_module
+from gigas.storage.records import GameIoRecordWriter
 from tests.integration.peers.capture_peer import PeerBackend
 
 if TYPE_CHECKING:
@@ -214,7 +214,7 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
     first = wait_for(preview, lambda state: state.frame is not None).frame
     assert first is not None
     holding, resume = Event(), Event()
-    publish = project._publish_image
+    publish = records_module._publish_image
 
     def delayed_publish(path: Path, data: bytes) -> None:
         holding.set()
@@ -223,8 +223,8 @@ def test_observation_save_does_not_stall_capture_preview_or_stop(
             raise OSError(message)
         publish(path, data)
 
-    monkeypatch.setattr(project, "_publish_image", delayed_publish)
-    writer = ProjectWriter.create(tmp_path / "observation")
+    monkeypatch.setattr(records_module, "_publish_image", delayed_publish)
+    writer = GameIoRecordWriter.create(tmp_path / "observation")
 
     async def scenario() -> None:
         recording = RecordingService(writer)

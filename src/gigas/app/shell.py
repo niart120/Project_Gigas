@@ -67,6 +67,7 @@ class ApplicationShell(QObject):
         """Construct views without displaying them."""
         super().__init__()
         self.path = path
+        self._startup_cwd = Path.cwd()
         self.window = MainWindow()
         self.dialog: SettingsDialog | None = None
         self._serial_ports: tuple[SerialPort, ...] = ()
@@ -128,6 +129,18 @@ class ApplicationShell(QObject):
         panel.send_requested.connect(self.service.send)
         panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
+        for requested in (
+            panel.disconnect_requested,
+            panel.login_requested,
+            panel.sandbox_requested,
+            panel.model_requested,
+            panel.goal_requested,
+            panel.goal_resume_requested,
+            panel.goal_clear_requested,
+            panel.send_requested,
+            panel.interrupt_requested,
+        ):
+            requested.connect(self._render)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
         self.service.received.connect(self._render)
@@ -307,7 +320,7 @@ class ApplicationShell(QObject):
     def _new_project(self) -> None:
         if not self.window.project_menu.isEnabled():
             return
-        dialog = QFileDialog(self.window, "プロジェクトを新規作成", str(self.path.parent))
+        dialog = QFileDialog(self.window, "プロジェクトを新規作成", str(self._startup_cwd))
         dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         dialog.setLabelText(QFileDialog.DialogLabel.Accept, "作成")
         dialog.setFileMode(QFileDialog.FileMode.AnyFile)
@@ -321,7 +334,9 @@ class ApplicationShell(QObject):
         if not self.window.project_menu.isEnabled():
             return
         selected = QFileDialog.getExistingDirectory(
-            self.window, "プロジェクトを開く", str(self.path.parent)
+            self.window,
+            "プロジェクトを開く",
+            self.baseline.last_project_path or str(self._startup_cwd),
         )
         if selected:
             self._select_project(Path(selected))
@@ -536,13 +551,6 @@ class ApplicationShell(QObject):
         if request.close_dialog and self.dialog is not None:
             self.window.notifications.close_details()
             self.dialog.hide()
-        if (
-            request.snapshot is None
-            and settings.last_project_path
-            and not self._exit_requested
-            and not self.committed
-        ):
-            self._select_project(Path(settings.last_project_path))
         self._render()
 
     @Slot(object)
@@ -561,7 +569,7 @@ class ApplicationShell(QObject):
                 )
             else:
                 explanation = (
-                    "プロジェクトは選択済みですが、次回起動時の復元先を保存できませんでした。"
+                    "プロジェクトは選択済みですが、次回選択時の候補を保存できませんでした。"
                     "設定ファイルと詳細を確認してから、プロジェクトを選び直してください。"
                     if request.snapshot.last_project_path != self.baseline.last_project_path
                     else "設定を保存できず、適用しませんでした。編集内容と詳細を確認してください。"
@@ -608,7 +616,7 @@ class ApplicationShell(QObject):
         )
         self.window.project_menu.setEnabled(
             self._can_edit
-            and self.window.connection.connect_action.isEnabled()
+            and self.window.connection.can_select_project
             and (self.dialog is None or not self.dialog.isVisible())
         )
         self.video.set_available(not closing)
