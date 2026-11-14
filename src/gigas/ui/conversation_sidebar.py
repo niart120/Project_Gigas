@@ -36,8 +36,14 @@ if TYPE_CHECKING:
 
 
 def thread_title(thread: "ThreadInfo") -> str:
-    """Return the public name, preview, or a short label when both are empty."""
-    return thread.name or thread.preview or "名前のない会話"
+    """Return a single-line name, preview, or fallback without changing metadata.
+
+    Whitespace is collapsed for display. A name containing only whitespace is
+    treated as empty, followed by the preview and then the unnamed label.
+    """
+    name = " ".join((thread.name or "").split())
+    preview = " ".join(thread.preview.split())
+    return name or preview or "名前のない会話"
 
 
 class ConversationHeading(QWidget):

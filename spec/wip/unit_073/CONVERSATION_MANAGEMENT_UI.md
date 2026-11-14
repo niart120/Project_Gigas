@@ -152,6 +152,10 @@ Refactor status: **refactor-done**。green後に旧can_select_projectの開始�
 
 余白の修正は最外layout末尾のstretchを1とし、余剰高さをそこへ配分する1行だけとした。`uv run pytest tests/integration/test_conversation_sidebar.py -k populated_sidebar --basetemp=tmp/pytest-m5-sidebar-gap -q --tb=short`は実寸画面で189pxの不適切な間隔を検出してred→green、構造確認後も1 passed。`uv run pytest tests/integration/test_conversation_sidebar.py tests/integration/test_conversation_controller.py tests/integration/test_window_presets.py tests/integration/test_project_gui.py tests/integration/test_codex_gui.py tests/integration/test_conversation_view.py --basetemp=tmp/pytest-m5-sidebar-gap -q --tb=short`は94 passed。変更2ファイルのruff/format、全体tyも成功。Refactor status: **refactor-skipped**。1行の配置指定に責務の重複や追加抽出の必要はなく、独立レビューで開閉・選択・accessibilityの不変を確認した。再起動後の`08-l4-sidebar-fixed.jpeg`でも会話行と見出しが上詰めとなったことを確認し、保存した画像を再検査した。
 
+続けてProjectを開いた際、複数行previewが一覧で各8行以上に広がる問題を`09-l4-multiline-titles.jpeg`で確認した。表示名だけを1行へ整える修正へ戻り、このprocessもモデル送信前に通常終了した。`l4-20261114T203648Z-6f08065d-report.json`はproject/list 1回・thread/list 2回のみで、4対象の記録と未所属作業領域は不変。
+
+表示名の修正は既存の共通関数`thread_title`で空白をまとめ、name・preview・既定名の優先順を維持した。本文と公開metadataは変更しない。`uv run pytest tests/integration/test_conversation_sidebar.py -k multiline_thread --basetemp=tmp/pytest-m5-title -q --tb=short`は84pxの複数行表示を検出してred→green、最終も1 passed。上記と同じSidebar/Controller/Window/Project/Codex/Viewの6ファイルを`--basetemp=tmp/pytest-m5-title`で検査し、95 passed。変更2ファイルのruff/format、全体ty、lock/build、文書リンクが成功した。Refactor status: **refactor-skipped**。既存の純粋な共通表示関数へ変更を収め、重複した整形や新しい所有者はない。独立レビューで必須修正なし。再起動した実画面の`10-l4-titles-fixed.jpeg`では、同じProjectの2会話が各1行となり、所属見出しと新規操作が隣接していることを確認した。
+
 ## 8. 先送り事項
 
 M6は新規/閲覧/実行を跨ぐ設定・権限・承認・障害の結合と記憶生成対象を確認し、M7はUSB Video DeviceとCOM8で通し受入を行う。M3で未観測の記憶抽出は標準条件の範囲で確認し、強制抽出を製品へ加えない。長時間履歴の性能と攻略の有用性はU10。

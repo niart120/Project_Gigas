@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt
@@ -5,7 +6,7 @@ from PySide6.QtWidgets import QToolButton
 from pytestqt.qtbot import QtBot
 
 from gigas.runtime.codex.management_models import ProjectInfo, ProjectPage, ThreadInfo, ThreadPage
-from gigas.ui.conversation_sidebar import ConversationHeading, ConversationSidebar
+from gigas.ui.conversation_sidebar import ConversationHeading, ConversationSidebar, thread_title
 from gigas.ui.main_window import MainWindow
 
 
@@ -226,6 +227,38 @@ def test_heading_keeps_plain_full_values_without_forcing_window_width(qtbot: QtB
     assert heading.loading.isVisible()
     heading.set_target("未所属", "新しい会話")
     assert not heading.loading.isVisible()
+
+
+def test_multiline_thread_names_and_previews_use_one_row_and_the_same_heading(qtbot: QtBot) -> None:
+    sidebar = _sidebar(qtbot)
+    preview = "  攻略の相談\r\n\t最初の条件\n次の条件\u2028調査\u2029メモ\n結果\n補足\n終了  "
+    expected_preview = "攻略の相談 最初の条件 次の条件 調査 メモ 結果 補足 終了"
+    choices = (
+        (None, preview, expected_preview),
+        ("  指定した\n会話名\t ", preview, "指定した 会話名"),
+        (" \t", preview, expected_preview),
+        (None, "\n\t ", "名前のない会話"),
+    )
+    threads = tuple(
+        replace(_thread(str(index), None), name=name, preview=text)
+        for index, (name, text, _expected) in enumerate(choices)
+    )
+    sidebar.set_threads(None, ThreadPage((_thread("single", None), *threads), None, None))
+    qtbot.wait(1)
+    rows = sidebar._groups[None].threads
+    one_line_height = rows.visualItemRect(rows.item(0)).height()
+    heading = ConversationHeading()
+    qtbot.addWidget(heading)
+    for index, (thread, (_name, original, expected)) in enumerate(
+        zip(threads, choices, strict=True), 1
+    ):
+        row = rows.item(index)
+        assert rows.visualItemRect(row).height() == one_line_height
+        assert row.text() == expected
+        assert row.data(Qt.ItemDataRole.AccessibleTextRole) == expected
+        heading.set_target("Project", thread_title(thread))
+        assert heading.title.text() == expected
+        assert thread.preview == original
 
 
 def test_window_sidebar_toggle_returns_width_and_keeps_existing_content_and_settings(

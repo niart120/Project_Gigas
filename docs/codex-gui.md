@@ -152,6 +152,8 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 `set_actions_enabled(bool)`は会話の選択・新規操作、`set_listing_enabled(bool)`は追加ページの取得操作を切り替えます。初期状態では両方とも無効です。所属の開閉は維持します。`set_projects_loading(bool)`と`set_threads_loading(project_id, bool)`は対応する一覧だけを読込中にします。`ConversationHeading.set_target(project, title, loading=False)`は所属・会話名と読込状態を表示し、選択の正本を持ちません。
 
+会話名の表示は共通の`thread_title(thread)`で作ります。公開name、preview、名前のない会話の順に選び、改行・タブなどの連続する空白を1つの空白にまとめます。空白だけの値は空として扱います。一覧行・見出し・読み上げ用の会話名に同じ値を使い、公開metadataと会話本文は変更しません。
+
 `gigas.ui.connection_panel.ConnectionPanel.activate(generation)`は接続世代と実行状態を更新し、表示中の会話を交換しません。`replace_target(project, title, thread_id=None, entries=(), goal=None)`で確認済みの対象へ表示を交換すると、旧履歴・要求操作部・Planを破棄し、渡された履歴とGoalを表示します。呼出し側でサービスの対象参照を確認してください。入力中の原稿と現在の接続のモデル候補は維持します。`set_browse_goal(goal)`は閲覧対象の確定Goalだけを更新し、activeでも実行中とは扱いません。空の実行状態通知は閲覧Goalの削除を意味しません。
 
 初回履歴の取得中は`begin_loading(project, title)`で本文・Goal・Planを隠し、入力・モデル選択・送信・Goal操作を無効にします。停止と切断の受付条件は維持します。成功時は`replace_target`、失敗・取消し時は`cancel_loading()`を呼びます。後者は同じ文書と閲覧位置を再表示します。`draft`はIME未確定文字を除いた現在の原稿を返し、確認後の`discard_draft()`は原稿とIME編集中状態を破棄します。会話ごとの下書き保存は行いません。
