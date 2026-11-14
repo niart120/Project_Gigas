@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gigas.runtime.codex._conversation_protocol import goal_state
 from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.management_models import (
     ItemPage,
@@ -16,6 +17,7 @@ from gigas.runtime.codex.management_models import (
 )
 
 if TYPE_CHECKING:
+    from gigas.runtime.codex.models import GoalState
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
@@ -69,6 +71,11 @@ def item_page(value: "JsonValue") -> ItemPage:
         _optional_text(result.get("nextCursor")),
         _optional_text(result.get("backwardsCursor")),
     )
+
+
+def goal_response(value: "JsonValue") -> "GoalState | None":
+    """Decode a saved Goal using the same public state contract as execution."""
+    return goal_state(_object(value).get("goal"))
 
 
 def _object(value: "JsonValue") -> "JsonObject":

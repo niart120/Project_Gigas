@@ -55,6 +55,14 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 各ページの`threads`・`turns`・`items`はサーバー順のtupleです。`next_cursor`は続きの取得に使い、`backwards_cursor`は`sort_direction`を反転して取得するときに使います。どちらも不透明な文字列または`None`で、クライアントは解析しません。`sort_direction`は`asc`・`desc`、省略時は会話・turn一覧が降順、item一覧が昇順です。ページ取得は1回の要求で終了し、全件を自動収集しません。不正応答・通信失敗の例外はProject管理APIと共通です。
 
+## 保存済みGoalの取得・削除API
+
+`CodexManagement.get_goal(thread_id)`は保存済み会話のGoalを既存の`GoalState`で返し、Goalがなければ`None`を返します。目的、状態、利用量、予算をサーバーの値から補正しません。
+
+`clear_goal(thread_id)`は明示的なユーザー操作として`origin=user`で削除を依頼し、サーバーが返す`cleared`の真偽値を返します。事前のGoal取得は不要で、削除通知も待ちません。`False`は削除が起きなかったことを表します。削除はturnの中断や機器入力の停止ではありません。
+
+どちらも開いている接続とthread IDで操作でき、認証・モデル・Sandboxの実行準備や保存cwdの存在確認を要求しません。会話のresume、MCP・記録部品の準備、自動再送は行いません。不正応答・通信失敗の例外はProject管理APIと共通です。
+
 ## 実行環境と初回準備
 
 `SandboxEvent(readiness, setting_up, detail, reconnect_required)`はWindows実行環境の状態です。`readiness`は`ready / notConfigured / updateRequired`、取得不能は`None`です。接続後に認証と独立して取得します。`setup_windows_sandbox()`は明示的な準備を依頼し、開始受付だけでなく完了通知と状態再取得を待ちます。Windowsの確認操作は本人が行います。

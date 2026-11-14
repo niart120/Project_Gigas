@@ -38,9 +38,9 @@ M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runt
 |---|---|---|---|---|
 | refactor-skipped | I1: 既定サービス接続はGIGAS専用homeを使い、接続前は作成せず、開発用homeを変更しない | new | integration | 起動・終了と既存接続の回帰を確認、70bc1f7 |
 | refactor-skipped | I2: Web・記憶・承認者の既定値、保存往復、不正値拒否、他設定の保持 | new | unit/integration | UIと実行への適用はM3/M5。red10→関連70件green、全814件green |
-| refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、commit待ち |
-| refactor-done | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | 新規17件red→I3込み36件green、接続を含む82件green。公開型・クライアント・応答変換を分離。commit待ち |
-| todo | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 選択対象とのUI結合はM4/M5 |
+| refactor-skipped | I3: Project create/list/readは唯一のrootと公開応答を扱い、RPC失敗を伝える | new | unit/integration | red collection error→新規19件green、接続と合わせ65件green。実runtimeで作成・一覧・read・再起動後readを確認、0f955d2 |
+| refactor-done | I4: 所属・未所属一覧、thread read、turn/itemのページ取得が実行を開始しない | new | unit/integration | 新規17件red→I3込み36件green、接続を含む82件green。公開型・クライアント・応答変換を分離、298c5e8 |
+| refactor-skipped | I5: 保存済みGoalのget/clearが実行準備なしで成立し、削除を停止扱いしない | new | unit/integration | 新規11件red→green、管理・接続・既存Goal解析を含め131件green。選択対象とのUI結合はM4/M5。実runtimeのcold get/clearも確認 |
 | todo | I6: 専用homeの起動・認証、管理API永続化、既存の新規実行・停止が製品経路で成立 | new | integration/acceptance | 実接続・認証は模擬試験と区別 |
 
 ## 7. 対象ファイル
@@ -67,9 +67,15 @@ I3の[実runtimeプローブ](assets/probe_projects.py)を`uv run python -X utf8
 
 I4: `list_threads`・`read_thread`・`list_turns`・`list_items`を追加した。`projectId:null`は未所属、`modelProviders:[]`は全プロバイダーとし、metadata取得は`includeTurns:false`、turn取得は`itemsView:full`を明示する。本文・公開itemの種類別payloadを保持し、各ページの`nextCursor`・`backwardsCursor`を解析せず返す。独立したschema調査でも、turn要求の既定summaryと応答の既定fullの違い、item一覧のturnId付きwrapper、19種のitem共通id/typeを確認した。
 
-`uv run pytest tests/unit/test_codex_history.py --basetemp=tmp/pytest-m1-history -q`は未実装の4メソッドで17 failedを確認した。実装後、I3を含む36 passed。green後に値型を`management_models.py`、応答変換を`_management_protocol.py`へ移し、公開クライアントを要求の配送へ絞った。`management`からの型importは維持し、接続・会話実行・サービス・GUIには管理状態を追加していない。構造変更後の`uv run pytest tests/unit/test_codex_history.py tests/unit/test_codex_management.py tests/unit/test_codex_connection.py --basetemp=tmp/pytest-m1-history -q`は82 passed。対象ruff・format・差分検査と全体tyは成功し、型境界にAny・cast・ignoreを追加していない。公開型のdocstringと`docs/codex.md`を入力・戻り値・例外・ページ単位の振る舞いに照合した。独立レビューではschemaとの不一致・本文欠落・責務の混在による修正必須の指摘なし。実runtimeと統合gateは別途確認する。
+`uv run pytest tests/unit/test_codex_history.py --basetemp=tmp/pytest-m1-history -q`は未実装の4メソッドで17 failedを確認した。実装後、I3を含む36 passed。green後に値型を`management_models.py`、応答変換を`_management_protocol.py`へ移し、公開クライアントを要求の配送へ絞った。`management`からの型importは維持し、接続・会話実行・サービス・GUIには管理状態を追加していない。構造変更後の`uv run pytest tests/unit/test_codex_history.py tests/unit/test_codex_management.py tests/unit/test_codex_connection.py --basetemp=tmp/pytest-m1-history -q`は82 passed。対象ruff・format・差分検査と全体tyは成功し、型境界にAny・cast・ignoreを追加していない。公開型のdocstringと`docs/codex.md`を入力・戻り値・例外・ページ単位の振る舞いに照合した。独立レビューではschemaとの不一致・本文欠落・責務の混在による修正必須の指摘なし。実runtime・統合gateは以下に記録する。
 
 I4の[実runtimeプローブ](assets/probe_history.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_history.py --output-root tmp/u08-m1-history-20261115-02 --result spec/wip/unit_069/assets/probe-history-result.json`で実行し、終了コード0。[結果](assets/probe-history-result.json)は所属別一覧、保存cwd、全文・turn/item対応、cursor、プロセス再起動後のresumeなしの履歴取得を示す。利用不能なローカル接続先へ合成本文を提出し、公開item確定後に明示中断して履歴を作った。モデル応答・認証・ゲーム操作の確認ではない。全unitは385 passed、全体ruff・format・ty、lock・build・差分検査も成功した。
+
+I5: `get_goal(thread_id) -> GoalState | None`と`clear_goal(thread_id) -> bool`を追加。getはGoalの省略・nullをNoneとし、clearは明示ユーザー操作の`origin:user`を送り、`cleared`の真偽値を返す。`uv run pytest tests/unit/test_codex_management_goals.py --basetemp=tmp/pytest-m1-goals -q`は2メソッド未実装による11 failedから11 passedとなった。未認証・モデル不正・Sandbox未準備、保存cwd欠落でも実行準備を要求せず、clearは事前get・resume・停止・通知待ちを追加しない。
+
+I5の構造確認はrefactor-skipped。要求生成・Goal解析・削除結果の検査は既存`goal_params`・`goal_state`・`goal_clear_result`を共用し、GoalState以外の独自型や状態を増やしていない。`uv run pytest tests/unit/test_codex_management_goals.py tests/unit/test_codex_management.py tests/unit/test_codex_history.py tests/unit/test_codex_connection.py tests/unit/test_conversation_protocol.py --basetemp=tmp/pytest-m1-goals -q`は131 passed。対象ruff・format・差分検査と全体tyは成功し、公開docstring・`docs/codex.md`を戻り値・例外・副作用に照合した。独立レビューでschemaとの不一致や実行経路への依存による修正必須指摘なし。実runtime・統合gateは以下に記録する。
+
+I5の[実runtimeプローブ](assets/probe_goals.py)を`uv run python -X utf8 spec/wip/unit_069/assets/probe_goals.py --history-root tmp/u08-m1-history-20261115-02 --result spec/wip/unit_069/assets/probe-goals-result.json`で実行し、終了コード0。[結果](assets/probe-goals-result.json)は、隔離homeの保存済みGoalをプロセス再起動後に未認証・モデル未選択で取得・削除でき、threadがnotLoadedのまま維持されること、削除後のgetと再clearが不在を返すことを示す。実モデルや機器操作は行っていない。`uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m1-root -q`は861 passed（66.07秒）。全体ruff・format・ty、lock・build・差分検査も成功した。
 
 ## 9. 先送り事項
 

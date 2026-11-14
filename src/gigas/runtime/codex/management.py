@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Literal
 
 from gigas.runtime.codex import _management_protocol as protocol
+from gigas.runtime.codex._conversation_protocol import goal_clear_result, goal_params
 from gigas.runtime.codex.management_models import (
     ItemPage,
     ProjectInfo,
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from gigas.runtime.codex.connection import CodexConnection
+    from gigas.runtime.codex.models import GoalState
     from gigas.runtime.codex.transport import JsonObject
 
 __all__ = [
@@ -224,6 +226,43 @@ class CodexManagement:
             params["turnId"] = turn_id
         result = await self._connection.request("thread/items/list", params)
         return protocol.item_page(result)
+
+    async def get_goal(self, thread_id: str) -> "GoalState | None":
+        """Read a saved thread's Goal without preparing conversation execution.
+
+        Args:
+            thread_id: Server-owned identity of the thread whose Goal is requested.
+
+        Returns:
+            The existing GoalState value, or None when no Goal is reported. Usage,
+            budget and status are returned as reported without inferred changes.
+
+        Raises:
+            CodexConnectionError: The connection is closed or the response is invalid.
+            TransportError: The request fails or the server rejects it.
+        """
+        result = await self._connection.request("thread/goal/get", {"threadId": thread_id})
+        return protocol.goal_response(result)
+
+    async def clear_goal(self, thread_id: str) -> bool:
+        """Delete a saved Goal for an explicit user action without stopping execution.
+
+        This request does not resume a thread, prepare resources, read its workspace,
+        or wait for a notification. It does not require a prior get_goal call.
+
+        Args:
+            thread_id: Server-owned identity of the thread whose Goal is to be deleted.
+
+        Returns:
+            True if the server deleted a Goal, or False if no deletion occurred.
+            This result does not promise that a turn or device input has stopped.
+
+        Raises:
+            CodexConnectionError: The connection is closed or the response is invalid.
+            TransportError: The request fails or the server rejects it.
+        """
+        result = await self._connection.request("thread/goal/clear", goal_params(thread_id))
+        return goal_clear_result(result)
 
 
 def _page_params(
