@@ -258,6 +258,9 @@ def test_execution_settings_changed_during_preparation_wait_for_next_new_thread(
         assert results[-1].error == ""
         service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=changed))
         qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        with qtbot.waitSignal(service.management_completed) as selected:
+            service.new_conversation()
+        assert not selected.args[0].error
         service.send("next conversation")
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
         assert results[-1].message == MessageResult("accepted", "turn-1")
@@ -779,6 +782,9 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
 
         service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
         qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        with qtbot.waitSignal(service.management_completed) as changed_selection:
+            service.new_conversation("project-1" if selected else None)
+        assert not changed_selection.args[0].error
         service.send("new conversation")
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
         new_thread = next(params for method, params in peers[1].calls if method == "thread/start")

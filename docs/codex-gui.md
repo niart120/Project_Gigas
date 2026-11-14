@@ -48,7 +48,7 @@ App ServerはGIGASとCodexをつなぐローカルプロセスで、ChatGPTロ�
 
 Codex App Serverへの接続後、会話開始前に「プロジェクト」→「新規作成」「開く」で作業フォルダーを選べます。未選択なら初回送信時に`%LOCALAPPDATA%\GIGAS\unassigned\<workspace-id>`を作ります。Project所属・未所属とも、作業場所の下の`records/<thread-id>/`へ同じ構成で記録します。Projectの登録とフォルダー選択は[グローバル設定](settings.md)を参照してください。
 
-会話はCodexの永続threadとして開始し、履歴は専用Codex homeに保持します。GIGASは実際のthread IDを使って会話ごとの記録先を決め、ゲームI/O・限定した本文を`events.jsonl`へ保存します。行ごとにthread IDを複製せず、MCP画像を公開活動のテキスト通知から複製する処理もありません。切断後の接続では新しい会話になり、同じProjectでも記録先は分かれます。過去の会話を選んで再開するGUIは未対応です。
+会話はCodexの永続threadとして開始し、履歴は専用Codex homeに保持します。GIGASは実際のthread IDを使って会話ごとの記録先を決め、ゲームI/O・限定した本文を`events.jsonl`へ保存します。行ごとにthread IDを複製せず、MCP画像を公開活動のテキスト通知から複製する処理もありません。切断しても選択したIDを保持し、接続し直すだけでは新しい会話を作りません。保存済み会話への送信・Goal作成/再開と、過去の会話を選ぶGUIは未対応です。
 
 チャットから使える`observe`は、映像取得サービスの最新の有効な画像を返します。映像停止中や有効画像がない場合は取得エラーです。取得中の最新画像には機器内部の遅延があり、要求後に撮影されたことは保証しません。観測解像度は設定の「I/O」から変更できます。
 
@@ -130,11 +130,27 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 `gigas.services.conversations`の`NewConversationTarget(project_id=None)`は、まだ開始していない会話の所属だけを表します。`StoredConversationTarget(thread_id, cwd, project_id=None)`は、公開応答で確認した既存ID・保存作業場所・所属を表します。どちらも選択対象の値であり、接続済み・実行準備済みを意味しません。`None`の所属は未所属です。
 
-`BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の履歴ページ、`HistoryResult(target, page)`は取得開始時の対象と追加ページを保持します。履歴は`TurnPage`の全文項目とcursorをそのまま使い、全件収集や表示用の本文への変換はしません。追加ページの完了時には`target`が現在の選択と同じインスタンスかを照合してください。同じ会話へ選び直した場合も、以前の選択で要求したページは採用しません。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
+`BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の履歴ページ、`HistoryResult(target, page)`は取得開始時の対象と追加ページを保持します。履歴は`TurnPage`の全文項目とcursorをそのまま使い、全件収集や表示用の本文への変換はしません。サービスの読み取り専用`selected_target`は現在の不変な対象参照です。追加ページや閲覧Goal通知の受信時は、その`target is service.selected_target`を確認してください。同じ会話へ選び直した場合も以前の要求結果を採用しません。読み出した参照自体は変化しませんが、現在の選択は非同期に進み得ます。選択変更はサービスのキュー経由で行います。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
 
 `gigas.services.codex.CodexServiceThread(data_root, reader, factory=..., input_factory=...)` は専用QThread内のasyncioループでCodex・入力接続・ゲームI/O MCP・保存先を所有します。`data_root`は未選択チャットの親となるアプリデータフォルダー、`reader`は既存映像取得サービスの`CaptureReader`です。`input_factory`は解決済み入力設定から機器を作り、既定では`SerialInput`を使います。`start()`だけではCodexにも入力機器にも接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
 
 注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で入力を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
+
+会話の一覧・選択は次のサービスAPIを使います。`management_completed`は`ManagementResult(generation, operation, value, error, project_id)`を返し、空の`error`が成功です。結果の世代を現在の接続と照合してください。会話の選択と初回履歴取得は一件ずつ受け付けます。
+
+| メソッド | operationと成功時のvalue |
+| --- | --- |
+| `list_projects(*, cursor=None)` | `projects` / 公開`ProjectPage`の1ページ |
+| `list_threads(project_id, *, cursor=None)` | `threads` / 指定所属の`ThreadPage`。`None`は未所属 |
+| `new_conversation(project_id=None)` | `new` / `NewConversationTarget`。フォルダーとthreadは明示実行まで作らない |
+| `select_conversation(thread_id)` | `select` / `BrowseResult`。保存cwdが欠けていても閲覧できる |
+| `load_history(*, cursor=None)` | `history` / `HistoryResult`。追加取得は送信・切替を妨げない |
+
+切替はturn・active Goal・送信・停止・入力回収が終わってから行います。実行中の切替は拒否し、自動停止や予約はしません。候補取得後に旧購読を解除し、要求を失効させ、MCP受付・回答配送・保存を回収してから採用します。同じcwdの別会話でも旧MCP入口を閉じます。取得・解放に失敗すると選択と表示済み履歴を保持しますが、解放済みの実行をロード済みとは扱いません。
+
+閲覧中の`select_model`はモデル候補だけを変更し、`clear_goal`は選択IDへ直接削除を要求します。削除には接続・認証が必要ですが、モデル・sandbox・cwd・MCPの準備は不要です。削除が発生した応答は対応する公開通知まで待ち、削除なしの応答は通知を待ちません。`browse_goal_changed(generation, BrowseGoalEvent(target, goal))`は閲覧対象のGoal通知で、実行状態の`ConversationStatus`へ合成しません。削除待機中も停止・切断・終了を受け付けます。
+
+新規startで確認した実IDは記録先を開く前に保持します。以後の記録先結合失敗や切断でもIDを捨てず、既存IDへの送信を新規開始へ置き換えません。新しい会話を開始するときは`new_conversation`を明示します。閲覧中のactive Goalはローカル実行ではなく、停止・終了で勝手にpauseしません。
 
 接続済み・会話開始前に`create_project(path)`と`open_project(path)`で公開Projectを選択できます。前者は新規フォルダーを作って登録し、後者は既存フォルダーに対応する公開Projectを選択または登録します。`project_completed`の`ProjectResult(path, error)`が結果を返し、空の`error`だけが選択成功です。成功時のpathは公開応答のroot、失敗時は現在の選択を保持します。選択だけでは会話・MCP・writerを開始しません。
 
@@ -154,4 +170,4 @@ GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`a
 
 `shutdown()`は新規操作を閉じ、接続と所有taskを回収します。GUIを動かしたまま`finished`と`wait(0)`を確認し、`shutdown_error`が空である場合に終了成功とします。`QThread.quit()`ではこのサービスのasyncioループは終了しません。
 
-製品サービスは攻略資料の編集に作業フォルダーへの書込を要求するため、Windows実行環境が準備済みである必要があります。未準備または要求した書込範囲を確認できない場合、通常指示・Goal操作を拒否して接続を維持します。権限を広げた自動再試行はしません。
+製品サービスは攻略資料の編集に作業フォルダーへの書込を要求するため、Windows実行環境が準備済みである必要があります。未準備または要求した書込範囲を確認できない場合、通常指示・Goal作成・再開を拒否して接続を維持します。閲覧とGoal削除にはこの準備を要求しません。権限を広げた自動再試行はしません。

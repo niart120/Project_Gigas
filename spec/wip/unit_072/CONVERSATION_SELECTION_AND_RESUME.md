@@ -60,7 +60,7 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 | refactor-skipped | K1: start/resumeが選択モデル・推論レベル・最新設定を渡し、ID・所属・作業場所・権限の不一致を拒否する | new/regression | unit/integration | 共通設定変換、resume固有項目、Goal開始前のeffort、余分な設定更新の整理 |
 | refactor-done | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
 | refactor-done | K3a: 公開履歴と所属別新規の選択候補を取得し、失敗時に以前の対象を保持する | new/edge | unit/integration | 新規/既存target・閲覧/ページ結果、取得は一件、履歴を蓄積せず、実行資源を作らない |
-| todo | K3b: 選択部品をサービスへ結合し、停止後だけ切替え、閲覧モデル選択・Goal削除を実行せず扱う | new/edge | integration | unsubscribeと旧要求・資源の回収、遅い結果の失効、start後・切断後の対象保持、Goal相関共用 |
+| refactor-done | K3b: 選択部品をサービスへ結合し、停止後だけ切替え、閲覧モデル選択・Goal削除を実行せず扱う | new/edge | integration | unsubscribeと旧要求・資源の回収、遅い結果の失効、start後・切断後の対象保持、Goal相関共用 |
 | todo | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
 | todo | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
 
@@ -73,7 +73,7 @@ runtime/codexの要求組立・管理/表示型、servicesの会話選択・実�
 | command / 確認 | 状態 | 対象 |
 |---|---|---|
 | 採用版公開schema・ソース照合 | 確認済み（静的） | resumeの要求・実効応答、unsubscribeの3結果、設定再構築条件、Goal通知と再開順序。根拠は08と第5節の採用版ソース |
-| 各itemのpytest | not run | 要求、選択/実行境界、資源と通知・停止の順序 |
+| 各itemのpytest | K1〜K3b成功、K4以降not run | 要求、選択/実行境界、資源と通知・停止の順序。詳細は後掲 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m4-root -q | not run | 既存の通常送信・Goal・機器・GUIを含む回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・公開型/所有境界 |
 | uv lock --check / uv build | not run | 公開API・依存・配布契約 |
@@ -111,6 +111,18 @@ refactor-done: 試験の初期writer命名を整理し、同じ試験が成功�
 `uv run pytest tests/integration/test_conversation_selection.py --basetemp=tmp/pytest-m4-k3a -q --tb=short`は未実装moduleでcollection 1 error、実装後11 passed（0.08秒）、構造確認後11 passed（0.09秒）。`uv run pytest tests/integration/test_conversation_selection.py tests/unit/test_codex_history.py tests/unit/test_codex_management_goals.py --basetemp=tmp/pytest-m4-k3a-regression -q --tb=short`は39 passed（0.14秒）。変更3ファイルのruff・format、全体ty、差分検査は成功した。
 
 refactor-done: 試験のpoll待ちを明示Event付きRPC gateへ置換し、async context managerの型をAsyncGeneratorで表した。同じ試験は成功し、Any・cast・型抑制を追加していない。独立レビューの修正必須指摘なし。履歴結果はtargetの値等価ではなく同じ選択instanceで照合することをdocstring・公開文書に明記した。A→B→Aへの切替後に古いAのページが届く場合も、K3bで採用しないことを確認する。サービス・GUIへの結合、再接続の製品利用はまだ未実装である。
+
+### K3b 実装・検証結果
+
+一覧・選択・履歴ページ取得をサービスのキューとQt結果通知へ結合した。切替前に実行・送信・停止・機器回収を検査し、旧購読・MCP受付・回答配送・保存を回収する。途中で資源解放に失敗しても以前の選択を保ち、解放済みの実行状態は表示に残さない。追加履歴の成功と失敗はいずれも接続世代と選択instanceで照合する。新規開始後の実IDと最新Goalは切断後も保持する。
+
+閲覧モデル選択は候補の変更だけを行い、Goal削除は接続・認証だけで公開APIへ渡す。閲覧中のGoalとロード済み実行を分け、停止・終了で閲覧Goalをpauseしない。開始応答待ちの状態を閲覧と取り違えず、モデル変更を拒否する。既存会話への実行はK4で結合し、この時点では新規startへ置き換えず拒否する。
+
+`uv run pytest tests/integration/test_conversation_switching.py --basetemp=tmp/pytest-m4-k3b -q --tb=short`は未実装型でcollection 1 error、実装・境界試験追加後18 passed（4.52秒）、構造確認後18 passed（4.47秒）。独立レビューと追加確認で、回答配送待機中のMCP受付残存、解放失敗後の実行状態通知欠落、開始応答待機中のモデル変更をそれぞれ失敗する試験で確認し、修正した。
+
+`uv run pytest tests/integration/test_conversation_selection.py tests/integration/test_conversation_execution.py tests/integration/test_conversation_control.py tests/integration/test_conversation_resources.py tests/integration/test_conversation_notifications.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py tests/integration/test_input_service.py tests/integration/test_input_observation_path.py tests/integration/test_codex_gui.py tests/integration/test_project_gui.py --basetemp=tmp/pytest-m4-k3b-regression -q --tb=short`は214 passed（25.33秒）。対象12ファイルのruff・format、全体tyとscripts/check_codex.pyの個別型検査、差分検査は成功した。
+
+refactor-done: Goal変更と公開通知の相関をprivateなGoalTrackerへ集約し、Qt配送の値型をcodex_models.pyへ移してサービス本体への逆依存を除いた。試験は明示Event・RPC gateを使い、固定sleepで順序を仮定しない。同じ対象試験は成功し、独立レビューの修正必須指摘は解消した。公開API・入力のbusy・現在選択の参照契約を文書と整合させた。実app-server・実機・ネイティブGUIはこのitemでは未使用で、K4のresume結合とK5の実接続受入は未実施。
 
 ## 9. 先送り事項
 

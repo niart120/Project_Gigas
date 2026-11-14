@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from functools import partial
 from threading import Lock
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThread, Signal
 
@@ -18,9 +18,23 @@ from gigas.runtime.codex.connection import (
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import DialogueEvent, ExecutionSettings, TextEvent
+from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
+from gigas.services._conversation_selection import ConversationSelection
 from gigas.services._workspaces import select_project
+from gigas.services.codex_models import (
+    AnswerOutcome,
+    AnswerResult,
+    ConnectionFactory,
+    InputConnectionResult,
+    MessageResult,
+    ProjectResult,
+    ServiceEvent,
+    ServiceOperation,
+    ServiceResult,
+)
+from gigas.services.conversations import ManagementResult
 from gigas.services.input import InputService
 
 if TYPE_CHECKING:
@@ -35,110 +49,25 @@ if TYPE_CHECKING:
         ConnectionEvent,
         ConnectionOptions,
     )
+    from gigas.services.conversations import (
+        ConversationTarget,
+        ManagementOperation,
+        ManagementValue,
+    )
     from gigas.services.input import InputDevice
 
-type ServiceOperation = Literal[
-    "connect",
-    "login",
-    "setup_windows_sandbox",
-    "send",
-    "answer",
-    "stop",
-    "disconnect",
-    "select_model",
-    "goal_set",
-    "goal_resume",
-    "goal_clear",
+__all__ = [
+    "AnswerOutcome",
+    "AnswerResult",
+    "CodexServiceThread",
+    "ConnectionFactory",
+    "InputConnectionResult",
+    "MessageResult",
+    "ProjectResult",
+    "ServiceEvent",
+    "ServiceOperation",
+    "ServiceResult",
 ]
-type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
-
-
-type ConnectionFactory = Callable[
-    [ConnectionOptions, Callable[[RuntimeEvent], None]], CodexConnection
-]
-
-
-@dataclass(frozen=True, slots=True)
-class InputConnectionResult:
-    """Applied serial configuration and connection outcome for the GUI."""
-
-    config: "SerialConfig | None"
-    connected: bool
-    error: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectResult:
-    """A Project selection attempt; an empty error confirms the selected server root.
-
-    Attributes:
-        path: Requested directory on failure; server-reported root on success.
-        error: Display-safe failure details; failure preserves the previous selection.
-    """
-
-    path: "Path"
-    error: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class ServiceEvent:
-    """A connection event with the generation that produced it."""
-
-    generation: int
-    event: "ConnectionEvent"
-
-
-@dataclass(frozen=True, slots=True)
-class AnswerResult:
-    """Delivery evidence for one answer, independent of request resolution.
-
-    Attributes:
-        token: Connection-unique token supplied to answer.
-        outcome: sent confirms only transport write completion; not_sent means
-            rejection before submission; unknown must never be retried automatically.
-            None of these outcomes assert execution of an approved operation.
-    """
-
-    token: str
-    outcome: AnswerOutcome
-
-
-@dataclass(frozen=True, slots=True)
-class MessageResult:
-    """Runtime acceptance evidence for one ordinary message or in-turn instruction.
-
-    Attributes:
-        outcome: accepted means a successful public reply; not_sent means no
-            submission or an explicit rejection; unknown must not be retried automatically.
-        turn_id: Turn confirmed by the successful reply, otherwise None.
-            Acceptance does not assert turn completion or compliance with the instruction.
-    """
-
-    outcome: Literal["accepted", "not_sent", "unknown"]
-    turn_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ServiceResult:
-    """Operation completion; empty error means the call returned successfully.
-
-    A successful stop confirms server termination and local input recovery.
-    A successful goal_clear confirms its RPC result, not execution termination.
-    Errors contain no raw exception text.
-    Answer operations include token-specific delivery evidence in answer, including
-    rejected or cancelled calls. The generation still identifies the connection.
-    failure_id correlates this result with an already emitted SessionStatus from
-    that generation. None identifies an uncorrelated result, not a successful call.
-    Message operations include public acceptance evidence in message; a returned
-    call without submission is not acceptance.
-    """
-
-    generation: int
-    operation: ServiceOperation
-    error: str = ""
-    answer: AnswerResult | None = None
-    failure_id: int | None = None
-    message: MessageResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +104,8 @@ class CodexServiceThread(QThread):
     received = Signal(object)
     completed = Signal(object)
     project_completed = Signal(object)
+    management_completed = Signal(object)
+    browse_goal_changed = Signal(int, object)
     recording_failed = Signal(str, str, str)
     input_changed = Signal(object)
     input_ports = Signal(object, str)
@@ -201,6 +132,7 @@ class CodexServiceThread(QThread):
         self._input_pending = False
         self._input_apply_task: asyncio.Task[None] | None = None
         self._resources = ConversationResources(data_root, reader, self.recording_failed.emit)
+        self._selection = ConversationSelection()
         self._execution_settings = ExecutionSettings()
         self._conversation: ConversationExecution | None = None
         self._resources_lock = asyncio.Lock()
@@ -212,9 +144,18 @@ class CodexServiceThread(QThread):
         self._active_generation = 0
         self._connection: CodexConnection | None = None
         self._closing: asyncio.Task[None] | None = None
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._tasks: dict[asyncio.Task[None], _OperationContext | None] = {}
         self._done: asyncio.Event | None = None
         self.shutdown_error = ""
+
+    @property
+    def selected_target(self) -> "ConversationTarget":
+        """Return the current immutable selection reference for identity checks.
+
+        Reading does not reserve the selection. The service queue may adopt a
+        different target later; the returned object itself is never changed.
+        """
+        return self._selection.target
 
     def apply_input(self, config: "SerialConfig | None") -> None:
         """Apply resolved saved input settings; None explicitly disconnects."""
@@ -223,6 +164,40 @@ class CodexServiceThread(QThread):
     def refresh_input_ports(self) -> None:
         """Enumerate serial ports without opening a connection."""
         self._enqueue(lambda: self._track(asyncio.create_task(self._refresh_input_ports())))
+
+    def list_projects(self, *, cursor: str | None = None) -> None:
+        """Read one public Project page; management_completed carries its result."""
+        self._submit_management(
+            "projects", lambda c: CodexManagement(c).list_projects(cursor=cursor)
+        )
+
+    def list_threads(self, project_id: str | None, *, cursor: str | None = None) -> None:
+        """Read one assignment page; None explicitly requests unassigned threads."""
+        self._submit_management(
+            "threads",
+            lambda c: CodexManagement(c).list_threads(project_id, cursor=cursor),
+            project_id=project_id,
+        )
+
+    def new_conversation(self, project_id: str | None = None) -> None:
+        """Select an unstarted assignment after releasing an idle prior conversation."""
+        self._submit_management(
+            "new", lambda c: self._new_conversation(c, project_id), project_id=project_id
+        )
+
+    def select_conversation(self, thread_id: str) -> None:
+        """Read saved history without resuming; a running conversation must stop first."""
+        self._submit_management("select", lambda c: self._select_conversation(c, thread_id))
+
+    def load_history(self, *, cursor: str | None = None) -> None:
+        """Read one extra page without reserving submission or selection admission.
+
+        Results, including failures, are discarded when their selection instance
+        is no longer current. Cursors are passed through without interpretation.
+        """
+        self._submit_management(
+            "history", lambda c: self._selection.history(CodexManagement(c), cursor=cursor)
+        )
 
     def create_project(self, path: "Path") -> None:
         """Queue exclusive directory creation and Project selection before a thread starts.
@@ -312,11 +287,11 @@ class CodexServiceThread(QThread):
 
     def clear_goal(self) -> None:
         """Withdraw the Goal without interrupting the current turn or input."""
-        self._submit("goal_clear", lambda execution: execution.clear_goal())
+        self._submit("goal_clear", self._clear_goal)
 
     def select_model(self, model: str, effort: str) -> None:
         """Submit next-turn settings through the shared conversation send operation."""
-        self._submit("select_model", lambda execution: execution.select_model(model, effort))
+        self._submit("select_model", lambda execution: self._select_model(execution, model, effort))
 
     def login(self) -> None:
         """Queue explicit ChatGPT login on the connection owner."""
@@ -466,11 +441,11 @@ class CodexServiceThread(QThread):
         self._track(task, context)
 
     def _track(self, task: asyncio.Task[None], context: _OperationContext | None = None) -> None:
-        self._tasks.add(task)
+        self._tasks[task] = context
         task.add_done_callback(lambda finished: self._task_finished(finished, context))
 
     def _task_finished(self, task: asyncio.Task[None], context: _OperationContext | None) -> None:
-        self._tasks.discard(task)
+        self._tasks.pop(task, None)
         if task.cancelled() and context is not None:
             # _execute handles cancellation once entered; this call never started.
             self._reject_submission(context)
@@ -617,21 +592,39 @@ class CodexServiceThread(QThread):
             self._closing = None
 
             def receive(event: "RuntimeEvent") -> None:
-                execution.receive(event)
+                if self._connection is connection and self._conversation is not None:
+                    execution = self._conversation
+                    if isinstance(event, RpcNotification) and execution.snapshot.thread_id is None:
+                        goal = self._selection.receive_goal(event)
+                        if goal is not None:
+                            self.browse_goal_changed.emit(generation, goal)
+                    execution.receive(event)
 
             connection = self._factory(options, receive)
-            execution = ConversationExecution(
-                connection,
-                self._resources,
-                self._input,
-                lambda event: self._receive(generation, event),
-                settings=self._execution_settings,
-                closing=lambda: self._closing is not None or self._connection is not connection,
-                request_close=lambda: self._begin_close(connection, execution),
-            )
             self._connection = connection
-            self._conversation = execution
+            self._conversation = self._make_execution(connection)
         await connection.open()
+
+    def _make_execution(self, connection: CodexConnection) -> ConversationExecution:
+        def emit(event: "ConnectionEvent") -> None:
+            if self._conversation is execution:
+                self._receive(self._active_generation, event)
+
+        execution = ConversationExecution(
+            connection,
+            self._resources,
+            self._input,
+            emit,
+            selection=self._selection,
+            settings=self._execution_settings,
+            closing=lambda: (
+                self._closing is not None
+                or self._connection is not connection
+                or self._conversation is not execution
+            ),
+            request_close=lambda: self._begin_close(connection, execution),
+        )
+        return execution
 
     async def _invoke_connection(
         self,
@@ -657,7 +650,153 @@ class CodexServiceThread(QThread):
                 await self._input.drain_input()
                 return None
             raise CodexConnectionError("この接続では送信を受け付けない")
+        if command.operation != "stop" and self._selection.busy:
+            raise CodexConnectionError("会話の選択・操作が完了していません")
         return await call(execution)
+
+    async def _select_model(
+        self, execution: ConversationExecution, model: str, effort: str
+    ) -> None:
+        if execution.snapshot.thread_id is not None:
+            await execution.select_model(model, effort)
+        else:
+            connection = self._require_browsing(execution)
+            await self._selection.select_model(connection, model, effort)
+
+    async def _clear_goal(self, execution: ConversationExecution) -> None:
+        if execution.snapshot.thread_id is not None:
+            await execution.clear_goal()
+        else:
+            connection = self._require_browsing(execution)
+            if not connection.status.authenticated:
+                raise CodexConnectionError("Codexの接続・認証を確認してください")
+            await self._selection.clear_goal(
+                connection,
+                closing=lambda: self._closing is not None or self._connection is not connection,
+            )
+
+    def _require_browsing(self, execution: ConversationExecution) -> CodexConnection:
+        connection = self._require_management(self._active_generation)
+        if execution.snapshot.sending or execution.snapshot.stopping:
+            raise CodexConnectionError("会話の送信・停止処理が完了していません")
+        return connection
+
+    def _submit_management(
+        self,
+        operation: "ManagementOperation",
+        call: "Callable[[CodexConnection], Awaitable[ManagementValue]]",
+        *,
+        project_id: str | None = None,
+    ) -> None:
+        generation = self._generation
+        self._enqueue(
+            lambda: self._track(
+                asyncio.create_task(self._manage(generation, operation, call, project_id))
+            )
+        )
+
+    async def _manage(
+        self,
+        generation: int,
+        operation: "ManagementOperation",
+        call: "Callable[[CodexConnection], Awaitable[ManagementValue]]",
+        project_id: str | None,
+    ) -> None:
+        target = self._selection.target
+        value = None
+        error = ""
+        try:
+            value = await call(self._require_management(generation))
+        except CodexConnectionError as failure:
+            error = str(failure)
+        except Exception:  # noqa: BLE001 -- public boundary must not expose upstream text.
+            error = "会話管理の操作に失敗しました"
+        if operation == "history" and (
+            target is not self._selection.target or generation != self._active_generation
+        ):
+            return
+        self.management_completed.emit(
+            ManagementResult(generation, operation, value, error, project_id)
+        )
+
+    def _require_management(self, generation: int) -> CodexConnection:
+        connection = self._connection
+        if (
+            connection is None
+            or generation != self._active_generation
+            or self._closing is not None
+            or self._ending
+        ):
+            raise CodexConnectionError("Codexへ接続してから操作してください")
+        return connection
+
+    def _require_switch(self, connection: CodexConnection) -> ConversationExecution:
+        if (
+            self._require_management(self._active_generation) is not connection
+            or self._conversation is None
+        ):
+            raise CodexConnectionError("会話の選択中に接続が変わりました")
+        execution = self._conversation
+        state = execution.snapshot
+        if (
+            state.sending
+            or state.stopping
+            or state.turn_id is not None
+            or (state.goal is not None and state.goal.status == "active")
+            or self._input.busy
+        ):
+            raise CodexConnectionError("会話を停止してから切り替えてください")
+        return execution
+
+    async def _new_conversation(
+        self, connection: CodexConnection, project_id: str | None
+    ) -> "ManagementValue":
+        self._require_switch(connection)
+        return await self._selection.new(
+            project_id, release=lambda: self._release_selection(connection)
+        )
+
+    async def _select_conversation(
+        self, connection: CodexConnection, thread_id: str
+    ) -> "ManagementValue":
+        self._require_switch(connection)
+        return await self._selection.select(
+            CodexManagement(connection),
+            thread_id,
+            release=lambda: self._release_selection(connection),
+        )
+
+    async def _release_selection(self, connection: CodexConnection) -> None:
+        execution = self._require_switch(connection)
+        thread_id = execution.snapshot.thread_id
+        if thread_id is not None:
+            result = await connection.request("thread/unsubscribe", {"threadId": thread_id})
+            if not isinstance(result, dict) or result.get("status") not in {
+                "notLoaded",
+                "notSubscribed",
+                "unsubscribed",
+            }:
+                raise CodexConnectionError("会話の購読解除結果を確認できません")
+        async with self._resources_lock:
+            self._require_switch(connection)
+            self._selection.retain_goal(execution.snapshot.thread_id, execution.snapshot.goal)
+            self._conversation = self._make_execution(connection)
+            execution.connection_closing()
+            self._receive(self._active_generation, self._conversation.snapshot)
+            await self._resources.close_endpoint()
+            await execution.drain()
+            # Settle old command results before publishing the new selection.
+            pending = [
+                task
+                for task, context in self._tasks.items()
+                if context is not None
+                and context.operation
+                in {"send", "answer", "select_model", "goal_set", "goal_resume", "goal_clear"}
+            ]
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await self._resources.close()
+            self._require_management(self._active_generation)
 
     def _receive(self, generation: int, event: "ConnectionEvent") -> None:
         if generation == self._active_generation:
@@ -693,7 +832,7 @@ class CodexServiceThread(QThread):
         connection = self._require_project_selection(connection, execution)
         project = await select_project(CodexManagement(connection), path, create=create)
         self._require_project_selection(connection, execution)
-        self._resources.select_project(project.id)
+        await self._selection.new(project.id, release=lambda: self._release_selection(connection))
         return project.root
 
     def _require_project_selection(
@@ -726,11 +865,13 @@ class CodexServiceThread(QThread):
         if self._connection is not connection:
             return asyncio.create_task(connection.close())
         if self._closing is None:
+            execution = self._conversation or execution
             self._closing = asyncio.create_task(
                 self._release_connection(connection, execution),
                 name="gigas-connection-resources-close",
             )
             execution.connection_closing()
+            self._selection.connection_closing()
             self._input.stop()
         return self._closing
 
@@ -749,6 +890,9 @@ class CodexServiceThread(QThread):
                 await self._resources.disconnect()
             finally:
                 if self._connection is connection:
+                    self._selection.retain_goal(
+                        execution.snapshot.thread_id, execution.snapshot.goal
+                    )
                     self._conversation = None
                     self._connection = None
         for outcome in (*outcomes, *drained):

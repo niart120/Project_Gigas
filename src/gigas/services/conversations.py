@@ -1,12 +1,12 @@
 """Immutable conversation selections and public history results."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gigas.runtime.codex.management import ThreadInfo, TurnPage
+    from gigas.runtime.codex.management import ProjectPage, ThreadInfo, ThreadPage, TurnPage
     from gigas.runtime.codex.models import GoalState
 
 
@@ -67,3 +67,41 @@ class HistoryResult:
 
     target: StoredConversationTarget
     page: "TurnPage"
+
+
+type ManagementOperation = Literal["projects", "threads", "new", "select", "history"]
+type ManagementValue = (
+    ProjectPage | ThreadPage | NewConversationTarget | BrowseResult | HistoryResult
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ManagementResult:
+    """One management result, separate from execution and message acceptance.
+
+    Attributes:
+        generation: Connection generation that received the request.
+        operation: Listing, selection or history operation.
+        value: Public page or selection on success; None on failure.
+        error: Display-safe failure reason, empty on success.
+        project_id: Requested list or new-conversation assignment; None means unassigned.
+    """
+
+    generation: int
+    operation: ManagementOperation
+    value: ManagementValue | None = None
+    error: str = ""
+    project_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BrowseGoalEvent:
+    """A confirmed Goal notification for the captured browsing selection.
+
+    Attributes:
+        target: Selection instance that owns the notification.
+        goal: Public Goal, or None after removal. This is not local execution state.
+    """
+
+    target: StoredConversationTarget
+    goal: "GoalState | None"

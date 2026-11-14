@@ -40,7 +40,6 @@ class ConversationResources:
         self._data_root = data_root
         self._reader = reader
         self._failed = failed
-        self._project_id: str | None = None
         self._cwd: Path | None = None
         self._writer: GameIoRecordWriter | None = None
         self._observations: ObservationService | None = None
@@ -59,21 +58,18 @@ class ConversationResources:
         if self._observations is not None:
             self._observations.resolution = resolution
 
-    def select_project(self, project_id: str) -> None:
-        """Adopt an identity before a thread starts; the caller checks admission."""
-        if self._writer is not None:
-            raise RecordError("会話の記録中はプロジェクトを変更できません")
-        self._project_id = project_id
-        self._cwd = None
-
     async def prepare(
-        self, management: "CodexManagement", start_input: "InputStart"
+        self,
+        management: "CodexManagement",
+        start_input: "InputStart",
+        *,
+        project_id: str | None = None,
     ) -> ThreadConfiguration:
         """Prepare the workspace and MCP endpoint without creating recording files."""
         try:
             if self._cwd is None:
                 preparation = asyncio.create_task(
-                    resolve_workspace(management, self._data_root, project_id=self._project_id)
+                    resolve_workspace(management, self._data_root, project_id=project_id)
                 )
                 try:
                     self._cwd = await asyncio.shield(preparation)
@@ -82,7 +78,7 @@ class ConversationResources:
                     raise
             else:
                 await asyncio.to_thread(_require_directory, self._cwd)
-            return await self._prepare_endpoint(self._cwd, start_input, project_id=self._project_id)
+            return await self._prepare_endpoint(self._cwd, start_input, project_id=project_id)
         except Exception as error:
             self.report_failure(error)
             raise
@@ -223,7 +219,7 @@ class ConversationResources:
                 self._recording = None
 
     async def disconnect(self) -> None:
-        """Close all thread resources, retaining only the selected Project identity."""
+        """Close all thread resources; selection belongs to the caller."""
         await self.close()
 
     async def close(self) -> None:

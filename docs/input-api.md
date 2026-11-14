@@ -42,6 +42,8 @@ steps = parse_sequence(
 
 `gigas.services.input.InputService()`は、一つの入力接続と実行中の操作列を所有します。観測・記録先・会話IDは受け取りません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として渡し、`SerialInput`をそのまま使えます。
 
+読み取り専用の`busy`は、受け付けた操作の実行またはneutralへの復帰がまだ完了していない間だけ`True`です。接続の有無や、会話の実行状態とは別の値です。
+
 ```python
 import asyncio
 

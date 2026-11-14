@@ -25,6 +25,8 @@ from gigas.runtime.codex.models import (
     can_submit,
 )
 from gigas.runtime.codex.transport import RpcError, RpcNotification, ServerRequest, TransportError
+from gigas.services._conversation_goals import GoalTracker
+from gigas.services.conversations import StoredConversationTarget
 from gigas.services.input import OperationResult
 from gigas.storage.records import RecordError
 
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.models import ConnectionEvent, ExecutionSettings, GoalState
     from gigas.runtime.codex.transport import JsonObject, JsonValue
     from gigas.services._conversation_resources import ConversationResources
+    from gigas.services._conversation_selection import ConversationSelection
     from gigas.services.input import InputService
 
 
@@ -63,14 +66,6 @@ class _Stop:
 
 
 @dataclass(slots=True)
-class _GoalReply:
-    """Notifications observed only while one Goal RPC is being settled."""
-
-    seen: list["GoalState | None"] = field(default_factory=list)
-    changed: asyncio.Event = field(default_factory=asyncio.Event)
-
-
-@dataclass(slots=True)
 class _TurnReply:
     """Turn identities observed only while one turn/start is being settled."""
 
@@ -93,6 +88,7 @@ class ConversationExecution:
         inputs: "InputService",
         emit: "Callable[[ConnectionEvent], None]",
         *,
+        selection: "ConversationSelection",
         settings: "ExecutionSettings",
         closing: "Callable[[], bool]",
         request_close: "Callable[[], asyncio.Task[None]]",
@@ -103,16 +99,20 @@ class ConversationExecution:
         self._inputs = inputs
         self._emit = emit
         self._settings = settings
+        self._selection = selection
         self._closing = closing
         self._request_close = request_close
         self._thread_id: str | None = None
-        self._goal: GoalState | None = None
+        self._goals = GoalTracker()
         self._turn: _Turn | None = None
         self._requests = HumanRequests()
         self._sending: _Submission | None = None
         self._stopping: _Stop | None = None
-        self._goal_reply: _GoalReply | None = None
         self._turn_reply: _TurnReply | None = None
+
+    @property
+    def _goal(self) -> "GoalState | None":
+        return self._goals.state
 
     @property
     def snapshot(self) -> ConversationStatus:
@@ -179,11 +179,16 @@ class ConversationExecution:
 
     async def _prepare(self) -> str:
         settings = self._settings
+        target = self._selection.target
+        if self._thread_id is None and isinstance(target, StoredConversationTarget):
+            raise CodexConnectionError("保存済み会話の再開はまだ利用できません")
         await self._connection.require_ready()
         try:
             if self._thread_id is None:
                 configuration = await self._resources.prepare(
-                    CodexManagement(self._connection), self.start_input
+                    CodexManagement(self._connection),
+                    self.start_input,
+                    project_id=target.project_id,
                 )
                 selection = self._connection.selection
                 config = await self._connection.request(
@@ -195,6 +200,9 @@ class ConversationExecution:
                 result = await self._connection.request("thread/start", params)
                 self._thread_id = protocol.validate_thread(
                     result, configuration, selection, settings=settings
+                )
+                self._selection.adopt_started(
+                    self._thread_id, configuration.cwd, configuration.project_id
                 )
                 self._publish()
             await self._resources.bind_records(self._thread_id)
@@ -308,7 +316,6 @@ class ConversationExecution:
             raise CodexConnectionError("削除する目標がありません")
 
         async def submit(submission: _Submission) -> None:
-            await self._connection.require_ready()
             if self._stopping is not None or self._closing():
                 raise CodexConnectionError("停止により目標の削除を送信しませんでした")
             submission.submitted = True
@@ -324,28 +331,7 @@ class ConversationExecution:
         return self._thread_id
 
     async def _change_goal(self, method: str, params: "JsonObject") -> None:
-        reply = self._goal_reply = _GoalReply()
-        try:
-            result = await self._connection.request(method, params)
-            try:
-                if method == "thread/goal/clear":
-                    if not protocol.goal_clear_result(result):
-                        return  # No deletion occurred; the server emits no notification.
-                    expected = None
-                else:
-                    expected = protocol.goal_set_result(result)
-            except CodexConnectionError as error:
-                raise MessageDeliveryError("目標の変更結果を確認できません") from error
-            # Match the RPC result to an observed fact, retaining later notifications.
-            # A no-change response (for example budgetLimited) needs no extra event.
-            while self._goal != expected and expected not in reply.seen:
-                if self._closing():
-                    raise MessageDeliveryError("目標の変更通知を確認する前に切断しました")
-                reply.changed.clear()
-                await reply.changed.wait()
-        finally:
-            if self._goal_reply is reply:
-                self._goal_reply = None
+        await self._goals.change(self._connection, method, params, closing=self._closing)
 
     async def select_model(self, model: str, effort: str) -> None:
         """Commit catalog choices only after required thread settings succeed."""
@@ -591,12 +577,11 @@ class ConversationExecution:
                 self._emit(DialogueEvent("turn_completed", {"status": status}, turn_id))
             self._publish()
         elif event.method in {"thread/goal/updated", "thread/goal/cleared"}:
-            self._goal = protocol.goal_state(
-                params.get("goal") if event.method.endswith("updated") else None
+            self._goals.observe(
+                protocol.goal_state(
+                    params.get("goal") if event.method.endswith("updated") else None
+                )
             )
-            if self._goal_reply is not None:
-                self._goal_reply.seen.append(self._goal)
-                self._goal_reply.changed.set()
             self._emit(GoalEvent(self._goal))
             self._publish()
         elif self._turn is not None and params.get("turnId") == self._turn.id:
@@ -651,8 +636,7 @@ class ConversationExecution:
         """Wake notification waiters as failures before the service closes resources."""
         self._cancel_preparation()
         self._requests.cancel_unsubmitted()
-        if self._goal_reply is not None:
-            self._goal_reply.changed.set()
+        self._goals.closing()
         if self._turn_reply is not None:
             self._turn_reply.changed.set()
         if self._stopping is not None:

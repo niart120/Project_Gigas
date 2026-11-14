@@ -15,6 +15,7 @@ from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
 from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
+from gigas.services._conversation_selection import ConversationSelection
 from gigas.services.input import InputService
 from gigas.storage.records import GameIoRecordWriter
 from tests.unit.test_codex_connection import FakePeer, _until
@@ -48,6 +49,7 @@ class Conversation:
             self.resources,
             self.inputs,
             self.events.append,
+            selection=ConversationSelection(),
             settings=ExecutionSettings(),
             closing=lambda: self.closing is not None,
             request_close=self.close,

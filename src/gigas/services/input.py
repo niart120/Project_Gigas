@@ -83,6 +83,11 @@ class InputService:
         """Return whether opening and initial neutral succeeded and no I/O failed."""
         return self._available
 
+    @property
+    def busy(self) -> bool:
+        """Whether accepted input still owns execution or neutral-state recovery."""
+        return self._operation is not None and not self._operation.done()
+
     async def connect(self, device: InputDevice | None) -> None:
         """Stop, close the old owner, then open the new device, or disconnect.
 

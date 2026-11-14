@@ -26,6 +26,7 @@ from gigas.runtime.codex.models import (
 )
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
+from gigas.services._conversation_selection import ConversationSelection
 from gigas.services._workspaces import select_project
 from gigas.services.input import InputService
 
@@ -115,11 +116,13 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
             inputs.stop()
         return closing
 
+    selection = ConversationSelection()
     execution = ConversationExecution(
         connection,
         resources,
         inputs,
         events.put_nowait,
+        selection=selection,
         settings=settings,
         closing=lambda: closing is not None,
         request_close=request_close,
@@ -140,7 +143,7 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
                 _require(initial.phase != "login_required", "ChatGPT login is required")
                 observed_model = initial.model or observed_model
         project = await select_project(CodexManagement(connection), workspace, create=True)
-        resources.select_project(project.id)
+        await selection.new(project.id, release=resources.close)
         async with asyncio.timeout(120):
             prompt = PROMPTS[scenario].format(probe_file=f"../{probe_file.name}")
             turn_id = await execution.send(prompt)
