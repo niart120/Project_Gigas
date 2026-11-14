@@ -168,7 +168,7 @@ class CodexSettings(QFrame):
             }[sandbox.readiness]
         )
         if sandbox.reconnect_required:
-            state = "再接続が必要"
+            state = "Codex App Serverの再接続が必要"
         detail = f"\n{sandbox.detail}" if sandbox.detail else ""
         text = f"{state}{detail}"
         if self.sandbox.text() != text:

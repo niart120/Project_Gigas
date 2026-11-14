@@ -506,7 +506,7 @@ class ConnectionPanel(QWidget):
         elif operation == "setup_windows_sandbox":
             explanation = (
                 "実行環境の準備完了を確認できません。Windowsの確認画面と実行環境の状態を確認してください。"
-                "準備後も利用できない場合は、切断して再接続してください。"
+                "準備後も利用できない場合は、Codex App Serverを切断して再接続してください。"
                 "切断だけではWindowsの準備処理の終了を確認できません。"
             )
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))

@@ -67,7 +67,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `SandboxEvent(readiness, setting_up, detail, reconnect_required)`はWindows実行環境の状態です。`readiness`は`ready / notConfigured / updateRequired`、取得不能は`None`です。接続後に認証と独立して取得します。`setup_windows_sandbox()`は明示的な準備を依頼し、開始受付だけでなく完了通知と状態再取得を待ちます。Windowsの確認操作は本人が行います。
 
-準備失敗・取得不能は理由を残して失敗を返し、接続を維持します。成功後も非readyなら`reconnect_required=True`となり、明示的な再接続が必要です。受付不明では再送せず通知を待ちます。待機中も切断できますが、Windows側の準備取消しは保証しません。GUIはturn・active Goal・送信・停止処理がある間の準備操作を無効にします。
+準備失敗・取得不能は理由を残して失敗を返し、接続を維持します。成功後も非readyなら`reconnect_required=True`となり、Codex App Serverの明示的な切断・再接続が必要です。受付不明では再送せず通知を待ちます。待機中も切断できますが、Windows側の準備取消しは保証しません。GUIはturn・active Goal・送信・停止処理がある間の準備操作を無効にします。
 
 通常指示とGoal操作は、接続・認証、有効なモデルと推論レベル、準備済みの実行環境を要求します。別の送信または停止処理中は受け付けません。turn実行中、質問待ち、機器未接続、映像未取得、利用枠の表示だけでは拒否しません。回答は元要求の有効性と接続・停止状態で判断し、通常指示の送信中にも配送できます。
 
