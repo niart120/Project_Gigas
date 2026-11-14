@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: complete。[unit_063](../../wip/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を完了した。既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存する。
+状態: complete。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の最初の作業単位を完了した。既存の記録を保持して追記し、生成済み対話・観測を内容の再検査なしで保存する。
 
 ## 2. 対象範囲
 

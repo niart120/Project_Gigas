@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: complete。[unit_063](../../wip/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位2。metadata・PNG・JSONLの明示flush/fsyncを撤去し、通常のwrite/closeを保存の完了条件とした。実装commitは690a6a5。
+状態: complete。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位2。metadata・PNG・JSONLの明示flush/fsyncを撤去し、通常のwrite/closeを保存の完了条件とした。実装commitは690a6a5。
 
 ## 2. 対象範囲・対象外
 

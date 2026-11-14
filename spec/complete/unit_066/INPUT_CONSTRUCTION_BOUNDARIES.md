@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: wip。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位3。InputState/InputStepの生成時保証を維持し、parserと生成後の重複検査を削る。
+状態: complete。[unit_063](../unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)第6節の単位3。InputState/InputStepの生成時保証を維持し、parserと生成後の重複検査を削った。I1は0c6ef5d、I2は3a79b9bで完了した。
 
 ## 2. 対象範囲・対象外
 
@@ -43,10 +43,10 @@ I2は単独encoderの能力拒否3例を削り、I1と同じ対象の169試験�
 
 ## 8. 先送り事項
 
-親M2の小整理はunit_054が所有する。保存・入力の全体gateはunit_063第6節の単位4で実施する。
+親M2の小整理はunit_054が所有する。保存・入力の全体gateはunit_063第6節の単位4として実施済み。
 
 ## 9. 完了チェックリスト
 
 - [x] 生成時保証・機器適合・呼出前提を分けた
-- [ ] I1・I2と公開APIの改訂を完了した
-- [ ] 検証結果と参照先を更新した
+- [x] I1・I2と公開APIの改訂を完了した
+- [x] 検証結果と参照先を更新した
