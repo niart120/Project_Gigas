@@ -1,0 +1,68 @@
+{
+  "runtime": "codex-cli 0.167.0",
+  "project_one_root": true,
+  "config": {
+    "web_search": "live",
+    "memories": {
+      "version": null,
+      "dual_write": null,
+      "disable_on_external_context": false,
+      "generate_memories": true,
+      "use_memories": true,
+      "dedicated_tools": null,
+      "max_raw_memories_for_consolidation": null,
+      "max_unused_days": null,
+      "max_rollout_age_days": null,
+      "max_rollouts_per_startup": null,
+      "min_rollout_idle_hours": null,
+      "min_rate_limit_remaining_percent": null,
+      "extract_model": null,
+      "consolidation_model": null,
+      "consolidation_service_tier": null
+    },
+    "project_doc_max_bytes": 32768
+  },
+  "local_skill_discovered": true,
+  "start": {
+    "cwd": "<probe-root>\\unassigned\\8ed57e80e45a469a99adaa2701fdf417",
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "auto_review",
+    "sandbox": {
+      "type": "readOnly",
+      "networkAccess": false
+    }
+  },
+  "session_source": "vscode",
+  "instruction_source_kinds": [
+    "<probe-root>\\unassigned\\8ed57e80e45a469a99adaa2701fdf417\\AGENTS.md"
+  ],
+  "empty_thread_resume_with_record_path": "Rejected: no rollout found",
+  "persistence_turn": "Unavailable local provider; interrupted or already terminated.",
+  "unassigned_list_and_read": true,
+  "unsubscribe": "unsubscribed",
+  "idle_unsubscribe_resume_reviewer_changed": true,
+  "idle_resume_mcp_url_and_auth_replaced": true,
+  "history_page_read": true,
+  "goal_read": {
+    "goal": null
+  },
+  "restart_resolves_workspace_and_project": true,
+  "memory_off_config": {
+    "version": null,
+    "dual_write": null,
+    "disable_on_external_context": false,
+    "generate_memories": false,
+    "use_memories": false,
+    "dedicated_tools": null,
+    "max_raw_memories_for_consolidation": null,
+    "max_unused_days": null,
+    "max_rollout_age_days": null,
+    "max_rollouts_per_startup": null,
+    "min_rollout_idle_hours": null,
+    "min_rate_limit_remaining_percent": null,
+    "extract_model": null,
+    "consolidation_model": null,
+    "consolidation_service_tier": null
+  },
+  "restart_resume": true
+}
