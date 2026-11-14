@@ -101,4 +101,4 @@ Planの公開項目はstepとpending/inProgress/completed、explanationは省略
 
 実機確認はサービス部品を組み合わせたPythonプログラムによるものです。一回のRIGHTだけを許す制限は検証用の介入で、製品の入力許可状態ではありません。新構成での新規ログインと実承認は未再検証、APIキー認証は対象外です。
 
-未確認は、300秒実待ち、解除ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続運転です。実アカウントの利用制限を意図的に発生させず、固定通知・模擬制限による確認と分けます。保存参照・再起動後の復帰は[U08](../planned/unit_013/RESUME.md)、連続運転は[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)で扱います。
+未確認は、300秒実待ち、解除ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続運転です。実アカウントの利用制限を意図的に発生させず、固定通知・模擬制限による確認と分けます。保存参照・再起動後の復帰は[U08](../wip/unit_013/RESUME.md)、連続運転は[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)で扱います。

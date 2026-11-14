@@ -96,7 +96,7 @@ M3の実機はUSB Video Device、COM8・CH552・9600 baud。入力・memory書�
 
 ### 後続工程と対象外
 
-[U07](../../planned/unit_012/PLANNED_STOP.md)は追加指示による計画的終了、[U08](../../planned/unit_013/RESUME.md)は保存参照・アプリ再起動後の復旧、[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)は記憶の整理・保守、[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)は上表の運転条件と長時間受入を所有する。共通配送・停止・同一セッションの保持Goal・原記録を入口とし、U06ではこれらを実装しない。
+[U07](../../planned/unit_012/PLANNED_STOP.md)は追加指示による計画的終了、[U08](../../wip/unit_013/RESUME.md)は保存参照・アプリ再起動後の復旧、[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)は記憶の整理・保守、[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)は上表の運転条件と長時間受入を所有する。共通配送・停止・同一セッションの保持Goal・原記録を入口とし、U06ではこれらを実装しない。
 
 APIキー認証、アプリ内ログアウト・アカウント切替、モニター間DPI遷移、文字拡大専用の受入は今回の合意済み対象外であり、未完のU06項目へ戻さない。旧api_key設定をChatGPTへ明示変更するUIは、APIキー認証の対応を意味しない。
 

@@ -29,7 +29,7 @@
 
 [U02の接続・通常ターン](../complete/unit_007/CODEX_CONNECTION.md)は完了しています。[U03の映像取得](../complete/unit_008/VIDEO_CAPTURE.md)も人間レビューによるUI・読み取り境界の見直しと再検証を完了しました。U03はLive Gamer 4K 2.1で実映像の取得・プレビュー・切断・再接続・表示中のアプリ終了を確認しました。物理抜去と入力から表示までの光学的な遅延は未検証です。調査・実装・実機検証の詳細は各親仕様に記録します。
 
-[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)、[U04](../complete/unit_009/RECORDED_OBSERVATION.md)・U05・U06の完了仕様は、それぞれ当時の対象構成の受入記録です。[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)で会話・Goal・機器入力・停止の責務を再編し、模擬統合試験、実モデルとの接続、CH552の短い入力・停止を確認しました。確認範囲と未検証事項を両unitに記録しています。[unit_054](../complete/unit_054/KISS_SIMPLIFICATION.md)M2の保存・入力・境界整理も完了しました。U08・U10は後続作業で、U07・U09は初期版対象外です。依存と推奨順は05を正本とします。
+[U03 M3](../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)、[U04](../complete/unit_009/RECORDED_OBSERVATION.md)・U05・U06の完了仕様は、それぞれ当時の対象構成の受入記録です。[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)で会話・Goal・機器入力・停止の責務を再編し、模擬統合試験、実モデルとの接続、CH552の短い入力・停止を確認しました。確認範囲と未検証事項を両unitに記録しています。[unit_054](../complete/unit_054/KISS_SIMPLIFICATION.md)M2の保存・入力・境界整理も完了しました。U08は[M0](../wip/unit_068/MANAGEMENT_STORAGE_DESIGN.md)の要求・設計整理中で製品実装は未着手、U10は後続作業、U07・U09は初期版対象外です。依存と推奨順は05を正本とします。
 
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 

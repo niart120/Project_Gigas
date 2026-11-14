@@ -6,7 +6,7 @@
 
 この文書は工程の入口、依存関係、推奨順を所有します。各工程の調査項目、子工程の分割、受入条件はリンク先の親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
-[契約・状態・分岐の整理](../complete/unit_054/KISS_SIMPLIFICATION.md)のM1を経て、[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で通常指示・会話・機器入力・停止を、[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)でGoalの作成・編集・再開・削除を再編しました。M2の保存・入力は[unit_063](../complete/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)で検査所有と保証を整理し、実装・結合確認を完了しました。接続・取得境界の残件は[unit_067](../complete/unit_067/M2_BOUNDARY_CLEANUP.md)で整理し、親M2の最終受入も完了しました。次はU08の保存参照・再起動後復帰の調査・設計です。
+[契約・状態・分岐の整理](../complete/unit_054/KISS_SIMPLIFICATION.md)のM1を経て、[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)で通常指示・会話・機器入力・停止を、[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)でGoalの作成・編集・再開・削除を再編しました。M2の保存・入力は[unit_063](../complete/unit_063/STORAGE_INPUT_SIMPLIFICATION_DESIGN.md)で検査所有と保証を整理し、実装・結合確認を完了しました。接続・取得境界の残件は[unit_067](../complete/unit_067/M2_BOUNDARY_CLEANUP.md)で整理し、親M2の最終受入も完了しました。U08は管理機能の委譲と再接続へ親仕様を改訂し、[M0](../wip/unit_068/MANAGEMENT_STORAGE_DESIGN.md)の要求・設計整理に着手しました。製品実装と受入は未着手です。
 
 2026-11-11の実装棚卸しを受けた[実装整理](../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[M1](../complete/unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)・[M2](../complete/unit_029/DISPLAY_AND_REMAINDER_SIMPLIFICATION.md)は完了しました。続くUI/UX議論の合意を[10-ui-interaction.md](10-ui-interaction.md)へまとめ、共通入力・公開表示・Goal操作をU06、追加指示による計画的終了をU07へ反映しました。APIの未確認事項は[08](08-sdk-compatibility.md#ui-api-open)へ分離しています。この時点の親仕様の先行更新は工程への着手を意味しません。現在の進捗は第3節と各親仕様に従います。
 
@@ -36,7 +36,7 @@ U03では[取得サービス](../complete/unit_021/VIDEO_CAPTURE_SERVICE.md)と[
 
 ## 3. マイルストーンと着手条件
 
-U番号は製品の到達点、`unit_XXX`は作業仕様の識別子です。一工程を一つの巨大な変更にせず、親仕様にある子工程をレビュー可能な単位で進めます。U01〜U06は`spec/complete`、U07〜U10は未着手の`spec/planned`です。固定runtime 0.167.0の公開app-serverへ直接接続します。接続方式の根拠は[調査子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)、現在の実接続確認範囲は[08](08-sdk-compatibility.md)を参照します。
+U番号は製品の到達点、`unit_XXX`は作業仕様の識別子です。一工程を一つの巨大な変更にせず、親仕様にある子工程をレビュー可能な単位で進めます。U01〜U06は`spec/complete`、U08はM0の要求・設計整理に着手して`spec/wip`、U07・U09・U10は未着手の`spec/planned`です。固定runtime 0.167.0の公開app-serverへ直接接続します。接続方式の根拠は[調査子仕様](../complete/unit_016/CODEX_SDK_SELECTION.md)、現在の実接続確認範囲は[08](08-sdk-compatibility.md)を参照します。
 
 | 工程・親仕様 | 前提 | 冒頭で調査・設計すること | 工程の到達点 |
 |---|---|---|---|
@@ -46,7 +46,7 @@ U番号は製品の到達点、`unit_XXX`は作業仕様の識別子です。一
 | [U05 入力と即時停止](../complete/unit_010/INPUT_AND_STOP.md) | U04、入力の取消し・回収経路 | 実機プロトコル、有限列・通信条件、入力所有者、受付、取消し・解除、開始記録 | 通常ターンから有限の操作列と事後観測を扱い、GUIで即時停止する |
 | [U06 Goalによる継続](../complete/unit_011/GOAL_EXECUTION.md) | U02・U05、Goalの公開経路 | M0〜M3は当時の構成で完了。新しい会話と停止の契約はunit_061/062で改訂・検証 | Goalの自律継続、通常指示と元要求への回答、目的を保持する共通停止、明示再開、目的だけの削除 |
 | [U07 計画的終了](../planned/unit_012/PLANNED_STOP.md) | 初期版対象外 | 具体的な追加要求が生じた時点で再検討 | 専用機能・受入を予約しない |
-| [U08 保存参照・再起動後の再開](../planned/unit_013/RESUME.md) | U06の同一セッション再開。U07への依存なし | 保存参照の読込、アプリ・接続の再起動、同じGoalまたは新規スレッドへの再構成 | 共通の再開経路へ復帰の前処理を接続し、破棄Goalや過去操作を復活させない |
+| [U08 保存参照・再起動後の再開](../wip/unit_013/RESUME.md) | U06の同一セッション再開。U07への依存なし | 保存参照の読込、アプリ・接続の再起動、同じGoalまたは新規スレッドへの再構成 | 共通の再開経路へ復帰の前処理を接続し、破棄Goalや過去操作を復活させない |
 | [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外。実需と再採用の明示判断 | 必要になった時点で明示生成だけの方式から再設計 | 未着手の候補として保持。初期版の受入条件には含めない |
 | [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | U02〜U06・U08と会話再編・契約整理の必要な受入条件 | 機器構成、利用場面、遅延・資源・記録量の測定と判定 | Windows実機で短い依頼から数時間の運転へ広げる |
 
