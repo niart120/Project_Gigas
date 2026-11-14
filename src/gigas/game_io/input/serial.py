@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol
 import serial
 from serial.tools import list_ports
 
-from gigas.game_io.input.config import resolve_serial_config
 from gigas.game_io.input.models import InputState
 from gigas.game_io.input.protocol import encode_state
 
@@ -59,7 +58,6 @@ def list_serial_ports() -> tuple[SerialPort, ...]:
 
 
 def _open_native(config: "SerialConfig") -> SerialConnection:
-    resolve_serial_config(config.port, config.protocol.key, config.baudrate)
     if sum(port.identifier == config.port for port in list_serial_ports()) != 1:
         message = f"選択したシリアルポートが一意に見つかりません: {config.port}"
         raise SerialInputError(message)

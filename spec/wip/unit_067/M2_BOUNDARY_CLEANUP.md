@@ -24,7 +24,7 @@ StdioTransportはsubprocess起動で得たprotocolをreaderへ渡す。reader自
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | R1: 解決済み設定で現在のportを照合し、接続と初期neutralを行う | characterization | unit | 既存の実ポート境界・送信・取消し試験で確認 |
+| green | R1: 解決済み設定で現在のportを照合し、接続と初期neutralを行う | characterization | unit | 再解決を削除。設定・接続の37試験と静的検査成功、commit後に完了扱いとする |
 | todo | R2: 取得要求を一度取り出し、待機と取得の終了を回収する | characterization | integration | 既存の列挙・取得・再接続・終了試験で確認 |
 | todo | R3: 起動したprotocolで通知を受け、EOF・起動取消し・close時に処理を回収する | characterization | integration | 既存の模擬子プロセス試験で確認 |
 
@@ -35,6 +35,8 @@ StdioTransportはsubprocess起動で得たprotocolをreaderへ渡す。reader自
 ## 7. 検証
 
 各itemで対応試験とty、ruffを実行する。最後に全unit/integration、ruff format/check、ty、lock/build、仕様・公開文書の参照・diffを確認し、親M2の受入とする。実機・実app-serverを新たに実行する変更ではなく、模擬プロセス・I/Oの結果として報告する。
+
+R1は既存のserial 10試験を変更前の基準として確認した。構造整理なので人工的なredや検査呼出回数の試験は追加せず、`_open_native`の再解決とimportだけを削除した。`uv run pytest tests/unit/test_serial_input.py tests/unit/test_settings.py -q`は37 passed。設定解決、現在のport照合、接続時neutral、送信失敗・取消し回収を確認し、対象ruff format/checkと全体tyも成功した。SerialInputの解決済み設定という前提は既存docstringを維持し、公開API文書へ明記した。
 
 ## 8. 先送り事項
 

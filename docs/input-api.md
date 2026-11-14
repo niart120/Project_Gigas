@@ -32,7 +32,7 @@ steps = parse_sequence(
 
 `gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。WindowsのCH552・9600 baudで短い操作・解除送出・画面変化を確認済みです。PokeCon・3DSの実機、他OS、通信断・長時間運転は未検証です。
 
-`SerialInput(config)`は単一workerを所有します。`await open()`で現在の一覧からport識別子が一意に一致する機器を開き、neutralを送出します。`await send(state)`にはその機器に適合する生成済みInputStateを渡し、完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
+`SerialInput(config)`には`resolve_serial_config()`で解決した設定を渡します。接続側は設定を再解決せず、単一workerで`await open()`を実行し、現在の一覧からport識別子が一意に一致する機器を開いてneutralを送出します。`await send(state)`にはその機器に適合する生成済みInputStateを渡し、完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
 送信の全byte数が返った場合だけ完了します。部分送出や例外は`SerialInputError`となり、自動再送・flush・ACK待ちは行いません。取消しは開始済みwriteが戻るまで回収し、その間の別の送信・closeは拒否します。保持時間の待機・停止後のneutralは操作実行側が担当します。
 
