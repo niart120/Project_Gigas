@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **wip（I1〜I3完了、I4の実接続受入中）**。[U08親仕様](../unit_013/RESUME.md)のM2を担当する。管理APIの利用とゲームI/O保存を分離し、Projectあり・なしの新規会話で、実際のthread IDに結び付いた記録を残す。
+状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM2を担当する。管理APIの利用とゲームI/O保存を分離し、Projectあり・なしの新規会話で、実際のthread IDに結び付いた記録を残す。
 
 起点は[M0の確定設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と[M1の完了](../../complete/unit_069/MANAGEMENT_API.md)。利用者は保存場所や資料の形式を準備しなくても未所属で始められ、Projectを選んだ場合はその作業資料と記録を同じフォルダーで扱える。単独Python利用では呼出し側が指定した記録先だけを必要とする。
 
@@ -50,7 +50,7 @@ I1で単独保存API、I2で公開Projectと作業場所の解決を試験し、
 | refactor-done | I1: 単独Python利用で指定先へ5種のJSONLとPNGを残し、履歴破損・単発の書込失敗後も新規追記できる | new/edge | unit/integration | red collection error→新規22件・関連106件green。ID検査の例外範囲を整理し同じ試験でgreen。入力記録型・既存生成元・試験を同時更新 |
 | refactor-done | I2: 公開Projectの選択・登録と未所属の新規作業場所を解決し、既存資料を保持する | new/edge | unit/integration | red collection error→11件green。試験の型import・assert・例外範囲を整理して同じ11件green。位置台帳なし |
 | refactor-done | I3: 製品の通常送信・Goal開始がcwd/MCP→実thread ID→records結合を通り、限定本文・観測・入力を新形式へ保存する | new/regression | unit/integration | 記録19件・protocol45件・GUI8件をred→green。bind失敗・パス境界もred→green。非同期保存の重複検査・未使用戻り値を整理して再実行。全体871件成功 |
-| todo | I4: 実app-serverと既存GUIからProjectあり／なしの新規開始・保存・停止を確認する | acceptance | integration/GUI | 所属と作業場所・実効権限を実runtimeで確認。模擬フレームによる保存bytes確認と実runtime応答を区別。USB Video Device・COM8の通し受入はM7 |
+| refactor-skipped | I4: 実app-serverと既存GUIからProjectあり／なしの新規開始・保存・停止を確認する | acceptance | integration/GUI | 実GUIの未所属送信・Project作成とGoal開始/停止/通常送信、実Codex＋模擬frameの観測1回、公開metadataと保存先の一致を確認。製品追加修正なし |
 
 ## 7. 対象ファイル
 
@@ -66,7 +66,7 @@ storageの記録API・入力記録型、servicesの記録・観測・会話資�
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m2-root -q --tb=short | I3で871 passed（69.09秒） | 旧契約の試験を撤去・置換後の実行・停止・UI回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | I3成功（259ファイル） | 形式・lint・型境界 |
 | uv lock --check / uv run python scripts/check_package.py | I3成功 | lock、sdist/wheel内の共通指示、外部の新規環境でcapture worker・module/console起動と終了 |
-| 実app-server・既存GUIによる新規開始と停止 | I4実行中 | 未所属の送信・本文保存を確認。Project・観測保存・停止の受入は継続 |
+| 実app-server・既存GUIによる新規開始と停止 | I4成功 | 未所属送信、Project作成・Goal開始・生成中停止・停止後送信・正常終了、実Codexと模擬frameの観測保存を確認 |
 | git diff --check、文書内容・参照の確認 | I3差分検査成功 | 独立レビューの旧thread ID記述、GUI通知内容、過去実機結果の範囲を修正 |
 
 I1のred: `uv run pytest tests/integration/test_game_io_records.py --basetemp=tmp/pytest-m2-writer -q`は、gigas.storage.records未実装によるcollection errorを確認した。5種の形式・画像対応、破損の無修復保持、書込失敗後の継続、排他・終了を対象とする。
@@ -95,15 +95,23 @@ I3の構造確認はrefactor-done。ObservationServiceの二重busy検査とReco
 
 Product Designの実画面確認では、変更前後の1920×1110の画面を比較した。映像・対話の配置を維持し、切断中のProjectメニュー無効、接続後の有効化、初回送信後の無効化、前回Projectの非自動選択を確認した。画像は`tmp/u08-m2-ui-baseline/screenshots`と`tmp/u08-m2-ui-after/screenshots`に保管。Project作成ピッカーと選択後の実行はI4で続ける。
 
+I4は2026-11-15にapp-server 0.167.0、gpt-6.1-sol / low、M1で認証・sandbox準備済みの専用homeで実施した。`uv run python tmp/live_m1.py --root tmp/u08-m1-acceptance-20261115`から起動した製品GUIで、未所属の通常送信・応答・本文2種の保存、切断後の再接続を確認した。新規Projectのネイティブピッカーは起動cwdを初期表示し、指定した`tmp/u08-m2-project-native`を空のフォルダーとして作成・登録した。選択だけではrecordsを生成しなかった。
+
+同ProjectでGoalを開始し、1〜1000の列挙が157まで生成された時点で中断した。Goalの目的を保持した一時停止と、停止後の通常指示への応答を確認し、GUIを正常終了した（exit 0）。recordsは実thread IDの1フォルダーで、提出2件・確定本文1件となった。停止した未完本文は補完保存しなかった。後の`thread/read`・`project/read`・`thread/goal/get`で公開root・cwd・保存先IDの一致とGoalのpausedを確認した。画像は同じafterフォルダーの04〜08、要約は`tmp/u08-m2-project-audit.json`に保管した。
+
+`uv run python tmp/live_m2_observe.py --output tmp/u08-m2-observe-unassigned.json`は実CodexServiceThreadと64×48の赤い模擬Frameを使い、モデル提出1回・observe1回で成功した。HTTP直列化前のMCP CallToolResultと保存PNGの168 bytes・観測IDが一致し、提出1件・進捗を含む確定本文2件・観測1件を保存した。turn完了、共通停止、保存drain、終了が成功し、記録エラーはなかった。実thread/startの未所属、cwdとruntimeWorkspaceRoots、workspaceWrite・追加rootsなし・network=false・一時領域除外・on-request/userは要求と一致した。補助プログラムの最初の試行は型注釈の実行時import不足でMCP起動時に失敗したが、オフラインで修正を確認してから初回モデル提出を行った。製品変更・指示再送は行っていない。
+
+`uv run python tmp/audit_m2_public.py --workspace <対象作業場所> --output <要約先>`でGUIと観測の未所属2会話、Project1会話を公開metadataだけで照合した。未所属の結果は`tmp/u08-m2-public-audit.json`、Projectは上記要約へ保存した。cold readが公開しない実効権限はthread/startの確認と区別した。JSONLの共通4項目、本文textのみ、観測のID・取得時刻・相対画像パス・両寸法を確認した。製品コードの変更はなく、I4の構造変更は不要と判断した（refactor-skipped）。
+
 ## 9. 先送り事項
 
-M3以降は親仕様の範囲と順序に従う。既存会話のrecords再利用・履歴閲覧時にファイルを作らないことはM4で結合確認する。M2では新規開始、単独writerの再open、既存作業場所の欠落を検証する。新規Projectのサイドバー管理はM5で追加する。
+M3以降は親仕様の範囲と順序に従う。既存会話のrecords再利用・履歴閲覧時にファイルを作らないことはM4で結合確認する。新規Projectのサイドバー管理はM5で追加する。M2の画像受入は模擬Frameであり、USB Video Device・COM8を含むGUIから実機の通し受入はM7へ残す。数時間運転はU10。I3の全体試験で一度だけ発生した要求カード待ちtimeoutは原因未確定だが、対象83件と全体再実行では成功しており、再発時に送信結果を先に確認できる試験へ改めた。
 
 ## 10. 完了チェックリスト
 
 - [x] M1の完了とM2の範囲・責務を確認した
-- [ ] I1〜I4を検証し、各cycleの構造確認を記録した
+- [x] I1〜I4を検証し、各cycleの構造確認を記録した
 - [x] 旧保存契約と固定資料入口を呼出し元・公開文書から撤去した
 - [x] 型・docstring・公開docs・配布資材を実装へ照合した
-- [ ] 必要な品質ゲートと製品経路の受入を完了した
-- [ ] 親仕様・初期設計の進捗を更新した
+- [x] 必要な品質ゲートと製品経路の受入を完了した
+- [x] 親仕様・初期設計の進捗を更新した

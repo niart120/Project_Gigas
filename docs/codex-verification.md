@@ -38,4 +38,8 @@ uv run python scripts/check_codex.py file-approval --cwd "$env:TEMP\gigas-codex-
 
 2026年11月15日の[M1](../spec/complete/unit_069/MANAGEMENT_API.md)では、専用homeでの本人ログイン、Windows sandboxの準備とApp Server再接続、GUIからの通常応答・生成中の停止・停止後の送信を確認しました。この時点では記録は旧形式です。
 
-公開Projectと会話別recordsに対応させた本スクリプトは、CLI・静的検査までを確認し、実モデルでは未実行です。現在の保存経路の実接続は[U08](../spec/wip/unit_013/RESUME.md)のM2、GUIから実機までの通し受入はM7で確認します。他の入力機器・OS、長時間運転は未検証です。APIキー認証は対象外です。
+同日の[M2](../spec/complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)では、製品GUIから未所属の通常送信、Projectの新規作成、Goal開始・生成中停止・停止後の通常送信と正常終了を確認しました。公開Project root・会話cwd・recordsの実thread IDが一致し、Goalは目的を保持してpausedとなりました。提出本文と確定応答を保存し、中断した未完本文は補完保存していません。
+
+実Codexと64×48の模擬Frameを使った製品サービスの確認では、observe 1回のMCP応答と保存PNGの168 bytes・観測IDが一致しました。進捗を含む確定本文2件、提出1件、観測1件が新形式で残り、保存エラーなく停止・回収・終了しました。これは実機映像・入力の確認とは区別します。
+
+公開Projectと会話別recordsに対応させた本スクリプト自体は、CLI・静的検査までを確認し、実モデルでは未実行です。GUIから実機までの通し受入は[U08](../spec/wip/unit_013/RESUME.md)のM7で確認します。他の入力機器・OS、長時間運転は未検証です。APIキー認証は対象外です。
