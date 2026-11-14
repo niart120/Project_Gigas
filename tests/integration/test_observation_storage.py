@@ -14,8 +14,8 @@ import pytest
 
 from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
-from gigas.game_io.input.config import InputProtocol, get_protocol
-from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, parse_sequence
+from gigas.game_io.input.config import get_protocol
+from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
 from gigas.game_io.observation import Observation
 from gigas.storage.input_events import OperationFinished, OperationStarted
 from gigas.storage.project import ProjectError, ProjectWriter
@@ -25,9 +25,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 
-def test_input_records_keep_sequence_results_and_observation_reference(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_input_records_keep_sequence_results_and_observation_reference(tmp_path: Path) -> None:
     writer = ProjectWriter.create(tmp_path / "game")
     observation = Observation.from_frame(sample_frame())
     sequence = (
@@ -51,12 +49,10 @@ def test_input_records_keep_sequence_results_and_observation_reference(
     finally:
         writer.close()
     # A later capability change must affect new input, not existing archive rows.
-    with monkeypatch.context() as patch:
-        patch.setattr(InputProtocol, "touch", False)
-        with pytest.raises(InvalidSequenceError):
-            parse_sequence([step.to_json() for step in sequence], get_protocol("3ds"))
-        reopened = ProjectWriter.open(writer.path)
-        reopened.close()
+    with pytest.raises(InvalidSequenceError):
+        validate_state(sequence[0].state, replace(get_protocol("3ds"), touch=False))
+    reopened = ProjectWriter.open(writer.path)
+    reopened.close()
     records = [json.loads(row) for row in (writer.path / "events.jsonl").read_bytes().splitlines()]
     assert [row["sequence"] for row in records] == list(range(1, 5))
     assert [row["type"] for row in records] == [

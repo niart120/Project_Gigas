@@ -24,7 +24,7 @@ InputServiceは非空tupleを受ける前提とし、空列の再検査を削る
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | I1: 直接構築とJSON解析が同じ共通条件を保証し、非空で不変な全列だけを外部入口から渡す | regression | unit/integration | 共通条件の試験を生成境界へ整理。parserのprotocol引数・重複値域とサービスの空列再検査を削る |
+| refactor-done | I1: 直接構築とJSON解析が同じ共通条件を保証し、非空で不変な全列だけを外部入口から渡す | regression | unit/integration | 共通条件の試験を生成境界へ整理。parserのprotocol引数・重複値域とサービスの空列再検査を削除 |
 | todo | I2: 未知・非対応入力は列全体を開始前に拒否し、適合する状態を再検査せず既存byte列へ変換する | characterization | unit/integration | 単独encoderの能力拒否期待を削る。全列拒否・接続時neutral・停止解除を区別 |
 
 ## 6. 実装順と対象ファイル
@@ -34,6 +34,10 @@ I1でmodels.py、InputService.startと呼出側・対応試験を整理し、I2�
 ## 7. 検証
 
 入力protocol・serialのunit、InputService・MCP・保存入力のintegration、ruff format/check、ty、lock/build、文書参照・diffを実施する。byte列・停止回収を変更しないため実機を必須とせず、模擬I/O・実HTTPの受入と区別する。
+
+I1の基準は、共通条件を構築境界へ整理し、未知ボタン・非対応touchの全列拒否と、外部の空列・後方生成失敗を追加した105 passed。既存の生成保証を維持するため、人工的なredは作らなかった。重複検査削除後、`uv run pytest tests/unit/test_input_protocols.py tests/unit/test_serial_input.py tests/integration/test_input_service.py tests/integration/test_game_io_mcp.py tests/integration/test_input_observation_path.py tests/integration/test_observation_storage.py -q`は172 passed。原JSONからの独立・生成後の不変性・全列拒否・保存入力の非再解釈・機器別byte列を確認した。
+
+I1のgateは全体ruff format（242 files）・ruff check・ty、lock/build成功。公開parserは一引数へ変更し、型付き呼出側・docstring・公開例を揃えた。新しいAny・cast・ignore・依存は追加していない。変更文書のローカル参照33件・unit番号66件と差分を確認した。
 
 ## 8. 先送り事項
 

@@ -71,7 +71,6 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
                     {"kind": "press", "buttons": ["A"], "duration_ms": 1},
                     {"kind": "wait", "duration_ms": 1},
                 ],
-                config.protocol,
             )
             result, observation = await act_and_observe(
                 sequence,

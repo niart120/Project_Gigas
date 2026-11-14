@@ -191,7 +191,12 @@ def test_unavailable_or_invalid_whole_sequence_sends_nothing(harness: Harness) -
         assert isinstance(disabled, OperationResult)
         assert disabled.code == "INPUT_DISABLED"
         await harness.service.connect(harness.device)
-        for sequence in ((), (press(), press("START"))):
+        for unsupported in (
+            press("START"),
+            press("UNKNOWN"),
+            InputStep("press", 1, InputState(touch=(0, 0))),
+        ):
+            sequence = (press(), unsupported)
             invalid = harness.service.start(sequence)
             assert isinstance(invalid, OperationResult)
             assert invalid.code == "INVALID_SEQUENCE"
