@@ -13,7 +13,6 @@ from gigas.runtime.codex.connection import (
     CodexConnectionError,
     MessageDeliveryError,
 )
-from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import (
     ConversationStatus,
     DialogueEvent,
@@ -26,9 +25,8 @@ from gigas.runtime.codex.models import (
 )
 from gigas.runtime.codex.transport import RpcError, RpcNotification, ServerRequest, TransportError
 from gigas.services._conversation_goals import GoalTracker
-from gigas.services.conversations import StoredConversationTarget
+from gigas.services._conversation_preparation import PreparationAttempt, ThreadPreparation
 from gigas.services.input import OperationResult
-from gigas.storage.records import RecordError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -53,6 +51,7 @@ class _Turn:
 class _Submission:
     task: asyncio.Task[object] | None = None
     submitted: bool = False
+    preparation: PreparationAttempt = field(default_factory=PreparationAttempt)
 
 
 @dataclass(slots=True)
@@ -102,13 +101,26 @@ class ConversationExecution:
         self._selection = selection
         self._closing = closing
         self._request_close = request_close
-        self._thread_id: str | None = None
+        self._preparation = ThreadPreparation(connection, resources, selection, self._activate)
         self._goals = GoalTracker()
         self._turn: _Turn | None = None
         self._requests = HumanRequests()
         self._sending: _Submission | None = None
         self._stopping: _Stop | None = None
         self._turn_reply: _TurnReply | None = None
+
+    @property
+    def loaded(self) -> bool:
+        """Whether start or resume returned and passed configuration validation."""
+        return self._preparation.loaded
+
+    @property
+    def _thread_id(self) -> str | None:
+        return self._preparation.thread_id
+
+    def _activate(self, goal: "GoalState | None") -> None:
+        self._goals = GoalTracker(goal)
+        self._publish()
 
     @property
     def _goal(self) -> "GoalState | None":
@@ -130,11 +142,11 @@ class ConversationExecution:
         self._emit(self.snapshot)
 
     def set_execution_settings(self, settings: "ExecutionSettings") -> None:
-        """Retain saved options for a later new-thread preparation without an RPC.
+        """Retain saved options for a later start or resume without an RPC.
 
         Args:
             settings: Last successfully loaded or saved options. Preparation already
-                in progress uses its captured value; existing threads are not updated.
+                in progress uses its captured value; loaded threads are not updated.
         """
         self._settings = settings
 
@@ -162,6 +174,10 @@ class ConversationExecution:
         except TransportError:
             if submission.submitted:
                 raise MessageDeliveryError("要求の受付結果を確認できません") from None
+            if submission.preparation.resume_submitted:
+                raise CodexConnectionError(
+                    "会話の再開結果を確認できません。指示本文は送信していません"
+                ) from None
             raise CodexConnectionError("会話の準備中に接続が失われました") from None
         finally:
             # A canceled caller does not discard ownership of an in-flight write.
@@ -177,38 +193,10 @@ class ConversationExecution:
             self._sending = None
             self._publish()
 
-    async def _prepare(self) -> str:
-        settings = self._settings
-        target = self._selection.target
-        if self._thread_id is None and isinstance(target, StoredConversationTarget):
-            raise CodexConnectionError("保存済み会話の再開はまだ利用できません")
-        await self._connection.require_ready()
-        try:
-            if self._thread_id is None:
-                configuration = await self._resources.prepare(
-                    CodexManagement(self._connection),
-                    self.start_input,
-                    project_id=target.project_id,
-                )
-                selection = self._connection.selection
-                config = await self._connection.request(
-                    "config/read", {"includeLayers": False, "cwd": str(configuration.cwd)}
-                )
-                params = protocol.thread_start_params(
-                    configuration, selection, config, settings=settings
-                )
-                result = await self._connection.request("thread/start", params)
-                self._thread_id = protocol.validate_thread(
-                    result, configuration, selection, settings=settings
-                )
-                self._selection.adopt_started(
-                    self._thread_id, configuration.cwd, configuration.project_id
-                )
-                self._publish()
-            await self._resources.bind_records(self._thread_id)
-        except (OSError, RecordError) as error:
-            raise CodexConnectionError("会話の作業場所・記録先を準備できません") from error
-        return self._thread_id
+    async def _prepare(self, submission: _Submission) -> str:
+        return await self._preparation.prepare(
+            self._settings, self.start_input, submission.preparation
+        )
 
     async def send(self, prompt: str) -> str | None:
         """Submit ordinary or additional text once through turn/start.
@@ -225,7 +213,7 @@ class ConversationExecution:
 
         async def submit(submission: _Submission) -> str | None:
             try:
-                thread_id = await self._prepare()
+                thread_id = await self._prepare(submission)
             except asyncio.CancelledError:
                 if self._stopping is not None or self._closing():
                     return None
@@ -268,7 +256,7 @@ class ConversationExecution:
 
         async def submit(submission: _Submission) -> bool:
             try:
-                thread_id = await self._prepare()
+                thread_id = await self._prepare(submission)
             except asyncio.CancelledError:
                 if self._stopping is not None or self._closing():
                     return False
@@ -291,13 +279,21 @@ class ConversationExecution:
 
     async def resume_goal(self) -> bool:
         """Request active for the retained objective without rewriting objective or budget."""
-        if self._goal is None or self._goal.status in {"active", "complete"}:
+        goal = self._goal if self._thread_id is not None else self._selection.goal
+        if goal is None or goal.status in {"active", "complete"}:
             raise CodexConnectionError("再開できる目標がありません")
 
         async def submit(submission: _Submission) -> bool:
-            await self._connection.require_ready()
+            try:
+                await self._prepare(submission)
+            except asyncio.CancelledError:
+                if self._stopping is not None or self._closing():
+                    return False
+                raise
             if self._stopping is not None or self._closing():
                 return False
+            if self._goal is None or self._goal.status in {"active", "complete"}:
+                raise CodexConnectionError("再開できる目標がありません")
             submission.submitted = True
             await self._change_goal(
                 "thread/goal/set",
@@ -312,7 +308,7 @@ class ConversationExecution:
 
     async def clear_goal(self) -> None:
         """Withdraw the objective without interrupting its turn or device input."""
-        if self._goal is None:
+        if self._thread_id is None or self._goal is None:
             raise CodexConnectionError("削除する目標がありません")
 
         async def submit(submission: _Submission) -> None:
@@ -337,6 +333,7 @@ class ConversationExecution:
         """Commit catalog choices only after required thread settings succeed."""
 
         async def submit(submission: _Submission) -> None:
+            self._preparation.require_confirmed()
             selection = self._connection.propose_model(model, effort)
             if self._thread_id is not None:
                 submission.submitted = True
@@ -419,7 +416,9 @@ class ConversationExecution:
             try:
                 if submission is not None and submission.task is not None:
                     (outcome,) = await asyncio.gather(submission.task, return_exceptions=True)
-                    self._check_submission_at_stop(outcome, submission.submitted)
+                    self._check_submission_at_stop(
+                        outcome, submission.submitted or submission.preparation.resume_submitted
+                    )
                 if answers:
                     outcomes = await asyncio.gather(*answers, return_exceptions=True)
                     for outcome in outcomes:
@@ -656,6 +655,9 @@ class ConversationExecution:
     def _cancel_preparation(self) -> None:
         submission = self._sending
         if submission is not None and not submission.submitted:
+            if submission.preparation.resume_submitted:
+                return
+            submission.preparation.cancel_unsubmitted()
             task = submission.task
             if task is not None and not task.cancelling():
                 task.cancel()

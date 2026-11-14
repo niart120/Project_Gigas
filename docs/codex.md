@@ -12,7 +12,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None)` は接続を作成します。`options` は `ConnectionOptions`、`emit` は `RuntimeEvent` を受け取る短い同期コールバックです。作成時にはプロセスを起動しません。同じasyncioループで `open()`、必要なら `login()` を呼び、最後に `close()` を待ちます。
 
-`ConnectionOptions.execution_settings`は`ExecutionSettings`を受け取ります。`web_search_enabled`と`memory_enabled`は真偽値で、どちらも既定は`True`です。`approvals_reviewer`は`"auto_review"`（代わりに承認、既定）または`"user"`（自分で承認）を指定します。接続起動時と新規thread開始時に同じ設定変換を使います。
+`ConnectionOptions.execution_settings`は`ExecutionSettings`を受け取ります。`web_search_enabled`と`memory_enabled`は真偽値で、どちらも既定は`True`です。`approvals_reviewer`は`"auto_review"`（代わりに承認、既定）または`"user"`（自分で承認）を指定します。接続起動時とthreadの新規開始・再開に同じ設定変換を使います。
 
 Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準の生成・参照をまとめて切り替え、OFFでも既存の記憶を削除しません。生成は候補となる会話や実行条件に従い、ON直後の生成は保証しません。作業フォルダーのAGENTS.mdと標準探索先のSkillsを読み込み、GIGAS独自の探索処理や資料様式は設けません。Apps・Plugins・Hooksと外部通知は無効です。
 
@@ -73,7 +73,7 @@ Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準�
 
 準備失敗・取得不能は理由を残して失敗を返し、接続を維持します。成功後も非readyなら`reconnect_required=True`となり、Codex App Serverの明示的な切断・再接続が必要です。受付不明では再送せず通知を待ちます。待機中も切断できますが、Windows側の準備取消しは保証しません。GUIはturn・active Goal・送信・停止処理がある間の準備操作を無効にします。
 
-通常指示とGoal操作は、接続・認証、有効なモデルと推論レベル、準備済みの実行環境を要求します。別の送信または停止処理中は受け付けません。turn実行中、質問待ち、機器未接続、映像未取得、利用枠の表示だけでは拒否しません。回答は元要求の有効性と接続・停止状態で判断し、通常指示の送信中にも配送できます。
+通常指示とGoalの作成・編集・再開は、接続・認証、有効なモデルと推論レベル、準備済みの実行環境を要求します。Goal削除は接続・認証だけで操作できます。別の送信または停止処理中は受け付けません。turn実行中、質問待ち、機器未接続、映像未取得、利用枠の表示だけでは拒否しません。回答は元要求の有効性と接続・停止状態で判断し、通常指示の送信中にも配送できます。
 
 初回の通常指示またはGoal作成で、作業フォルダーとゲームI/O MCPを準備して永続threadを作ります。Project所属なら公開APIで取得した唯一のroot、未所属なら新しい`unassigned/<workspace-id>/`をcwd・runtimeWorkspaceRootsに指定します。Project IDも明示し、未所属はnullです。選択モデルと推論レベルはthread/startの`model`・`config.model_reasoning_effort`へ渡し、Goal開始前に適用します。接続・ログインだけでは会話の作業場所や記録先を作成しません。
 
@@ -83,7 +83,11 @@ Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準�
 
 thread/startの応答で得た実IDを保持し、作業場所の`records/<thread-id>/`へwriterを結び付けてからturn/startやGoal開始を提出します。記録先の準備に失敗した場合は未送信として返し、認証と取得済みIDを保持します。次の明示操作は同じIDへの準備を行い、自動再試行はしません。既存の作業フォルダーが欠けた場合は再作成しません。
 
-同じ会話ではthreadとMCP入口を再利用します。送信・Goal再開ごとのunsubscribe・resumeや入口の作り直しは行いません。結合後の画像・入力・本文は非同期に保存し、その成否をMCP応答・次の入力・停止の条件にしません。画像が応答直後に存在することや、異常終了時に全記録が残ることは保証しません。
+保存済み会話への明示送信・Goal作成/編集/再開では、保存cwdに現在のMCPと同じ`records/<thread-id>/`を準備し、`thread/resume`を完了してから指定操作を送ります。再開要求は現在のモデル・推論レベルと、準備開始時の設定を使用します。受信対象IDと記録先は要求前に結び付け、応答前の通知・質問・観測も受け付けます。active Goalが追加本文より先に動く可能性があり、その順序を変える補助操作は行いません。
+
+resume送信前の準備失敗では、次の明示操作で再び準備できます。resumeを送信した後、応答または実効設定を確認できなかった場合は、Codex App Serverを切断・再接続してから実行してください。自動再送や新規threadへの置換はしません。保持するGoalの削除と共通停止・切断は引き続き使えます。
+
+ロード済みの同じ会話ではthreadとMCP入口を再利用し、毎回のunsubscribe・resumeや入口の作り直しは行いません。結合後の画像・入力・本文は非同期に保存し、その成否をMCP応答・次の入力・停止の条件にしません。画像が応答直後に存在することや、異常終了時に全記録が残ることは保証しません。
 
 ## 通常指示とGoal
 
@@ -107,6 +111,8 @@ Goalのcomplete・paused・blocked・制限状態、turnの自然終了・失敗
 共通停止は送信中にも割り込みます。停止taskがある間は新しい指示・Goal操作・回答・機器入力を拒否します。入力列へ取消しを届け、開始済みwriteと必要なneutral送出を回収します。未提出の送信を取り消し、提出済みの要求・回答は配送結果を確認します。既知turnの中断と入力解除は、Goal変更の決着を待たずに進めます。
 
 送信済みGoal操作の結果と通知を処理した上で、Goalがactiveなら保持したままpausedを要求します。completeや制限状態など既に非activeの値は上書きしません。停止中に新たな自律turnが始まった場合も同じ停止処理で中断し、各対象の中断応答と終端通知を待ちます。
+
+resume待機中も共通停止を使えます。resume要求前なら準備だけを取り消し、閲覧中のGoalを休止しません。要求済みなら本文を送らず再開要求の結果を回収し、早期turn・active Goalを同じ停止処理で扱います。本文の未送信は、resumeによる実行がなかったことを意味しません。
 
 停止の正常結果は、サーバー側の停止と捕捉した入力列の解除・回収が完了した意味です。完了後は通常の受付へ戻り、別の再受付状態や機器の再許可操作はありません。保持Goalの自律継続には利用者の再開操作が必要です。停止は全バックグラウンドプロセスの終了や、ゲーム内セーブの成功を保証しません。
 

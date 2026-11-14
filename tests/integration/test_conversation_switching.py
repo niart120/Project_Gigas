@@ -29,6 +29,7 @@ from gigas.services.conversations import (
     NewConversationTarget,
     StoredConversationTarget,
 )
+from tests.integration.peers.codex_resume import ResumePeer
 from tests.integration.test_codex_service import _mcp_endpoint
 from tests.integration.test_conversation_selection import _saved
 from tests.unit.test_codex_connection import FakePeer
@@ -41,7 +42,9 @@ if TYPE_CHECKING:
 class _Session:
     """Drive public Qt commands while observing actual service result delivery."""
 
-    def __init__(self, qtbot: QtBot, path: Path, peer: FakePeer) -> None:
+    def __init__(
+        self, qtbot: QtBot, path: Path, peer: FakePeer, reader: CaptureReader | None = None
+    ) -> None:
         """Keep result streams and the runtime callback for controlled notifications."""
         self.qtbot = qtbot
         self.peer = peer
@@ -56,7 +59,7 @@ class _Session:
             self.notifications = emit
             return CodexConnection(self.peer, options, emit)
 
-        self.service = CodexServiceThread(path, CaptureReader(CaptureSnapshot), factory)
+        self.service = CodexServiceThread(path, reader or CaptureReader(CaptureSnapshot), factory)
         self.service.completed.connect(self.results.append)
         self.service.management_completed.connect(self.management.append)
         self.service.received.connect(self.events.append)
@@ -92,8 +95,10 @@ class _Session:
 
 
 @contextmanager
-def _session(qtbot: QtBot, path: Path, peer: FakePeer) -> Generator[_Session]:
-    session = _Session(qtbot, path, peer)
+def _session(
+    qtbot: QtBot, path: Path, peer: FakePeer, reader: CaptureReader | None = None
+) -> Generator[_Session]:
+    session = _Session(qtbot, path, peer, reader)
     session.service.start()
     try:
         assert not session.command(
@@ -148,7 +153,7 @@ def test_browse_and_new_selection_do_not_execute_or_pause_saved_active_goal(
 def test_switch_requires_idle_and_releases_old_resources_before_adopting_same_cwd(
     qtbot: QtBot, tmp_path: Path, status: str
 ) -> None:
-    peer = FakePeer()
+    peer = ResumePeer("project-1")
     peer.responses["thread/unsubscribe"] = {"status": status}
     with _session(qtbot, tmp_path, peer) as s:
         assert not s.command("send", lambda: s.service.send("first")).error
@@ -186,14 +191,18 @@ def test_switch_requires_idle_and_releases_old_resources_before_adopting_same_cw
             isinstance(event.event, ConversationStatus) and event.event.turn_id == "late"
             for event in s.events[before:]
         )
-        refused_send = s.command("send", lambda: s.service.send("resume is not implemented"))
-        assert refused_send.error
-        assert refused_send.message is not None
-        assert refused_send.message.outcome == "not_sent"
+        resumed = s.command("send", lambda: s.service.send("resume selected"))
+        assert not resumed.error
+        assert resumed.message is not None
+        assert resumed.message.outcome == "accepted"
         assert len([method for method, _ in peer.calls if method == "thread/start"]) == 1
+        resumed_params = next(p for m, p in peer.calls if m == "thread/resume")
+        assert resumed_params is not None
+        assert resumed_params["threadId"] == "stored-2"
+        assert _mcp_endpoint(resumed_params) != _mcp_endpoint(params)
 
 
-def test_disconnect_keeps_started_target_and_explicit_new_is_required(
+def test_disconnect_keeps_started_target_and_explicit_execution_resumes_it(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
     peer = FakePeer()
@@ -218,13 +227,17 @@ def test_disconnect_keeps_started_target_and_explicit_new_is_required(
         assert not s.command("disconnect", s.service.disconnect_runtime).error
         assert s.service._selection.target is target
         assert s.service._selection.goal == GoalState("saved goal", "active", 7, 1)
-        s.peer = next_peer = FakePeer()
+        s.peer = next_peer = ResumePeer()
         assert not s.command(
             "connect", lambda: s.service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
         ).error
-        refused = s.command("goal_set", lambda: s.service.set_goal("existing"))
-        assert refused.error
+        assert not s.command("send", lambda: s.service.send("existing")).error
         assert len([m for m, _ in peer.calls if m == "thread/start"]) == 1
+        assert len([m for m, _ in next_peer.calls if m == "thread/resume"]) == 1
+        assert not any(m == "thread/start" for m, _ in next_peer.calls)
+        s.notify(_terminal())
+        s.notify(RpcNotification("thread/goal/cleared", {"threadId": "thread-1"}))
+        next_peer.responses["thread/unsubscribe"] = {"status": "unsubscribed"}
         assert not s.manage("new", s.service.new_conversation).error
         assert not s.command("send", lambda: s.service.send("new")).error
         assert len([m for m, _ in next_peer.calls if m == "thread/start"]) == 1

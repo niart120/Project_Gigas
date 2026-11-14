@@ -12,8 +12,10 @@
 flowchart TB
   U["Qt GUI"] -->|"操作"| S["CodexServiceThread"]
   S --> E["ConversationExecution"]
+  S --> L["ConversationSelection"]
+  L -->|"公開管理API"| C["CodexConnection"]
   E -->|"RPC"| C["CodexConnection"]
-  C -->|"通知・要求"| E
+  C -->|"通知・要求"| S
   E -->|"表示・記録"| S
   S -->|"表示更新"| U
   E --> R["ConversationResources"]
@@ -33,7 +35,10 @@ flowchart TB
 | GUI | 下書き、表示内容、Qt配送結果待ち。接続と会話の通知から活性を導出する |
 | `CodexServiceThread` | Qt操作の配送、接続世代、部品の組立、接続全体の終了task。サービスの寿命で所有する |
 | `CodexConnection` | stdio、認証、モデル候補と確定選択、Windows実行環境、受信処理。一接続の寿命 |
-| `ConversationExecution` | thread ID、最新Goal、現在turn、送信task、停止task。接続に一つ。turn内容と要求は個別の所有者へ委譲する |
+| `ConversationSelection` | 新規会話の所属、または保存済みID・cwd・所属の不変値、閲覧metadata・Goalと取得中task。選択は接続を跨いで保持し、履歴ページの全文を蓄積しない |
+| `ConversationExecution` | 最新Goal、現在turn、送信task、停止taskと実行準備。一接続の現在対象に一つ。切替時には旧実行を回収して交換し、turn内容と要求は個別の所有者へ委譲する |
+| `ThreadPreparation` | 通知を受けるthread IDと、start/resumeの返却検査が成功した事実。新規・既存の作業場所、記録先、現在設定を結合する。実行対象とともに回収する |
+| `GoalTracker` | Goalの公開値と一件の変更要求・通知の相関。閲覧と実行の各所有者で同じ処理を使い、現在の所有者だけが通知を適用する |
 | `HumanRequests` / `TurnContent` | 未回答要求は解決・対象turn終端まで、配送開始済みtaskは要求が消えても配送結果確定まで所有する。本文は対象turn終端で確定する |
 | `ConversationResources` | MCP、観測・記録サービス、writer。MCP・writerは現在の実行資源として取得・回収する。履歴を選ぶだけでは取得しない |
 | `InputService` | 一つの機器接続、使用可否、一件の操作task。taskは解除まで、正常な機器接続はCodex切断後も保持する |
@@ -42,6 +47,8 @@ flowchart TB
 会話の状態は`ConversationStatus(thread_id, turn_id, goal, sending, stopping, waiting_for_answer)`へ投影します。`sending`と`stopping`はtaskの存在、回答待ちは元要求から導き、独立した実行phase・再受付許可・停止済みフラグを保存しません。Goal状態とturn状態の組合せを列挙型へ展開しません。機器入力にrun、Grant、入力世代を持たせません。Qtの古いイベントを識別する接続世代は維持します。
 
 会話選択ではapp-serverから得たthread IDを表示対象として保持し、実行管理は接続中の対象thread IDを保持します。会話の永続管理の正本はapp-serverで、GIGAS独自の会話ID台帳は作りません。再起動後は公開一覧・readからIDとcwdを取得します。保存部品へは解決済みの記録先を渡し、会話の選択・再解決を委ねません。
+
+新規startで検査した実IDはrecordsの結合前に選択へ渡します。結合失敗や切断でも新規扱いへ戻さず、再接続後の明示操作に使います。閲覧Goalは実行状態へ合成せず、閲覧だけの会話を停止・終了で休止しません。追加履歴と閲覧Goalの配送には取得時の選択参照を付け、接続世代と参照の同一性で照合します。同じ会話を選び直した場合も以前の取得結果を採用しません。
 
 要求パラメーターの組立・応答検証は状態を持たない関数に置きます。会話実行へ機器通信、画像加工、保存、認証、モデル一覧、全文の表示処理を集めません。資源取得・停止中だけ必要な待ち合わせは、そのtask内の値として保持します。
 
@@ -75,7 +82,11 @@ Windows実行環境は接続後に認証と独立して取得します。設定�
 
 接続・認証、表示中の会話、実行用にロードした会話を区別します。会話選択はthread/read・履歴ページ・goal/getによる表示だけとし、resume・記録先作成・ゲーム操作を行いません。既存会話へ明示送信する場合は、作業場所の存在を確認して現在のMCP・記録先・指示・設定を準備し、thread/resumeから通常送信またはGoalの目的編集・再開へ渡します。Goal削除はこの実行準備を通しません。履歴・Plan・質問承認の表示範囲は[10](10-ui-interaction.md)に従います。
 
+保存済みIDの通知受付と記録先はresume送信前に結合します。IDが既知でも現在設定での再開成功とはせず、返却検査が終わってから本文・Goal操作へ進みます。送信済みresumeのtaskは本文の提出と分けて所有し、応答待ちの停止では早期turnとGoalも共通停止で回収します。準備開始時に設定を捕捉し、その途中の設定変更で要求内容を組み替えません。
+
 切替は利用者が共通停止を完了してから行います。旧threadの購読解除、未回答要求の失効、旧MCP閉鎖と保存drainを経て資源を解放します。購読解除だけを停止・アンロードの保証にはしません。採用版では購読者のないidle threadに変更設定を指定してresumeすると再構築される経路を使えます。停止・購読解除が成立しない場合は送信せず、既存の失敗・明示切断経路を使います。毎ターンのunsubscribe/resumeは行いません。
+
+候補の初回取得と切替は一件だけを受け付けます。旧MCPの受付を閉じてから回答配送・保存の完了を待ち、同じcwdへの切替でも旧入力呼出し先を使い回しません。取得・解放に失敗した場合は選択を保持しますが、解放済みの実行状態を表示しません。通知はサービスが現在の所有者へ配送し、接続開始時の実行インスタンスに固定しません。
 
 書込みはworkspace-write、承認条件はon-request、承認者はauto_review（既定）またはuserです。追加書込先を増やさず、一時領域除外とシェルのnetwork_access=falseを維持します。応答のcwd・roots・承認・sandboxを検査し、準備不足でreadOnlyになった状態を黙って採用しません。標準の指示・Skillsを読み、ゲームMCP以外の外部MCP導入経路は設けません。MCP認証値をプロンプト・表示・recordsへ複製しません。
 

@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 class Conversation:
     """Use the real conversation/resources with a scripted runtime boundary."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, peer: FakePeer | None = None) -> None:
         """Assemble independent connection and conversation owners before opening."""
-        self.peer = FakePeer()
+        self.peer = peer if peer is not None else FakePeer()
         self.events: list[ConnectionEvent] = []
         self.inputs = InputService()
         self.resources = ConversationResources(
@@ -44,12 +44,13 @@ class Conversation:
             ConnectionOptions(path),
             self.receive,
         )
+        self.selection = ConversationSelection()
         self.execution = ConversationExecution(
             self.connection,
             self.resources,
             self.inputs,
             self.events.append,
-            selection=ConversationSelection(),
+            selection=self.selection,
             settings=ExecutionSettings(),
             closing=lambda: self.closing is not None,
             request_close=self.close,

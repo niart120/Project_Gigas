@@ -61,7 +61,7 @@ resume応答ではthread.id・projectId、cwd・runtimeWorkspaceRoots、model・
 | refactor-done | K2: 既存作業場所と同じrecordsを開き、欠損・失敗・取消しでも取得資源を回収する | new/edge | integration | 未所属/Project、欠けたcwd非再作成、recordsのみ再作成、追記と旧資源のdrain |
 | refactor-done | K3a: 公開履歴と所属別新規の選択候補を取得し、失敗時に以前の対象を保持する | new/edge | unit/integration | 新規/既存target・閲覧/ページ結果、取得は一件、履歴を蓄積せず、実行資源を作らない |
 | refactor-done | K3b: 選択部品をサービスへ結合し、停止後だけ切替え、閲覧モデル選択・Goal削除を実行せず扱う | new/edge | integration | unsubscribeと旧要求・資源の回収、遅い結果の失効、start後・切断後の対象保持、Goal相関共用 |
-| todo | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
+| refactor-done | K4: 既存会話への明示送信・Goal操作が現在資源でresumeし、早期通知と停止・切断を回収する | new/edge | integration | resume前のID/records結合、成功状態とIDの区別、失敗後の明示操作、保存設定snapshot、通常新規の回帰 |
 | todo | K5: 実app-serverのロード済みidle・再起動後の会話で閲覧と明示再開・同一記録先追記が成立する | acceptance | integration | 公開ID/cwd/Goal、現在MCP・設定・モデル、active Goalと追加指示、実機は使わない |
 
 ## 7. 対象ファイル
@@ -73,7 +73,7 @@ runtime/codexの要求組立・管理/表示型、servicesの会話選択・実�
 | command / 確認 | 状態 | 対象 |
 |---|---|---|
 | 採用版公開schema・ソース照合 | 確認済み（静的） | resumeの要求・実効応答、unsubscribeの3結果、設定再構築条件、Goal通知と再開順序。根拠は08と第5節の採用版ソース |
-| 各itemのpytest | K1〜K3b成功、K4以降not run | 要求、選択/実行境界、資源と通知・停止の順序。詳細は後掲 |
+| 各itemのpytest | K1〜K4成功、K5 not run | 要求、選択/実行境界、資源と通知・停止の順序。詳細は後掲 |
 | uv run pytest tests/unit tests/integration --basetemp=tmp/pytest-m4-root -q | not run | 既存の通常送信・Goal・機器・GUIを含む回帰 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | not run | 形式・lint・公開型/所有境界 |
 | uv lock --check / uv build | not run | 公開API・依存・配布契約 |
@@ -123,6 +123,18 @@ refactor-done: 試験のpoll待ちを明示Event付きRPC gateへ置換し、asy
 `uv run pytest tests/integration/test_conversation_selection.py tests/integration/test_conversation_execution.py tests/integration/test_conversation_control.py tests/integration/test_conversation_resources.py tests/integration/test_conversation_notifications.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py tests/integration/test_input_service.py tests/integration/test_input_observation_path.py tests/integration/test_codex_gui.py tests/integration/test_project_gui.py --basetemp=tmp/pytest-m4-k3b-regression -q --tb=short`は214 passed（25.33秒）。対象12ファイルのruff・format、全体tyとscripts/check_codex.pyの個別型検査、差分検査は成功した。
 
 refactor-done: Goal変更と公開通知の相関をprivateなGoalTrackerへ集約し、Qt配送の値型をcodex_models.pyへ移してサービス本体への逆依存を除いた。試験は明示Event・RPC gateを使い、固定sleepで順序を仮定しない。同じ対象試験は成功し、独立レビューの修正必須指摘は解消した。公開API・入力のbusy・現在選択の参照契約を文書と整合させた。実app-server・実機・ネイティブGUIはこのitemでは未使用で、K4のresume結合とK5の実接続受入は未実施。
+
+### K4 実装・検証結果
+
+既存会話の通常送信・Goal作成/目的編集/再開をresumeへ結合した。ThreadPreparationが新規/既存の資源取得と返却検査を扱い、受信IDと検証済みロード状態を区別する。resume送信前に同じrecordsと閲覧Goalを結合し、応答前の通知・質問・確定本文・MCP観測を受け付ける。設定は準備開始時の不変値を使い、ロード済み会話への追加送信ではresumeしない。
+
+送信済みresume taskを本文提出とは分けて所有し、停止・切断でも回収する。要求前の準備失敗は同じ選択先で明示的にやり直せる。要求後に検査を完了できなかった場合は、既知IDを維持して次の実行・モデル変更に明示再接続を要求する。Goal削除はこの検証成功を要求しない。再接続後は同じIDを新しい資源・設定で再開する。
+
+`uv run pytest tests/integration/test_conversation_resume.py tests/integration/test_conversation_resume_service.py tests/integration/test_conversation_switching.py --basetemp=tmp/pytest-m4-k4 -q --tb=short`は初回11 failed/1 passed（16.21秒）、実装と試験拡充後35 passed（9.13秒）、構造整理後35 passed（9.09秒）。resume応答待機中の実HTTP observe・確定本文の同一記録先への保存、停止時の早期turn中断、切断時のRPC回収と未提出本文の保持、設定の固定、失敗後の明示操作を確認した。
+
+`uv run pytest tests/integration/test_conversation_selection.py tests/integration/test_conversation_execution.py tests/integration/test_conversation_control.py tests/integration/test_conversation_resources.py tests/integration/test_conversation_notifications.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py tests/integration/test_input_service.py tests/integration/test_input_observation_path.py tests/integration/test_codex_gui.py tests/integration/test_project_gui.py tests/unit/test_conversation_protocol.py tests/unit/test_execution_configuration.py --basetemp=tmp/pytest-m4-k4-regression -q --tb=short`は277 passed（25.51秒）。対象8 Pythonファイルのruff・format、全体ty、差分検査は成功した。
+
+refactor-done: 未検証resumeの拒否条件を準備所有者へ共通化し、停止試験は明示的な停止状態の観測後に早期turnを渡すよう整理した。同じ対象試験は成功した。レビューで見つけたGoal削除への過剰なロード条件は撤去し、検査失敗後の削除試験を追加した。独立レビューの修正必須指摘は解消済み。初期設計02・09と公開API・設定文書を更新し、既存GUIで利用できる操作とM5で結合する保存Goal・履歴表示を区別した。実app-server・モデル・実機はこのitemでは未使用で、K5とM4全体gateは未実施。
 
 ## 9. 先送り事項
 

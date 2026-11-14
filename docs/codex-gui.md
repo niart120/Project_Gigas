@@ -48,7 +48,7 @@ App ServerはGIGASとCodexをつなぐローカルプロセスで、ChatGPTロ�
 
 Codex App Serverへの接続後、会話開始前に「プロジェクト」→「新規作成」「開く」で作業フォルダーを選べます。未選択なら初回送信時に`%LOCALAPPDATA%\GIGAS\unassigned\<workspace-id>`を作ります。Project所属・未所属とも、作業場所の下の`records/<thread-id>/`へ同じ構成で記録します。Projectの登録とフォルダー選択は[グローバル設定](settings.md)を参照してください。
 
-会話はCodexの永続threadとして開始し、履歴は専用Codex homeに保持します。GIGASは実際のthread IDを使って会話ごとの記録先を決め、ゲームI/O・限定した本文を`events.jsonl`へ保存します。行ごとにthread IDを複製せず、MCP画像を公開活動のテキスト通知から複製する処理もありません。切断しても選択したIDを保持し、接続し直すだけでは新しい会話を作りません。保存済み会話への送信・Goal作成/再開と、過去の会話を選ぶGUIは未対応です。
+会話はCodexの永続threadとして開始し、履歴は専用Codex homeに保持します。GIGASは実際のthread IDを使って会話ごとの記録先を決め、ゲームI/O・限定した本文を`events.jsonl`へ保存します。行ごとにthread IDを複製せず、MCP画像を公開活動のテキスト通知から複製する処理もありません。切断しても選択したIDを保持し、接続し直すだけでは実行しません。次の明示送信・Goal作成/編集/再開で同じ会話・作業場所・記録先を再開します。過去の会話を選ぶGUIは未対応です。
 
 チャットから使える`observe`は、映像取得サービスの最新の有効な画像を返します。映像停止中や有効画像がない場合は取得エラーです。取得中の最新画像には機器内部の遅延があり、要求後に撮影されたことは保証しません。観測解像度は設定の「I/O」から変更できます。
 
@@ -152,17 +152,21 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 新規startで確認した実IDは記録先を開く前に保持します。以後の記録先結合失敗や切断でもIDを捨てず、既存IDへの送信を新規開始へ置き換えません。新しい会話を開始するときは`new_conversation`を明示します。閲覧中のactive Goalはローカル実行ではなく、停止・終了で勝手にpauseしません。
 
+保存済み対象の`send`・`set_goal`・`resume_goal`は、保存cwd・同じrecords・現在のMCPを準備して`thread/resume`を送り、その確認後に指定操作を続けます。要求前からIDに対する通知・質問・保存を受け付け、active Goalの先行実行を許容します。準備中と応答未確認の状態ではモデル変更を受け付けません。resume送信後の失敗では実行を再試行せず、明示切断・再接続が必要です。Goal削除はこの検証成功に依存せず、接続・認証と保持Goalがあれば使えます。
+
 接続済み・会話開始前に`create_project(path)`と`open_project(path)`で公開Projectを選択できます。前者は新規フォルダーを作って登録し、後者は既存フォルダーに対応する公開Projectを選択または登録します。`project_completed`の`ProjectResult(path, error)`が結果を返し、空の`error`だけが選択成功です。成功時のpathは公開応答のroot、失敗時は現在の選択を保持します。選択だけでは会話・MCP・writerを開始しません。
 
 `set_observation_resolution(value)`は以後の観測へ設定を適用します。`recording_failed(identifier, path, reason)`は保存と記録先準備の失敗を通知します。実行前に記録先を開けなければ送信せず、結合後の個別保存失敗は入力・観測・停止を止めません。
 
-`set_execution_settings(ExecutionSettings)`は保存に成功したWeb検索・自動記憶・承認方法を、サービスのループへ渡します。次の新規会話の準備開始時に値を固定し、同じ値で要求と応答確認を行います。既存会話への設定RPCや再接続は送りません。接続前に渡した値は、後続の`connect_runtime(options)`で指定する設定に従います。アプリは最後に保存に成功した同じ値を両方へ渡します。
+`set_execution_settings(ExecutionSettings)`は保存に成功したWeb検索・自動記憶・承認方法を、サービスのループへ渡します。次の新規開始・resumeの準備開始時に値を固定し、同じ値で要求と応答確認を行います。ロード済み会話への設定RPCや自動再接続は送りません。接続前に渡した値は、後続の`connect_runtime(options)`で指定する設定に従います。アプリは最後に保存に成功した同じ値を両方へ渡します。
 
 GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`answer(token, decision=..., answers=...)`、`set_goal(objective)`、`resume_goal()`、`clear_goal()`、`select_model(model, effort)`、`interrupt()`、`disconnect_runtime()`を呼べます。各呼出しは処理を予約して戻り、`completed`が実際の操作終了を通知します。`interrupt()`の成功結果はサーバー側停止と入力の解除・回収の完了です。`clear_goal()`の成功は目的の削除で、turn中断ではありません。送信処理中でも停止を要求でき、停止中の再操作は同じtaskを待ちます。
 
 `SessionStatus`は接続・認証、`ConversationStatus`はthread・turn・Goalと送信・停止・回答待ちの表示に使います。Goalの変更は対応する通知の反映まで同じ送信taskで扱い、無変化応答ならそのまま終了します。遅い応答で後続のGoal通知を巻き戻しません。実行環境の準備結果も開始受付ではなく、完了通知と準備状態の確認後に返します。
 
 通常指示・追加指示・`goal_set`の`ServiceResult.message`は`MessageResult(outcome, turn_id)`です。`accepted`は公開応答での受付、`not_sent`は未配送または明確な拒否、`unknown`は受付不明を表します。通常送信・追加指示の`accepted`には確認したturn IDが入り、Goal送信は`accepted`でも`turn_id=None`です。どちらもturnの完了・指示の遵守を意味しません。
+
+resumeの結果と指示本文の受付は別です。本文が`not_sent`でもresumeによるGoal・turnが開始済みの場合があります。再開要求待機中の共通停止はその要求と早期turnを回収し、明示切断は接続・MCP・所有taskを終了します。
 
 回答の`ServiceResult.answer`は`AnswerResult(token, outcome)`です。`outcome`は`sent`（通信への書込完了）、`not_sent`（送信前の拒否）、`unknown`（送信結果不明）のいずれかです。世代とtokenの両方を照合してください。`RequestResolved`は回答受付の終了を表し、送信成功の根拠にはなりません。終了中の未処理回答にも結果を通知します。
 

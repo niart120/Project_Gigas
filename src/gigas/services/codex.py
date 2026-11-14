@@ -248,7 +248,7 @@ class CodexServiceThread(QThread):
 
         Args:
             settings: Last successfully loaded or saved application options. An ongoing
-                preparation retains its snapshot; an existing runtime thread is unchanged.
+                preparation retains its snapshot; a loaded runtime thread is unchanged.
         """
         self._enqueue(lambda: self._apply_execution_settings(settings))
 
