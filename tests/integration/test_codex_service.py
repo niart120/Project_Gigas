@@ -608,7 +608,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         headers = next(value for key, value in config.items() if key.endswith(".http_headers"))
         assert isinstance(url, str)
         assert isinstance(headers, dict)
-        service.set_observation_resolution("hd")
+        service.set_observation_resolution("sd")
         # A later loop command completes only after the setting command was handled.
         setting_applied = Event()
         service._enqueue(setting_applied.set)
@@ -634,7 +634,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         result = response.json()["result"]
         assert not result["isError"]
         metadata = json.loads(result["content"][1]["text"])
-        assert metadata["image"] == {"mime_type": "image/png", "width": 960, "height": 720}
+        assert metadata["image"] == {"mime_type": "image/png", "width": 640, "height": 480}
         qtbot.waitUntil(entered.is_set)
         if close_failure:
             monkeypatch.setattr(GameIoMcpServer, "close", fail_after_http_close)

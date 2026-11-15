@@ -60,7 +60,7 @@ GIGASは作業フォルダー配下の`records/<thread-id>/`を記録先にし�
 
 ## 画像と入力結果
 
-`Observation.from_frame(frame, resolution="full_hd")`は全画面を比率維持で縮小し、一度だけPNGへ符号化します。`resolution`は`original`、`full_hd`（1920×1080の枠、既定）、`hd`（1280×720の枠）です。小さい画像は拡大せず、切り抜きやプレビューの黒帯も加えません。入力は幅16〜3840・高さ16〜2160、符号化後は32 MiB以下です。
+`Observation.from_frame(frame, resolution="full_hd")`は全画面を比率維持で縮小し、一度だけPNGへ符号化します。`resolution`は`original`、`full_hd`（1920×1080の枠、既定）、`hd`（1280×720の枠）、`sd`（720×480の枠）です。小さい画像は拡大せず、切り抜きやプレビューの黒帯も加えません。入力は幅16〜3840・高さ16〜2160、符号化後は32 MiB以下です。
 
 `Observation`はPNG bytes、出力寸法、`mime_type == "image/png"`、観測ID、元取得時刻`captured_at`、`source_frame`を持ちます。観測IDは`obs-`にUUID4を続けた値で、同じFrameから再び生成すれば新しいIDになります。`image_path`は記録先からの相対パスです。画像の保存先だけはIDを確認して固定し、その他の内容の意味・実在・ゲーム内成否は呼出し側が扱います。
 

@@ -167,6 +167,7 @@ def test_invalid_window_size_preset_cannot_overwrite_existing_file(
     [
         ("auto", False, "original"),
         ("hd", True, "hd"),
+        ("full_hd", True, "sd"),
         ("full_hd", False, "full_hd"),
         ("wqhd", True, "hd"),
         ("four_k", False, "full_hd"),
@@ -176,7 +177,7 @@ def test_capture_resolution_and_preview_letterbox_round_trip_independently(
     tmp_path: Path,
     resolution: str,
     letterbox: bool,
-    observation: Literal["original", "full_hd", "hd"],
+    observation: Literal["original", "full_hd", "hd", "sd"],
 ) -> None:
     path = tmp_path / "settings.toml"
     path.write_text(

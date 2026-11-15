@@ -40,7 +40,7 @@ approvals_reviewer = "auto_review"
 | `capture.fps` | 要求取得頻度。1〜120の整数。実際の到着頻度を保証する値ではない |
 | `capture.preview_fps` | 表示更新の上限。1〜60の整数 |
 | `capture.resolution` | 取得解像度の要求。`auto`・`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
-| `observation.resolution` | agent向け画像のサイズ。`original`（元寸法）・`full_hd`（1920×1080の枠、既定）・`hd`（1280×720の枠）。全画面を比率維持で縮小し、小画像は拡大しない |
+| `observation.resolution` | agent向け画像のサイズ。`original`（元寸法）・`full_hd`（1920×1080の枠、既定）・`hd`（1280×720の枠）・`sd`（720×480の枠）。全画面を比率維持で縮小し、小画像は拡大しない |
 | `project.last_path` | 最後に選択したProjectの絶対パス。フォルダー選択の初期位置の補助。起動時にProjectを自動選択しない |
 | `gui.window_size_preset` | 表示サイズ。`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
 | `gui.preview_letterbox` | `true`は比率を保ち黒い余白を付ける「レターボックス」、`false`は表示枠へ合わせる「ストレッチ」。取得画像は変更しない |

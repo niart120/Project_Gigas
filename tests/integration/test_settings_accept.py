@@ -63,7 +63,7 @@ def test_cancel_discards_only_edits_since_last_apply(
     shell, capture = app
     dialog = open_editor(shell, capture)
     if observation:
-        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
+        dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("sd"))
     else:
         dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(15))
     dialog.save_button.click()
@@ -79,8 +79,8 @@ def test_cancel_discards_only_edits_since_last_apply(
     assert not dialog.isVisible()
     shell.open_settings()
     if observation:
-        assert load_settings(shell.path).observation_resolution == "hd"
-        assert dialog.observation_resolution.currentData() == "hd"
+        assert load_settings(shell.path).observation_resolution == "sd"
+        assert dialog.observation_resolution.currentData() == "sd"
     else:
         assert load_settings(shell.path).preview_fps == 15
         assert dialog.preview_fps.currentData() == 15

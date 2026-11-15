@@ -341,7 +341,7 @@ class ApplicationServiceThread(QThread):
         """Apply a size to later observations on the owning loop without reconnecting.
 
         Args:
-            resolution: Validated application setting: original, full_hd, or hd.
+            resolution: Validated application setting: original, full_hd, hd, or sd.
         """
         self._enqueue(lambda: self.codex.set_observation_resolution(resolution))
 

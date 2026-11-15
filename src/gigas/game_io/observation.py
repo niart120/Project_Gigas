@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 MAX_PNG_BYTES = 32 * 1024 * 1024
 
-type ObservationResolution = Literal["original", "full_hd", "hd"]
+type ObservationResolution = Literal["original", "full_hd", "hd", "sd"]
 
 
 class ObservationError(ValueError):
@@ -83,7 +83,7 @@ class Observation:
 
         Args:
             frame: BGR image with width 16..3840 and height 16..2160.
-            resolution: Original size, FullHD (1920x1080), or HD (1280x720).
+            resolution: Original size, FullHD (1920x1080), HD (1280x720), or SD (720x480).
                 FullHD is the default. Aspect ratio is preserved within integer
                 rounding; smaller frames are never enlarged.
 
@@ -104,6 +104,8 @@ class Observation:
             bounds = (1920, 1080)
         elif resolution == "hd":
             bounds = (1280, 720)
+        elif resolution == "sd":
+            bounds = (720, 480)
         else:
             message = "観測解像度が対応範囲外です"
             raise ObservationError("OBSERVATION_ENCODING_ERROR", message)
