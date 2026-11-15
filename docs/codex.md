@@ -138,7 +138,7 @@ resume待機中も共通停止を使えます。resume要求前なら準備だ�
 
 ## 制約と検証範囲
 
-GIGASアプリはsettings.tomlと同じディレクトリの`codex_home`を使います。既定配置は`%LOCALAPPDATA%/GIGAS/codex_home`です。普段のCodexの認証・設定・会話・記憶は引き継がず、GIGASの認証操作からログインします。起動だけではCodexへ接続しません。
+GIGASアプリはsettings.tomlと同じディレクトリの`codex_home`を使います。既定配置は`%LOCALAPPDATA%/GIGAS/codex_home`です。普段のCodexの認証・設定・会話・記憶は引き継がず、GIGASの認証操作からログインします。前回の接続が成功していれば起動時に一度Codexへ接続します。明示切断の成功で次回の自動接続を解除し、会話・Goalは自動実行しません。
 
 部品として`create_connection`を使う場合は`codex_home`で保存先を指定できます。省略時はCodexの標準homeを使います。資格情報をその場所へコピーしません。プロセスのcwdはhomeとは別に絶対パスの既存フォルダーを指定し、開発リポジトリから分けてください。
 

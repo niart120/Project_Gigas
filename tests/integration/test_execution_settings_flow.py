@@ -177,7 +177,10 @@ def test_loaded_model_selection_waits_for_update_and_retains_selection_on_reject
         assert "codex" in session.shell.window.notifications.notices
         assert len(session.params("thread/start")) == 1
         assert not session.params("thread/resume")
-        assert not session.shell.path.exists()
+        saved = load_settings(session.shell.path)
+        assert saved.model == ""
+        assert saved.effort == ""
+        assert saved.codex_auto_connect
         assert not session.command("send", panel.send_button.click).error
         assert session.params("turn/start")[-1]["model"] == "other"
         assert session.params("turn/start")[-1]["effort"] == "medium"

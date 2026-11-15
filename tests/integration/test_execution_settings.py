@@ -33,6 +33,7 @@ def test_execution_preferences_default_on_and_round_trip_without_deleting_memory
         "custom": 42,
         "effort": "",
         "auth_method": "chatgpt",
+        "auto_connect": False,
         "web_search_enabled": False,
         "memory_enabled": False,
         "approvals_reviewer": "user",

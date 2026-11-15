@@ -66,7 +66,7 @@ Qtのメインスレッドは表示と操作受付、サービス用QThreadの�
 
 ## 認証・モデル・実行環境
 
-`SessionStatus`は接続・認証を扱い、phaseは`connecting / login_required / authenticating / ready / error / closed`です。認証はGIGAS専用のCODEX_HOMEで管理し、開発用homeの資格情報を複製・同期しません。起動だけで接続・ログインせず、切断もログアウトへ変換しません。APIキー認証は初期版対象外です。
+`SessionStatus`は接続・認証を扱い、phaseは`connecting / login_required / authenticating / ready / error / closed`です。認証はGIGAS専用のCODEX_HOMEで管理し、開発用homeの資格情報を複製・同期しません。Codex接続成功を設定へ保存し、次回起動時に一度接続します。明示切断成功で記憶を解除し、通常終了・通信障害では保持します。起動だけでログイン・会話実行・Goal再開は行わず、切断もログアウトへ変換しません。APIキー認証は初期版対象外です。
 
 保存するモデル・推論レベルは次の接続の既定値です。無効でも認証は維持し、公開候補から選び直せます。選択変更は送信taskと共通の枠で扱い、実行用にロード済みの会話では`thread/settings/update`の受理後に確定値を通知します。現在turnは書き換えず、次の通常指示と設定受理後の自律turnへ反映します。無効値を別候補へ自動置換しません。
 

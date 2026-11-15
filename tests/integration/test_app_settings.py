@@ -49,12 +49,12 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
     assert dialog is not None
     qtbot.waitUntil(dialog.isVisible)
     assert panel.prompt.toPlainText() == "未送信の原稿"
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
 
     shell.window.settings_action.trigger()
 
     assert shell.dialog is dialog
-    assert dialog.model.text() == "edited"
+    assert dialog.preview_fps.currentData() == 60
     assert dialog.isModal()
     dialog.close_button.click()
     qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
@@ -74,6 +74,9 @@ def test_defaults_only_written_on_explicit_save(shell: ApplicationShell, qtbot: 
     assert load_settings(shell.path) == Settings(serial_baudrate=9600)
 
 
+@pytest.mark.parametrize(
+    "shell", [Settings(model="unknown-model", effort="custom-effort")], indirect=True
+)
 def test_all_settings_round_trip_and_offline_clears_device(
     shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -96,8 +99,6 @@ def test_all_settings_round_trip_and_offline_clears_device(
     dialog.serial_port.setCurrentIndex(dialog.serial_port.findData(values.serial_port))
     dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData(values.serial_protocol))
     dialog.serial_baudrate.setCurrentIndex(dialog.serial_baudrate.findData(values.serial_baudrate))
-    dialog.model.setText(values.model)
-    dialog.effort.setText(values.effort)
     dialog.show_reasoning.setChecked(values.show_reasoning)
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -115,7 +116,7 @@ def test_all_settings_round_trip_and_offline_clears_device(
         assert other.dialog.values() == values
         assert other.dialog.capture_choices.currentData() == values.capture_device
         assert other.dialog.capture_choices.findData(values.capture_device) >= 0
-        assert other.dialog.model.text() == values.model
+        assert other.dialog.values().model == values.model
         assert not other.dialog.show_reasoning.isChecked()
         other.window.connection.transcript.update_item(
             "summary", "読込後の公開要約", kind="reasoning"
@@ -123,11 +124,11 @@ def test_all_settings_round_trip_and_offline_clears_device(
         assert "読込後の公開要約" not in other.window.connection.transcript.toPlainText()
         other.dialog.capture_choices.setCurrentIndex(0)
         other.dialog.serial_port.setCurrentIndex(0)
-        other.dialog.model.clear()
-        other.dialog.effort.clear()
         other.dialog.save_button.click()
         qtbot.waitUntil(lambda: other.operation is None)
         assert load_settings(shell.path) == Settings(
+            model=values.model,
+            effort=values.effort,
             serial_protocol="pokecon",
             serial_baudrate=57600,
             show_reasoning=False,
@@ -141,9 +142,9 @@ def test_restoring_baseline_clears_dirty(shell: ApplicationShell) -> None:
     shell.open_settings()
     assert shell.dialog is not None
     assert not shell.dirty
-    shell.dialog.model.setText("changed")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     assert shell.dirty
-    shell.dialog.model.clear()
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(30))
     assert not shell.dirty
 
 
@@ -154,7 +155,7 @@ def test_dirty_application_close_choices(
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     shell.window.close()
     box = shell.confirmation
     assert box is not None
@@ -166,12 +167,12 @@ def test_dirty_application_close_choices(
     box.button(buttons[choice]).click()
     if choice == "cancel":
         assert dialog.isVisible()
-        assert dialog.model.text() == "edited"
+        assert dialog.preview_fps.currentData() == 60
         assert not shell.path.exists()
     else:
         qtbot.waitUntil(lambda: not dialog.isVisible())
         if choice == "save":
-            assert load_settings(shell.path).model == "edited"
+            assert load_settings(shell.path).preview_fps == 60
         else:
             assert not shell.path.exists()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
@@ -184,7 +185,7 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     shell.open_settings()
     dialog = shell.dialog
     assert dialog is not None
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     history = shell.window.connection.transcript
     history.update_item("summary", "取消し前の公開要約", kind="reasoning")
     dialog.show_reasoning.setChecked(False)
@@ -201,7 +202,7 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     assert shell.baseline.show_reasoning
     assert "取消し前の公開要約" in history.toPlainText()
     shell.open_settings()
-    assert dialog.model.text() == shell.baseline.model == ""
+    assert dialog.preview_fps.currentData() == shell.baseline.preview_fps == 30
     assert dialog.show_reasoning.isChecked()
 
 
@@ -231,7 +232,7 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
 ) -> None:
     shell.open_settings()
     assert shell.dialog is not None
-    shell.dialog.model.setText("edited")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     history = shell.window.connection.transcript
     history.update_item("summary", "保存前の公開要約", kind="reasoning")
     shell.dialog.show_reasoning.setChecked(False)
@@ -245,7 +246,7 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         patch.setattr(Path, "unlink", fail)
         shell.dialog.save_button.click()
         qtbot.waitUntil(lambda: shell.operation is None)
-        assert shell.dialog.model.text() == "edited"
+        assert shell.dialog.preview_fps.currentData() == 60
         assert shell.dialog.save_button.isEnabled()
         assert "remove temporary file" in shell.window.notifications.notices["settings"].details
         assert load_settings(shell.path).model == "original"
@@ -253,10 +254,10 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
         assert not shell.dialog.show_reasoning.isChecked()
         assert "保存前の公開要約" in history.toPlainText()
 
-    shell.dialog.model.setText("retry")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(15))
     shell.dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert load_settings(shell.path).model == "retry"
+    assert load_settings(shell.path).preview_fps == 15
     assert load_settings(shell.path).auth_method == "chatgpt"
     assert not load_settings(shell.path).show_reasoning
     assert "保存前の公開要約" not in history.toPlainText()
@@ -272,7 +273,7 @@ def test_unedited_text_preserves_crlf_and_nonbreaking_space(
     shell.open_settings()
     assert not shell.dirty
     assert shell.dialog is not None
-    shell.dialog.effort.setText("high")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     shell.apply_settings()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert load_settings(shell.path).model == original.model
@@ -298,10 +299,10 @@ def test_unexpected_worker_failure_returns_without_exposing_exception_text(
         dialog = application.dialog
         assert dialog is not None
         if operation == "save":
-            dialog.model.setText("unsaved")
+            dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
             dialog.save_button.click()
             qtbot.waitUntil(lambda: application.operation is None)
-            assert dialog.model.text() == "unsaved"
+            assert dialog.preview_fps.currentData() == 60
             assert application.baseline.model == ""
         diagnostic = application.window.notifications.notices["settings"].details
         assert "RuntimeError" in diagnostic

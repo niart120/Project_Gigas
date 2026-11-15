@@ -42,7 +42,7 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
         panel.disconnect_requested.connect(lambda: disconnected.append(True))
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setText("edited")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         shell.dialog.save_button.click()
         qtbot.waitUntil(entered.is_set)
 
@@ -63,7 +63,7 @@ def test_dialog_close_during_save_keeps_existing_stop_actions(qtbot: QtBot, tmp_
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)
         assert not shell.dialog.isVisible()
-        assert shell.baseline.model == "edited"
+        assert shell.baseline.preview_fps == 60
     finally:
         release.set()
         qtbot.waitUntil(lambda: shell.operation is None)

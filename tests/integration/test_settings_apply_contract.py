@@ -24,14 +24,15 @@ def app(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
     path = tmp_path / "settings.toml"
-    save_settings(
-        path, Settings(capture_device="path-a", serial_port="COM3", serial_protocol="pokecon")
-    )
+    save_settings(path, Settings(serial_port="COM3", serial_protocol="pokecon"))
     capture = ControlledCapture()
     shell = ApplicationShell(path, capture_service=capture)
     monkeypatch.setattr(shell.service, "apply_input", lambda _config: None)
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)
+    # Exercise editing while capture is stopped, independently of startup restore.
+    shell.apply_settings(replace(shell.baseline, capture_device="path-a"), capture=False)
+    qtbot.waitUntil(lambda: shell.operation is None)
     capture.state = replace(
         capture.state,
         devices=(DeviceInfo("Camera A", "path-a"), DeviceInfo("Camera B", "path-b")),
@@ -73,11 +74,13 @@ def test_editor_keeps_project_path_when_editing_visible_settings(
     window = MainWindow()
     qtbot.addWidget(window)
     dialog = SettingsDialog(tmp_path / "settings.toml", window)
-    original = Settings(last_project_path=str(tmp_path / "project"))
+    original = Settings(
+        last_project_path=str(tmp_path / "project"), model="custom-model", effort="custom-effort"
+    )
     dialog.set_values(original)
-    dialog.model.setText("changed")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
 
-    assert dialog.values() == replace(original, model="changed", serial_baudrate=9600)
+    assert dialog.values() == replace(original, preview_fps=60, serial_baudrate=9600)
 
 
 def test_explicit_offline_apply_clears_saved_device_after_same_device_can_start(

@@ -4,7 +4,7 @@ from threading import Event
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -81,6 +81,7 @@ def connect(qtbot: QtBot, shell: ApplicationShell) -> int:
     qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
     result = next(result for result in results if result.operation == "connect")
     assert not result.error
+    qtbot.waitUntil(lambda: shell.operation is None)
     return result.generation
 
 
@@ -98,35 +99,36 @@ def test_new_project_persists_selection_without_starting_capture(
     startup = tmp_path / "startup"
     startup.mkdir()
     monkeypatch.chdir(startup)
-    save_settings(path, Settings(capture_device="saved-camera"))
+    save_settings(path, Settings())
     shell, peer, capture = make_shell(path)
     monkeypatch.chdir(tmp_path)
 
-    def choose(dialog: QFileDialog) -> int:
-        assert dialog.acceptMode() == QFileDialog.AcceptMode.AcceptSave
-        assert dialog.fileMode() == QFileDialog.FileMode.AnyFile
-        assert dialog.testOption(QFileDialog.Option.DontConfirmOverwrite)
-        assert Path(dialog.directory().absolutePath()) == startup
-        dialog.selectFile(str(target))
-        return QDialog.DialogCode.Accepted
+    target.mkdir()
 
-    monkeypatch.setattr(QFileDialog, "exec", choose)
+    def choose(_parent: object, _title: str, directory: str) -> str:
+        assert Path(directory) == startup
+        return str(target)
+
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", choose)
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         connect(qtbot, shell)
-        assert shell.window.project_menu.isEnabled()
+        assert shell.window.new_project_action.isEnabled()
         shell.window.new_project_action.trigger()
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         assert shell.window.connection.disconnect_action.isEnabled()
         qtbot.waitUntil(lambda: shell.baseline.last_project_path == str(target))
+        group = shell.window.sidebar._groups["project-1"]
+        qtbot.waitUntil(group.empty.isVisible)
         assert list(target.iterdir()) == []
         assert load_settings(path).last_project_path == str(target)
         assert str(target) in shell.window.windowTitle()
         assert capture.connections == []
-        assert shell.window.project_menu.isEnabled()
+        assert shell.window.new_project_action.isEnabled()
         assert [method for method, _ in peer.calls if method.startswith("project/")] == [
+            "project/list",
             "project/list",
             "project/create",
         ]
@@ -160,7 +162,7 @@ def test_open_preserves_materials_and_restart_does_not_select_the_saved_path(
         assert peer.calls == []
         assert str(target) not in shell.window.windowTitle()
         connect(qtbot, shell)
-        shell.window.open_project_action.trigger()
+        shell.window.new_project_action.trigger()
         qtbot.waitUntil(lambda: str(target) in shell.window.windowTitle())
         assert [method for method, _ in peer.calls if method.startswith("project/")] == [
             "project/list",
@@ -174,9 +176,9 @@ def test_open_preserves_materials_and_restart_does_not_select_the_saved_path(
     restored.start()
     try:
         qtbot.waitUntil(lambda: restored.ready)
-        assert restored_peer.calls == []
+        assert not any(method == "project/create" for method, _ in restored_peer.calls)
         assert str(target) not in restored.window.windowTitle()
-        assert restored.window.connection.connect_action.isEnabled()
+        qtbot.waitUntil(restored.window.connection.disconnect_action.isEnabled)
         assert notes.read_text(encoding="utf-8") == "既存資料"
         assert original.read_bytes() == b"original bytes"
         assert {entry.name for entry in target.iterdir()} == {"攻略.md", "records"}
@@ -197,11 +199,11 @@ def test_missing_selection_hint_is_not_opened_or_reported_as_an_error(
     try:
         qtbot.waitUntil(lambda: shell.ready)
         assert shell.window.connection.connect_action.isEnabled()
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         assert notices == []
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setText("changed")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         shell.dialog.ok_button.click()
         qtbot.waitUntil(lambda: shell.operation is None)
         assert load_settings(path).last_project_path == str(target)
@@ -222,23 +224,23 @@ def test_project_selection_requires_an_idle_connection_even_after_a_thread(
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         generation = connect(qtbot, shell)
         assert shell.conversations.can_switch
-        assert shell.window.project_menu.isEnabled()
+        assert shell.window.new_project_action.isEnabled()
         for conversation in (
             ConversationStatus(sending=True),
             ConversationStatus(stopping=True),
             ConversationStatus("thread-1", "turn-1"),
         ):
             shell.service.received.emit(ServiceEvent(generation, conversation))
-            assert not shell.window.project_menu.isEnabled()
+            assert not shell.window.new_project_action.isEnabled()
         shell.service.received.emit(ServiceEvent(generation, ConversationStatus("thread-1")))
-        assert shell.window.project_menu.isEnabled()
+        assert shell.window.new_project_action.isEnabled()
         shell.window.connection.disconnect_action.trigger()
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         qtbot.waitUntil(shell.window.connection.connect_action.isEnabled)
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
     finally:
         close(qtbot, shell)
 
@@ -289,11 +291,12 @@ def test_selection_remains_active_when_last_path_cannot_be_saved(
     try:
         qtbot.waitUntil(lambda: shell.ready)
         connect(qtbot, shell)
-        shell.window.open_project_action.trigger()
+        notices.clear()
+        shell.window.new_project_action.trigger()
         qtbot.waitUntil(lambda: bool(notices))
         assert str(target) in shell.window.windowTitle()
         assert shell.baseline.last_project_path == ""
-        assert shell.window.project_menu.isEnabled()
+        assert shell.window.new_project_action.isEnabled()
         assert shell.window.connection.disconnect_action.isEnabled()
         assert notices[-1].details == "injected settings write failure"
     finally:
@@ -318,7 +321,7 @@ def test_pending_selection_blocks_execution_but_allows_stop_and_close(
         peer.list_release = Event()
         shell.window.connection.prompt.setPlainText("画面を確認して")
         qtbot.waitUntil(shell.window.connection.send_button.isEnabled)
-        shell.window.open_project_action.trigger()
+        shell.window.new_project_action.trigger()
         box = shell.conversations.confirmation
         assert box is not None
         box.button(QMessageBox.StandardButton.Discard).click()
@@ -338,3 +341,20 @@ def test_pending_selection_blocks_execution_but_allows_stop_and_close(
             shell.request_close()
         qtbot.waitUntil(lambda: not shell.window.isVisible())
     assert load_settings(shell.path).last_project_path == str(target)
+
+
+def test_cancel_folder_picker_leaves_project_catalog_unchanged(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shell, peer, _ = make_shell(tmp_path / "settings.toml")
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_args: "")
+    shell.start()
+    try:
+        qtbot.waitUntil(lambda: shell.ready)
+        connect(qtbot, shell)
+        calls = list(peer.calls)
+        shell.window.new_project_button.click()
+        assert peer.calls == calls
+        assert shell.baseline.last_project_path == ""
+    finally:
+        close(qtbot, shell)

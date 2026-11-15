@@ -30,7 +30,7 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     assert not dialog.capture_refresh_button.isEnabled()
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
     assert dialog.capture_choices.currentData() == "path-b"
-    dialog.model.setText("unsaved model")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.capture_fps.setCurrentIndex(dialog.capture_fps.findData(30))
     shell.open_settings()
     assert capture.refreshes == 1
@@ -60,7 +60,7 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
         shell.baseline,
         capture_device="path-a",
         capture_fps=30,
-        model="unsaved model",
+        preview_fps=60,
         serial_baudrate=9600,
     )
     assert not capture.connections
@@ -124,7 +124,7 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
     dialog = shell.dialog
     assert dialog is not None
     qtbot.waitUntil(lambda: dialog.capture_choices.currentText() == "Current camera")
-    dialog.model.setText("unsaved")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.tabs.setCurrentIndex(1)
     choices = dialog.capture_choices
     choices.showPopup()
@@ -149,7 +149,7 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
     assert dialog.values().capture_device == ""
     assert shell.baseline.capture_device == "path-b"
     assert load_settings(shell.path) == shell.baseline
-    assert dialog.values().model == "unsaved"
+    assert dialog.values().preview_fps == 60
     assert not dialog.capture_refresh_button.isEnabled()
 
 
@@ -159,7 +159,7 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
     marker = tmp_path / "release.txt"
     service = CaptureService(backend_factory=PeerBackend(str(marker)))
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-b"))
+    save_settings(path, Settings())
     shell = ApplicationShell(path, capture_service=service)
     shell.start()
     try:
@@ -172,7 +172,7 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
         dialog = shell.dialog
         assert dialog is not None
         qtbot.waitUntil(lambda: dialog.capture_choices.count() == 3)
-        shell.apply_settings(shell.baseline)
+        shell.apply_settings(replace(shell.baseline, capture_device="path-b"))
         qtbot.waitUntil(lambda: service.snapshot().frame is not None)
         first = service.snapshot().frame
         assert first is not None
