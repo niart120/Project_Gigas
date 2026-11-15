@@ -188,6 +188,7 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         assert not next(result.error for result in results if result.operation == "connect")
         panel.prompt.setPlainText("開始 日本語🙂")
+        qtbot.waitUntil(panel.send_button.isEnabled)
         panel.send_button.click()
         panel.send_button.click()
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
