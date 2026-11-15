@@ -1,3 +1,4 @@
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -5,11 +6,19 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
+from gigas.ui.conversation_transcript import ConversationTranscript
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from pytestqt.logging import _QtMessageCapture
     from pytestqt.qtbot import QtBot
+
+
+@pytest.fixture(autouse=True, params=[Transcript, ConversationTranscript])
+def transcript_implementation(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "Transcript", request.param)
 
 
 def _history(qtbot: "QtBot") -> Transcript:
@@ -21,7 +30,9 @@ def _history(qtbot: "QtBot") -> Transcript:
     qtbot.wait(1)
     view.update_item("question", "経路 😀\n北側か南側か。", kind="request")
     for index in range(45):
-        view.update_item(str(index), f"応答 {index}\n本文")
+        view.update_item(str(index), f"応答 {index}\n\n本文")
+    if isinstance(view, ConversationTranscript):
+        qtbot.waitUntil(lambda: view.rendering_idle)
     return view
 
 
@@ -79,7 +90,10 @@ def test_inline_body_copy_and_geometry_follow_updates(qtbot: "QtBot") -> None:
     assert "北側か南側か。" in copied
     assert "応答 1" in copied
     view.update_item("44", "末尾の追記", append=True)
-    assert view.textCursor().selectedText().replace("\u2029", "\n") == copied
+    if isinstance(view, ConversationTranscript):
+        qtbot.waitUntil(lambda: view.rendering_idle)
+    view.copy()
+    assert QApplication.clipboard().text() == copied
     view.verticalScrollBar().setValue(0)
     question = view.document().find("北側か南側か。")
     following = view.document().find("応答 0")

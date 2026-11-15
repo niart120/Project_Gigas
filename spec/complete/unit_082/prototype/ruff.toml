@@ -1,0 +1,6 @@
+# Experimental fixtures are not a product API. Keep correctness/style checks;
+# type contracts and public API documentation belong to M2/M3 production code.
+extend = "../../../../pyproject.toml"
+
+[lint]
+extend-ignore = ["ANN", "D", "S101", "T201", "RUF001"]

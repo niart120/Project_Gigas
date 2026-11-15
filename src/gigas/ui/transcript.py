@@ -1,6 +1,6 @@
 """Item-based conversation text that retains selection and the visible passage."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -42,6 +42,7 @@ class _Item:
     displayed: str = ""
     emphasis: tuple[tuple[int, int], ...] = ()
     control: QWidget | None = None
+    entry: "HistoryEntry | None" = None
 
 
 def _utf16_length(text: str) -> int:
@@ -170,6 +171,28 @@ class Transcript(QTextBrowser):
         item.emphasis = ()
         self._render_item(item)
 
+    def update_entry(self, entry: "HistoryEntry", *, append: bool = False) -> None:
+        """Retain structured public data while rendering the current literal projection.
+
+        Args:
+            entry: Live or saved display data with a stable item identity.
+            append: Whether entry.text is a delta to append to the accumulated text.
+        """
+        item = self._item(entry.key, entry.kind)
+        item.text = item.text + entry.text if append else entry.text
+        item.entry = replace(entry, text=item.text)
+        item.emphasis = ()
+        self._render_item(item)
+
+    def item_entry(self, item_id: str) -> "HistoryEntry | None":
+        """Return retained public data, or None for an absent or local-only item.
+
+        Args:
+            item_id: Stable display identity used by update_entry or prepend_items.
+        """
+        item = self._items.get(item_id)
+        return item.entry if item is not None else None
+
     def update_plan(
         self,
         item_id: str,
@@ -233,10 +256,10 @@ class Transcript(QTextBrowser):
 
         Args:
             entries: Oldest-first entries from the preceding public history page.
-                Entries contain only text and never create request controls.
+                Entries retain display data and never create request controls.
         """
         added = {
-            entry.key: _Item(entry.kind, 0, text=entry.text)
+            entry.key: _Item(entry.kind, 0, text=entry.text, entry=entry)
             for entry in entries
             if entry.key not in self._items
         }
@@ -331,7 +354,7 @@ class Transcript(QTextBrowser):
             return
         self._laying_out_controls = True
         try:
-            margin = int(self.document().documentMargin())
+            margin = self._control_margin()
             width = max(1, self.viewport().width() - 2 * margin)
             for item in self._items.values():
                 control = item.control
@@ -352,12 +375,8 @@ class Transcript(QTextBrowser):
                     )
                     control.resize(width, max(1, height))
                     control.show()
-                cursor = self._control_anchor(item)
-                block = cursor.blockFormat()
                 spacing = height + 6 if control is not None else 0
-                if block.bottomMargin() != spacing:
-                    block.setBottomMargin(spacing)
-                    cursor.setBlockFormat(block)
+                self._reserve_control_space(item, spacing)
             layout = self.document().documentLayout()
             if layout is not None:
                 layout.documentSize()
@@ -371,11 +390,21 @@ class Transcript(QTextBrowser):
     def _position_controls(self) -> None:
         if not self._controls or self._laying_out_controls:
             return
-        margin = int(self.document().documentMargin())
+        margin = self._control_margin()
         for item in self._items.values():
             if item.control is not None and item.displayed:
                 anchor = self._control_anchor(item)
                 item.control.move(margin, self.cursorRect(anchor).bottom() + 3)
+
+    def _control_margin(self) -> int:
+        return int(self.document().documentMargin())
+
+    def _reserve_control_space(self, item: _Item, spacing: int) -> None:
+        cursor = self._control_anchor(item)
+        block = cursor.blockFormat()
+        if block.bottomMargin() != spacing:
+            block.setBottomMargin(spacing)
+            cursor.setBlockFormat(block)
 
     def _item(self, item_id: str, kind: HistoryKind) -> _Item:
         item = self._items.get(item_id)

@@ -11,6 +11,7 @@ from pytestqt.qtbot import QtBot
 from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.connection import CodexConnection
+from gigas.runtime.codex.history import item_key
 from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
@@ -31,6 +32,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SandboxEvent,
     SessionStatus,
+    SummaryPart,
     TextEvent,
     UsageBucket,
     UsageEvent,
@@ -186,6 +188,7 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         assert not next(result.error for result in results if result.operation == "connect")
         panel.prompt.setPlainText("開始 日本語🙂")
+        qtbot.waitUntil(panel.send_button.isEnabled)
         panel.send_button.click()
         panel.send_button.click()
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
@@ -197,7 +200,10 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         token = question.request.token
         assert question.request.kind == "question"
         assert "経路確認" in panel.plan_panel.view.toPlainText()
-        assert "公開要約" in panel.transcript.toPlainText()
+        qtbot.waitUntil(lambda: "公開要約" in panel.plan_panel.reasoning.text.toPlainText())
+        for key, item in tuple(panel.transcript._items.items()):
+            if item.kind in {"activity", "reasoning"}:
+                panel.transcript.toggle_details(key)
         assert "fixture/observe" in panel.transcript.toPlainText()
         assert "観測完了" in panel.transcript.toPlainText()
         assert "INTERNAL_CONTENT" not in panel.transcript.toPlainText()
@@ -252,7 +258,9 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     panel.handle_event(ServiceEvent(1, PlanEvent("old", ())))
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),))))
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("old", "shared", ("公開要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("old", "shared", (SummaryPart(0, "公開要約"),)))
+    )
     panel.handle_event(
         ServiceEvent(
             1, ActivityEvent("old", "shared", "mcpToolCall", "gigas/observe", "inProgress")
@@ -265,9 +273,12 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
         )
     )
     history = panel.transcript.toPlainText()
-    assert history.count("gigas/observe") == 1
-    assert "観測済み" in history
-    assert "公開要約" in history
+    assert "観測済み" not in history
+    assert "公開要約" not in history
+    panel.transcript.toggle_details(item_key("thread", "old", "shared", kind="activity"))
+    panel.transcript.toggle_details(item_key("thread", "old", "shared", kind="reasoning"))
+    assert "観測済み" in panel.transcript.toPlainText()
+    assert "公開要約" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
     assert "調査" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
@@ -285,9 +296,12 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     _ready(panel, 1, "m", "low")
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("new", "shared", ("新しい要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("new", "shared", (SummaryPart(0, "新しい要約"),)))
+    )
     assert "移動" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
+    panel.transcript.toggle_details(item_key("thread", "new", "shared", kind="reasoning"))
     assert "新しい要約" in panel.transcript.toPlainText()
     assert "公開要約" in panel.transcript.toPlainText()
     panel.interrupt()
@@ -397,7 +411,7 @@ def test_plan_updates_do_not_resize_history_or_move_reading_position(
         assert history.viewport().height() == previous_height
         previous_height = history.viewport().height()
         panel.handle_event(ServiceEvent(1, TextEvent("final", "最終応答", replace=True)))
-        qtbot.wait(1)
+        qtbot.waitUntil(lambda: history.rendering_idle)
         if reader == "tail":
             assert bar.value() == bar.maximum()
         else:
@@ -713,8 +727,10 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
     assert stops == [True]
     panel.handle_event(ServiceEvent(1, TextEvent("answer", "<b>A")))
     panel.handle_event(ServiceEvent(1, TextEvent("answer", "B</b>")))
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     assert "<b>AB</b>" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, TextEvent("answer", "final", replace=True)))
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     assert "final" in panel.transcript.toPlainText()
     assert "AB" not in panel.transcript.toPlainText()
     panel.handle_result(ServiceResult(1, "send"))
@@ -1361,7 +1377,7 @@ def test_goal_completion_and_removal_do_not_interrupt_the_current_turn(
         panel.handle_event(ServiceEvent(3, RequestResolved("question")))
         panel.handle_event(ServiceEvent(3, ConversationStatus("thread", goal=complete)))
         assert panel.plan_panel.status.text() == "完了"
-        assert "橋に到着しました" in panel.transcript.toPlainText()
+        qtbot.waitUntil(lambda: "橋に到着しました" in panel.transcript.toPlainText())
         assert not requested
     elif action == "stop":
         panel.interrupt_button.click()

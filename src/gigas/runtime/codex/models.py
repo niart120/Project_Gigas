@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gigas.runtime.codex.transport import JsonObject, RpcId
+    from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcId
 
 type ConnectionPhase = Literal[
     "connecting",
@@ -16,6 +16,8 @@ type ConnectionPhase = Literal[
     "error",
     "closed",
 ]
+
+type MessagePhase = Literal["commentary", "partial_answer", "final_answer"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +106,8 @@ class TextEvent:
         role: Source of the text.
         replace: Whether this text replaces earlier deltas for the same item.
         turn_id: Containing public turn, or None for locally submitted text.
+        phase: Public assistant phase, or None when absent or unknown.
+        completed: Whether an item/completed notification supplied this text.
     """
 
     item_id: str
@@ -111,6 +115,8 @@ class TextEvent:
     role: Literal["assistant", "user"] = "assistant"
     replace: bool = False
     turn_id: str | None = None
+    phase: MessagePhase | None = None
+    completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,19 +148,29 @@ class PlanEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class SummaryPart:
+    """One public summary paragraph with its original nonnegative wire index."""
+
+    index: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class ReasoningEvent:
     """A replacement snapshot containing only a reasoning item's public summary.
 
     Attributes:
         turn_id: Current accepted turn, before its completion notification.
         item_id: Runtime item identity within that turn.
-        summary: Public paragraphs in summary-index order; empty removes the summary.
+        summary: Indexed public paragraphs in index order; empty removes the summary.
             Raw reasoning content is never included.
+        completed: Whether an item/completed notification supplied this snapshot.
     """
 
     turn_id: str
     item_id: str
-    summary: tuple[str, ...]
+    summary: tuple[SummaryPart, ...]
+    completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,9 +184,13 @@ class ActivityEvent:
         title: Actual command, changed paths, server/tool name, or Web search query.
         status: Public item status or notification lifecycle; None when a saved Web
             item has no lifecycle status. Never inferred game progress.
-        details: Public textual result preview, command location or file diff.
-            MCP arguments, image data, metadata and structured results are omitted.
+        details: Public textual result preview or file diff, separate from invocation data.
+            Image data, metadata and structured results are omitted.
             A preview may be truncated by the runtime.
+        cwd: Command working directory when supplied.
+        exit_code: Command exit code when supplied; zero is retained.
+        arguments: Independent copy of public MCP arguments, for expanded details.
+        completed: Received item lifecycle, or None when unavailable in saved history.
     """
 
     turn_id: str
@@ -179,6 +199,10 @@ class ActivityEvent:
     title: str
     status: Literal["inProgress", "completed", "failed", "declined"] | None
     details: str = ""
+    cwd: str | None = None
+    exit_code: int | None = None
+    arguments: "JsonValue" = field(default=None, repr=False)
+    completed: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

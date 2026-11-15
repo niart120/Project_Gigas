@@ -1,0 +1,351 @@
+{
+  "activity-display-m4": {
+    "status": {
+      "events": {
+        "SessionStatus": 4,
+        "AccountInfo": 1,
+        "ModelSelection": 2,
+        "SandboxEvent": 1,
+        "UsageEvent": 6,
+        "ConversationStatus": 9,
+        "TextEvent": 504,
+        "TurnStarted": 1,
+        "DialogueEvent": 9,
+        "ActivityEvent": 6,
+        "ReasoningEvent": 2
+      },
+      "capture": "closed",
+      "capture_error": "",
+      "frame_size": null,
+      "gui_active_max_ms": 195.489,
+      "gui_active_p95_ms": 10.942,
+      "gui_samples": 2914,
+      "rendering_idle": true
+    },
+    "turns": {
+      "01a1dec8-9e4a-76b0-8b6c-8d992d4c2d5f": {
+        "start_s": 137.562,
+        "activities": [
+          "observe",
+          "observe",
+          "observe"
+        ],
+        "summaries": {},
+        "phases": [
+          "commentary",
+          "final_answer"
+        ],
+        "end_s": 166.912,
+        "settled_s": 166.912,
+        "duration_s": 29.35
+      }
+    },
+    "gui_gaps": [],
+    "subtitle_changes": []
+  },
+  "activity-display-m4-summary": {
+    "status": {
+      "events": {
+        "SessionStatus": 4,
+        "AccountInfo": 1,
+        "ModelSelection": 2,
+        "SandboxEvent": 1,
+        "UsageEvent": 20,
+        "ConversationStatus": 21,
+        "TextEvent": 1106,
+        "TurnStarted": 3,
+        "DialogueEvent": 39,
+        "PlanEvent": 10,
+        "ActivityEvent": 28,
+        "ReasoningEvent": 18
+      },
+      "capture": "closed",
+      "capture_error": "",
+      "frame_size": null,
+      "gui_active_max_ms": 234.698,
+      "gui_active_p95_ms": 11.332,
+      "gui_samples": 14324,
+      "rendering_idle": true
+    },
+    "turns": {
+      "01a1dece-07ba-74d0-b28e-299e9281f0e6": {
+        "start_s": 88.671,
+        "activities": [
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe"
+        ],
+        "summaries": {},
+        "phases": [
+          "commentary",
+          "final_answer"
+        ],
+        "end_s": 165.599,
+        "settled_s": 165.599,
+        "duration_s": 76.928
+      },
+      "01a1ded0-cd4a-7f92-8c3f-de84074bb667": {
+        "start_s": 270.307,
+        "activities": [
+          "observe",
+          "act_and_observe",
+          "observe",
+          "act_and_observe",
+          "observe"
+        ],
+        "summaries": {
+          "rs_0383ab16f5d2fd17016af98d8ad0fc87d08445cc1cae4adb3e": [
+            {
+              "index": 0,
+              "text": "**Checking input**"
+            }
+          ],
+          "rs_0383ab16f5d2fd17016af98d926efc87d0b8e5f864da5d4953": [
+            {
+              "index": 0,
+              "text": "**Refreshing the view**"
+            }
+          ],
+          "rs_0383ab16f5d2fd17016af98d9ad5bc87d0a0912137e1d40ae3": [
+            {
+              "index": 0,
+              "text": "**Checking sprite orientation**"
+            }
+          ]
+        },
+        "phases": [
+          "commentary",
+          "final_answer"
+        ],
+        "end_s": 309.083,
+        "settled_s": 309.083,
+        "duration_s": 38.776
+      },
+      "01a1ded2-5954-7c80-9d41-1b3cef27667e": {
+        "start_s": 371.695,
+        "activities": [
+          "observe",
+          "observe",
+          "observe"
+        ],
+        "summaries": {
+          "rs_0383ab16f5d2fd17016af98df60d2487d09a7e3f6336a31be5": [
+            {
+              "index": 0,
+              "text": "**Aligning NPC sprite**"
+            }
+          ]
+        },
+        "phases": [
+          "commentary"
+        ],
+        "stopping_s": 400.491,
+        "end_s": 400.529,
+        "settled_s": 400.533,
+        "duration_s": 28.834,
+        "stopping_to_settled_ms": 42.0
+      }
+    },
+    "gui_gaps": [
+      {
+        "seconds": 116.945,
+        "type": "GuiGap",
+        "ms": 234.698
+      },
+      {
+        "seconds": 123.68,
+        "type": "GuiGap",
+        "ms": 59.683
+      },
+      {
+        "seconds": 134.971,
+        "type": "GuiGap",
+        "ms": 69.521
+      },
+      {
+        "seconds": 282.031,
+        "type": "GuiGap",
+        "ms": 55.331
+      },
+      {
+        "seconds": 282.172,
+        "type": "GuiGap",
+        "ms": 102.145
+      },
+      {
+        "seconds": 291.254,
+        "type": "GuiGap",
+        "ms": 99.58
+      },
+      {
+        "seconds": 298.24,
+        "type": "GuiGap",
+        "ms": 88.19
+      },
+      {
+        "seconds": 298.368,
+        "type": "GuiGap",
+        "ms": 107.318
+      },
+      {
+        "seconds": 389.036,
+        "type": "GuiGap",
+        "ms": 106.48
+      },
+      {
+        "seconds": 393.198,
+        "type": "GuiGap",
+        "ms": 107.957
+      },
+      {
+        "seconds": 399.646,
+        "type": "GuiGap",
+        "ms": 60.64
+      }
+    ],
+    "subtitle_changes": [
+      {
+        "seconds": 282.077,
+        "type": "SubtitlePaintState",
+        "text": "**Checking input**",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      },
+      {
+        "seconds": 291.16,
+        "type": "SubtitlePaintState",
+        "text": "**Refreshing the view**",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      },
+      {
+        "seconds": 298.267,
+        "type": "SubtitlePaintState",
+        "text": "**Checking sprite orientation**",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      },
+      {
+        "seconds": 371.763,
+        "type": "SubtitlePaintState",
+        "text": "",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      },
+      {
+        "seconds": 388.935,
+        "type": "SubtitlePaintState",
+        "text": "**Aligning NPC sprite**",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      },
+      {
+        "seconds": 399.663,
+        "type": "SubtitlePaintState",
+        "text": "",
+        "label": "推論",
+        "scroll": 0,
+        "maximum": 0
+      }
+    ]
+  },
+  "activity-display-m4-final": {
+    "status": {
+      "events": {
+        "SessionStatus": 3,
+        "AccountInfo": 1,
+        "ModelSelection": 2,
+        "SandboxEvent": 1,
+        "UsageEvent": 14,
+        "ConversationStatus": 8,
+        "TextEvent": 979,
+        "GoalEvent": 1,
+        "TurnStarted": 1,
+        "DialogueEvent": 25,
+        "PlanEvent": 11,
+        "ActivityEvent": 20,
+        "ReasoningEvent": 4
+      },
+      "capture": "streaming",
+      "capture_error": "",
+      "frame_size": [
+        1920,
+        1080
+      ],
+      "gui_active_max_ms": 114.252,
+      "gui_active_p95_ms": 11.258,
+      "gui_samples": 9637,
+      "rendering_idle": true
+    },
+    "turns": {
+      "01a1ded7-afb2-73b1-b0ee-7dcd3c836066": {
+        "start_s": 153.303,
+        "activities": [
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe",
+          "observe"
+        ],
+        "summaries": {},
+        "phases": [
+          "commentary",
+          "final_answer"
+        ],
+        "end_s": 250.249,
+        "settled_s": 250.249,
+        "duration_s": 96.946
+      }
+    },
+    "gui_gaps": [
+      {
+        "seconds": 21.743,
+        "type": "SlowQtEvent",
+        "ms": 253.087,
+        "receiver": "ConversationController",
+        "event": 43
+      },
+      {
+        "seconds": 200.932,
+        "type": "GuiGap",
+        "ms": 114.252
+      },
+      {
+        "seconds": 220.77,
+        "type": "GuiGap",
+        "ms": 79.569
+      },
+      {
+        "seconds": 243.964,
+        "type": "GuiGap",
+        "ms": 69.357
+      }
+    ],
+    "subtitle_changes": []
+  },
+  "burst-before": [
+    25.30010000918992,
+    23.094300006050617,
+    24.369799997657537,
+    31.608899997081608
+  ],
+  "burst-windows-before": [
+    23.77070000511594,
+    23.020399996312335,
+    23.87470001121983,
+    31.519200012553483
+  ]
+}

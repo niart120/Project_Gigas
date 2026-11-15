@@ -72,6 +72,7 @@ def test_stop_during_save_preserves_submitted_application(
     dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("pokecon"))
     history = shell.window.connection.transcript
     history.update_item("summary", "保存待ち中の公開要約", kind="reasoning")
+    history.toggle_details("summary")
     dialog.show_reasoning.setChecked(False)
     dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)

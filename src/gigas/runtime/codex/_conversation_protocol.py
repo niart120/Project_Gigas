@@ -180,6 +180,7 @@ def turn_start_params(thread_id: str, prompt: str, selection: "ModelSelection") 
         "input": [{"type": "text", "text": prompt}],
         "model": selection.model,
         "effort": selection.effort,
+        "summary": "auto",
     }
 
 

@@ -102,6 +102,8 @@ def test_additional_message_uses_same_start_and_prepared_endpoint(tmp_path: Path
             methods = [method for method, _ in c.peer.calls]
             assert methods.count("thread/start") == 1
             assert methods.count("turn/start") == 2
+            turns = [params for method, params in c.peer.calls if method == "turn/start"]
+            assert all(params is not None and params.get("summary") == "auto" for params in turns)
             assert "turn/steer" not in methods
             assert "thread/resume" not in methods
             assert "thread/unsubscribe" not in methods

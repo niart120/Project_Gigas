@@ -191,6 +191,7 @@ def _select_unassigned(qtbot: QtBot, shell: ApplicationShell) -> None:
         lambda: (
             shell.window.connection.heading.title.text() == "未所属会話"
             and not shell.window.connection.heading.loading.isVisible()
+            and shell.window.connection.transcript.rendering_idle
         )
     )
 

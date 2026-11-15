@@ -58,6 +58,7 @@ def test_reconnect_retains_documents_draft_goal_and_expired_cards(qtbot: QtBot) 
     panel.prompt.setPlainText("未送信の指示")
     panel.handle_event(ServiceEvent(1, SessionStatus("closed")))
     panel.handle_result(ServiceResult(1, "disconnect"))
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     before = panel.transcript.toPlainText()
     document = panel.transcript.document()
     selection = document.find("既存本文")
@@ -102,6 +103,7 @@ def test_explicit_target_replacement_clears_old_controls_but_draft_discard_is_se
     )
     assert panel.heading.project.text() == "別Project"
     assert panel.heading.title.text() == "保存会話"
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     assert "保存本文" in panel.transcript.toPlainText()
     assert "進路を選択" not in panel.transcript.toPlainText()
     assert not panel.requests
@@ -137,16 +139,20 @@ def test_loading_hides_existing_content_without_recreating_it_and_failure_restor
         goal=GoalState("現在の目的", "paused"),
     )
     panel.prompt.setPlainText("そのまま保持")
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     selected = panel.transcript.document().find("本文 20")
+    assert not selected.isNull(), panel.transcript.toPlainText()
     start, end = selected.selectionStart(), selected.selectionEnd()
     selected.setPosition(end)
     selected.setPosition(start, QTextCursor.MoveMode.KeepAnchor)
     panel.transcript.setTextCursor(selected)
+    assert panel.transcript.textCursor().selectedText() == "本文 20"
     panel.transcript.ensureCursorVisible()
     visible = panel.transcript.cursorForPosition(QPoint(0, 1))
     y = panel.transcript.cursorRect(visible).top()
     document = panel.transcript.document()
     panel.begin_loading("候補Project", "候補会話")
+    assert panel.transcript.textCursor().selectedText() == "本文 20"
     assert panel.heading.title.text() == "候補会話"
     assert panel.heading.loading.isVisible()
     assert panel.transcript.isHidden()

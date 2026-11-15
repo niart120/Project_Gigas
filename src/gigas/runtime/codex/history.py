@@ -4,11 +4,17 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from gigas.runtime.codex._notifications import item_activity
+from gigas.runtime.codex._notifications import item_activity, message_phase, summary_parts
 
 if TYPE_CHECKING:
     from gigas.runtime.codex.management_models import TurnPage
-    from gigas.runtime.codex.models import ActivityEvent
+    from gigas.runtime.codex.models import (
+        ActivityEvent,
+        MessagePhase,
+        ReasoningEvent,
+        SummaryPart,
+        TextEvent,
+    )
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 type HistoryKind = Literal[
@@ -18,17 +24,25 @@ type HistoryKind = Literal[
 
 @dataclass(frozen=True, slots=True)
 class HistoryEntry:
-    """Literal display text with an identity shared by saved and live items.
+    """Public display data with an identity shared by saved and live items.
 
     Attributes:
         key: Stable display identity including the public thread, turn, item and role.
         kind: Presentation role; never an instruction to create an input control.
         text: Literal public text, without hidden reasoning or embedded image data.
+        phase: Public assistant phase, or None when absent or unknown.
+        summary: Indexed public reasoning paragraphs; never raw reasoning content.
+        activity: Structured activity details, not expanded by the text projection.
+        completed: Received item lifecycle, or None when unavailable in saved history.
     """
 
     key: str
     kind: HistoryKind
     text: str
+    phase: "MessagePhase | None" = None
+    summary: "tuple[SummaryPart, ...]" = ()
+    activity: "ActivityEvent | None" = None
+    completed: bool | None = None
 
 
 def item_key(thread_id: str, turn_id: str, item_id: str, *, kind: HistoryKind) -> str:
@@ -41,10 +55,36 @@ def activity_entry(thread_id: str, event: "ActivityEvent") -> HistoryEntry:
     statuses = {"inProgress": "実行中", "completed": "完了", "failed": "失敗", "declined": "拒否"}
     label = statuses.get(event.status, "") if event.status is not None else ""
     title = f"{label} · {event.title}" if label else event.title
+    details = [event.cwd or "", event.details]
+    if event.exit_code is not None:
+        details.append(f"終了コード: {event.exit_code}")
     return HistoryEntry(
         item_key(thread_id, event.turn_id, event.item_id, kind="activity"),
         "activity",
-        "\n".join(part for part in (title, event.details) if part),
+        "\n".join(part for part in (title, *details) if part),
+        activity=event,
+        completed=event.completed,
+    )
+
+
+def text_entry(thread_id: str, event: "TextEvent") -> HistoryEntry:
+    """Project one live text update without discarding phase or item lifecycle."""
+    key = (
+        item_key(thread_id, event.turn_id, event.item_id, kind=event.role)
+        if event.turn_id is not None
+        else f"message:{event.item_id}"
+    )
+    return HistoryEntry(key, event.role, event.text, phase=event.phase, completed=event.completed)
+
+
+def reasoning_entry(thread_id: str, event: "ReasoningEvent") -> HistoryEntry:
+    """Project public paragraphs while preserving their subtitle identities."""
+    return HistoryEntry(
+        item_key(thread_id, event.turn_id, event.item_id, kind="reasoning"),
+        "reasoning",
+        "\n\n".join(part.text for part in event.summary),
+        summary=event.summary,
+        completed=event.completed,
     )
 
 
@@ -85,19 +125,21 @@ def _entry(thread_id: str, turn_id: str, item: "JsonObject") -> HistoryEntry | N
     kind = item.get("type")
     role: HistoryKind
     text = ""
+    phase = None
+    summary = ()
     if kind == "userMessage":
         role, text = "user", _texts(item.get("content"), block_type="text")
     elif kind == "agentMessage":
         role, text = "assistant", _agent_text(item)
+        phase = message_phase(item.get("phase"))
     elif kind == "plan":
         role = "plan"
         body = item.get("text")
         text = body if isinstance(body, str) else ""
     elif kind == "reasoning":
         role = "reasoning"
-        summary = item.get("summary")
-        if isinstance(summary, list):
-            text = "\n\n".join(paragraph for paragraph in summary if isinstance(paragraph, str))
+        summary = summary_parts(item.get("summary", []))
+        text = "\n\n".join(part.text for part in summary)
     elif kind == "functionCallOutput":
         role = "activity"
         output = item.get("output")
@@ -109,7 +151,15 @@ def _entry(thread_id: str, turn_id: str, item: "JsonObject") -> HistoryEntry | N
         activity = item_activity(turn_id, item_id, item)
         return activity_entry(thread_id, activity) if activity is not None else None
     return (
-        HistoryEntry(item_key(thread_id, turn_id, item_id, kind=role), role, text) if text else None
+        HistoryEntry(
+            item_key(thread_id, turn_id, item_id, kind=role),
+            role,
+            text,
+            phase=phase,
+            summary=summary,
+        )
+        if text
+        else None
     )
 
 

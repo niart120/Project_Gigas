@@ -278,6 +278,7 @@ def test_window_sidebar_toggle_returns_width_and_keeps_existing_content_and_sett
     window.conversation_heading.show()
     window.connection.prompt.setPlainText("未送信")
     window.connection.transcript.update_item("message", "既存本文")
+    qtbot.waitUntil(lambda: window.connection.transcript.rendering_idle)
     width = window.splitter.width()
     window.sidebar_button.click()
     qtbot.waitUntil(lambda: window.splitter.width() > width)

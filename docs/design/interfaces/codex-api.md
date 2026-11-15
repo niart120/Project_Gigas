@@ -72,11 +72,19 @@ GIGASが使用する通信・実行設定は[Codex接続仕様](codex.md)、通�
 | `AccountInfo` / `UsageEvent` | 公開アカウント情報と利用枠。`available`は直近取得の成否で、通常利用の可否は公開値を保持 |
 | `SandboxEvent` | `ready / notConfigured / updateRequired`または取得不能、準備中、理由、再接続の必要性 |
 | `ConversationStatus` | thread・turn・Goalと、送信・停止・回答待ちの状態 |
-| `TextEvent` | itemの本文。`replace=False`は追記、`True`は全文の置換 |
-| `PlanEvent` / `ReasoningEvent` / `ActivityEvent` | 公開計画の全一覧、公開要約、公開された活動の表示情報 |
+| `TextEvent` | itemの本文。`replace=False`は追記、`True`は全文の置換。`phase`は公開種別、`completed`はitem完了通知の受信を表す |
+| `PlanEvent` | 公開計画の全一覧 |
+| `ReasoningEvent` | 公開要約の置換スナップショット。`summary`は`SummaryPart(index, text)`のtupleで、欠番があっても元のindexを保持。`completed`はitem完了通知の受信を表す |
+| `ActivityEvent` | 種類・対象・状態・テキスト結果に加え、コマンドの`cwd`・`exit_code`とMCPの`arguments`を別フィールドで保持。`completed`は通知の完了区分、保存履歴では`None` |
 | `GoalEvent` | `GoalState(objective, status, tokens_used, time_used_seconds, token_budget)`。削除後は`None` |
 | `DialogueEvent` | 完了項目または終端時点の本文スナップショット。`partial`で未確定を識別 |
 | `HumanRequest` / `RequestResolved` | 回答要求と受付終了。受付終了は回答の配送成功を意味しない |
+
+`TextEvent.phase`は`commentary / partial_answer / final_answer`または`None`。差分通知は開始itemの値を引き継ぎ、完了itemで更新する。欠落・未知値は`None`とし、本文やturn状態から補わない。phaseはturn・Goalの完了判定には使わない。
+
+表示変換の`HistoryEntry`は、従来の`text`に加えて`phase`・`summary`・`activity`・`completed`を保持する。保存履歴とライブ通知は同じthread・turn・item・表示種別のキーを使う。保存itemにない完了通知の区分は`None`とし、活動の公開`status`とは区別する。`activity.arguments`は公開引数のコピーであり、マスキング処理は行わない。画像結果・メタデータ・構造化結果・生の推論は表示データの対象外。
+
+`DialogueEvent.payload`のreasoningは`summary: [{index, text}, ...]`、activityは`type / title / status / details / cwd / exit_code / arguments`を持つ。messageは本文と、判明した場合のphaseを持つ。中断などの終端では未完了itemを`partial=True`で一度だけ通知する。これらの追加情報をゲームI/O記録へ新たに保存する処理は行わない。
 
 `HumanRequest.token`は接続内の要求を識別する。アプリケーションサービスへ`answer(token, answers={質問ID: 回答})`または`answer(token, decision=判断)`を渡す。回答の成功結果は通信への書込完了を表し、許可対象の実行成功とは別である。未配送は`CodexConnectionError`、配送結果不明は`AnswerDeliveryError`で通知する。
 

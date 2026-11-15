@@ -4,9 +4,15 @@ import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QTextCursor
 
-from gigas.runtime.codex.history import HistoryEntry, history_entries
+from gigas.runtime.codex.history import HistoryEntry, history_entries, item_key
 from gigas.runtime.codex.management_models import TurnPage
-from gigas.runtime.codex.models import ActivityEvent, ConversationStatus, ReasoningEvent, TextEvent
+from gigas.runtime.codex.models import (
+    ActivityEvent,
+    ConversationStatus,
+    ReasoningEvent,
+    SummaryPart,
+    TextEvent,
+)
 from gigas.services.codex import ServiceEvent
 from gigas.ui.connection_panel import ConnectionPanel
 from tests.integration.test_inline_transcript import _form, _history
@@ -110,22 +116,49 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     panel.handle_event(
-        ServiceEvent(1, TextEvent("answer", "確定本文", replace=True, turn_id="turn"))
+        ServiceEvent(
+            1,
+            TextEvent(
+                "answer",
+                "確定本文",
+                replace=True,
+                turn_id="turn",
+                phase="final_answer",
+                completed=True,
+            ),
+        )
     )
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("turn", "reason", ("確定要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("turn", "reason", (SummaryPart(0, "確定要約"),)))
+    )
     panel.handle_event(
         ServiceEvent(1, ActivityEvent("turn", "web", "webSearch", "ラッキー", "completed", "図鑑"))
     )
     panel.transcript.prepend_items(history_entries("thread", page))
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
+    panel.transcript.toggle_details(item_key("thread", "turn", "reason", kind="reasoning"))
+    panel.transcript.toggle_details(item_key("thread", "turn", "web", kind="activity"))
     body = panel.transcript.toPlainText()
     assert "途中本文" not in body
     assert "途中要約" not in body
-    assert body.count("確定本文") == body.count("確定要約") == body.count("ラッキー") == 1
+    assert body.count("確定本文") == body.count("確定要約") == 1
     assert "完了 · ラッキー\n図鑑" in body
-    assert "進路\n北\n南" in body
+    assert "進路 北 南" in body
     assert not panel.requests
+    answer = panel.transcript.item_entry(item_key("thread", "turn", "answer", kind="assistant"))
+    assert answer is not None
+    assert (answer.text, answer.phase, answer.completed) == ("確定本文", "final_answer", True)
+    reason_key = item_key("thread", "turn", "reason", kind="reasoning")
+    panel.transcript.set_reasoning_visible(False)
+    reason = panel.transcript.item_entry(reason_key)
+    assert reason is not None
+    assert reason.summary == (SummaryPart(0, "確定要約"),)
+    assert "確定要約" not in panel.transcript.toPlainText()
+    panel.transcript.set_reasoning_visible(True)
+    assert panel.transcript.item_entry(reason_key) == reason
     panel.handle_event(
         ServiceEvent(1, TextEvent("answer", "次のturn", replace=True, turn_id="next"))
     )
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     assert "確定本文" in panel.transcript.toPlainText()
     assert "次のturn" in panel.transcript.toPlainText()
