@@ -52,8 +52,8 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | 手動保持の更新・短い押下・解除を順序どおり送り、有限列との排他・protocol・失敗・終了回収を守る | new / edge | integration | item 1。API未定義のred→7件green。軸集約・中央通過・取消された解除待ち・task完了直後の再受付も確認。コミット後に完了記録 |
-| todo | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2。既存会話テストを拡張 |
+| refactor-skipped | 手動保持の更新・短い押下・解除を順序どおり送り、有限列との排他・protocol・失敗・終了回収を守る | new / edge | integration | item 1、677a425。API未定義のred→7件green。軸集約・中央通過・取消された解除待ち・task完了直後の再受付も確認。追加構造変更不要 |
+| green | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2。解除せず送信するred→11件green。コミット後に完了記録 |
 | todo | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3。アプリ配送と捕捉対象 |
 | todo | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4。モデルと小窓、protocol別 |
 | todo | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。Shell結合と既存終了経路 |
@@ -77,6 +77,9 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | uv run pytest tests/integration/test_manual_input.py tests/integration/test_codex_shutdown.py tests/integration/test_input_service.py -q | pass | 軸集約・中央通過を追加後28 passed（1.97秒）。manual単独は6件 |
 | 独立レビュー・再現テスト | 修正 | 手動task完了から所有解除callbackまでの隙間に新しい入力を受理して失うP2を採用。再現red後、旧manualが残る間の新規受付を拒否する最小修正 |
 | uv run pytest tests/integration/test_manual_input.py tests/integration/test_input_service.py tests/integration/test_input_configuration.py tests/integration/test_codex_shutdown.py -q | pass | 修正後35 passed（2.82秒）。manual単独7件。ruff check/format・tyもpass |
+| uv run pytest tests/integration/test_manual_execution.py tests/integration/test_conversation_control.py tests/integration/test_conversation_resume.py tests/integration/test_conversation_execution.py -q | pass | item 2、63 passed（13.63秒）。Goal通知を返す既存ResumePeerで実際の完了条件を検証 |
+| 独立レビュー→ケース補強 | 採用 | 読込済みGoal不在での新規Goal作成、send/goal_set両方の未送信結果を追加。修正必須の実装指摘なし |
+| uv run pytest tests/integration/test_manual_execution.py -q | pass | 補強後11 passed（2.89秒）。ruff check/format・tyもpass |
 | native画面・画像比較・実機 | not run | 実装後に記録 |
 
 ## 10. 先送り事項

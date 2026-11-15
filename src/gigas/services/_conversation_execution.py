@@ -26,7 +26,7 @@ from gigas.runtime.codex.models import (
 from gigas.runtime.codex.transport import RpcError, RpcNotification, ServerRequest, TransportError
 from gigas.services._conversation_goals import GoalTracker
 from gigas.services._conversation_preparation import PreparationAttempt, ThreadPreparation
-from gigas.services.input import OperationResult
+from gigas.services.input import InputServiceError, OperationResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -52,6 +52,7 @@ class _Submission:
     task: asyncio.Task[object] | None = None
     submitted: bool = False
     preparation: PreparationAttempt = field(default_factory=PreparationAttempt)
+    starts_execution: bool = False
 
 
 @dataclass(slots=True)
@@ -138,6 +139,17 @@ class ConversationExecution:
             self._requests.has_blocking,
         )
 
+    @property
+    def manual_blocked(self) -> bool:
+        """Whether this execution owns preparation, live work, an answer, or stopping."""
+        return (
+            (self._sending is not None and self._sending.starts_execution)
+            or self._turn is not None
+            or (self._goal is not None and self._goal.status == "active")
+            or self._stopping is not None
+            or self._requests.has_blocking
+        )
+
     def _publish(self) -> None:
         self._emit(self.snapshot)
 
@@ -157,12 +169,15 @@ class ConversationExecution:
             raise CodexConnectionError("Codexの接続・認証を確認してください")
 
     async def _submit[T](
-        self, operation: "Callable[[_Submission], Coroutine[object, object, T]]"
+        self,
+        operation: "Callable[[_Submission], Coroutine[object, object, T]]",
+        *,
+        starts_execution: bool = False,
     ) -> T:
         self._require_admission()
         if not can_submit(self._connection.status, self.snapshot):
             raise CodexConnectionError("別の送信処理が完了していません")
-        submission = self._sending = _Submission()
+        submission = self._sending = _Submission(starts_execution=starts_execution)
         task = asyncio.create_task(operation(submission), name="gigas-conversation-send")
         submission.task = task
         self._publish()
@@ -194,6 +209,12 @@ class ConversationExecution:
             self._publish()
 
     async def _prepare(self, submission: _Submission) -> str:
+        if submission.starts_execution:
+            try:
+                await self._inputs.release_manual()
+            except InputServiceError as error:
+                message = f"実行開始前の入力解除に失敗しました: {error}"
+                raise CodexConnectionError(message) from error
         return await self._preparation.prepare(
             self._settings, self.start_input, submission.preparation
         )
@@ -224,7 +245,7 @@ class ConversationExecution:
             self._emit(TextEvent(uuid4().hex, prompt, "user", True))
             return await self._send_turn(thread_id, prompt)
 
-        return await self._submit(submit)
+        return await self._submit(submit, starts_execution=True)
 
     async def _send_turn(self, thread_id: str, prompt: str) -> str:
         reply = self._turn_reply = _TurnReply()
@@ -275,7 +296,7 @@ class ConversationExecution:
             )
             return True
 
-        return await self._submit(submit)
+        return await self._submit(submit, starts_execution=not self.loaded or self._goal is None)
 
     async def resume_goal(self) -> bool:
         """Request active for the retained objective without rewriting objective or budget."""
@@ -304,7 +325,7 @@ class ConversationExecution:
             )
             return True
 
-        return await self._submit(submit)
+        return await self._submit(submit, starts_execution=True)
 
     async def clear_goal(self) -> None:
         """Withdraw the objective without interrupting its turn or device input."""
@@ -360,7 +381,7 @@ class ConversationExecution:
             if self._closing():
                 raise CodexConnectionError("接続を終了しています")
             stop = self._stopping = _Stop()
-            operation = self._inputs.stop()
+            operation = self._inputs.stop_finite()
             submission = self._sending
             self._cancel_preparation()
             self._requests.cancel_unsubmitted()
