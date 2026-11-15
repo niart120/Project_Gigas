@@ -70,7 +70,7 @@ Windows準備は`windowsSandbox/readiness`・`setupStart(mode=elevated)`・`setu
 | UI-A3 | tools.update_plan.enabled=true、thread/turn単位の最新plan配列を表示 | 毎turnの出力は保証せず、Goal全体のTODOへ変換しない |
 | UI-A4 | 公開summaryだけを表示し、内部推論全文を扱わない | 非空summaryの提供は保証しない。固定表示試験と実受信の検証を区別 |
 | UI-A5 | 実際の公開ツール名・対象・結果をitem単位で表示 | MCP画像・引数を公開対話へ重複保存せず、turn終端後の遅い内容を補わない |
-| UI-A6 | 専用の計画的終了は初期版対象外 | [U07](../planned/unit_012/PLANNED_STOP.md)を初期版の進行条件にしない |
+| UI-A6 | 専用の計画的終了は独立工程を廃止 | [U07の廃止判断](05-implementation.md#u07-retired)に従い、共通機能の所有仕様を参照する |
 
 Planの公開項目はstepとpending/inProgress/completed、explanationは省略またはnullを許します。項目IDはなく、本文類似性で合成しません。Goal編集・削除だけでは現在Planを消しません。
 
