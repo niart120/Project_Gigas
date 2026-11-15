@@ -4,7 +4,7 @@
 
 初期版の製品範囲は[01](01-overview.md)に従います。U07・U09は初期版対象外です。本書は工程の入口、依存関係、実施順を所有します。各工程の到達点・分割・受入条件は親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
-U08は[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)・[M1](../complete/unit_069/MANAGEMENT_API.md)・[M2](../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)・[M3](../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)・[M4の切替・既存会話の再接続](../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)を完了しました。[M5の会話管理UI](../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)も完了しました。[M6の再開・設定・障害の結合検証](../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)も完了しました。[M7の製品全体の受入](../wip/unit_075/PRODUCT_ACCEPTANCE.md)に着手しました。各段階の進捗・受入状態は[親仕様](../wip/unit_013/RESUME.md)に集約します。
+U08はM0の設計から[M7の製品全体の受入](../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。各段階の検証範囲は[親仕様](../complete/unit_013/RESUME.md)に集約します。次の工程候補はU10の連続運転です。
 
 ## 開発方針
 
@@ -27,7 +27,7 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 | [U05 入力と即時停止](../complete/unit_010/INPUT_AND_STOP.md) | complete。U04に依存 | 有限の入力列、事後観測、停止・解除 |
 | [U06 Goalによる継続](../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
 | [U07 計画的終了](../planned/unit_012/PLANNED_STOP.md) | 初期版対象外 | 具体的な要求が生じた時点で再検討 |
-| [U08 Project・会話管理と再接続](../wip/unit_013/RESUME.md) | wip、M0〜M6完了、M7受入中。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
+| [U08 Project・会話管理と再接続](../complete/unit_013/RESUME.md) | complete。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
 | [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
 | [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
 
@@ -35,7 +35,7 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 
 ## U08の到達点と作業順
 
-M1専用home・設定・管理API→M2記録と新規開始の結合→M3実行設定・標準指示の結合→M4切替・既存会話の再接続→M5会話管理UI→M6再開・設定・障害の結合検証→M7 GUI・実機の通し受入の順に進めます。開始条件と完了条件は[U08親仕様第6節](../wip/unit_013/RESUME.md#6-マイルストーン作業単位実施順)を正本とします。
+M1専用home・設定・管理API→M2記録と新規開始の結合→M3実行設定・標準指示の結合→M4切替・既存会話の再接続→M5会話管理UI→M6再開・設定・障害の結合検証→M7 GUI・実機の通し受入の順に進めます。開始条件と完了条件は[U08親仕様第6節](../complete/unit_013/RESUME.md#6-マイルストーン作業単位実施順)を正本とします。
 
 M2はM1の管理APIを呼出し側から使い、固定memory・project.jsonの撤去とcwd・実thread ID・recordsの結合を同時に完了します。保存部品自体に管理API依存は置きません。Projectの画面操作を追加する前に、サービス経由のProjectあり／なしの開始と既存入力UIからの新規実行を確認します。
 

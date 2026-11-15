@@ -25,7 +25,7 @@
 
 ## 4. 関連仕様・後続依存
 
-[実装計画](../../initial/05-implementation.md)・[検証観点](../../initial/07-verification.md)・[UI](../../initial/10-ui-interaction.md)から専用終了の初期版要件を外す。[U08](../../wip/unit_013/RESUME.md)は保存参照・再起動後の復帰、[U10](../unit_015/CONTINUOUS_OPERATION.md)は採用機能の連続運転を所有し、いずれもU07の完了を待たない。
+[実装計画](../../initial/05-implementation.md)・[検証観点](../../initial/07-verification.md)・[UI](../../initial/10-ui-interaction.md)から専用終了の初期版要件を外す。[U08](../../complete/unit_013/RESUME.md)は保存参照・再起動後の復帰、[U10](../unit_015/CONTINUOUS_OPERATION.md)は採用機能の連続運転を所有し、いずれもU07の完了を待たない。
 
 ## 5. TDD Test List・対象ファイル
 

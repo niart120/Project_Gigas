@@ -112,9 +112,9 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 
 [記憶の起動処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/memories/write/src/start.rs)は非ephemeral・記憶機能有効・root会話を対象とします。phase1は許可された対話source、memory_mode、経過・idle時間等から候補を選びます。app-serverのsourceはvscodeで、[候補source](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rollout/src/lib.rs)に含まれます。[MCP呼出し処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/mcp_tool_call.rs)はdisable_on_external_context=falseならMCPによるpolluted化を行いません。これは採用版の既定値とも一致します。
 
-OFFでは起動時生成と標準参照を無効にし、既存ファイルの削除APIを呼びません。generate_memories=falseで作ったthreadの生成対象状態はdisabledとして保存されます。ONへ戻す際に過去threadを一括変更・強制再抽出する処理は追加しません。将来の候補選択・抽出・統合は標準処理に任せます。モデルによる抽出・統合の製品確認はM3・M6で行い、即時生成を開始条件にしません。
+OFFでは起動時生成と標準参照を無効にし、既存ファイルの削除APIを呼びません。generate_memories=falseで作ったthreadの生成対象状態はdisabledとして保存されます。ONへ戻す際に過去threadを一括変更・強制再抽出する処理は追加しません。将来の候補選択・抽出・統合は標準処理に任せ、即時生成を開始条件にしません。製品での確認範囲と未観測事項は次段に記します。
 
-[M3](../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)ではON/OFFの実効値、公開参照経路、OFF時の既存記憶保持と、標準統合処理による試験用summaryの形式整理を確認しました。[M6](../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)では実resumeへ設定を再適用し、ゲームMCP利用後の生成対象維持、公開参照とOFF時の保持を確認しました。標準6時間idle等の必要条件を満たす候補は0で、実会話からの抽出は引き続き未観測です。条件を変えて抽出を強制する機構は追加しません。実機利用後の対象状態はM7で確認します。
+[M3](../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)ではON/OFFの実効値、公開参照経路、OFF時の既存記憶保持と、標準統合処理による試験用summaryの形式整理を確認しました。[M6](../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)では実resumeへ設定を再適用し、ゲームMCP利用後の生成対象維持、公開参照とOFF時の保持を確認しました。M6の確認時点では標準6時間idle等の必要条件を満たす候補は0でした。[M7](../complete/unit_075/PRODUCT_ACCEPTANCE.md)では実機MCPを利用したProject・未所属の両threadでmemory_mode=enabled・source=vscodeの維持を確認しました。実会話からの抽出は引き続き未観測で、条件を変えて抽出を強制する機構は追加しません。
 
 [Skills探索](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/skills/src/host_roots.rs)はcwd側・祖先側の.agents/skills、$HOME/.agents/skills、専用CODEX_HOME/skills等を扱います。独自の探索器は不要です。
 

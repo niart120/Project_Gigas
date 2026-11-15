@@ -101,7 +101,7 @@ M0の文書検査とM1/M2の製品・実接続・実機受入は各子仕様に�
 | R02/R04の実runtimeでの障害経路 | M2-03で修正・模擬RPC/Qt回帰、M2-08で実モデルの通常2ターンを確認し修正受入済み。実runtimeの受理前中断・failed終端は未誘発。実運用で発生した場合に当該経路を再確認する |
 | 新しい接続権の公開と古い要求の拒否、事後Frame | [U05](../../complete/unit_010/INPUT_AND_STOP.md) M0、入力公開前 |
 | Goal・案内と記憶入口、対話UI、公開応答の別記録・memory書込権限 | [U06](../../complete/unit_011/GOAL_EXECUTION.md) |
-| 保存参照からの復帰・整理復元 | [U08](../../wip/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md) |
+| 保存参照からの復帰・整理復元 | [U08](../../complete/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md) |
 
 ## 11. 完了チェックリスト
 

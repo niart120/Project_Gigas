@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態
 
-状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM1を担当する。M0の[確定設計](../unit_068/MANAGEMENT_STORAGE_DESIGN.md)を製品の起動・設定・管理APIへ反映し、既存の新規実行・停止を維持する。
+状態: **complete**。[U08親仕様](../../complete/unit_013/RESUME.md)のM1を担当する。M0の[確定設計](../unit_068/MANAGEMENT_STORAGE_DESIGN.md)を製品の起動・設定・管理APIへ反映し、既存の新規実行・停止を維持する。
 
 利用者はGIGAS専用のCodexへ接続・ログインし、Project・会話・履歴・Goalの保存情報を公開APIから利用する。履歴を読むだけでは会話を実行しない。
 

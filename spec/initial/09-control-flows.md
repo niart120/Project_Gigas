@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-本書は部品間の処理順序を示す採用設計です。通常指示と共通の受付・停止・資源所有は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goalの通知・状態は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)を基礎とします。閲覧中を含む受付・資源所有は[02](02-runtime.md)、画面操作は[10](10-ui-interaction.md)を正本とします。製品統合・実接続・実機受入の範囲は[U08親仕様](../wip/unit_013/RESUME.md)と各子仕様へ記録します。
+本書は部品間の処理順序を示す採用設計です。通常指示と共通の受付・停止・資源所有は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goalの通知・状態は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)を基礎とします。閲覧中を含む受付・資源所有は[02](02-runtime.md)、画面操作は[10](10-ui-interaction.md)を正本とします。製品統合・実接続・実機受入の範囲は[U08親仕様](../complete/unit_013/RESUME.md)と各子仕様へ記録します。
 
 ## フローと所有者
 

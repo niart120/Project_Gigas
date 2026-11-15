@@ -2,7 +2,7 @@
 
 ## 1. 目的・状態・起点
 
-状態: **complete**。[U08親仕様](../../wip/unit_013/RESUME.md)のM6を担当する。Intent Delta: none。[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)までに完成した画面と実行経路について、状態を跨ぐ設定反映と失敗後の保持・再操作を検証し、見つかった不具合を修正する。
+状態: **complete**。[U08親仕様](../../complete/unit_013/RESUME.md)のM6を担当する。Intent Delta: none。[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)までに完成した画面と実行経路について、状態を跨ぐ設定反映と失敗後の保持・再操作を検証し、見つかった不具合を修正する。
 
 利用者が保存会話を選び、モデルや設定を変更して続きを送る場合、履歴を遡る途中や実行準備で失敗する場合を扱う。新しい管理機能や画面構成を設計する工程にはしない。
 

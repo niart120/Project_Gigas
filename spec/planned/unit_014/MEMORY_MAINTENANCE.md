@@ -23,7 +23,7 @@
 - [契約・状態・分岐の整理](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [保存・記憶](../../initial/04-agent-memory.md)
 - [工程と依存](../../initial/05-implementation.md)
-- [U08 再開](../../wip/unit_013/RESUME.md)
+- [U08 再開](../../complete/unit_013/RESUME.md)
 - [U10 連続運転](../unit_015/CONTINUOUS_OPERATION.md)
 
 ## 5. 再検討時の調査・設計

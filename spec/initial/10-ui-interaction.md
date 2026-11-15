@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-本書は主画面の構成と利用者操作を定めます。実行制御は[02](02-runtime.md)、APIの根拠は[08](08-sdk-compatibility.md)に従います。U08のサイドバー・保存済み履歴・再接続UIは[M5](../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)で製品へ結合し、実画面・実app-serverで確認しました。設定・障害の結合検証と実機受入の状態は[U08親仕様](../wip/unit_013/RESUME.md)を参照してください。専用の計画的終了[U07](../planned/unit_012/PLANNED_STOP.md)は初期版対象外です。
+本書は主画面の構成と利用者操作を定めます。実行制御は[02](02-runtime.md)、APIの根拠は[08](08-sdk-compatibility.md)に従います。U08のサイドバー・保存済み履歴・再接続UIは[M5](../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)で製品へ結合し、実画面・実app-serverで確認しました。設定・障害の結合検証と実機受入の状態は[U08親仕様](../complete/unit_013/RESUME.md)を参照してください。専用の計画的終了[U07](../planned/unit_012/PLANNED_STOP.md)は初期版対象外です。
 
 ## 状態と対象範囲
 
@@ -111,7 +111,7 @@ Qtの操作受付は即時に戻し、停止の非同期結果はサーバー実
 
 削除はGoalの目的を取り下げる操作です。閲覧中も選択thread IDへthread/goal/clearを直接送り、実行準備やresumeを行いません。モデル・実行環境・作業フォルダー・機器の準備は削除の活性条件にしません。現在turn・操作列を中断せず、結果も停止完了を意味しません。動作を止めたい場合は共通の中断を使います。削除しても会話・原記録・記憶・プロジェクトを消さず、削除済みGoalを再開操作で復活させません。Goalの非active通知だけでは現在turnや質問カードを失効させません。
 
-専用の計画的終了は[U07](../planned/unit_012/PLANNED_STOP.md)とともに初期版対象外です。「保存して終えて」も通常指示として送り、Gigasに終了専用UI・状態・Goal休止からの自動停止を加えません。[U08](../wip/unit_013/RESUME.md)は保存参照の読込・再起動後の復帰を担当し、必要な準備後に共通の送信・Goal再開へ渡します。
+専用の計画的終了は[U07](../planned/unit_012/PLANNED_STOP.md)とともに初期版対象外です。「保存して終えて」も通常指示として送り、Gigasに終了専用UI・状態・Goal休止からの自動停止を加えません。[U08](../complete/unit_013/RESUME.md)は保存参照の読込・再起動後の復帰を担当し、必要な準備後に共通の送信・Goal再開へ渡します。
 
 ## Planの更新契約
 
