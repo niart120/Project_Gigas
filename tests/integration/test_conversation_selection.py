@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 def _saved(peer: "FakePeer", cwd: Path, thread_id: str = "stored-1") -> None:
     peer.responses["thread/read"] = {"thread": {**_thread(cwd, "project-1"), "id": thread_id}}
+    peer.responses.setdefault(
+        "project/read",
+        {"project": {"id": "project-1", "name": "Project", "roots": [{"path": str(cwd)}]}},
+    )
     peer.responses["thread/turns/list"] = {
         "data": [
             {

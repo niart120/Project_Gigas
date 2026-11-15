@@ -54,6 +54,14 @@ class ProjectsPeer(FakePeer):
             }
             self.projects.append(project)
             self.responses[method] = {"project": project}
+        elif method == "project/read":
+            assert params is not None
+            project = next(
+                value
+                for value in self.projects
+                if isinstance(value, dict) and value.get("id") == params["projectId"]
+            )
+            self.responses[method] = {"project": project}
         return await super().request(method, params)
 
 

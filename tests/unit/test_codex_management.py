@@ -180,3 +180,105 @@ def test_project_rpc_failure_is_returned_without_retry_or_execution(
             assert not any(method.startswith("thread/") for method, _ in peer.calls)
 
     asyncio.run(scenario())
+
+
+def test_project_edit_and_delete_do_not_require_a_workspace_or_execution(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        missing = tmp_path / "deleted-folder"
+        async with _client(tmp_path) as (client, peer):
+            peer.responses["project/update"] = {"project": _project(missing, name="Renamed")}
+            peer.responses["project/delete"] = {}
+            edited = await client.update_project("project-1", name="Renamed", root=missing)
+            assert edited == ProjectInfo("project-1", "Renamed", missing)
+            await client.delete_project("project-1")
+            assert _project_calls(peer) == [
+                (
+                    "project/update",
+                    {
+                        "projectId": "project-1",
+                        "name": "Renamed",
+                        "roots": [{"path": str(missing)}],
+                    },
+                ),
+                ("project/delete", {"projectId": "project-1"}),
+            ]
+            assert not missing.exists()
+            assert not any(method.startswith(("thread/", "turn/")) for method, _ in peer.calls)
+
+    asyncio.run(scenario())
+
+
+def test_name_only_update_does_not_send_roots(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            peer.responses["project/update"] = {"project": _project(tmp_path, name="New name")}
+            await client.update_project("project-1", name="New name")
+            assert _project_calls(peer) == [
+                ("project/update", {"projectId": "project-1", "name": "New name"})
+            ]
+
+    asyncio.run(scenario())
+
+
+def test_project_update_rejects_invalid_input_before_rpc(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            with pytest.raises(ValueError, match="表示名"):
+                await client.update_project("project-1", name=" ")
+            with pytest.raises(ValueError, match="絶対パス"):
+                await client.update_project("project-1", name="Valid", root=Path("relative"))
+            assert _project_calls(peer) == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("method", ["project/update", "project/delete"])
+def test_project_mutation_failure_is_not_retried(tmp_path: Path, method: str) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            peer.rpc_errors[method] = -32602
+            operation = (
+                client.update_project("project-1", name="Renamed")
+                if method == "project/update"
+                else client.delete_project("project-1")
+            )
+            with pytest.raises(RpcError):
+                await operation
+            assert len(_project_calls(peer)) == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("reply", [None, False, [], "ok"])
+def test_project_delete_does_not_accept_invalid_success_reply(
+    tmp_path: Path, reply: JsonValue
+) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            peer.responses["project/delete"] = reply
+            with pytest.raises(CodexConnectionError):
+                await client.delete_project("project-1")
+            assert len(_project_calls(peer)) == 1
+
+    asyncio.run(scenario())
+
+
+def test_archived_threads_can_be_queried_without_changing_default_listing(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            peer.responses["thread/list"] = {"data": []}
+            await client.list_threads("project-1", archived=True, cursor="next", limit=1)
+            await client.list_threads("project-1")
+            calls = [params for method, params in peer.calls if method == "thread/list"]
+            assert calls == [
+                {
+                    "projectId": "project-1",
+                    "modelProviders": [],
+                    "archived": True,
+                    "cursor": "next",
+                    "limit": 1,
+                },
+                {"projectId": "project-1", "modelProviders": []},
+            ]
+
+    asyncio.run(scenario())

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Literal
 
 from gigas.runtime.codex import _management_protocol as protocol
 from gigas.runtime.codex._conversation_protocol import goal_clear_result, goal_params
+from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.management_models import (
     ItemPage,
     ProjectInfo,
@@ -120,6 +121,49 @@ class CodexManagement:
         result = await self._connection.request("project/read", {"projectId": project_id})
         return protocol.project_response(result)
 
+    async def update_project(
+        self, project_id: str, *, name: str, root: "Path | None" = None
+    ) -> ProjectInfo:
+        """Update a registration without touching files or conversation execution.
+
+        Args:
+            project_id: Server-owned identity of the registration to edit.
+            name: Nonempty display name; surrounding whitespace is removed.
+            root: Optional absolute replacement directory. None leaves roots unchanged.
+
+        Returns:
+            Project metadata reported by the server after this request.
+
+        Raises:
+            ValueError: The name is empty or the replacement path is relative.
+            CodexConnectionError: The response cannot be decoded.
+            TransportError: Delivery fails or the server rejects the update. No retry occurs.
+        """
+        name = name.strip()
+        if not name:
+            raise ValueError("プロジェクトの表示名を入力してください")
+        if root is not None and not root.is_absolute():
+            raise ValueError("Projectの作業フォルダーには絶対パスが必要")
+        params: JsonObject = {"projectId": project_id, "name": name}
+        if root is not None:
+            params["roots"] = [{"path": str(root)}]
+        result = await self._connection.request("project/update", params)
+        return protocol.project_response(result)
+
+    async def delete_project(self, project_id: str) -> None:
+        """Delete one registration, retaining threads and workspace files.
+
+        Args:
+            project_id: Server-owned identity to delete.
+
+        Raises:
+            CodexConnectionError: The reply is not an object.
+            TransportError: Delivery fails or the server rejects deletion. No retry occurs.
+        """
+        result = await self._connection.request("project/delete", {"projectId": project_id})
+        if not isinstance(result, dict):
+            raise CodexConnectionError("プロジェクト削除の応答形式が不正")
+
     async def list_threads(
         self,
         project_id: str | None,
@@ -127,6 +171,7 @@ class CodexManagement:
         cursor: str | None = None,
         limit: int | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
+        archived: bool | None = None,
     ) -> ThreadPage:
         """Read one page for a Project or for unassigned threads across all providers.
 
@@ -135,6 +180,7 @@ class CodexManagement:
             cursor: Opaque continuation cursor, passed through unchanged.
             limit: Optional page-size limit; omitted to use the server default.
             sort_direction: Optional direction; the server defaults to descending.
+            archived: True selects archived threads. None preserves the default listing.
 
         Returns:
             One page of thread metadata and both server pagination cursors.
@@ -145,6 +191,8 @@ class CodexManagement:
         """
         params = _page_params(cursor, limit, sort_direction)
         params.update({"projectId": project_id, "modelProviders": []})
+        if archived is not None:
+            params["archived"] = archived
         result = await self._connection.request("thread/list", params)
         return protocol.thread_page(result)
 

@@ -1,38 +1,45 @@
-# 仮想コントローラの画面照合
-
-source visual truth: [採用画像](spec/complete/unit_078/assets/virtual-controller-proposal.png)
-
-実装はPySide6のネイティブウィンドウ。通常状態はCH552、640×420論理px、Windows 150%（DPR 1.5）、Yu Gothic UI。画像のタイトルバーと背景余白を除いた1264×826を640×420へ縮小し、960×630の実装client画像も640×420へ正規化した。CSSは対象外。
-
-## 比較履歴
-
-1. [初回比較](spec/complete/unit_078/assets/controller-comparison-1.png) / [実装1](spec/complete/unit_078/assets/controller-native-1.png)
-   - [P2] ABXYと中央の記号が採用画像より小さく、操作部の識別性が下がっている。操作部の高さに合わせて描画文字を拡大する。
-   - [P2] 暗色QPaletteのMidでは外周と背景の差が小さく、stickとpadの境界が読みにくい。前景色から半透明の外周色を作り、padの中央境界も描く。
-   - 配置、左右stickの色、上部・中央・下部の構成は維持。標準タイトルバー、単色背景、ネイティブパレットは意図した差分。
-2. [修正後比較](spec/complete/unit_078/assets/controller-comparison-2.png)で外周とABXYの識別性を確認。中央±はまだ弱いため線描へ変更。独立レビューの縦長時の文字切れも採用し、描画fontを部品の幅・高さへ収めた。
-3. [最終比較](spec/complete/unit_078/assets/controller-comparison-3.png) / [実装3](spec/complete/unit_078/assets/controller-native-3.png)で再確認。中央±・ABXY・外周のP2を解消。最小・無効・3DS・拡大font・縦長3DSを別撮影し、操作部の重なりや文字切れがないことを確認。
-
-## 必須観点
-
-文字: Yu Gothic UI。ABXYは高さへ合わせ、幅と高さに収まる範囲へ制限。中央±は線描。採用画像の字形・太さを完全一致させずWindowsのフォントを使用する差分は許容。説明文・状態バー・見えるstick名はない。
-
-余白・配置: 上部6ボタン、左上stick、右上ABXY、中央2×2、左下pad、右下stick。画像はclient領域に正規化した。
-
-色: 左シアン・右赤を維持。前景色から作った半透明の外周で背景との差を確保した。無効状態はパレットの無効前景と薄い軸色を使用。
-
-画像品質: 操作部はQPainterによるベクトル描画。撮影・HOMEは標準機能を表す単純なアイコン。製品写真・ロゴ等の画像資産はない。
-
-内容: 採用された操作ラベルのみ。3DSではSELECT/STARTへ置換し、LS/RS/撮影を無効表示。
-
-## 追加状態・操作証跡
-
-[最小サイズ](spec/complete/unit_078/assets/controller-minimum.png)、[3DS](spec/complete/unit_078/assets/controller-3ds.png)、[無効](spec/complete/unit_078/assets/controller-disabled.png)、[18pt font](spec/complete/unit_078/assets/controller-large-font.png)、[縦長3DS](spec/complete/unit_078/assets/controller-tall-3ds.png)。すべてDPR 1.5。最小寸法は520×350を下限とし、fontMetricsから文字高さ・SELECT幅に必要な分だけ増やす。
-
-全景の640×420比較で全ラベル・外周が読めるため、部分切抜きは不要と判断した。追加状態はnative clientの原寸画像でも確認した。Qtのマウスイベントで保持・外部座標release・最小化・非アクティブ化・無効化を検査し、Windows上でも操作部外へのドラッグ→解放で解除通知と中央復帰を観測。CUAのdrag APIは窓境界外の座標を拒否するため、実際に窓の外で離す操作は未検証。非対応protocolの実機やクロスモニタDPI変更も未検証。ブラウザconsole検査はnative Qtのため対象外。
-
-残るP3: 採用画像の背景質感・陰影・字の太さはネイティブパレットと標準フォントへ置換している。追加の装飾は行わない。
-
-実施: 文字と外周の修正、修正後の同寸法再比較、追加状態の確認。未解決のP0/P1/P2はない。
+# unit_083 プロジェクト管理の画面確認
 
 final result: passed
+
+## 比較対象と条件
+
+利用者が提示したCodexの[編集画面](spec/complete/unit_083/evidence/source-edit.png)・[削除確認](spec/complete/unit_083/evidence/source-delete.png)・[管理メニュー](spec/complete/unit_083/evidence/source-menu.png)を操作・配置の参照元とした。実装は既存GIGASのPySide6画面へ統合し、Web版の複製やCodexの外観の完全再現は行わない。単一フォルダー差替え、2項目のメニュー、Windows標準ウィンドウ枠は採用済み仕様による差である。
+
+最終実装の証拠は[編集](spec/complete/unit_083/evidence/edit.png)、[削除確認](spec/complete/unit_083/evidence/delete.png)、[メニュー](spec/complete/unit_083/evidence/menu.png)、[所在アイコン](spec/complete/unit_083/evidence/folder-icons.png)。Windows上の実ウィンドウをCUAで撮影した。サービスの応答は隔離した模擬データであり、実API・実モデルの結果は[受入記録](spec/complete/unit_083/ACCEPTANCE.md)と区別する。
+
+| 証拠 | 画像寸法 |
+|---|---|
+| 参照元 編集／削除 | 807×469／645×268 px |
+| 実装 編集／削除 | 623×291／525×211 px（ネイティブ枠込み） |
+| 実装 メニュー／アイコン確認 | 109×52／303×331 px |
+| 主画面の撮影範囲 | 1921×1111 px |
+
+参照元の元DPIは不明。実装はWindowsのQt標準フォントを継承する（環境既定はYu Gothic UI 9pt、主モニターDPRは1.5）。画像はCUAが返した大きさのまま保存し、推定倍率による拡縮・ピクセル差分判定はしていない。CSS寸法はネイティブQtのため該当しない。比較ではOS枠と異なる製品の既定文字サイズを除き、操作の順序、グループ、読める文言、状態、余白を評価した。
+
+参照元2枚と修正後2枚を同じ比較入力へ入れて確認した。主画面全体に加え、ウィンドウ単位の画像を比較したため、ボタン・パス・確認文は追加の拡大切抜きなしで読める。アイコンは専用の小さいウィンドウで形状と読み上げ名を確認した。
+
+## 指摘と修正の履歴
+
+| 程度・対象 | 初回の差 | 修正と再確認 |
+|---|---|---|
+| P2 編集下部 | 保存がキャンセルの左にあり、長いパスが末尾から表示された。[初回](spec/complete/unit_083/evidence/edit-before.png) | 左下に削除、右下にキャンセル→保存を配置し、パス表示の初期位置を先頭へ変更。[修正後](spec/complete/unit_083/evidence/edit.png)で確認 |
+| P2 削除確認 | 削除・キャンセルの順序が参照元と異なった。[初回](spec/complete/unit_083/evidence/delete-before.png) | キャンセル→削除の順へ変更。配置変更で左寄せになったボタン群も中央へ揃え、[最終画像](spec/complete/unit_083/evidence/delete.png)を再撮影して参照元と比較 |
+
+未修正のP0・P1・P2はない。
+
+## 必須の比較面
+
+| 観点 | 確認結果 |
+|---|---|
+| 文字・階層 | 既存Qtフォントを継承し、表示名・フォルダーをラベルで区別。長い絶対パスは1行の読取り専用欄で選択・横移動できる。削除確認は折返しが収まり、名前と対象パスを読める。参照元の大きい見出しはWindows標準タイトルへ置換する意図的な差 |
+| 配置・余白 | 表示名→フォルダー、下部の削除と保存を分離。単一フォルダー仕様に合わせ追加・行削除を置かない。本文とボタンの重なりなし。参照元の寸法・角丸・影の複製は対象外 |
+| 色・状態 | 既存の暗色テーマ、保存のフォーカス枠、赤の削除操作を継承。確認の初期フォーカスはキャンセル。所在は黄の三角形と赤の丸に×を用い、色だけに依存しない |
+| 画像・アイコン | 装飾画像・ロゴ・生成画像は使用しない。所在はQt標準の警告／エラーアイコン。自作の図形や絵文字で素材を代用していない |
+| 文言 | メニューは編集・プロジェクトを削除だけ。編集項目は表示名・単一フォルダー。削除確認は登録削除・チャット保持・ファイル保持を説明し、更新状態のバッジや通常画面の説明文を追加していない |
+
+## 操作と残る限界
+
+実画面でメニューから編集・削除確認へ進み、Enterでキャンセルして削除要求が出ないことを確認した。保存中の二重提出・閉じる操作、未保存名の削除対象への混入防止、原稿・本文保持はQt結合試験でも確認している。所在アイコンの画像中の「フォルダー不在」「所在確認失敗」は検証用のProject名であり、製品が追加する状態文言ではない。読み上げ用の状態名を別途設定している。
+
+Windowsネイティブ画面のためブラウザー・CSS・コンソール検査は該当しない。モニター間DPI遷移、すべてのスクリーンリーダーによる読み上げ、他OSの外観は未検証。今回の受入を妨げる差とは扱わず、Windowsの既存GUI条件で確認した。

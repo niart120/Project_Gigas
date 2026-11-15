@@ -340,3 +340,21 @@ def test_empty_placeholder_requires_completed_empty_page(qtbot: QtBot) -> None:
     sidebar.set_threads("empty", ThreadPage((_thread("one", "empty"),), None, None))
     assert not group.empty.isVisible()
     assert group.threads.count() == 1
+
+
+def test_folder_probe_uses_distinct_icons_without_modifying_the_name(qtbot: QtBot) -> None:
+    sidebar = _sidebar(qtbot)
+    sidebar.upsert_project(ProjectInfo("project", "Same name", Path.cwd()))
+    group = sidebar._groups["project"]
+    sidebar.set_directory_status("project", "missing")
+    missing = group.warning.pixmap().toImage()
+    assert not group.warning.isHidden()
+    assert not group.warning.text()
+    assert group.warning.accessibleName()
+    sidebar.set_directory_status("project", "unavailable")
+    assert group.warning.pixmap().toImage() != missing
+    assert not group.warning.text()
+    assert not group.warning.toolTip()
+    assert group.heading.text() == "Same name"
+    sidebar.set_directory_status("project", "available")
+    assert group.warning.isHidden()

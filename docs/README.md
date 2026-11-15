@@ -12,7 +12,7 @@
 
 | 領域 | 文書 |
 |---|---|
-| 機能 | [会話・Goal・再開](design/functions/conversations.md)、[ゲームI/O](design/functions/game-io.md) |
+| 機能 | [会話・Goal・再開](design/functions/conversations.md)、[プロジェクト管理](design/functions/projects.md)、[ゲームI/O](design/functions/game-io.md) |
 | 画面と操作 | [デスクトップGUI](design/ui/desktop.md) |
 | Codexとの接続 | [通信と実行設定](design/interfaces/codex.md)、[接続・管理API](design/interfaces/codex-api.md)、[アプリケーションサービスAPI](design/interfaces/application-api.md) |
 | 映像・入力との接続 | [映像取得API](design/interfaces/video-api.md)、[入力API](design/interfaces/input-api.md)、[ゲームI/O MCP](design/interfaces/observation-mcp.md) |

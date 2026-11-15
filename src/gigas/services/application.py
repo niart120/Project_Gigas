@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from gigas.game_io.input.config import SerialConfig
     from gigas.game_io.input.models import InputState
     from gigas.game_io.observation import ObservationResolution
+    from gigas.runtime.codex.management import ProjectInfo
     from gigas.runtime.codex.models import ConnectionOptions
     from gigas.services.conversations import ConversationTarget
     from gigas.services.input import InputDevice
@@ -275,6 +276,22 @@ class ApplicationServiceThread(QThread):
     def list_projects(self, *, cursor: str | None = None) -> None:
         """Read one public Project page; management_completed carries its result."""
         self._enqueue(lambda: self.codex.list_projects(cursor=cursor))
+
+    def inspect_project(self, project_id: str) -> None:
+        """Inspect a project and all members; deliver project_inspect via management_completed."""
+        self._enqueue(lambda: self.codex.inspect_project(project_id))
+
+    def probe_project_folder(self, project: "ProjectInfo") -> None:
+        """Check a folder asynchronously without loading a project's conversation list."""
+        self._enqueue(lambda: self.codex.probe_project_folder(project))
+
+    def update_project(self, expected: "ProjectInfo", *, name: str, root: "Path") -> None:
+        """Queue one project edit using the metadata shown when its dialog opened."""
+        self._enqueue(lambda: self.codex.update_project(expected, name=name, root=root))
+
+    def delete_project(self, expected: "ProjectInfo") -> None:
+        """Queue a confirmed registration deletion; files and conversations remain."""
+        self._enqueue(lambda: self.codex.delete_project(expected))
 
     def list_threads(self, project_id: str | None, *, cursor: str | None = None) -> None:
         """Read one assignment page; None explicitly requests unassigned threads."""

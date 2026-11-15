@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.runtime.codex.history import history_entries
@@ -38,6 +38,8 @@ class ConversationController(QObject):
         parent: Owning application shell.
     """
 
+    projects_available = Signal(object)
+
     def __init__(
         self, window: "MainWindow", service: "ApplicationServiceThread", parent: QObject
     ) -> None:
@@ -56,6 +58,7 @@ class ConversationController(QObject):
         self._threads: dict[str, ThreadInfo] = {}
         self._listed = False
         self._projects_pending = False
+        self._projects_append = False
         self._thread_requests: dict[str | None, str | None] = {}
         self._threads_loaded: set[str | None] = set()
         self._refresh_threads: set[str | None] = set()
@@ -177,6 +180,7 @@ class ConversationController(QObject):
             return False
         self._projects[project.id] = project
         self.sidebar.upsert_project(project)
+        self.projects_available.emit((project,))
         self._replace_new(target)
         self.sidebar.expand_project(project.id)
         return True
@@ -206,6 +210,7 @@ class ConversationController(QObject):
         if not self._available or not self.panel.can_list_conversations or self._projects_pending:
             return
         self._projects_pending = True
+        self._projects_append = cursor is not None
         self.sidebar.set_projects_loading(True)
         self.service.list_projects(cursor=cursor)
 
@@ -254,14 +259,19 @@ class ConversationController(QObject):
         if not isinstance(result, ManagementResult) or result.generation != self.generation:
             return
         operation, value = result.operation, result.value
+        if operation in {"project_inspect", "project_update", "project_delete", "project_folder"}:
+            return
         if operation == "projects":
             if not self._projects_pending:
                 return
             self._projects_pending = False
             self.sidebar.set_projects_loading(False)
             if isinstance(value, ProjectPage):
+                if not self._projects_append:
+                    self._projects.clear()
                 self._projects.update((project.id, project) for project in value.projects)
-                self.sidebar.set_projects(value, append=True)
+                self.sidebar.set_projects(value, append=self._projects_append)
+                self.projects_available.emit(value.projects)
                 self._update_heading()
         elif operation == "threads":
             if result.project_id not in self._thread_requests:
@@ -394,6 +404,43 @@ class ConversationController(QObject):
         self.panel.update_target_heading(self._project_name(target.project_id), title)
         self.window.setWindowTitle(f"GIGAS · {root}" if root is not None else "GIGAS")
 
+    def apply_project(self, project: "ProjectInfo", threads: "tuple[ThreadInfo, ...]") -> None:
+        """Apply confirmed metadata without rebuilding the displayed transcript or draft."""
+        self._projects[project.id] = project
+        self._threads.update((thread.id, thread) for thread in threads)
+        self.sidebar.upsert_project(project)
+        if project.id in self._threads_loaded:
+            self.sidebar.set_threads(project.id, ThreadPage(threads, None, None))
+        self._target = self.service.selected_target
+        self._history_pending = None
+        self.sidebar.set_selection(
+            self._target.project_id,
+            self._target.thread_id if isinstance(self._target, StoredConversationTarget) else None,
+        )
+        self._update_heading()
+        self._render()
+
+    def project_info(self, project_id: str) -> "ProjectInfo | None":
+        """Return the currently displayed server registration, if it is still listed."""
+        return self._projects.get(project_id)
+
+    def remove_project(self, project_id: str) -> None:
+        """Remove a registration and refresh unassigned membership without clearing text."""
+        self._projects.pop(project_id, None)
+        self.sidebar.remove_project(project_id)
+        self._threads_loaded.discard(project_id)
+        self._thread_requests.pop(project_id, None)
+        self._target = self.service.selected_target
+        self._history_pending = None
+        self._threads_loaded.discard(None)
+        self._list_threads(None)
+        self.sidebar.set_selection(
+            self._target.project_id,
+            self._target.thread_id if isinstance(self._target, StoredConversationTarget) else None,
+        )
+        self._update_heading()
+        self._render()
+
     def _reset_requests(self) -> None:
         self._projects_pending = False
         self.sidebar.set_projects_loading(False)
@@ -414,6 +461,7 @@ class ConversationController(QObject):
                 self._list_threads(project_id)
         self.sidebar.set_listing_enabled(listing)
         self.sidebar.set_actions_enabled(self.can_switch)
+        self.sidebar.set_management_enabled(self.can_switch)
         self.panel.history_button.setVisible(self._history_cursor is not None)
         self.panel.history_button.setEnabled(
             listing and self._history_pending is None and self._selection_pending is None

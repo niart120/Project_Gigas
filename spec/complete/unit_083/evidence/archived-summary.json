@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "runtime": "0.167.0",
+  "zero_member_update": true,
+  "archived_rename": true,
+  "archived_delete_retains_history_cwd_and_archive": true,
+  "management_no_model_requests": true
+}

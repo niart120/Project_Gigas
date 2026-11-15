@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from gigas.services.projects import ProjectDeleted, ProjectDetails, ProjectFolderStatus
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -69,9 +71,26 @@ class HistoryResult:
     page: "TurnPage"
 
 
-type ManagementOperation = Literal["projects", "threads", "new", "select", "history"]
+type ManagementOperation = Literal[
+    "projects",
+    "threads",
+    "new",
+    "select",
+    "history",
+    "project_inspect",
+    "project_folder",
+    "project_update",
+    "project_delete",
+]
 type ManagementValue = (
-    ProjectPage | ThreadPage | NewConversationTarget | BrowseResult | HistoryResult
+    ProjectPage
+    | ThreadPage
+    | NewConversationTarget
+    | BrowseResult
+    | HistoryResult
+    | ProjectDetails
+    | ProjectDeleted
+    | ProjectFolderStatus
 )
 
 

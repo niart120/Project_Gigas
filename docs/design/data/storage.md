@@ -16,6 +16,10 @@ Projectは作業資料を共有する単位で、会話はCodexのthreadに対�
 
 Codex専用homeの内部形式はapp-serverが管理する。GIGASのゲームI/O記録からCodexの会話を再構成するものではない。
 
+## Projectの登録変更
+
+Projectのフォルダー変更は登録rootと所属チャットのcwdを公開APIで更新する。旧ファイルは移動せず、新しい明示実行は`新root/records/<同じthread-id>/`へ追記する。登録削除ではチャットは保存済みcwdを保持して未所属になる。GIGASは更新進捗の永続台帳を作らず、再起動後も公開metadataから不一致を判定する。詳細は[プロジェクト管理仕様](../functions/projects.md)を参照する。
+
 ## アプリ設定
 
 設定はUTF-8のTOMLで保存し、`capture`、`observation`、`controller.serial`、`agent`、`gui`、`project`の各テーブルを使う。ファイルがなければ既定値で開始する。既存ファイルの構文や値が不正な場合はエラーを返す。

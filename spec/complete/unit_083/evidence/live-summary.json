@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "runtime": "0.167.0",
+  "model": "gpt-6.1-sol",
+  "thread_id": "01a1df4d-0293-7360-a95c-e369d4886752",
+  "old": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\old",
+  "new": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\new",
+  "same_id": true,
+  "history_turns": 2,
+  "management_no_turn": true,
+  "old_records_unchanged": true,
+  "new_records": [
+    "dialogue.submitted",
+    "dialogue.message",
+    "observation.recorded",
+    "input.operation_started",
+    "observation.recorded",
+    "input.operation_finished",
+    "dialogue.message"
+  ],
+  "new_pngs": 2,
+  "write_proof": true,
+  "input": "neutral only, sent; no hardware ACK",
+  "delete": "registration removed, chat retained"
+}

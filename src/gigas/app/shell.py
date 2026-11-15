@@ -9,6 +9,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from gigas.app.conversations import ConversationController
+from gigas.app.projects import ProjectController
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
 from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
@@ -169,6 +170,7 @@ class ApplicationShell(QObject):
         self.service.manual_completed.connect(self._manual_completed)
         self.service.finished.connect(self._service_finished)
         self.conversations = ConversationController(self.window, self.service, self)
+        self.projects = ProjectController(self.window, self.service, self.conversations, self)
         panel.state_changed.connect(self._render)
 
     def start(self) -> None:

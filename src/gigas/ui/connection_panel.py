@@ -100,6 +100,7 @@ class ConnectionPanel(QWidget):
         self._status = SessionStatus("closed")
         self._conversation = ConversationStatus()
         self._input_busy = False
+        self._project_busy = False
         self._management_availability: tuple[bool, bool] | None = None
         self._pending: set[str] = set()
         self._submitted = ""
@@ -246,6 +247,11 @@ class ConnectionPanel(QWidget):
         self._input_busy = busy
         self._render()
 
+    def set_project_busy(self, busy: bool) -> None:
+        """Suspend execution controls during project changes, retaining stop and drafts."""
+        self._project_busy = busy
+        self._render()
+
     def begin_loading(self, project: str, title: str) -> None:
         """Hide retained content while fetching the named candidate's first page.
 
@@ -283,6 +289,7 @@ class ConnectionPanel(QWidget):
             and self._settings_ready
             and not self._display.loading
             and not self._input_busy
+            and not self._project_busy
             and not state.sending
             and not state.stopping
             and state.turn_id is None
@@ -617,6 +624,7 @@ class ConnectionPanel(QWidget):
         stopping = conversation.stopping or "stop" in self._pending
         accepting = (
             available
+            and not self._project_busy
             and self._settings_ready
             and self._connected
             and can_submit(self._status, conversation)
@@ -646,6 +654,7 @@ class ConnectionPanel(QWidget):
             view.refresh(available=self._answers_available)
         running = (
             self._input_busy
+            or self._project_busy
             or goal_active
             or conversation.turn_id is not None
             or conversation.sending
