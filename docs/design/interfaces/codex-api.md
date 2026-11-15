@@ -23,13 +23,15 @@ GIGASが使用する通信・実行設定は[Codex接続仕様](codex.md)、通�
 
 ## Project管理API
 
-`gigas.runtime.codex.management.CodexManagement(connection)`は、開いている`CodexConnection`を通してProjectを作成・一覧・取得します。接続の終了は呼出し側が担当します。管理操作はモデルの選択やWindows実行環境の準備を要求せず、threadの開始・resume、MCPや記録部品の準備を行いません。
+`gigas.runtime.codex.management.CodexManagement(connection)`は、開いている`CodexConnection`を通してProjectを作成・一覧・取得・更新・削除します。接続の終了は呼出し側が担当します。このAPI自体はモデルの選択やWindows実行環境の準備を要求せず、threadの開始・resume、MCPや記録部品の準備を行いません。複数チャットの追従は上位サービスが調整します。
 
 | メソッド | 入力と結果 |
 | --- | --- |
 | `create_project(name, root, *, idempotency_key)` | 呼出し側が決めた作成操作のキーと絶対パスの`Path`を渡し、`ProjectInfo`を取得する |
 | `list_projects(*, cursor=None, limit=None)` | サーバー順の1ページを`ProjectPage`として取得する。省略した値はサーバーの既定値を使う |
 | `read_project(project_id)` | 指定IDの最新の`ProjectInfo`を取得する |
+| `update_project(project_id, *, name, root=None)` | 空白を除いた表示名と任意の絶対rootで更新し、`ProjectInfo`を返す。root省略は既存rootsを保持する |
+| `delete_project(project_id)` | 登録だけを削除する。チャットとファイルは保持し、正常応答では`None`を返す |
 
 `ProjectInfo`は`id`、`name`、`root: Path`を持ちます。作業フォルダーは1件に限り、複数rootsのProjectは対応対象外です。フォルダーの作成・選択・存在確認は呼出し側が行います。管理APIはディレクトリを作成せず、Projectの位置や一覧を別途保存しません。
 
@@ -43,7 +45,7 @@ GIGASが使用する通信・実行設定は[Codex接続仕様](codex.md)、通�
 
 | メソッド | 入力と結果 |
 | --- | --- |
-| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None)` | 指定Projectの会話を`ThreadPage`で取得する。`None`は明示的に未所属を選び、全モデルプロバイダーを対象にする |
+| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None, archived=None)` | 指定Projectの会話を`ThreadPage`で取得する。project_idの`None`は未所属。全モデルプロバイダーを対象にし、archivedはTrueでアーカイブ済み、Falseで通常、Noneでサーバーの既定条件を使う |
 | `read_thread(thread_id)` | `includeTurns=false`で`ThreadInfo`を取得する。本文の一括取得は行わない |
 | `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None)` | `itemsView=full`を明示し、1ページのturnと各turnに含まれる公開itemを`TurnPage`で取得する |
 | `list_items(thread_id, *, turn_id=None, cursor=None, limit=None, sort_direction=None)` | 1ページの公開itemを`ItemPage`で取得する。`turn_id`指定時はそのturnに絞る |

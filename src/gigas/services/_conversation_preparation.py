@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from gigas.runtime.codex import _conversation_protocol as protocol
 from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.management import CodexManagement
+from gigas.services._project_management import ProjectManagement
 from gigas.services.conversations import StoredConversationTarget
 from gigas.storage.records import RecordError
 
@@ -87,6 +88,32 @@ class ThreadPreparation:
             if self.thread_id is not None:
                 await self._resources.bind_records(self.thread_id)
                 return self.thread_id
+            if target.project_id is not None:
+                # Run under the submission's sending/stop ownership, before files open.
+                details = await ProjectManagement(
+                    self._connection,
+                    check=lambda: None,
+                    release=self._resources.close,
+                    settings=settings,
+                ).inspect(target.project_id)
+                if details.pending:
+                    message = (
+                        "プロジェクトのフォルダー更新が未完了です。"
+                        "編集画面で保存を再試行してください"
+                    )
+                    raise CodexConnectionError(message)
+                if (
+                    isinstance(target, StoredConversationTarget)
+                    and target.cwd != details.project.root
+                ):
+                    member = next((t for t in details.threads if t.id == target.thread_id), None)
+                    if member is None:
+                        message = (
+                            "チャットの所属・作業場所を確認できません。会話を選び直してください"
+                        )
+                        raise CodexConnectionError(message)
+                    self._selection.refresh_thread(member)
+                    target = self._selection.target
             if isinstance(target, StoredConversationTarget):
                 configuration = await self._resources.prepare_existing(
                     target.cwd, start_input, project_id=target.project_id

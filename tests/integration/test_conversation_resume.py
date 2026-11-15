@@ -19,6 +19,10 @@ def _stored(c: Conversation, cwd: Path, goal: GoalState | None = None) -> None:
     assert isinstance(c.peer, ResumePeer)
     c.selection.adopt_started("thread-1", cwd, c.peer.project_id)
     c.selection.retain_goal("thread-1", goal)
+    if c.peer.project_id is not None:
+        c.peer.responses["project/read"] = {
+            "project": {"id": c.peer.project_id, "name": "Project", "roots": [{"path": str(cwd)}]}
+        }
     if goal is not None:
         c.peer.goal = {
             "objective": goal.objective,
@@ -52,8 +56,9 @@ def test_existing_send_resumes_saved_cwd_with_current_settings_and_same_records(
             assert c.execution.loaded
             assert await c.execution.send("additional") == "turn-1"
             requests = [(m, p) for m, p in c.peer.calls if m.startswith(("thread/", "turn/"))]
-            assert [m for m, _ in requests] == ["thread/resume", "turn/start", "turn/start"]
-            params = requests[0][1]
+            reads = ["thread/list", "thread/list"] if project_id is not None else []
+            assert [m for m, _ in requests] == [*reads, "thread/resume", "turn/start", "turn/start"]
+            params = next(p for m, p in requests if m == "thread/resume")
             assert params is not None
             assert (params["threadId"], params["cwd"], params["model"]) == (
                 "thread-1",

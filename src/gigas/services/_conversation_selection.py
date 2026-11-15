@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from gigas.runtime.codex import _conversation_protocol as protocol
@@ -123,6 +124,36 @@ class ConversationSelection:
         self._target = StoredConversationTarget(thread_id, cwd, project_id)
         self._thread = None
         self._goals = GoalTracker()
+
+    def refresh_project(self, project_id: str, root: "Path | None") -> None:
+        """Refresh only the selected assignment after a confirmed management change.
+
+        Args:
+            project_id: Registration affected by the completed operation.
+            root: Confirmed new workspace, or None when the registration was deleted.
+        """
+        if self._target.project_id != project_id:
+            return
+        assignment = project_id if root is not None else None
+        if isinstance(self._target, StoredConversationTarget):
+            self._target = replace(
+                self._target, cwd=root or self._target.cwd, project_id=assignment
+            )
+            if self._thread is not None:
+                self._thread = replace(
+                    self._thread, cwd=root or self._thread.cwd, project_id=assignment
+                )
+        else:
+            self._target = NewConversationTarget(assignment)
+
+    def refresh_thread(self, thread: "ThreadInfo") -> None:
+        """Adopt metadata for the same selected ID without replacing history or Goal."""
+        if (
+            isinstance(self._target, StoredConversationTarget)
+            and self._target.thread_id == thread.id
+        ):
+            self._target = StoredConversationTarget(thread.id, thread.cwd, thread.project_id)
+            self._thread = thread
 
     async def select_model(self, connection: "CodexConnection", model: str, effort: str) -> None:
         """Validate and retain catalog values without loading or updating a thread."""

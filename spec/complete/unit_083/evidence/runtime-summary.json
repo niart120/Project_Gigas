@@ -1,0 +1,11 @@
+{
+  "runtime": "0.167.0",
+  "threads": 3,
+  "same_ids": true,
+  "same_history": true,
+  "new_cwd": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\product-manager-6f131145-aca3-45c7-8e2d-3d6d508ed3ea\\new",
+  "old_folder_missing": true,
+  "no_new_model_requests": true,
+  "delete_retains_threads": true,
+  "result": "PASS"
+}

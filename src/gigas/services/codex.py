@@ -18,6 +18,11 @@ from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
 from gigas.services._conversation_selection import ConversationSelection
+from gigas.services._project_management import (
+    ProjectManagement,
+    ProjectUpdateError,
+    directory_status,
+)
 from gigas.services._workspaces import select_project
 from gigas.services.codex_models import (
     AnswerOutcome,
@@ -29,8 +34,9 @@ from gigas.services.codex_models import (
     ServiceOperation,
     ServiceResult,
 )
-from gigas.services.conversations import ManagementResult
+from gigas.services.conversations import ManagementResult, StoredConversationTarget
 from gigas.services.input import InputService, OperationResult
+from gigas.services.projects import ProjectFolderStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -132,6 +138,7 @@ class CodexService:
         self._connection: CodexConnection | None = None
         self._closing: asyncio.Task[None] | None = None
         self._tasks: dict[asyncio.Task[None], _OperationContext | None] = {}
+        self._project_task: asyncio.Task[object] | None = None
 
     def connect_runtime(self, options: "ConnectionOptions", generation: int) -> None:
         """Start the connection attempt identified by the application's request number."""
@@ -167,6 +174,75 @@ class CodexService:
         self._submit_management(
             "projects", lambda c: CodexManagement(c).list_projects(cursor=cursor)
         )
+
+    def inspect_project(self, project_id: str) -> None:
+        """Read all project members and directory availability without execution."""
+        self._submit_management(
+            "project_inspect",
+            lambda c: self._project_manager(c).inspect(project_id),
+            project_id=project_id,
+        )
+
+    def probe_project_folder(self, project: "ProjectInfo") -> None:
+        """Check only one listed folder, retaining lazy conversation-list fetching."""
+        self._submit_management(
+            "project_folder", lambda _c: self._probe_folder(project), project_id=project.id
+        )
+
+    async def _probe_folder(self, project: "ProjectInfo") -> ProjectFolderStatus:
+        status = await asyncio.to_thread(directory_status, project.root)
+        return ProjectFolderStatus(project, status)
+
+    def update_project(self, expected: "ProjectInfo", *, name: str, root: "Path") -> None:
+        """Save an edit and reconcile member workspaces through public metadata."""
+        self._submit_management(
+            "project_update",
+            lambda c: self._update_project(c, expected, name=name, root=root),
+            project_id=expected.id,
+        )
+
+    def delete_project(self, expected: "ProjectInfo") -> None:
+        """Delete a registration while retaining the selected conversation and draft."""
+        self._submit_management(
+            "project_delete", lambda c: self._delete_project(c, expected), project_id=expected.id
+        )
+
+    def _project_manager(self, connection: CodexConnection) -> ProjectManagement:
+        generation = self._active_generation
+
+        def check() -> None:
+            if self._require_management(generation) is not connection:
+                raise CodexConnectionError("プロジェクト操作中に接続が変わりました")
+
+        return ProjectManagement(
+            connection,
+            check=check,
+            release=lambda: self._release_selection(connection),
+            settings=self._execution_settings,
+        )
+
+    async def _update_project(
+        self, connection: CodexConnection, expected: "ProjectInfo", *, name: str, root: "Path"
+    ) -> "ManagementValue":
+        result = await self._project_manager(connection).update(expected, name=name, root=root)
+        if not result.pending:
+            self._selection.refresh_project(expected.id, result.project.root)
+        return result
+
+    async def _delete_project(
+        self, connection: CodexConnection, expected: "ProjectInfo"
+    ) -> "ManagementValue":
+        generation = self._active_generation
+        result = await self._project_manager(connection).delete(expected)
+        target = self._selection.target
+        if isinstance(target, StoredConversationTarget) and target.project_id == expected.id:
+            metadata = await CodexManagement(connection).read_thread(target.thread_id)
+            if self._require_management(generation) is not connection:
+                raise CodexConnectionError("プロジェクト操作中に接続が変わりました")
+            self._selection.refresh_thread(metadata)
+        else:
+            self._selection.refresh_project(expected.id, None)
+        return result
 
     def list_threads(self, project_id: str | None, *, cursor: str | None = None) -> None:
         """Read one assignment page; None explicitly requests unassigned threads."""
@@ -339,6 +415,10 @@ class CodexService:
         This is an application coordination boundary; it emits no command result
         and does not release unrelated input when there is no conversation.
         """
+        task = self._project_task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
         if self._conversation is not None:
             await self._conversation.stop()
 
@@ -482,6 +562,11 @@ class CodexService:
             if command.operation == "stop":
                 return None
             raise CodexConnectionError("この接続では送信を受け付けない")
+        if self._project_task is not None:
+            if command.operation == "stop":
+                await self.stop_execution()
+                return None
+            raise CodexConnectionError("プロジェクトの更新が完了していません")
         if command.operation != "stop" and self._selection.busy:
             raise CodexConnectionError("会話の選択・操作が完了していません")
         return await call(execution)
@@ -523,6 +608,21 @@ class CodexService:
         generation = self._generation
         self._track(asyncio.create_task(self._manage(generation, operation, call, project_id)))
 
+    def _admit_management(
+        self, connection: CodexConnection, operation: "ManagementOperation"
+    ) -> None:
+        if self._project_task is not None and operation in {
+            "new",
+            "select",
+            "project_update",
+            "project_delete",
+        }:
+            raise CodexConnectionError("プロジェクトの更新が完了していません")
+        if operation in {"project_update", "project_delete"}:
+            self._require_switch(connection)
+            if self._selection.busy:
+                raise CodexConnectionError("会話の選択が完了していません")
+
     async def _manage(
         self,
         generation: int,
@@ -533,12 +633,34 @@ class CodexService:
         target = self._selection.target
         value = None
         error = ""
+        mutation = operation in {"project_update", "project_delete"}
+        owner = asyncio.current_task()
+        connection = None
         try:
-            value = await call(self._require_management(generation))
+            connection = self._require_management(generation)
+            self._admit_management(connection, operation)
+            if mutation:
+                self._project_task = owner
+            value = await call(connection)
+        except ProjectUpdateError as failure:
+            error = str(failure)
+            if connection is self._connection and generation == self._active_generation:
+                await self._close_connection()
+        except asyncio.CancelledError:
+            error = "プロジェクト操作を中断しました。接続し直し、保存状態を確認してください"
+            if (
+                mutation
+                and connection is self._connection
+                and generation == self._active_generation
+            ):
+                await self._close_connection()
         except CodexConnectionError as failure:
             error = str(failure)
         except Exception:  # noqa: BLE001 -- public boundary must not expose upstream text.
             error = "会話管理の操作に失敗しました"
+        finally:
+            if self._project_task is owner:
+                self._project_task = None
         if operation == "history" and (
             target is not self._selection.target or generation != self._active_generation
         ):
@@ -655,6 +777,8 @@ class CodexService:
     async def _select_project(
         self, path: "Path", *, generation: int, create: bool
     ) -> "ProjectInfo":
+        if self._project_task is not None:
+            raise CodexConnectionError("プロジェクトの更新が完了していません")
         connection = self._require_management(generation)
         execution = self._require_switch(connection)
         target = self._selection.target

@@ -1,0 +1,152 @@
+[
+  {
+    "method": "project/list"
+  },
+  {
+    "method": "project/create"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "config/read"
+  },
+  {
+    "method": "thread/start",
+    "cwd": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\old",
+    "runtimeWorkspaceRoots": [
+      "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\old"
+    ],
+    "sandbox": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": true,
+      "excludeSlashTmp": true
+    }
+  },
+  {
+    "method": "turn/start"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/read"
+  },
+  {
+    "method": "thread/goal/get"
+  },
+  {
+    "method": "thread/unsubscribe"
+  },
+  {
+    "method": "project/update"
+  },
+  {
+    "method": "thread/read"
+  },
+  {
+    "method": "thread/goal/get"
+  },
+  {
+    "method": "thread/unsubscribe"
+  },
+  {
+    "method": "config/read"
+  },
+  {
+    "method": "thread/resume",
+    "cwd": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\new",
+    "runtimeWorkspaceRoots": [
+      "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\new"
+    ],
+    "sandbox": {
+      "type": "readOnly",
+      "networkAccess": false
+    }
+  },
+  {
+    "method": "thread/unsubscribe"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/read"
+  },
+  {
+    "method": "thread/goal/get"
+  },
+  {
+    "method": "thread/turns/list"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "thread/list"
+  },
+  {
+    "method": "config/read"
+  },
+  {
+    "method": "thread/resume",
+    "cwd": "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\new",
+    "runtimeWorkspaceRoots": [
+      "E:\\documents\\VSCodeWorkspace\\Project_Gigas\\tmp\\project-removal-ux\\acceptance-dd328ceb-eb09-45f3-9556-f7daf5129346\\new"
+    ],
+    "sandbox": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": true,
+      "excludeSlashTmp": true
+    }
+  },
+  {
+    "method": "turn/start"
+  },
+  {
+    "method": "thread/turns/list"
+  },
+  {
+    "method": "project/read"
+  },
+  {
+    "method": "thread/unsubscribe"
+  },
+  {
+    "method": "project/delete"
+  },
+  {
+    "method": "project/list"
+  },
+  {
+    "method": "thread/read"
+  }
+]

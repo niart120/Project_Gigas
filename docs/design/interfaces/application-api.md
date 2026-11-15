@@ -56,6 +56,23 @@ Codex切断では、切断開始時に捕捉した有限操作の終了を待ち
 | `select_conversation(thread_id)` | `select` / `BrowseResult`。保存cwdが欠けていても閲覧できる |
 | `load_history(*, cursor=None)` | `history` / `HistoryResult`。追加取得は送信・切替を妨げない |
 
+## プロジェクトの編集・削除API
+
+`ApplicationServiceThread`と`CodexService`は次の操作を提供します。結果は同じ`management_completed`へ要求時の世代・project_id付きで返します。
+
+| メソッド | operationと成功時のvalue |
+|---|---|
+| `probe_project_folder(project)` | `project_folder` / `ProjectFolderStatus`。一覧取得済みの保存値に対する所在確認だけを行う |
+| `inspect_project(project_id)` | `project_inspect` / `ProjectDetails`。登録、通常・アーカイブ済みの全所属、所在確認を返す |
+| `update_project(expected, *, name, root)` | `project_update` / `ProjectDetails`。編集開始時の`ProjectInfo`と照合し、登録と既存チャットを更新する |
+| `delete_project(expected)` | `project_delete` / `ProjectDeleted`。全ページの一覧で登録がないことを確認する |
+
+`ProjectDetails.pending`は登録rootと異なるcwdの通常チャットです。永続的な進捗ではありません。更新はサービス内で直列化し、保存中の送信・新規開始・切替を拒否します。停止は管理更新を中断して接続を回収し、部分失敗・結果不明は再接続・再取得後の明示的な再試行で扱います。通常のフォルダー追従は購読解除→読取り専用resume→購読解除を使い、次の明示実行で書込み範囲と実行資源を準備し直します。詳細は[プロジェクト管理仕様](../functions/projects.md)を参照してください。
+
+サイドバーの`edit_requested(project_id)`・`delete_requested(project_id)`は管理操作の意図だけを通知します。`set_management_enabled(bool)`は管理メニューの受付、`set_directory_status(project_id, status)`は`available`・`missing`・`unavailable`の所在アイコン、`remove_project(project_id)`は登録行の削除です。`ConnectionPanel.set_project_busy(bool)`は管理保存中の送信・切替を閉じ、原稿編集・停止・切断を残します。
+
+## 選択・再開の受付条件
+
 切替はturn・active Goal・送信・停止・入力回収が終わってから行います。実行中の切替は拒否し、自動停止や予約はしません。候補取得後に旧購読を解除し、要求を失効させ、MCP受付・回答配送・保存を回収してから採用します。同じcwdの別会話でも旧MCP入口を閉じます。取得・解放に失敗すると選択と表示済み履歴を保持しますが、解放済みの実行をロード済みとは扱いません。
 
 閲覧中の`select_model`はモデル候補だけを変更し、`clear_goal`は選択IDへ直接削除を要求します。削除には接続・認証が必要ですが、モデル・sandbox・cwd・MCPの準備は不要です。削除が発生した応答は対応する公開通知まで待ち、削除なしの応答は通知を待ちません。`browse_goal_changed(generation, BrowseGoalEvent(target, goal))`は閲覧対象のGoal通知で、実行状態の`ConversationStatus`へ合成しません。削除待機中も停止・切断・終了を受け付けます。

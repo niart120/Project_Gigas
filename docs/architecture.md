@@ -27,7 +27,7 @@ flowchart LR
 
 | 配置 | 主な責務 |
 |---|---|
-| `app/` | 起動、画面とサービスの組立て、設定の保存・適用、会話選択・映像表示の調整、終了 |
+| `app/` | 起動、画面とサービスの組立て、設定の保存・適用、会話選択・プロジェクト管理・映像表示の調整、終了 |
 | `ui/` | ウィジェット、操作の受付、会話・状態・映像の表示 |
 | `services/application.py` | GUIからの要求の配送、Codexと入力サービスの寿命、停止・入力接続変更の連携 |
 | `services/codex.py` と会話関連の内部モジュール | Codex接続、会話選択と実行、Goal、作業場所・記録・MCPの準備と解放 |
@@ -67,6 +67,8 @@ MCPの`observe`は最新キャッシュを取り出し、`ObservationService`が
 ## 会話と保存の境界
 
 CodexはGIGAS用の専用homeで起動する。Project・会話履歴・Goal・標準自動記憶はapp-serverのAPIで管理し、履歴の閲覧と会話の実行再開を分ける。
+
+`ProjectController`は管理メニュー・編集・確認と結果の表示を担う。`CodexService`は管理更新を直列化し、`ProjectManagement`へ全所属の取得・追従・最終確認を委ねる。管理用の読取り専用resumeと、次の明示実行の準備を分け、ファイル移動や独自Project台帳を保存部品へ持ち込まない。
 
 GIGASの会話資源は、作業フォルダー、会話IDに対応する`records/<thread-id>/`、ゲームMCP、観測・保存サービスを束ねる。作業フォルダーの選択と記録先の決定は呼出し側が行い、`GameIoRecordWriter`は渡された保存先のファイルと整合を扱う。
 

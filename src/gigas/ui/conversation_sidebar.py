@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -103,6 +104,8 @@ class _ConversationGroup(QWidget):
     new_requested = Signal()
     thread_requested = Signal(str)
     more_requested = Signal(str)
+    edit_requested = Signal()
+    delete_requested = Signal()
 
     def __init__(self, name: str, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -115,6 +118,9 @@ class _ConversationGroup(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
+        self.warning = QLabel(self)
+        self.warning.hide()
+        row.addWidget(self.warning)
         self.heading = _GroupButton(self)
         self.heading.setCheckable(True)
         self.heading.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -126,8 +132,25 @@ class _ConversationGroup(QWidget):
         self.new_button.setAccessibleName("新しい会話")
         self.new_button.setAutoRaise(True)
         self.new_button.clicked.connect(self.new_requested)
+        self.menu = QMenu(self)
+        self.edit_action = self.menu.addAction("編集")
+        self.delete_action = self.menu.addAction("プロジェクトを削除")
+        self.edit_action.triggered.connect(self.edit_requested)
+        self.delete_action.triggered.connect(self.delete_requested)
+        self.menu_button = QToolButton(self)
+        self.menu_button.setText("…")
+        self.menu_button.setAccessibleName("プロジェクトの操作")
+        self.menu_button.setToolTip("")
+        self.menu_button.setAutoRaise(True)
+        self.menu_button.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu_button.setMenu(self.menu)
+        self.menu_button.hide()
+        self.heading.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.heading.customContextMenuRequested.connect(self._context_menu)
         row.addWidget(self.heading, 1)
         row.addWidget(self.new_button)
+        row.addWidget(self.menu_button)
         layout.addLayout(row)
         self.content = QWidget(self)
         content = QVBoxLayout(self.content)
@@ -162,6 +185,30 @@ class _ConversationGroup(QWidget):
         self.heading.setAccessibleName(name)
         self.heading.setToolTip("")
         self.threads.setAccessibleName(name)
+
+    def _context_menu(self, point: object) -> None:
+        del point
+        if not self.menu_button.isHidden() and self.menu_button.isEnabled():
+            self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
+
+    def set_directory_status(self, status: str) -> None:
+        """Show distinct native icons for a missing folder and failed inspection."""
+        if status == "available":
+            self.warning.hide()
+            self.warning.setAccessibleName("")
+            return
+        unavailable = status == "unavailable"
+        icon = self.style().standardIcon(
+            QStyle.StandardPixmap.SP_MessageBoxCritical
+            if unavailable
+            else QStyle.StandardPixmap.SP_MessageBoxWarning
+        )
+        self.warning.setPixmap(icon.pixmap(16, 16))
+        self.warning.setAccessibleName(
+            "フォルダーを確認できません" if unavailable else "フォルダーなし"
+        )
+        self.warning.setToolTip("")
+        self.warning.show()
 
     def _expand(self, expanded: bool) -> None:
         self.heading.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
@@ -250,6 +297,8 @@ class ConversationSidebar(QScrollArea):
     thread_requested = Signal(str)
     projects_more_requested = Signal(str)
     threads_more_requested = Signal(object, str)
+    edit_requested = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Create an empty unassigned group with conversation actions disabled."""
@@ -258,6 +307,7 @@ class ConversationSidebar(QScrollArea):
         self._enabled = False
         self._listing_enabled = False
         self._loading = False
+        self._management_enabled = False
         self._cursor: str | None = None
         self._selection: tuple[str | None, str | None] = (None, None)
         self.setWidgetResizable(True)
@@ -288,6 +338,11 @@ class ConversationSidebar(QScrollArea):
         group.more_requested.connect(
             lambda cursor: self.threads_more_requested.emit(project_id, cursor)
         )
+        if project_id is not None:
+            group.menu_button.show()
+            group.menu_button.setEnabled(self._management_enabled)
+            group.edit_requested.connect(lambda: self.edit_requested.emit(project_id))
+            group.delete_requested.connect(lambda: self.delete_requested.emit(project_id))
         self._rows.addWidget(group)
         self._groups[project_id] = group
         group.set_actions_enabled(self._enabled)
@@ -303,6 +358,27 @@ class ConversationSidebar(QScrollArea):
             self._add_group(project.id, project.name)
         else:
             group.set_name(project.name)
+
+    def set_management_enabled(self, enabled: bool) -> None:
+        """Set project-menu admission independently of list expansion."""
+        self._management_enabled = enabled
+        for project_id, group in self._groups.items():
+            if project_id is not None:
+                group.menu_button.setEnabled(enabled)
+
+    def set_directory_status(self, project_id: str, status: str) -> None:
+        """Reflect a completed folder probe without modifying the project name."""
+        group = self._groups.get(project_id)
+        if group is not None:
+            group.set_directory_status(status)
+
+    def remove_project(self, project_id: str) -> None:
+        """Remove a confirmed deleted registration without touching other groups."""
+        group = self._groups.pop(project_id, None)
+        if group is not None:
+            self._rows.removeWidget(group)
+            group.hide()
+            group.deleteLater()
 
     def expand_project(self, project_id: str) -> None:
         """Expand a displayed Project and emit its normal list-loading request.

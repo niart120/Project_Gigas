@@ -169,6 +169,7 @@ def test_disconnect_drains_sent_resume_without_submitting_body_and_retains_targe
         assert not s.service.codex._resources.records_bound
         # Reconnection constructs a fresh loader while retaining the same saved ID.
         s.peer = resumed = ResumePeer("project-1")
+        resumed.responses["project/read"] = peer.responses["project/read"]
         s.service.set_execution_settings(ExecutionSettings(False, False, "user"))
         assert not s.command(
             "connect",
