@@ -16,7 +16,7 @@
 
 ## 4. 関連文書・着手条件・調査
 
-[03 I/O](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[07 検証](../../initial/07-verification.md)、[08 SDK](../../initial/08-sdk-compatibility.md)、[10 UI](../../initial/10-ui-interaction.md)、[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を参照する。
+[03 I/O](../../archive/initial/03-game-io.md)、[04 保存](../../archive/initial/04-agent-memory.md)、[07 検証](../../archive/initial/07-verification.md)、[08 SDK](../../archive/initial/08-sdk-compatibility.md)、[10 UI](../../archive/initial/10-ui-interaction.md)、[M1実装](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)を参照する。
 
 着手時はM1コードと既存試験が存在し、MCP・保存先UIは未結合だった。R02/R04を再確認・修正したうえで結合した。現在はMCP SDK 2.3.0とCodex 0.167.0による製品経路の固定画像受信、後のターンでの保存画像参照、終了後の公開thread/readを確認済み。短命Bearerは当該実会話のrolloutと今回のアプリ記録に残らなかった。走査範囲を超える非保存や実機受入の証明とはしない。詳細と残件は第9節に記録する。
 

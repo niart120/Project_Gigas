@@ -14,7 +14,7 @@ BT、Goal、自動再接続、入力の暗黙分割、dynamic tool、非同期�
 
 ## 4. 関連文書・着手条件
 
-[U05親](../unit_010/INPUT_AND_STOP.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)、[M1](../../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)、[責務分離](../../complete/unit_041/INPUT_FAILURE_SEPARATION.md)、[ゲームI/O](../../initial/03-game-io.md)、[SDK互換性](../../initial/08-sdk-compatibility.md)に従う。
+[U05親](../unit_010/INPUT_AND_STOP.md)、[M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)、[M1](../../complete/unit_038/INPUT_EXECUTION_AND_OBSERVATION.md)、[責務分離](../../complete/unit_041/INPUT_FAILURE_SEPARATION.md)、[ゲームI/O](../../archive/initial/03-game-io.md)、[SDK互換性](../../archive/initial/08-sdk-compatibility.md)に従う。
 
 M1内部API・最新キャッシュ観測・非同期保存を利用する。公開経路は同期MCPを継続し、呼出し期限の初期値を300秒とする。採用Codexの既定値と数秒〜1分中心の用途を根拠とした設計判断であり、MCP共通の最大値ではない。Codexへは`tool_timeout_sec`を明示し、Gigas側も受付後の期限を持つ。無期限化・progressによる延長は前提にしない。非同期タスク・ポーリング、dynamic tool経路への製品変更は今回行わない。
 
@@ -108,7 +108,7 @@ ui/settings_dialog.py、app/shell.py、services/codex.py、runtime/codex/、mcp/
 
 ## 9. 未確認事項
 
-B解除ACK、writeの最悪所要時間、DTR/RTSによるreset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過の実待機は未検証。[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)の機器条件・継続運転の確認へ引き継ぐ。65秒の成功、短縮期限、CH552の短い実操作という確認範囲を越えた保証はしない。
+B解除ACK、writeの最悪所要時間、DTR/RTSによるreset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過の実待機は未検証。[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)の機器条件・継続運転の確認へ引き継ぐ。65秒の成功、短縮期限、CH552の短い実操作という確認範囲を越えた保証はしない。
 
 ## 10. 完了条件
 

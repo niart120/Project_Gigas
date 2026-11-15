@@ -1,4 +1,4 @@
 interface:
   display_name: "Test Desiderata Review"
-  short_description: "Review test value"
-  default_prompt: "Review a proposed test for value, cost, and maintenance trade-offs."
+  short_description: "Evaluate test value and maintenance costs"
+  default_prompt: "Use $test-desiderata-review to assess the requested tests and suggest improvements for the bugs they should detect."

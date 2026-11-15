@@ -1,6 +1,6 @@
 # U06 Goalによる継続と途中介入 親仕様
 
-> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
+> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../archive/initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
 
 ## 1. 目的・状態・起点
 
@@ -8,7 +8,7 @@
 
 状態: **complete、2026-11-13にM0〜M3と工程全体の受入を完了**。M1は文脈内の質問/承認、常設目標と一体型入力、次turnのモデル選択までを含む。各子工程の根拠は第6節、今回の実証と制約は[M3](../unit_050/GOAL_ACCEPTANCE.md)へ集約する。APIキー認証・PR・mergeは対象外。公開API・隔離接続・Qt試作の結果を製品/実機の受入と混同しない。
 
-起点は[実装計画](../../initial/05-implementation.md)、[認証と実行設定の分離](../../initial/02-runtime.md)、[主画面とメッセージ操作](../../initial/10-ui-interaction.md)。利用場面は明示的な継続開始、公開計画の確認、質問回答/追加指示/承認、停止と同一セッション再開。
+起点は[実装計画](../../archive/initial/05-implementation.md)、[認証と実行設定の分離](../../archive/initial/02-runtime.md)、[主画面とメッセージ操作](../../archive/initial/10-ui-interaction.md)。利用場面は明示的な継続開始、公開計画の確認、質問回答/追加指示/承認、停止と同一セッション再開。
 
 ## 2. 前提と着手条件
 
@@ -24,7 +24,7 @@ M2で公開Goalの自律turnを採用し、サービスのrunを明示開始か�
 
 ## 4. 関連文書
 
-[02 実行管理](../../initial/02-runtime.md)、[04 記憶・保存](../../initial/04-agent-memory.md)、[07 検証](../../initial/07-verification.md)、[08 公開APIと根拠](../../initial/08-sdk-compatibility.md)、[09 処理順序](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md)。API調査はM0、製品結合はM1/M2、実接続受入と残る制約はM3子仕様が所有する。
+[02 実行管理](../../archive/initial/02-runtime.md)、[04 記憶・保存](../../archive/initial/04-agent-memory.md)、[07 検証](../../archive/initial/07-verification.md)、[08 公開APIと根拠](../../archive/initial/08-sdk-compatibility.md)、[09 処理順序](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md)。API調査はM0、製品結合はM1/M2、実接続受入と残る制約はM3子仕様が所有する。
 
 ## 5. 採用した契約と確認範囲
 
@@ -98,7 +98,7 @@ M3の実機はUSB Video Device、COM8・CH552・9600 baud。入力・memory書�
 
 ### 後続工程と対象外
 
-[U07](../../initial/05-implementation.md#u07-retired)は追加指示による計画的終了、[U08](../../complete/unit_013/RESUME.md)は保存参照・アプリ再起動後の復旧、[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)は記憶の整理・保守、[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)は上表の運転条件と長時間受入を所有する。共通配送・停止・同一セッションの保持Goal・原記録を入口とし、U06ではこれらを実装しない。
+[U07](../../archive/initial/05-implementation.md#u07-retired)は追加指示による計画的終了、[U08](../../complete/unit_013/RESUME.md)は保存参照・アプリ再起動後の復旧、[U09](../../archive/planned/unit_014/MEMORY_MAINTENANCE.md)は記憶の整理・保守、[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)は上表の運転条件と長時間受入を所有する。共通配送・停止・同一セッションの保持Goal・原記録を入口とし、U06ではこれらを実装しない。
 
 APIキー認証、アプリ内ログアウト・アカウント切替、モニター間DPI遷移、文字拡大専用の受入は今回の合意済み対象外であり、未完のU06項目へ戻さない。旧api_key設定をChatGPTへ明示変更するUIは、APIキー認証の対応を意味しない。
 

@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[親](../unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[M1最終](../../complete/unit_048/NEXT_TURN_MODEL.md)、[M2](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)、[実行管理](../../initial/02-runtime.md)、[記憶](../../initial/04-agent-memory.md)、[検証](../../initial/07-verification.md)、[公開API](../../initial/08-sdk-compatibility.md)、[UI](../../initial/10-ui-interaction.md)。M2の793件成功と模擬Responses/機器での実runtime結合を前提とし、実モデル・実機の証拠へ拡張しない。
+[親](../unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[M1最終](../../complete/unit_048/NEXT_TURN_MODEL.md)、[M2](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)、[実行管理](../../archive/initial/02-runtime.md)、[記憶](../../archive/initial/04-agent-memory.md)、[検証](../../archive/initial/07-verification.md)、[公開API](../../archive/initial/08-sdk-compatibility.md)、[UI](../../archive/initial/10-ui-interaction.md)。M2の793件成功と模擬Responses/機器での実runtime結合を前提とし、実モデル・実機の証拠へ拡張しない。
 
 採用runtime0.167.0の公開schema/sourceと既存実装を調べてから変更する。新規ログインで本人操作が必要な場合と、sandbox準備のOS確認は本人へ引き継ぎ、認証情報を複製しない。
 

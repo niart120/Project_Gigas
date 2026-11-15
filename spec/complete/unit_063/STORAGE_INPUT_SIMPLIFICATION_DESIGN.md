@@ -20,8 +20,8 @@ M2で行うのは、**保存先の保全に必要な検査と、機器操作を�
 
 ## 3. 前提と関連文書
 
-- [入力・観測の現行仕様](../../initial/03-game-io.md)、[保存・記憶の現行仕様](../../initial/04-agent-memory.md)
-- [入力API](../../../docs/input-api.md)、[記録付き観測](../../../docs/recorded-observation.md)
+- [入力・観測の現行仕様](../../archive/initial/03-game-io.md)、[保存・記憶の現行仕様](../../archive/initial/04-agent-memory.md)
+- [入力API](../../../docs/design/interfaces/input-api.md)、[記録付き観測](../../../docs/design/data/recorded-observation.md)
 - [通常指示・停止と内部構成](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、[Goal操作](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)
 
 M0で採用済みなのは、過去payloadを再解釈しないこと、ID・時刻・内部値の検査縮小、明示flush/fsyncの撤去、入力の共通条件と機器能力の検査先を分けること、単独利用の保証縮小である。入力については今回の指示により生成時の不変条件保証を維持し、構築時検査の全廃案を第5.2節で置き換える。生成後の再検査と単独encoderの機器適合保証を削る方針と区別する。現行仕様は実装と同時に改訂する。

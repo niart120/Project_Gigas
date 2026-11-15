@@ -22,7 +22,7 @@ M2以降、Goalの製品制御・仮表示、PR作成・マージ、実機入力
 
 ## 4. 関連文書と着手条件
 
-[初期UI設計](../../initial/10-ui-interaction.md)、[工程順](../../initial/05-implementation.md)、[公開API](../../initial/08-sdk-compatibility.md)。既存の要求ID・配送証拠・停止・非同期設定適用を再利用する。UIの変更でruntime/API契約を拡張しない。
+[初期UI設計](../../archive/initial/10-ui-interaction.md)、[工程順](../../archive/initial/05-implementation.md)、[公開API](../../archive/initial/08-sdk-compatibility.md)。既存の要求ID・配送証拠・停止・非同期設定適用を再利用する。UIの変更でruntime/API契約を拡張しない。
 
 着手時branchは`codex/u06-m0-goal-design`、worktreeはclean。採用依存はlock通り。独立担当はPlan/映像と文書を担当し、親が会話部品と結合・品質gateを所有する。
 

@@ -1,36 +1,44 @@
 ---
 name: tdd-workflow
-description: "この Python repo の spec/wip、spec/initial、TDD Test List から Canon TDD を進める orchestration skill。ユーザが TDD、テストリスト、red/green/refactor、仕様から実装への進行を求めるときに使う。"
+description: "TDDで進める実装・修正を、小さな振る舞いの失敗確認から実装・構造整理へ進める。TDDを依頼された場合や、期待する振る舞いを先にテストで固定する進め方が適する場合の補助。"
 ---
 
-# TDD Workflow
+# TDD
 
-`spec-format`、`tdd-test-list`、`tdd-one-cycle`、`refactor-after-green` を接続する。
+## テスト対象を選ぶ
 
-## Git Context
+合意した振る舞い、関連する仕様、既存の実装とテストから、次に確かめる小さな例を選びます。unitに今回の資料があれば参照できます。
 
-- 変更前に branch と `git status --short` を確認する。
-- default branch への直接 commit はユーザの明示指示がある場合を除き避ける。
-- dirty worktree では既存変更を読んで、ユーザ変更を破棄しない。
+| 変更 | テストの切り口の例 |
+|---|---|
+| 入力の検査 | 正常値、境界値、拒否される値と失敗の返し方 |
+| 状態を持つ操作 | 操作前の状態、受付結果、操作後の状態 |
+| 非同期処理 | 開始待ち・実行中・終了後のどこで取消しや通知が入るか |
+| 不具合修正 | 報告された症状が起きる入力と呼び出しの組み合わせ |
 
-## Workflow
+「新しい管理クラスを作る」より、「停止中の追加操作を受け付けない」のように入力・条件・結果で捉えます。既存テストの期待結果やパラメータを変えれば表現できる場合は、そこで扱えます。
 
-1. 関連する `spec/initial/*.md`、親仕様、対象の `spec/wip` を読む。対象が `planned` にある場合は前提と調査・設計の状態を確認する。
-2. `spec-format` で着手する仕様を `wip` へ移すか、必要な子仕様だけを作る。未着手の親仕様を複製せず、前提が未成立のままTDDへ入らない。
-3. `tdd-test-list` で振る舞いベースの item に分ける。
-4. 次に扱う item を 1 つだけ選ぶ。
-5. `tdd-one-cycle` で red / green / refactor を進める。
-6. green 後の構造変更は `refactor-after-green` と `tidy-first` で behavior change と分ける。
-7. test quality に迷う場合は `test-desiderata-review` を使う。
-8. その item の test、実装、必要な refactor、TDD Test List の状態更新を 1 つの論理変更として commit する。commit 前に対象 item の検証を実行し、結果を記録する。
-9. 次の item がある場合は 4 へ戻る。複数 item を 1 commit にまとめない。
-10. Test List をすべて消化し、仕様の完了条件と必要な gate を満たしたら、`pr-merge-cleanup` を使って PR 作成、merge、default branch 同期、branch cleanup を行う。
+## 失敗から実装へ
 
-## Rules
+期待する振る舞いを表すテストを書き、その振る舞いが未実装・不正であるために失敗することを確認します。importエラーや準備不足による失敗なら、先にテスト環境を直します。
 
-- red から green の途中で見つけた別の振る舞いは list に追加し、今の item に混ぜない。
-- refactor は green 後に行う。
-- formatter / linter だけを refactor と呼ばない。
-- package metadata に触れたら `uv lock --check` と `uv build` を追加する。
-- Test List の item を完了扱いにするのは、その item に対応する検証が成功し、commit が作成された後だけにする。
-- docs / spec の item は、リンク、参照先、frontmatter、構文などの機械的契約か、実行可能な製品契約に限る。説明文の固定文字列、見出し、禁止語、checkbox、状態語を green の条件にしない。
+既存の責務へ必要な実装を加え、同じテストを通します。実装を小さくすることは、テストの入力だけを特別扱いすることではありません。次の例で別の条件を確かめ、必要な一般化の範囲を見極めます。
+
+複数部品の関係で起きる問題には、その関係を残した結合テストを使います。例えば、停止後の遅い通知を扱うなら、停止と通知配送を通した結果を確認します。内部フラグの値だけでは、入力が再開してしまう問題を捉えられない場合があります。
+
+## 構造を整える
+
+テストが通った後、重複する変換、意味の重なる状態、責務の混在を見直します。観測できる振る舞いを保って整理し、関係するテストで確認します。
+
+実装前に名前や小さな関数分割を整理した方が変更を理解しやすい場合は、その整理を先に行えます。広範な設計変更が必要なら、今回の変更とどこで分けるかを判断します。
+
+## 実行範囲と区切り
+
+対象を絞るコマンド例です。`-k` の条件は実際のテスト名に合わせます。
+
+```powershell
+uv run pytest tests/unit -k input -x -vv
+uv run pytest tests/integration -k input -x -vv
+```
+
+失敗の切り分け中は狭く実行し、変更の区切りで呼び出し側や関連機能へ回帰確認を広げます。テストの数とコミットの数を対応させず、差分として理解できる単位でまとめます。

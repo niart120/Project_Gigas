@@ -203,7 +203,7 @@ clearの`cleared=true`は削除通知を回収する。`cleared=false`は削除�
 
 ### 7.3 正本仕様とテスト
 
-[実行管理](../../initial/02-runtime.md)のGoal操作と終了規則、[制御フロー](../../initial/09-control-flows.md)のS04/S05と複合状態図、[UI](../../initial/10-ui-interaction.md)と[操作説明](../../../docs/codex-gui.md)を本書へ合わせる。入力・記録の共通改訂はunit_061が所有する。complete仕様は過去の実装記録として保持する。
+[実行管理](../../archive/initial/02-runtime.md)のGoal操作と終了規則、[制御フロー](../../archive/initial/09-control-flows.md)のS04/S05と複合状態図、[UI](../../archive/initial/10-ui-interaction.md)と[操作説明](../../../docs/guides/codex.md)を本書へ合わせる。入力・記録の共通改訂はunit_061が所有する。complete仕様は過去の実装記録として保持する。
 
 `test_codex_connection.py`のGoal lock、利用制限による自動停止・再開拒否、Goal clearによるinterrupt、completeによる全質問失効の期待を第8節へ置換する。`test_codex_service.py`の一括Goal試験は、目的編集・再開・削除と通常指示によるゲーム操作へ分ける。`test_codex_gui.py`は既存ボタンを操作して要求内容、状態表示、再開の再操作を確認する。
 
@@ -246,7 +246,7 @@ clearの`cleared=true`は削除通知を回収する。`cleared=false`は削除�
 
 実測は実app-serverとローカル固定モデル応答による代表場面の確認である。実アカウントの制限、Gigasの製品制御・GUI・MCP・実機入力は対象外。終端後の監視は0.4秒で、任意の遅延を網羅した保証ではない。製品の組替え後の試験・実接続は第10節に別記する。
 
-予算編集UIと再起動後の復元は今回の範囲外とし、必要になった時点の作業仕様で扱う。専用の計画的終了は初期版対象外とし、その後[U07の独立工程を廃止](../../initial/05-implementation.md#u07-retired)した。終了を求める通常指示を禁止せず、Goal非active通知から機器停止を起動する契約も追加しない。
+予算編集UIと再起動後の復元は今回の範囲外とし、必要になった時点の作業仕様で扱う。専用の計画的終了は初期版対象外とし、その後[U07の独立工程を廃止](../../archive/initial/05-implementation.md#u07-retired)した。終了を求める通常指示を禁止せず、Goal非active通知から機器停止を起動する契約も追加しない。
 
 ## 10. 対象ファイル・検証・完了条件
 

@@ -8,7 +8,7 @@
 通信API・認証方式・自動ログイン・自動再接続・U07以降・PR/マージは対象外。
 
 ## 関連・前提
-[前回実装](../../complete/unit_051/CODEX_SETTINGS_UI.md)、[UI](../../initial/10-ui-interaction.md)、[接続手順](../../../docs/codex-gui.md)。Product Designレビューの指摘を起点とし、機能テストの成功を見た目の合格としない。
+[前回実装](../../complete/unit_051/CODEX_SETTINGS_UI.md)、[UI](../../archive/initial/10-ui-interaction.md)、[接続手順](../../../docs/guides/codex.md)。Product Designレビューの指摘を起点とし、機能テストの成功を見た目の合格としない。
 
 ## 振る舞い
 未接続時は認証状態を断定せず—とし「ログイン」を無効表示。「Codex App Server」の接続ボタンで既存connectを明示実行しaccount/readを待つ。認証ボタンから接続する導線は設けない。未認証ならログイン、認証済みなら取得値。ブラウザは本人の明示操作で開く。App Serverの切断とChatGPTのログアウトを混同しない。設定開閉で接続・認証を自動実行しない。

@@ -11,7 +11,7 @@
 | 2026-11-12のM0依頼 | 取得・表示・観測・保存・MCPの責務を現在のコードから決め、過剰な機能、状態、UI、試験を増やさない |
 | 同日の追加指摘 | 要求後の新フレーム待ちを取りやめ、最新画像キャッシュをそのまま採用する。旧親仕様の鮮度条件を変更する |
 | 先行成果 | [U02](../unit_007/CODEX_CONNECTION.md)の単一stdio接続とサービス用ループ、[U03](../unit_008/VIDEO_CAPTURE.md)の読み取り専用Frame |
-| 恒常設計 | [02](../../initial/02-runtime.md)、[03](../../initial/03-game-io.md)、[04](../../initial/04-agent-memory.md)、[05](../../initial/05-implementation.md)、[07](../../initial/07-verification.md)、[08](../../initial/08-sdk-compatibility.md)、[10](../../initial/10-ui-interaction.md) |
+| 恒常設計 | [02](../../archive/initial/02-runtime.md)、[03](../../archive/initial/03-game-io.md)、[04](../../archive/initial/04-agent-memory.md)、[05](../../archive/initial/05-implementation.md)、[07](../../archive/initial/07-verification.md)、[08](../../archive/initial/08-sdk-compatibility.md)、[10](../../archive/initial/10-ui-interaction.md) |
 
 利用場面は、利用者が保存先を作成・選択し、Codexが`observe()`を呼び、観測IDから保存画像をたどること。取得失敗と記録失敗を区別し、保存の問題は観測ID付きの既存エラー詳細で再確認できることを求める。保存完了を観測応答の前提にはしない。
 

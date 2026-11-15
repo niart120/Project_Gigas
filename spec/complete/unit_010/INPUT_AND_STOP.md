@@ -8,8 +8,8 @@ Codexの通常ターンから有限の操作列を実機へ送り、解除後の
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
-| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../initial/05-implementation.md) |
-| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../initial/06-repository.md) |
+| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../archive/initial/05-implementation.md) |
+| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../archive/initial/06-repository.md) |
 
 利用場面: 利用者が操作依頼を明示的に開始する。Codexがact_and_observeを呼び、操作後の画面を確認する。途中でGUIから停止すると後続入力が実行されない。
 
@@ -17,7 +17,7 @@ Codexの通常ターンから有限の操作列を実機へ送り、解除後の
 
 ## 2. 前提と着手条件
 
-GUIの依頼入力・停止導線は[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と採用済みの[主画面とメッセージ操作](../../initial/10-ui-interaction.md)に従う。M0で設定モーダル表示中を含む通常ターンの即時停止の入口を具体化し、M2で物理入力と結合確認する。映像機器の「未接続」による取得終了と、推論中断・物理入力の停止は別の責務。U06 M1のUI置換、M2のGoal保持／破棄・同一セッション再開へ共通停止処理を引き継ぐ。本工程に仮のGoal状態や終了専用経路を作らず、U06の画面完成を実機停止の前提にしない。
+GUIの依頼入力・停止導線は[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と採用済みの[主画面とメッセージ操作](../../archive/initial/10-ui-interaction.md)に従う。M0で設定モーダル表示中を含む通常ターンの即時停止の入口を具体化し、M2で物理入力と結合確認する。映像機器の「未接続」による取得終了と、推論中断・物理入力の停止は別の責務。U06 M1のUI置換、M2のGoal保持／破棄・同一セッション再開へ共通停止処理を引き継ぐ。本工程に仮のGoal状態や終了専用経路を作らず、U06の画面完成を実機停止の前提にしない。
 
 [U04](../../complete/unit_009/RECORDED_OBSERVATION.md)の観測・記録・MCP、[U02](../../complete/unit_007/CODEX_CONNECTION.md)の通常ターン・要求応答・中断を利用する。入力を公開する前にMCP接続と実行世代の対応・旧要求失効が採用版で成立することを確認する。U01のポート文字列保存は入力接続の成立を意味しない。
 
@@ -35,12 +35,12 @@ U02完了後レビューR01は[設定障害時の停止修正](../../complete/un
 
 ## 4. 関連文書
 
-- [02-runtime.md](../../initial/02-runtime.md)
-- [03-game-io.md](../../initial/03-game-io.md)
-- [04-agent-memory.md](../../initial/04-agent-memory.md)
-- [09-control-flows.md](../../initial/09-control-flows.md)
-- [08-sdk-compatibility.md](../../initial/08-sdk-compatibility.md)
-- [検証観点](../../initial/07-verification.md)
+- [02-runtime.md](../../archive/initial/02-runtime.md)
+- [03-game-io.md](../../archive/initial/03-game-io.md)
+- [04-agent-memory.md](../../archive/initial/04-agent-memory.md)
+- [09-control-flows.md](../../archive/initial/09-control-flows.md)
+- [08-sdk-compatibility.md](../../archive/initial/08-sdk-compatibility.md)
+- [検証観点](../../archive/initial/07-verification.md)
 
 ## 5. M0の調査・設計成果
 
@@ -104,11 +104,11 @@ NyXの期限なしhold、dummy、接続cache、実行後の自動再構築、key
 
 | 事項 | 担当・期限 | 理由と影響 |
 |---|---|---|
-| write中の停止 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | M2でCH552への解除送出と移動後の停止映像を確認。B解除ACK、writeの最悪所要時間、DTR/RTSによるresetは未検証。固定write期限や独自cancel_write制御は置かない |
-| 長いMCP要求 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | 300秒設定で65秒waitと途中停止、短縮期限を確認。300秒経過と長時間連続運転は未検証。期限内の結果配送・実解除は保証せず、自動再送しない。詳細は[M2子](../unit_042/INPUT_APPLICATION_INTEGRATION.md) |
+| write中の停止 | [U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md) | M2でCH552への解除送出と移動後の停止映像を確認。B解除ACK、writeの最悪所要時間、DTR/RTSによるresetは未検証。固定write期限や独自cancel_write制御は置かない |
+| 長いMCP要求 | [U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md) | 300秒設定で65秒waitと途中停止、短縮期限を確認。300秒経過と長時間連続運転は未検証。期限内の結果配送・実解除は保証せず、自動再送しない。詳細は[M2子](../unit_042/INPUT_APPLICATION_INTEGRATION.md) |
 | Goal継続と全介入 | [U06](../../complete/unit_011/GOAL_EXECUTION.md) | 本工程の通常ターンと停止部品へ継続通知・追加指示・制限を接続する |
 | 停止後の再開 | [U06](../../complete/unit_011/GOAL_EXECUTION.md)・[U08](../../complete/unit_013/RESUME.md) | 本工程の世代失効・旧処理収束を共用し、同一セッションの保持Goal再開はU06、保存参照からの復帰はU08で作る |
-| 長時間の遅延・機器条件 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md) | PokeCon・3DS実機、他OS、長時間連続運転、通信断時の機器挙動は未検証。今回のCH552の結果を他構成へ拡張しない |
+| 長時間の遅延・機器条件 | [U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md) | PokeCon・3DS実機、他OS、長時間連続運転、通信断時の機器挙動は未検証。今回のCH552の結果を他構成へ拡張しない |
 
 ## 11. 完了チェックリスト
 

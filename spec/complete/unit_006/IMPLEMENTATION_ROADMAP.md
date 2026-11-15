@@ -6,7 +6,7 @@
 
 状態: **complete（文書整備完了）**。本書は文書整備の作業仕様であり、U02〜U10の親仕様とは別に完了を判定した。製品工程の9親仕様はplannedに残す。
 
-関連文書: [AGENTS.md](../../../AGENTS.md)、[工程表](../../initial/05-implementation.md)、[配置と運用](../../initial/06-repository.md)、[U01](../../complete/unit_001/APP_STARTUP.md)。
+関連文書: [AGENTS.md](../../../AGENTS.md)、[工程表](../../archive/initial/05-implementation.md)、[配置と運用](../../archive/initial/06-repository.md)、[U01](../../complete/unit_001/APP_STARTUP.md)。
 
 利用場面は、次の担当者が「既存実装」「方針」「これから調査・設計する範囲」を区別し、依存条件を満たす次の子作業を一つ選べることである。
 

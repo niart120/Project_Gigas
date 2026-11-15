@@ -305,10 +305,10 @@ Qtのコマンド受付は即時に戻り、非同期の操作結果は実際の
 
 | 改訂先 | 改訂内容 |
 |---|---|
-| [実行管理](../../initial/02-runtime.md)・[制御フロー](../../initial/09-control-flows.md) | send/steer分岐、複合phase、自然終端と明示停止の共通化、run/Grantの遷移図を本書の送信・停止・所有へ置換 |
-| [入力・観測](../../initial/03-game-io.md)・[保存・記憶](../../initial/04-agent-memory.md) | Grantによる観測・保存の所属、runイベント、Frame選択順、操作と実turnの推定的関連付けを改訂 |
-| [UI](../../initial/10-ui-interaction.md)・[Codex操作](../../../docs/codex-gui.md)・[Codex接続](../../../docs/codex.md) | 通常送信と停止の操作可否、結果の意味、次の送信で再許可する説明を更新。Goal差分はunit_062 |
-| [入力API](../../../docs/input-api.md)・[MCP](../../../docs/observation-mcp.md)・[記録付き観測](../../../docs/recorded-observation.md)と対象docstring | Grant/run API撤去、入力結果と画像・保存の分離、同一入口の寿命を反映 |
+| [実行管理](../../archive/initial/02-runtime.md)・[制御フロー](../../archive/initial/09-control-flows.md) | send/steer分岐、複合phase、自然終端と明示停止の共通化、run/Grantの遷移図を本書の送信・停止・所有へ置換 |
+| [入力・観測](../../archive/initial/03-game-io.md)・[保存・記憶](../../archive/initial/04-agent-memory.md) | Grantによる観測・保存の所属、runイベント、Frame選択順、操作と実turnの推定的関連付けを改訂 |
+| [UI](../../archive/initial/10-ui-interaction.md)・[Codex操作](../../../docs/guides/codex.md)・[Codex接続](../../../docs/design/interfaces/codex-api.md) | 通常送信と停止の操作可否、結果の意味、次の送信で再許可する説明を更新。Goal差分はunit_062 |
+| [入力API](../../../docs/design/interfaces/input-api.md)・[MCP](../../../docs/design/interfaces/observation-mcp.md)・[記録付き観測](../../../docs/design/data/recorded-observation.md)と対象docstring | Grant/run API撤去、入力結果と画像・保存の分離、同一入口の寿命を反映 |
 
 complete配下は過去の実装記録として保持する。U07は初期版対象外とし、Goal pause通知から機器を止める専用終了フローと、U08/U10のU07待ちを撤去する。通常指示としての作業依頼と共通停止は維持する。
 

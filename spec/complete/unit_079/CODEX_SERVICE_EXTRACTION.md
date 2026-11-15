@@ -28,7 +28,7 @@ ApplicationServiceThreadへQt配送とループ寿命を残し、CodexServiceへ
 
 ## 4. 関連docs・前提
 
-[責務](../../initial/02-runtime.md)、[処理順序](../../initial/09-control-flows.md)、[GUI API](../../../docs/codex-gui.md)。関連既存テスト102件のgreenを確認済み。構造整理には既存回帰テストを使い、人工的なredを作らない。新しい非Qt境界の利用を一つのTDD項目として先に検証する。
+[責務](../../archive/initial/02-runtime.md)、[処理順序](../../archive/initial/09-control-flows.md)、[GUI API](../../../docs/guides/codex.md)。関連既存テスト102件のgreenを確認済み。構造整理には既存回帰テストを使い、人工的なredを作らない。新しい非Qt境界の利用を一つのTDD項目として先に検証する。
 
 ## 5. 振る舞い仕様
 

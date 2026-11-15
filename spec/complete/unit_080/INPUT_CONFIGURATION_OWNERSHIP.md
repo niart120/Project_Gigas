@@ -21,7 +21,7 @@
 
 ## 4. 関連文書・調査
 
-[責務](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[処理順](../../initial/09-control-flows.md)。既存test_codex_serviceの設定独立・最新変更先・再試行、test_input_serviceのclose失敗・open中終了を再利用する。独立調査で確認した停止/解除待ちの抜けを以下の項目で検証する。
+[責務](../../archive/initial/02-runtime.md)、[ゲームI/O](../../archive/initial/03-game-io.md)、[処理順](../../archive/initial/09-control-flows.md)。既存test_codex_serviceの設定独立・最新変更先・再試行、test_input_serviceのclose失敗・open中終了を再利用する。独立調査で確認した停止/解除待ちの抜けを以下の項目で検証する。
 
 ## 5. 振る舞い仕様
 

@@ -7,7 +7,7 @@
 ログイン、サンドボックス準備、利用状況を設定のCodexタブへ集約する。接続メニューは接続・切断だけ。通信・操作権・保存処理は再利用する。APIキー、ログアウト、別認証、U07以降、PR・マージは対象外。
 
 ## 関連文書・着手条件
-[U06 M3](../../complete/unit_050/GOAL_ACCEPTANCE.md)、[UI](../../initial/10-ui-interaction.md)、[設定](../../../docs/settings.md)。M3受入済み。
+[U06 M3](../../complete/unit_050/GOAL_ACCEPTANCE.md)、[UI](../../archive/initial/10-ui-interaction.md)、[設定](../../../docs/guides/settings.md)。M3受入済み。
 
 ## 振る舞い
 ChatGPTアカウント、Codex App Server、Codexサンドボックス、利用状況、接続時の既定値の順。開くだけでは接続しない。設定内で明示接続・切断、ログイン開始・URLを開く、準備を操作する。状態と操作可否は既存接続パネルが所有。設定画面を閉じても提出済み操作は継続し、再表示で最新状態を表示する。値は選択・コピーでき、利用状況更新で閲覧位置を維持する。

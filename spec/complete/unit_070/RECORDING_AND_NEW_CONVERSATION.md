@@ -14,7 +14,7 @@ GameIoRecordWriterの公開API、5種JSONL・PNG、限定本文、単純追記�
 
 ## 3. 前提・関連文書
 
-M1は製品実装と実接続の受入を完了した。保存契約は[04](../../initial/04-agent-memory.md)、資源所有は[02](../../initial/02-runtime.md)、公開経路は[08](../../initial/08-sdk-compatibility.md)、開始・停止は[09](../../initial/09-control-flows.md)、受入観点は[07](../../initial/07-verification.md)に従う。
+M1は製品実装と実接続の受入を完了した。保存契約は[04](../../archive/initial/04-agent-memory.md)、資源所有は[02](../../archive/initial/02-runtime.md)、公開経路は[08](../../archive/initial/08-sdk-compatibility.md)、開始・停止は[09](../../archive/initial/09-control-flows.md)、受入観点は[07](../../archive/initial/07-verification.md)に従う。
 
 既存のConversationExecution._prepareは通常送信とGoal開始の共通入口である。MCPサーバーはcallableを受け取るため、thread作成前のMCP公開と、作成後のwriter・ObservationService結合を分離できる。仮のwriterやthreadを作る必要はない。管理APIはM1のCodexManagementを用いる。
 

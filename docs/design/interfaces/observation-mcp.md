@@ -1,0 +1,48 @@
+# ゲームI/O MCP API
+
+`gigas.mcp.game_io.GameIoMcpServer`は、観測と入力の呼出し先をstateless Streamable HTTPで公開するPython APIです。[観測サービス](../data/recorded-observation.md)と[入力サービス](input-api.md)は組立側が所有します。
+
+## 所有と利用順
+
+既存のasyncioループ上で`GameIoMcpServer(observe, act)`を作り、`await server.start()`で起動します。
+
+| 引数 | 呼出し先の契約 |
+|---|---|
+| `observe` | 引数なしの非同期関数。最新の`Observation`を返す |
+| `act` | 検証済みの`tuple[InputStep, ...]`を受け取る非同期関数。`(OperationResult, Observation | ObservationError | None)`を返す |
+
+`act`の呼出し先が会話の停止・切断を確認し、入力taskの開始・結果の回収と観測・記録を組み合わせます。接続中の機器で列全体を実行できるかは入力サービスが検査します。MCPサーバーは操作権・会話状態・機器接続を保持しません。通常停止ではサーバーを作り直さず、停止中の受付拒否と停止完了後の新規受付を呼出し先が決めます。
+
+サーバーは`127.0.0.1`のOS割当ポートで待ち受け、インスタンスごとに異なるサーバ名とBearerを発行します。`server.server_name`は設定キー、`server.config`は`url`と`http_headers`を持ちます。設定への組立は呼出側が行い、認証値をプロンプト・原記録・通常ログへ含めません。起動前・終了開始後の`url`と`config`参照は`RuntimeError`です。
+
+`await server.close()`は新規HTTP受付を閉じ、処理中の要求とSDKの終了を待ちます。待機を取り消してもサーバtaskは保持され、再度`close()`で終了を確認できます。閉じたインスタンスは再起動せず、再接続には新しいインスタンスを作ります。起動失敗をアプリ全体のプロセス終了へ変換しません。
+
+終了時は入力の取消しを先に進め、MCP要求を回収してから観測の符号化・記録をdrainし、writerとイベントループを閉じます。サーバーのcloseだけで機器の押下解除や保存成功を確認したとは扱いません。映像取得サービスの寿命も独立しています。
+
+## ツールと応答
+
+`observe`は引数なしで最新の有効なFrameの画像を返します。`act_and_observe(sequence)`は有限・非空の入力列全体を検査してから呼出し先へ渡します。入力・解除完了後に最新キャッシュの画像を取得しますが、次の操作開始前に画像が選ばれる保証はありません。入力形式は[入力API](input-api.md)を参照してください。どちらも新しいFrameを待たず、入力が画面へ反映された保証にはしません。
+
+ツール説明には共通の入力形式と既知のボタン名、機器ごとに対応入力が異なることを含めます。MCPは特定機器の能力を保持せず、入力サービスが現在の接続で列全体の能力を検査します。未対応の要素が一つでもあれば送出前に全体を拒否します。機器の接続・切替でMCPを作り直す必要はありません。入力枠は列と解除の終了時に解放し、符号化中に次の列を受け付けられます。観測・符号化・保存の失敗だけで後続入力を止めません。
+
+`tools/list`は、`observe`に`destructiveHint: false`・`openWorldHint: false`、`act_and_observe`に`readOnlyHint: false`・`destructiveHint: true`・`idempotentHint: false`・`openWorldHint: true`を公開します。これらの情報は承認や成功の保証ではありません。
+
+成功時は完成PNGのimage contentと、`observation_id`、`captured_at`、`source_frame`、`image`のJSON text contentを返します。入力時は`operation_id`を添えます。MCPで画像を再符号化せず、保存も同じObservationを使います。画像ファイルが応答時点で保存済みであることは保証しません。
+
+失敗は画像なしの`isError: true`とし、`code`・`message`を返します。入力要求では判明した`phase`、`completed_steps`、`input_sent`、`neutral`、受理した操作の`operation_id`も返します。観測だけが失敗した場合はMCPのcodeとphaseに観測エラーを示し、入力の完了要素数・送出・解除結果を保持します。保存失敗は既に返した応答を変更せず、記録側の診断通知で扱います。
+
+## 待機期限と停止
+
+`act_and_observe`の待機期限は300秒です。期限に達すると、その要求の取消しを開始します。入力中なら当該操作を一度だけ取り消し、開始済みwriteと必要なneutral送出を回収してから期限エラーを返します。**300秒以内の応答や解除を保証する期限ではありません。** ドライバーが戻らない場合、回収待ちが続きます。
+
+観測中の期限切れはその観測応答だけを取り消し、開始済み符号化・保存と別の入力操作を維持します。通常停止も画像完成・保存を待つ理由にはしません。内部入力の時間・要素数に固定上限を加えず、非同期受付・ポーリング・自動再送は提供しません。
+
+期限エラーを配送できる場合は`TOOL_TIMEOUT`と保守的な`phase: unknown`、`input_sent: unknown`、`neutral: unconfirmed`を返します。取消し後にGigas内部で回収した結果と、クライアントが受信できた結果は別です。Codex側のMCP待機も別に計時するため、期限エラー自体が届かない場合があります。結果不明の列を自動再送せず、観測して状態を確認してください。
+
+HTTP切断やMCP取消し通知が入力停止へ届くことは保証しません。ユーザーの共通停止はHTTP応答を待たず入力所有者へ届けます。MCPサーバーの終了だけを入力停止として扱いません。
+
+## 接続上の制約
+
+Bearer欠落・不一致は401です。終了開始後にHTTP受付処理へ到達した要求は503を返します。待受終了後は接続自体が成立せず、接続済みでもHTTP応答前に切断される場合があります。Hostと、存在する場合のOriginは当該loopbackアドレスに限定します。MCPセッションの履歴・再配送用ストアは保持しません。
+
+実機を含む確認範囲は[実接続の記録](../../../spec/archive/verification/codex-2026-11-15.md)を参照してください。

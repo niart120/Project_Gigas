@@ -4,7 +4,7 @@
 
 状態: **complete**。[U08親仕様](../../complete/unit_013/RESUME.md)のM4を担当する。公開履歴を読む選択対象と実行資源を持つ対象を分け、既存会話への明示送信・Goal操作をサービス経由で結合した。製品実装・実app-serverの受入を完了し、会話管理UIはM5へ引き継ぐ。
 
-起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD5、[02](../../initial/02-runtime.md)の所有、[08](../../initial/08-sdk-compatibility.md)の公開契約、[09](../../initial/09-control-flows.md)のS06。画面の配置・下書き・履歴表示範囲は[10](../../initial/10-ui-interaction.md)を維持し、UIの結合はM5が担当する。
+起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD5、[02](../../archive/initial/02-runtime.md)の所有、[08](../../archive/initial/08-sdk-compatibility.md)の公開契約、[09](../../archive/initial/09-control-flows.md)のS06。画面の配置・下書き・履歴表示範囲は[10](../../archive/initial/10-ui-interaction.md)を維持し、UIの結合はM5が担当する。
 
 ## 2. 対象範囲・対象外
 

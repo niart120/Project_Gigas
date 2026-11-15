@@ -47,8 +47,8 @@ NyXPyは参考であり、その接続管理は移植していない。実装時
 ## 4. 関連docs・着手条件・工程
 
 - [Agent Guide](../../../AGENTS.md)
-- [初期設計一覧](../../initial/README.md)、[責務・所有](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)
-- [工程計画](../../initial/05-implementation.md)、[検証方針](../../initial/07-verification.md)、[処理順序](../../initial/09-control-flows.md)、[UI契約](../../initial/10-ui-interaction.md)
+- [初期設計一覧](../../archive/initial/README.md)、[責務・所有](../../archive/initial/02-runtime.md)、[ゲームI/O](../../archive/initial/03-game-io.md)
+- [工程計画](../../archive/initial/05-implementation.md)、[検証方針](../../archive/initial/07-verification.md)、[処理順序](../../archive/initial/09-control-flows.md)、[UI契約](../../archive/initial/10-ui-interaction.md)
 - [会話実行モデル](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、[Goal操作](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)
 - [U08親仕様](../../complete/unit_013/RESUME.md)、[入力構築境界](../../complete/unit_066/INPUT_CONSTRUCTION_BOUNDARIES.md)
 
@@ -284,7 +284,7 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 | [app/shell.py](../../../src/gigas/app/shell.py)、[app/conversations.py](../../../src/gigas/app/conversations.py) | modify | アプリサービスへの接続、通知・終了の結合 |
 | [ui/main_window.py](../../../src/gigas/ui/main_window.py)、[virtual_controller.py](../../../src/gigas/ui/virtual_controller.py)・[controller_model.py](../../../src/gigas/ui/controller_model.py) | modify / new | 段階3。入口・配置・表示・マウス操作 |
 | [tests/unit](../../../tests/unit)、[tests/integration](../../../tests/integration) | modify / new | 段階ごとの回帰・新規契約。既存test_codex_service、test_input_service等を優先 |
-| [02](../../initial/02-runtime.md)、[03](../../initial/03-game-io.md)、[09](../../initial/09-control-flows.md)、[10](../../initial/10-ui-interaction.md)、[docs](../../../docs) | modify | 各段階で所有・操作順・GUI・利用手順を反映 |
+| [02](../../archive/initial/02-runtime.md)、[03](../../archive/initial/03-game-io.md)、[09](../../archive/initial/09-control-flows.md)、[10](../../archive/initial/10-ui-interaction.md)、[docs](../../../docs) | modify | 各段階で所有・操作順・GUI・利用手順を反映 |
 
 設計確定時の変更は本親仕様、採用モック、初期設計一覧・工程計画からの入口。製品変更と検証結果は各段階の子仕様で記録する。
 
@@ -325,7 +325,7 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 
 キーボード対応は本工程完了後の独立候補。GUI手動入力モデルへ追加する方向だけ残し、キー割当・自動リピート・同時保持・競合規則は採用時に別仕様で決める。タッチ入力・常時最前面・終了後の窓位置保存も必要性が確認された時点で扱う。
 
-Bluetoothは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)、長時間運転とドライバー待機等の観測は[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)を参照する。本工程の疎通確認だけでそれらの受入を完了にしない。
+Bluetoothは[unit_037](../../archive/planned/unit_037/BLUETOOTH_INPUT.md)、長時間運転とドライバー待機等の観測は[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)を参照する。本工程の疎通確認だけでそれらの受入を完了にしない。
 
 ## 11. チェックリスト
 

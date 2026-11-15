@@ -18,7 +18,7 @@ CH552・PokeCon・3DS S2/T3 New Firmwareの設定解決・完全入力状態の�
 
 ## 4. 関連文書・着手条件
 
-[02 実行管理](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 記録](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[U04 M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に従う。
+[02 実行管理](../../archive/initial/02-runtime.md)、[03 ゲームI/O](../../archive/initial/03-game-io.md)、[04 記録](../../archive/initial/04-agent-memory.md)、[05 工程](../../archive/initial/05-implementation.md)、[U04 M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に従う。
 
 M0と現在のコード・依存・試験を照合して着手した。入力機器は未接続・実機未検証。serial停止方式はpySerial 3.5のWindows実装を確認し、7節の方式を採用した。MCP公開境界は本子では実装せず、長い要求の方式判断と実測をM2の公開前条件として引き継ぐ。
 
@@ -100,7 +100,7 @@ M1の内部APIはこの期限に依存しない。M2では公開前に、時間�
 
 M2は本子の内部APIとU02/U04を使う。公開境界の実装前に、7節のruntime期限を踏まえて長い有限列の公開方式を確定する。OK／適用からの接続・切替、停止と質問/承認待ち、取得終了・障害、MCP公開能力と次送信時の再読込を配線し、旧Grantの呼出し拒否とGUI即時停止を確認する。
 
-実機受入前に対象機器・ファーム・baudを特定し、open時reset、write中停止、実neutral、通信断時の保持、操作後映像の反映を確認する。シリアルは各OSとも実機未検証であり、Linux/macOSのアプリ全体への対応は本子の完了に含めない。BTは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
+実機受入前に対象機器・ファーム・baudを特定し、open時reset、write中停止、実neutral、通信断時の保持、操作後映像の反映を確認する。シリアルは各OSとも実機未検証であり、Linux/macOSのアプリ全体への対応は本子の完了に含めない。BTは[unit_037](../../archive/planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
 
 ## 11. チェックリスト
 

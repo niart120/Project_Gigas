@@ -1,4 +1,4 @@
 interface:
   display_name: "Docstring Style"
-  short_description: "Review public docstrings"
-  default_prompt: "Review public API docstrings for style and consistency with type annotations and docs."
+  short_description: "Clarify public API contracts and examples"
+  default_prompt: "Use $docstring-style to improve the requested API explanations and align them with the actual contract."

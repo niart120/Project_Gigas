@@ -4,7 +4,7 @@
 
 ### 1.1 目的と状態
 
-[U01親仕様](../unit_001/APP_STARTUP.md)の起動・設定に必要な直接依存、責務・並行処理、検証条件を選定し、2026-11-10に調査・設計を完了した。選定した依存はM1・M2で製品へ反映済み。以下の調査結果はその時点の根拠であり、2026-11-11の文書再編で再検証したものではない。後続工程の番号は改訂後の[05](../../initial/05-implementation.md)に合わせた。
+[U01親仕様](../unit_001/APP_STARTUP.md)の起動・設定に必要な直接依存、責務・並行処理、検証条件を選定し、2026-11-10に調査・設計を完了した。選定した依存はM1・M2で製品へ反映済み。以下の調査結果はその時点の根拠であり、2026-11-11の文書再編で再検証したものではない。後続工程の番号は改訂後の[05](../../archive/initial/05-implementation.md)に合わせた。
 
 本書は独立した作業仕様unit_002。親が工程全体を束ね、本書がM0の判断・根拠・結果を所有する。後続の子仕様も各unitに1ファイルで置く。
 
@@ -12,7 +12,7 @@
 
 ### 1.2 起点と関連文書
 
-ユーザーの2026-11-10依頼、[02-runtime.md](../../initial/02-runtime.md)、[05-implementation.md](../../initial/05-implementation.md)、[06-repository.md](../../initial/06-repository.md)を起点とする。保存と指示は[04](../../initial/04-agent-memory.md)、配布確認は[07のT20](../../initial/07-verification.md)、Codex接続のリスクは[08](../../initial/08-sdk-compatibility.md)を参照する。
+ユーザーの2026-11-10依頼、[02-runtime.md](../../archive/initial/02-runtime.md)、[05-implementation.md](../../archive/initial/05-implementation.md)、[06-repository.md](../../archive/initial/06-repository.md)を起点とする。保存と指示は[04](../../archive/initial/04-agent-memory.md)、配布確認は[07のT20](../../archive/initial/07-verification.md)、Codex接続のリスクは[08](../../archive/initial/08-sdk-compatibility.md)を参照する。
 
 ### 1.3 利用場面
 

@@ -14,7 +14,7 @@
 
 ## 3. 前提と関連文書
 
-[02](../../initial/02-runtime.md)、[06](../../initial/06-repository.md)、[07](../../initial/07-verification.md)、[08](../../initial/08-sdk-compatibility.md)、[09](../../initial/09-control-flows.md)。U01は完了。直接接続への明示承認によりM0の方式判断待ちは解消した。固定runtimeから生成したJSON schemaを調査し、必要なv2契約だけ実装する。
+[02](../../archive/initial/02-runtime.md)、[06](../../archive/initial/06-repository.md)、[07](../../archive/initial/07-verification.md)、[08](../../archive/initial/08-sdk-compatibility.md)、[09](../../archive/initial/09-control-flows.md)。U01は完了。直接接続への明示承認によりM0の方式判断待ちは解消した。固定runtimeから生成したJSON schemaを調査し、必要なv2契約だけ実装する。
 
 ## 4. 所有・公開契約
 
@@ -143,7 +143,7 @@ TDD対象pytest、ruff format/check、ty、依存lock、build、既存unit/integ
 
 通常モードの質問は`isBlocking=false`でもcoreが回答をawaitする（[固定実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/session/mod.rs#L3458)）。実際の2秒保留中もターンが終了せず、上記の回答・中断に成功した。
 
-実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateは[M2](../unit_018/CODEX_GUI.md)を含む[U02最終確認](../unit_007/CODEX_CONNECTION.md)で成功した。全145 tests、ruff/ty/lock、wheel/sdistと新規install後の資材・起動確認を含む。継続利用する実接続手順は[docs](../../../docs/codex-verification.md)に置く。
+実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateは[M2](../unit_018/CODEX_GUI.md)を含む[U02最終確認](../unit_007/CODEX_CONNECTION.md)で成功した。全145 tests、ruff/ty/lock、wheel/sdistと新規install後の資材・起動確認を含む。継続利用する実接続手順は[docs](../../archive/verification/codex-2026-11-15.md)に置く。
 
 ## 8. 先送り事項
 

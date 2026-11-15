@@ -1,4 +1,4 @@
 interface:
   display_name: "Type Boundary Review"
-  short_description: "Review public type boundaries"
-  default_prompt: "Review type-checking results and public API type boundaries."
+  short_description: "Resolve type errors and clarify boundaries"
+  default_prompt: "Use $type-boundary-review to investigate the relevant type errors or boundary contracts and choose suitable representations."

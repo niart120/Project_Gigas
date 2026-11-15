@@ -8,7 +8,7 @@ U03の最新フレームを一つの観測として確定・保存し、同じ�
 
 M0子のcompleteは調査作業の完了を指し、実装前の設計方針はレビュー・実装結果で改訂する。[M1子仕様](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)で独立した観測・保存APIを実装・検証した。[M2子仕様](../unit_035/MCP_OBSERVATION_INTEGRATION.md)を作成し着手した。同日の再レビューで、画像監査・重複メタデータ・保存工程別の取消しを簡素化した。
 
-起点は2026-11-11の[工程計画](../../initial/05-implementation.md)、2026-11-12のM0限定依頼と、その後のM1実装・検証依頼。同日の追加指摘に従い、要求受付後の新フレーム待ちを取りやめ、最新画像キャッシュをそのまま採用する方式へ変更した。
+起点は2026-11-11の[工程計画](../../archive/initial/05-implementation.md)、2026-11-12のM0限定依頼と、その後のM1実装・検証依頼。同日の追加指摘に従い、要求受付後の新フレーム待ちを取りやめ、最新画像キャッシュをそのまま採用する方式へ変更した。
 
 利用場面は、保存先を作成・選択し、Codexが現在の最新画像を観測し、後から観測IDで同じ保存画像を参照すること。
 
@@ -18,9 +18,9 @@ M0子のcompleteは調査作業の完了を指し、実装前の設計方針は�
 
 Codex結合には[U02](../../complete/unit_007/CODEX_CONNECTION.md)の接続とサービス用asyncioループを使う。観測・保存部品はCodex接続から独立して設計・検証できる。MCP公開は採用runtime 0.167.0の`thread/start.config`を使い、同梱版schemaと公開tagの設定型、M2での製品実接続を確認した。
 
-[U02レビュー](../../dev-journal.md)のR02（受理前中断で原稿消失）・R04（failed終端後の明示的次送信が拒否される）は、M0で現在のコードと試験を読み、未修正と確認した。M2-03で再現し、接続・会話UIの拡張前に独立した修正を行った。固有の境界は模擬RPC・実Qtで、通常接続の回帰は実Codexの2ターンで確認し、修正を受け入れた。実runtimeで受理前中断・failed終端を誘発した結果ではなく、その経路は未検証リスクとして残る。詳細は[M2子仕様](../unit_035/MCP_OBSERVATION_INTEGRATION.md)を参照する。
+[U02レビュー](../../archive/dev-journal.md)のR02（受理前中断で原稿消失）・R04（failed終端後の明示的次送信が拒否される）は、M0で現在のコードと試験を読み、未修正と確認した。M2-03で再現し、接続・会話UIの拡張前に独立した修正を行った。固有の境界は模擬RPC・実Qtで、通常接続の回帰は実Codexの2ターンで確認し、修正を受け入れた。実runtimeで受理前中断・failed終端を誘発した結果ではなく、その経路は未検証リスクとして残る。詳細は[M2子仕様](../unit_035/MCP_OBSERVATION_INTEGRATION.md)を参照する。
 
-UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[主画面方針](../../initial/10-ui-interaction.md)に従い、新設する「プロジェクト」メニューの「新規作成」「開く」と既存の接続・エラー詳細だけを使う。全体対話UIはU06。U06の完成を本工程の前提にしない。
+UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[主画面方針](../../archive/initial/10-ui-interaction.md)に従い、新設する「プロジェクト」メニューの「新規作成」「開く」と既存の接続・エラー詳細だけを使う。全体対話UIはU06。U06の完成を本工程の前提にしない。
 
 ## 3. 対象範囲・対象外
 
@@ -30,7 +30,7 @@ UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と
 
 ## 4. 関連文書
 
-[M0の詳細契約](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[03 観測・操作](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[08 公開経路と未確認事項](../../initial/08-sdk-compatibility.md)、[07 検証](../../initial/07-verification.md)。親は工程全体の受入、子は詳細契約・検証結果を所有する。
+[M0の詳細契約](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[03 観測・操作](../../archive/initial/03-game-io.md)、[04 保存](../../archive/initial/04-agent-memory.md)、[08 公開経路と未確認事項](../../archive/initial/08-sdk-compatibility.md)、[07 検証](../../archive/initial/07-verification.md)。親は工程全体の受入、子は詳細契約・検証結果を所有する。
 
 ## 5. M0の決定とM1レビューでの見直し
 
@@ -101,7 +101,7 @@ M0の文書検査とM1/M2の製品・実接続・実機受入は各子仕様に�
 | R02/R04の実runtimeでの障害経路 | M2-03で修正・模擬RPC/Qt回帰、M2-08で実モデルの通常2ターンを確認し修正受入済み。実runtimeの受理前中断・failed終端は未誘発。実運用で発生した場合に当該経路を再確認する |
 | 新しい接続権の公開と古い要求の拒否、事後Frame | [U05](../../complete/unit_010/INPUT_AND_STOP.md) M0、入力公開前 |
 | Goal・案内と記憶入口、対話UI、公開応答の別記録・memory書込権限 | [U06](../../complete/unit_011/GOAL_EXECUTION.md) |
-| 保存参照からの復帰・整理復元 | [U08](../../complete/unit_013/RESUME.md)・[U09](../../planned/unit_014/MEMORY_MAINTENANCE.md) |
+| 保存参照からの復帰・整理復元 | [U08](../../complete/unit_013/RESUME.md)・[U09](../../archive/planned/unit_014/MEMORY_MAINTENANCE.md) |
 
 ## 11. 完了チェックリスト
 

@@ -10,7 +10,7 @@
 
 利用場面は、通常会話から目標を開始し、公開計画を読み、回答・追加指示・承認を渡し、入力を止めて同じ会話で明示的に再開すること。
 
-2026-11-13 M1での改訂: 秘密入力の専用UI・消去/保存分岐は用途と実モデル受信の根拠がなく撤回し、`isSecret=true`を含む要求全体を未対応で返す。続く[文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)では送信先選択と独立した承認列を撤去し、右側のPlanを常設する。表示契約は[10](../../initial/10-ui-interaction.md)と後続子仕様を正とし、本書のAPI実測と当時の検証は履歴として残す。
+2026-11-13 M1での改訂: 秘密入力の専用UI・消去/保存分岐は用途と実モデル受信の根拠がなく撤回し、`isSecret=true`を含む要求全体を未対応で返す。続く[文脈内対話UI](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)では送信先選択と独立した承認列を撤去し、右側のPlanを常設する。表示契約は[10](../../archive/initial/10-ui-interaction.md)と後続子仕様を正とし、本書のAPI実測と当時の検証は履歴として残す。
 
 ## 2. 対象範囲
 
@@ -22,7 +22,7 @@ Goal開始・目的更新・休止・明示再開・破棄、通常送信と介�
 
 ## 4. 前提・関連文書・根拠
 
-[AGENTS.md](../../../AGENTS.md)、[実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[記憶・保存](../../initial/04-agent-memory.md)、[互換性](../../initial/08-sdk-compatibility.md)、[処理順序](../../initial/09-control-flows.md)、[UI](../../initial/10-ui-interaction.md)に従う。前提は[U02](../../complete/unit_007/CODEX_CONNECTION.md)、[U04](../../complete/unit_009/RECORDED_OBSERVATION.md)、[U05 M2](../../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)。通常turnの受入をGoalへ拡張しない。
+[AGENTS.md](../../../AGENTS.md)、[実行管理](../../archive/initial/02-runtime.md)、[ゲームI/O](../../archive/initial/03-game-io.md)、[記憶・保存](../../archive/initial/04-agent-memory.md)、[互換性](../../archive/initial/08-sdk-compatibility.md)、[処理順序](../../archive/initial/09-control-flows.md)、[UI](../../archive/initial/10-ui-interaction.md)に従う。前提は[U02](../../complete/unit_007/CODEX_CONNECTION.md)、[U04](../../complete/unit_009/RECORDED_OBSERVATION.md)、[U05 M2](../../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)。通常turnの受入をGoalへ拡張しない。
 
 採用実行ファイルの `app-server generate-json-schema --experimental` と公開tag `rust-v0.167.0`（`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`）を照合した。[公式app-server](https://learn.chatgpt.com/docs/app-server)・[Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)は入口の説明に使い、採用版と異なる挙動は実測・固定tagを優先する。
 
@@ -74,7 +74,7 @@ Goal変更受付、turn終端、入力解除を別の結果として扱う。遅
 
 ### Goal・Plan・History・Message
 
-Goalは目的と公開状態、Planは現在turnの公開計画、Historyはユーザー/Codex/要求/公開活動、Messageは送信前原稿を所有する。配置は[10](../../initial/10-ui-interaction.md)。Goal/Planと下書きやmemoryを同期する機構は設けない。
+Goalは目的と公開状態、Planは現在turnの公開計画、Historyはユーザー/Codex/要求/公開活動、Messageは送信前原稿を所有する。配置は[10](../../archive/initial/10-ui-interaction.md)。Goal/Planと下書きやmemoryを同期する機構は設けない。
 
 質問原稿は既存の(HumanRequest.token, question ID)で保持し、要求の必須回答が揃った時だけ一つのanswers応答を返す。M1修正では回答を会話内の要求カードで編集し、Messageは通常送信と追加指示に分ける。自由回答可なら回答と指示を含む全文をその回答へ一度送り、本文分割・複数IDへの同文複製はしない。isOther=falseでは提示された選択肢を使う。承認は要求が提示した判断の明示操作だけで返す。turn/Goal/steerは公開応答、質問/承認は既存AnswerResultのtransport書込完了で送信結果を確定する。後者はモデル側の実行成功ではなく、serverRequest/resolvedだけでも配送成功とはしない。
 
@@ -88,7 +88,7 @@ reasoningは公開summaryのdelta/完了itemだけを表示し、空なら省略
 
 ### guide・memory・対話記録
 
-アプリが初回利用時に不足するguide.mdとmemory/current.mdを作り、既存内容は初期化しない。guideは入口、memoryはCodexの現状と知識、原観測・入力・会話記録はアプリ所有。正本は[04](../../initial/04-agent-memory.md)。
+アプリが初回利用時に不足するguide.mdとmemory/current.mdを作り、既存内容は初期化しない。guideは入口、memoryはCodexの現状と知識、原観測・入力・会話記録はアプリ所有。正本は[04](../../archive/initial/04-agent-memory.md)。
 
 CodexのcwdとruntimeWorkspaceRoots=[memory]は記録先のmemory/、sandboxはworkspace-writeとする。sandbox_workspace_writeはwritable_roots=[]（cwdだけ）、network_access=false、exclude_tmpdir_env_var=true、exclude_slash_tmp=trueを明示し、共有homeの余分な書込先を引き継がない。応答のsandbox条件を確認する。guideと原記録は親から読む。on-request/userを維持し、全権限化や自動承認を採用しない。
 

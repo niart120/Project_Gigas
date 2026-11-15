@@ -8,8 +8,8 @@
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
-| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../initial/05-implementation.md) |
-| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../initial/06-repository.md) |
+| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../archive/initial/05-implementation.md) |
+| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../archive/initial/06-repository.md) |
 
 利用場面: 利用者が取得元を選んで接続し、ゲームの実映像を確認する。切断とアプリ終了を扱い、Codexや保存機能がなくても映像部分を確認できる。
 
@@ -27,9 +27,9 @@
 
 ## 4. 関連文書
 
-- [02-runtime.md](../../initial/02-runtime.md)
-- [03-game-io.md](../../initial/03-game-io.md)
-- [検証観点](../../initial/07-verification.md)
+- [02-runtime.md](../../archive/initial/02-runtime.md)
+- [03-game-io.md](../../archive/initial/03-game-io.md)
+- [検証観点](../../archive/initial/07-verification.md)
 
 ## 5. 冒頭の調査・設計
 

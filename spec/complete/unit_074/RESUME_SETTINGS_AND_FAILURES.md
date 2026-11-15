@@ -14,7 +14,7 @@
 
 ## 3. 関連文書・着手条件・冒頭確認
 
-[02 実行](../../initial/02-runtime.md)、[04 記録・指示](../../initial/04-agent-memory.md)、[07 検証](../../initial/07-verification.md)、[08 公開契約](../../initial/08-sdk-compatibility.md)、[09 操作](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md)を正本とする。先行成果は[M3](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)、[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)、[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)。
+[02 実行](../../archive/initial/02-runtime.md)、[04 記録・指示](../../archive/initial/04-agent-memory.md)、[07 検証](../../archive/initial/07-verification.md)、[08 公開契約](../../archive/initial/08-sdk-compatibility.md)、[09 操作](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md)を正本とする。先行成果は[M3](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)、[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)、[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)。
 
 M5は全体1007件、静的検査、配布build、実画面・実app-server受入を完了した。設定保存、Panelのモデル選択、サービスのresume故障は既存試験で確認済みだが、それぞれを画面まで通す境界に不足がある。既存peer・制御された待機を使い、実装構造の写しや固定文言の検査は増やさない。
 

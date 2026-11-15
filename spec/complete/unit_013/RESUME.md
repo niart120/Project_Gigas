@@ -6,7 +6,7 @@ Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し�
 
 状態: **complete（M0〜M7完了）**。2026-11-14の合意を[M0 責務・保存境界の設計](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)と関連初期設計へ反映し、管理・記録・実行設定・再接続・会話管理UIを実装した。2026-11-15に[M7 製品全体の受入](../unit_075/PRODUCT_ACCEPTANCE.md)でGUIから実機までを確認し、U08の受入を完了した。各段階の検証範囲は第9節、長時間運転などの引継ぎは第10節に記す。
 
-作業規約は[AGENTS.md](../../../AGENTS.md)と[配置・運用](../../initial/06-repository.md)に従う。攻略補助は実プレイで不足を観測してから検討する。
+作業規約は[AGENTS.md](../../../AGENTS.md)と[配置・運用](../../archive/initial/06-repository.md)に従う。攻略補助は実プレイで不足を観測してから検討する。
 
 利用場面は、Projectなしで新しい依頼を始める、Project内で新しい依頼を始める、既存の会話を閲覧する、アプリ再起動後に同じ会話の続きを任せる、同じ攻略資料を使って新しい会話を始めることである。依頼の規模や長期目標と途中指示の関係はCodexに任せ、GIGAS独自の目標階層を設けない。
 
@@ -18,7 +18,7 @@ Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し�
 
 [U06](../../complete/unit_011/GOAL_EXECUTION.md)、[会話実行](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、[Goal操作](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)、[契約整理](../../complete/unit_054/KISS_SIMPLIFICATION.md)の成果を前提とする。通常送信・追加指示の配送、共通停止、機器入力の取消し・解除は共用する。共通停止はactiveなGoalを目的を保持して休止し、Goal削除は現在動作の停止と分ける。同一セッションの停止後に独立した再受付状態を追加しない。U07は初期版対象外であり、着手・受入条件に含めない。
 
-責務・実現方式と引継ぎは[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、公開契約の根拠は[08](../../initial/08-sdk-compatibility.md)に集約する。製品経路の確認はM1以降へ割り当て、最新Web文書や設計の確定だけで受入済みとしない。
+責務・実現方式と引継ぎは[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、公開契約の根拠は[08](../../archive/initial/08-sdk-compatibility.md)に集約する。製品経路の確認はM1以降へ割り当て、最新Web文書や設計の確定だけで受入済みとしない。
 
 ## 3. 責務分担と契約の正本
 
@@ -28,7 +28,7 @@ Project・会話・Goal・自動記憶の管理をCodex app-serverへ委譲し�
 | Codex・利用者 | 依頼と途中指示の解釈、攻略判断、作業資料の構成・編集 |
 | GIGAS | ゲームI/O、停止と機器解除、公開状態・履歴の表示、選択した会話と現在の作業場所・MCP・記録先・設定の接続 |
 
-保存・指示の正本は[04](../../initial/04-agent-memory.md)、資源所有は[02](../../initial/02-runtime.md)、操作順は[09](../../initial/09-control-flows.md)、画面と表示状態は[10](../../initial/10-ui-interaction.md)とする。親仕様で詳細契約を重複定義しない。
+保存・指示の正本は[04](../../archive/initial/04-agent-memory.md)、資源所有は[02](../../archive/initial/02-runtime.md)、操作順は[09](../../archive/initial/09-control-flows.md)、画面と表示状態は[10](../../archive/initial/10-ui-interaction.md)とする。親仕様で詳細契約を重複定義しない。
 
 thread/startの応答でGIGASがthread IDを保持し、実行前に`records/<thread-id>/`を保存部品へ渡す。developerInstructionsは作業場所・保存構造・原記録を編集しないことを案内し、当該会話の正確なパス案内は要求しない。追加API・指示差替え・MCP結果への保存先追加は行わず、保存画像は必要時にobservation_idから探す。
 
@@ -98,11 +98,11 @@ JSONL形式のM2受入は04のJSONL形式の共通項目・5種のイベント�
 
 保持・削除の受入では、Project登録・会話の管理操作で実ファイルを削除しないこと、records欠落時も閲覧では作成せず明示的な実行時に必要なものだけを作成することを確認する。既存記録を初期化せず、Project所属・未所属とも欠落した既存作業フォルダーを自動再作成しない。履歴閲覧は可能とし、実行時には欠落した場所を通知して開始しない。
 
-親では受入観点のみを定める。詳細なTDD項目・故障注入点は各子仕様が所有する。既存の[検証観点](../../initial/07-verification.md)との対応はM0で更新済みとする。文書の見出し・状態語・固定文言を製品テストにしない。
+親では受入観点のみを定める。詳細なTDD項目・故障注入点は各子仕様が所有する。既存の[検証観点](../../archive/initial/07-verification.md)との対応はM0で更新済みとする。文書の見出し・状態語・固定文言を製品テストにしない。
 
 ## 8. 関連文書・対象ファイル
 
-M0で改訂する初期設計は、[01 概要](../../initial/01-overview.md)、[02 実行](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 保存・記憶](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[07 検証](../../initial/07-verification.md)、[08 外部契約](../../initial/08-sdk-compatibility.md)、[09 制御フロー](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md)である。配置・指示資材の変更は[06](../../initial/06-repository.md)にも反映する。
+M0で改訂する初期設計は、[01 概要](../../archive/initial/01-overview.md)、[02 実行](../../archive/initial/02-runtime.md)、[03 ゲームI/O](../../archive/initial/03-game-io.md)、[04 保存・記憶](../../archive/initial/04-agent-memory.md)、[05 工程](../../archive/initial/05-implementation.md)、[07 検証](../../archive/initial/07-verification.md)、[08 外部契約](../../archive/initial/08-sdk-compatibility.md)、[09 制御フロー](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md)である。配置・指示資材の変更は[06](../../archive/initial/06-repository.md)にも反映する。
 
 製品変更の候補は`src/gigas/app/`、`services/`、`runtime/codex/`、`storage/`、`ui/`、`prompts/`と対応する試験・利用手順である。公開APIの変更時は型境界・docstringのskillと必要な品質ゲートを使う。GUI文言とエラー表示はAGENTS.mdに従う。
 
@@ -125,9 +125,9 @@ M0で改訂する初期設計は、[01 概要](../../initial/01-overview.md)、[
 
 | 事項 | 担当・期限 | 扱い |
 |---|---|---|
-| 数時間の攻略・遅延・資源・記録量 | [U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)、長時間運転の受入前 | U08の保存・保持方針を基に実測する。モデル・開始条件・記憶・介入を区別して評価する |
+| 数時間の攻略・遅延・資源・記録量 | [U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)、長時間運転の受入前 | U08の保存・保持方針を基に実測する。モデル・開始条件・記憶・介入を区別して評価する |
 | 追加の攻略補助・資料規約 | 実プレイで不足を観測した後の作業選定 | 再現する問題と改善効果から採否を決める。専用監督・地図・SkillsをU08の完了条件へ加えない |
-| 独自の記憶整理 | [U09](../../planned/unit_014/MEMORY_MAINTENANCE.md)は初期版対象外 | app-serverの自動記憶利用とは区別する。実需と再採用判断なしに独自整理を追加しない |
+| 独自の記憶整理 | [U09](../../archive/planned/unit_014/MEMORY_MAINTENANCE.md)は初期版対象外 | app-serverの自動記憶利用とは区別する。実需と再採用判断なしに独自整理を追加しない |
 
 ## 11. 完了チェックリスト
 

@@ -4,7 +4,7 @@
 
 状態: **complete**。[U08親仕様](../../complete/unit_013/RESUME.md)のM3を担当する。[M2](../../complete/unit_070/RECORDING_AND_NEW_CONVERSATION.md)の新規開始経路へ、保存済みのWeb・自動記憶・承認方法とCodex標準の指示読込を結合した。既定でWebと自動記憶を使い、承認は「代わりに承認」とする。製品実装・実app-server受入を完了し、既存会話の再接続はM4へ引き継ぐ。
 
-起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD4・D5と、[08の設定契約](../../initial/08-sdk-compatibility.md#設定の所有と適用)。M2は製品実装・実接続受入まで完了した。利用者はGIGASの設定から実行環境を選び、攻略資料やSkillsは作業フォルダーと標準の探索先で管理できる。
+起点は[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)のD4・D5と、[08の設定契約](../../archive/initial/08-sdk-compatibility.md#設定の所有と適用)。M2は製品実装・実接続受入まで完了した。利用者はGIGASの設定から実行環境を選び、攻略資料やSkillsは作業フォルダーと標準の探索先で管理できる。
 
 ## 2. 対象範囲・対象外
 
@@ -14,7 +14,7 @@
 
 ## 3. 関連文書・着手時の確認
 
-[04](../../initial/04-agent-memory.md)の自由な攻略資料と記憶、[02](../../initial/02-runtime.md)の所有、[09](../../initial/09-control-flows.md)の明示開始、[10](../../initial/10-ui-interaction.md)とAGENTS.mdのGUI表記、[07](../../initial/07-verification.md)の受入観点に従う。
+[04](../../archive/initial/04-agent-memory.md)の自由な攻略資料と記憶、[02](../../archive/initial/02-runtime.md)の所有、[09](../../archive/initial/09-control-flows.md)の明示開始、[10](../../archive/initial/10-ui-interaction.md)とAGENTS.mdのGUI表記、[07](../../archive/initial/07-verification.md)の受入観点に従う。
 
 着手時点ではSettingsに3値の保存があり、launch.pyはWeb・記憶をOFF、AGENTS/Skillsを抑制し、thread要求はreviewer=userに固定していた。M2でPythonの固定資料指示とguide/current資材は撤去済み。Shellの保存成功経路は再利用するが、今回の3値だけの変更を映像設定変更とみなさないようにする。
 

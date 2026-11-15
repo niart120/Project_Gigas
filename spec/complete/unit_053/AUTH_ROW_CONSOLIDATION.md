@@ -7,7 +7,7 @@
 設定ダイアログ・認証表示・旧api_keyの明示的な設定変更を対象とする。APIキー認証の実装、通信API変更、自動ログイン、PR・マージは対象外。
 
 ## 関連文書・着手条件
-[配置修正](../../complete/unit_052/CODEX_SETTINGS_LAYOUT_FIX.md)、[初期UI](../../initial/10-ui-interaction.md)、[設定手順](../../../docs/settings.md)、[接続手順](../../../docs/codex-gui.md)。対応方式はChatGPTのみ。設定読み書きはapi_keyを保持し、接続処理は未対応として拒否する既存契約を確認した。
+[配置修正](../../complete/unit_052/CODEX_SETTINGS_LAYOUT_FIX.md)、[初期UI](../../archive/initial/10-ui-interaction.md)、[設定手順](../../../docs/guides/settings.md)、[接続手順](../../../docs/guides/codex.md)。対応方式はChatGPTのみ。設定読み書きはapi_keyを保持し、接続処理は未対応として拒否する既存契約を確認した。
 
 ## 振る舞い
 - 接続時の既定値はモデル・推論レベルのみ。通常の認証行はChatGPTの状態とログインボタンを表示し、方式選択メニューは作らない。

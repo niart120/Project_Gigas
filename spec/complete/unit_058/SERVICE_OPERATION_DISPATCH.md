@@ -36,8 +36,8 @@
 ## 4. 関連 docs
 
 - [親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)
-- [Codex 利用手順](../../../docs/codex.md)
-- [品質規約](../../initial/README.md)
+- [Codex 利用手順](../../../docs/design/interfaces/codex-api.md)
+- [品質規約](../../archive/initial/README.md)
 
 ### 4.1 前提・着手条件
 
