@@ -11,13 +11,14 @@ from gigas.runtime.codex.connection import (
     CodexConnectionError,
     MessageDeliveryError,
 )
-from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
+from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings, GoalState
 from gigas.runtime.codex.transport import RpcNotification
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
 from gigas.services._conversation_selection import ConversationSelection
 from gigas.services.input import InputService
 from gigas.storage.records import GameIoRecordWriter
+from tests.integration.peers.codex_resume import ResumePeer
 from tests.unit.test_codex_connection import FakePeer, _until
 
 if TYPE_CHECKING:
@@ -107,6 +108,52 @@ def test_additional_message_uses_same_start_and_prepared_endpoint(tmp_path: Path
             assert "turn/steer" not in methods
             assert "thread/resume" not in methods
             assert "thread/unsubscribe" not in methods
+        finally:
+            await c.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("saved", [False, True])
+@pytest.mark.parametrize("use_goal", [False, True])
+def test_summary_is_enabled_before_normal_or_goal_execution(
+    tmp_path: Path, *, saved: bool, use_goal: bool
+) -> None:
+    async def scenario() -> None:
+        c = Conversation(tmp_path, peer=ResumePeer())
+        if saved:
+            c.selection.adopt_started("thread-1", tmp_path, None)
+            c.selection.retain_goal("thread-1", GoalState("進めて", "paused", 0, 0))
+            c.peer.goal = {
+                "objective": "進めて",
+                "status": "paused",
+                "tokensUsed": 0,
+                "timeUsedSeconds": 0,
+            }
+        await c.connection.open()
+        try:
+            if use_goal:
+                if saved:
+                    assert await c.execution.resume_goal()
+                else:
+                    assert await c.execution.set_goal("進めて")
+            else:
+                assert await c.execution.send("進めて") == "turn-1"
+            preparation = "thread/resume" if saved else "thread/start"
+            methods = [method for method, _ in c.peer.calls]
+            params = next(params for method, params in c.peer.calls if method == preparation)
+            assert params is not None
+            config = params["config"]
+            assert isinstance(config, dict)
+            assert config["model_reasoning_summary"] == "auto"
+            trigger = "thread/goal/set" if use_goal else "turn/start"
+            assert methods.index(preparation) < methods.index(trigger)
+            if use_goal:
+                assert "turn/start" not in methods
+            else:
+                turn = next(params for method, params in c.peer.calls if method == trigger)
+                assert turn is not None
+                assert turn["summary"] == "auto"
         finally:
             await c.close()
 
