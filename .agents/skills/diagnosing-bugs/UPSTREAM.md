@@ -1,8 +1,9 @@
 # Upstream
 
 - Source: https://github.com/mattpocock/skills/blob/main/skills/engineering/diagnosing-bugs/SKILL.md
-- Helper script: https://github.com/mattpocock/skills/blob/main/skills/engineering/diagnosing-bugs/scripts/hitl-loop.template.sh
 - License: MIT, see `LICENSE`.
 - Vendored on: 2026-07-05
 
-The `SKILL.md` and helper script are vendored from `mattpocock/skills`.
+The skill was originally vendored from `mattpocock/skills`.
+
+On 2026-11-15, `SKILL.md` was adapted for Project_Gigas: reproduction and measurement guidance was retained, fixed phase gates were removed, and the unused human-in-the-loop shell template was removed. The upstream MIT license is retained.

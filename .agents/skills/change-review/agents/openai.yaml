@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change Review"
+  short_description: "Review behavior, structure, and test coverage"
+  default_prompt: "Use $change-review to review the requested changes for correctness, unnecessary complexity, and relevant test coverage."

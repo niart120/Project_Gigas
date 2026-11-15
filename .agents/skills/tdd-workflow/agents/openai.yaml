@@ -1,4 +1,4 @@
 interface:
   display_name: "TDD Workflow"
-  short_description: "Run a work unit with TDD"
-  default_prompt: "Read the work specification and complete test-list items through TDD with one commit per item."
+  short_description: "Develop behavior through focused TDD cycles"
+  default_prompt: "Use $tdd-workflow to implement the agreed behavior through focused tests, implementation, and useful refactoring."

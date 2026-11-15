@@ -1,46 +1,84 @@
 ---
 name: pr-merge-cleanup
-description: "この Python repo の変更を Git と GitHub CLI（gh）で PR 作成・チェック・マージし、default branch の同期とローカル・リモートのブランチ整理まで行う skill。マージ済み PR の後片付けだけにも使う。"
+description: "GitHubのPR作成・更新・CI確認・マージと、マージ後の同期・ブランチ整理を行う。依頼された範囲を扱い、PR作成だけの依頼をマージまで広げない。"
 ---
 
-# PR Merge Cleanup
+# PRとブランチ整理
 
-Gitでpush・同期・ブランチ削除を行い、GitHub CLI（`gh`）でPR・CI・レビュー・マージを操作する。GitHubプラグインの有無を実行条件にしない。
+## 対象の確認
 
-## 着手時の確認
+ブランチ、作業ツリー、remote、対象リポジトリのdefault branchを確認します。既存変更を保護し、対象の差分とコミットを把握してから操作します。
 
-- `git branch --show-current`、`git status --short`、`git remote get-url origin`で現在地を確認する。既存変更を破棄しない。
-- `gh --version`と`gh auth status`でCLIと既存認証を確認する。トークン値を表示・抽出しない。sandbox内だけで認証が失敗する場合は、許可された通常実行で既存の資格情報を確認し、認証切れと区別する。利用できなければ、その不足を報告し、認証を要しないローカル作業を進める。
-- `gh repo view --json nameWithOwner,defaultBranchRef`で対象repoとdefault branchを確定する。以後のgh操作は`--repo <owner/repo>`で対象を明示する。
-- PR作成・マージへ進む前に、対象変更をcommitし、worktreeをcleanにする。default branchへの直接commitはユーザーの明示指示がある場合に限る。
-- 後片付けだけならdefault branch上から実行してよい。ローカル作業branchが既に削除済みでも、PR情報からリモートの対象を確認できる。
+Git操作はGit、PR操作は利用可能なGitHub連携または `gh` を使います。以下は `gh` を使う場合の要点です。リポジトリ・PR番号・ブランチ・SHAは確認した値を指定します。
 
-## PR作成・チェック・マージ
+```powershell
+git branch --show-current
+git status --short
+git remote get-url origin
+gh repo view --json nameWithOwner,defaultBranchRef
+```
 
-1. `agentic-self-review`で実行gateと未検証事項を整理し、`.github/PULL_REQUEST_TEMPLATE.md`に沿うPR本文を一時ファイルへ書く。本文は下の`PR Body`を満たす。
-2. `git push -u origin <branch>`で作業branchをpushする。`git log --oneline <default>..HEAD`を本文に含める。
-3. `gh pr list --repo <owner/repo> --head <branch> --state open`で既存PRを確認する。なければ`gh pr create --repo <owner/repo> --base <default> --head <branch> --title <title> --body-file <file>`で作成する。既存PRの本文更新も`gh pr edit <number> --repo <owner/repo> --body-file <file>`を使う。
-4. `gh pr checks <number> --repo <owner/repo> --watch`で対象HEADのCI完了を待つ。長い待機はバックグラウンド実行して進捗を確認する。required checkに加え、変更範囲に必要なCIも成功していることを確認する。checkがない場合を成功した試験として報告しない。
-5. `gh pr view <number> --repo <owner/repo> --json headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup`でHEAD・base・マージ可否を再確認する。`gh pr view --json reviews`と`gh api graphql`でレビューと未解決reviewThreadsも確認する。reviewThreadsはページを最後まで読み、件数上限による見落としを避ける。
-6. 必須checkの未完了/失敗、変更要求、未解決の必須指摘、draft、競合、マージ可否不明があれば解消してから進む。HEADが更新されたらgateとレビューを新しいSHAで確認し直す。
-7. `gh pr merge <number> --repo <owner/repo> --merge --match-head-commit <verified-head-sha>`でmerge commitを作る。`--admin`で保護を迂回しない。ブランチ削除は次節で同期・確認後に行う。
-8. `gh pr view <number> --repo <owner/repo> --json state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName,isCrossRepository`で実際のMERGED状態を確認する。merge queueへ入っただけなら完了とせず、状態を追う。
+以降のコマンド例の `$repo`、`$branch`、`$base`、`$prNumber` は、確認した対象を表します。操作は依頼された範囲まで進めます。
 
-## 同期・ブランチ整理
+## PR作成・更新
 
-1. worktreeがcleanであることを確認し、`git switch <default>`、`git pull --ff-only origin <default>`で同期する。失敗したら停止し、force/resetで履歴を合わせない。
-2. 対象PRのMERGED状態、base、merge commitが同期先に含まれることを確認する。マージ対象headのSHAとbranch名を保持する。
-3. ローカル作業branchが残っていれば、default branchではなく、他のworktreeで使用中でなく、未取り込みの変更がないことを確認して`git branch -d <branch>`で削除する。`-d`が拒否した場合は理由を確認し、`-D`で強制削除しない。
-4. `git ls-remote --heads origin <branch>`でリモートを確認する。存在しなければ削除済みとして扱う。存在する場合は、default branchではなく、対象PRのheadと同じrepo・branch・SHAであることを確認する。マージ後の新しいcommitやforkのbranchを誤って削除しない。
-5. 確認した作業branchを`git push origin --delete <branch>`で削除する。プラグインの削除APIは不要。もう一度`git ls-remote --heads origin <branch>`を実行し、成功終了かつ該当refがないことを確認する。通信失敗を削除成功と扱わない。
-6. `git status --short`とdefault branchのlocal/remote SHAを確認し、PR URL・merge commit・削除branch・gate結果・残った作業を報告する。
+対象の変更をコミットし、作業ブランチをpushします。対象ブランチの既存PRを確認し、なければ作成します。本文はリポジトリのPRテンプレートに合わせ、目的・変更内容・実施した検証をまとめます。関連unitや文書があれば参照できます。
 
-## PR Body
+`gh pr create` / `gh pr edit` の本文は一時ファイルに書き、`--body-file` で渡します。作成・更新後はPRの内容と対象ブランチを確認します。
 
-- Summary: 変更目的を1〜3行で書く。
-- Related: spec、docs、issue、作業指示元。
-- Changes: ファイル一覧ではなく論理単位。
-- Commit Log: `<default>..HEAD`。
-- Testing: commandと結果。未実行gateは理由を記す。
-- Agentic SDD Gates: used / not usedと根拠。
-- Review Notes: 対象範囲の変更、先送り事項。
+```powershell
+git push -u origin $branch
+gh pr list --repo $repo --head $branch --state open
+```
+
+本文を書いたファイルを `$bodyFile`、タイトルを `$title` とする作成例です。既存PRがある場合は作成の代わりに更新します。
+
+```powershell
+# PRがない場合
+gh pr create --repo $repo --base $base --head $branch --title $title --body-file $bodyFile
+# 既存PRを更新する場合
+gh pr edit $prNumber --repo $repo --body-file $bodyFile
+```
+
+作業中に範囲が変わった場合、タイトルと本文は最終的な差分に合わせます。
+
+## マージ
+
+マージまで依頼されている場合は、対象HEADのCIとレビュー、未解決の指摘、競合を確認します。レビュー取得にページ分割がある場合は最後まで確認します。修正でHEADが変わったら、新しい差分に対応する確認を行います。
+
+必須checkの失敗・変更要求・競合を解消してから進めます。`gh` では確認済みHEADを `--match-head-commit` に指定し、`--merge` でマージします。`--admin` で保護を迂回しません。
+
+```powershell
+gh pr checks $prNumber --repo $repo --watch
+gh pr view $prNumber --repo $repo --json headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup
+```
+
+チェックとレビューを確認したHEADを `$verifiedHead` としてマージします。待機が長い場合は実行中の処理を追跡し、同じ確認を重複起動しません。
+
+```powershell
+gh pr merge $prNumber --repo $repo --merge --match-head-commit $verifiedHead
+gh pr view $prNumber --repo $repo --json state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName,isCrossRepository
+```
+
+キューへの登録とマージ完了を区別し、実際のMERGED状態とmerge commitを確認します。
+
+## 同期・整理
+
+作業ツリーに未コミットの変更がないことを確認し、default branchへ切り替えて `git pull --ff-only` で同期します。対象PRのmerge commitが取り込まれてから、作業ブランチを整理します。
+
+削除対象はdefault branch以外の作業ブランチです。ローカルは未取り込み変更や他worktreeでの使用がないことを確認し、`git branch -d` を使います。リモートは対象PRと同じリポジトリ・ブランチで、マージ後の新しいコミットがない場合に削除します。force/resetで同期や削除を押し通しません。
+
+確認後の操作例です。一括実行用のスクリプトではなく、各照会結果を見て次の操作へ進みます。ブランチが既に消えていれば、その削除操作は不要です。
+
+```powershell
+git switch $base
+git pull --ff-only origin $base
+git branch -d $branch
+git ls-remote --heads origin $branch
+git push origin --delete $branch
+git ls-remote --heads origin $branch
+```
+
+削除前の `ls-remote` で対象SHAを照合します。通信失敗と、成功した照会でrefが存在しない場合を区別します。ローカルの削除が拒否された場合も、未取り込み変更などの理由を確認します。
+
+最後に同期とブランチの状態を確認し、PRへのリンク、マージ・整理の結果、残る作業があれば報告します。

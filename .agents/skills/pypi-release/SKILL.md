@@ -1,27 +1,51 @@
 ---
 name: pypi-release
-description: "この Python repo の PyPI release を計画・実行する workflow skill。ユーザが PyPI / TestPyPI 公開、バージョン更新、release PR、v* tag、GitHub Actions publish、公開後 smoke check、release 手順確認を依頼したときに使う。"
+description: "GIGASのPyPI・TestPyPI公開の準備、バージョン更新、公開と配布物の確認を扱う。ローカルのビルドだけを依頼された場合に公開へ進めない。"
 ---
 
-# PyPI Release
+# PyPI公開
 
-`spec/publishing.md` を release runbook の正本として使う。手順詳細を skill に重複させない。
+## 公開経路を確認する
 
-## 手順
+リポジトリの公開手順、`pyproject.toml`、lockファイル、公開用workflowを確認します。配布名、公開先、バージョン、認証方式が未設定なら、まず公開準備として扱い、動作する公開経路が既にあると仮定しません。
 
-1. release 計画または実行前に `spec/publishing.md` を読む。
-2. `.github/workflows/publish.yml`、`pyproject.toml`、`uv.lock`、git 状態を確認する。
-3. release PR 作成、merge、default branch 同期、branch cleanup は `pr-merge-cleanup` に委譲する。
-4. local gate、TestPyPI smoke、production publish、post-publish smoke を分けて記録する。
+公開手順の詳細は `docs/guides/` の公開ガイドにまとめます。配置変更前なら `spec/publishing.md` から現在の準備状況を確認できます。
 
-## 停止条件
+| 確認対象 | 見る内容 |
+|---|---|
+| パッケージ設定 | 配布名、バージョン、対応Python、依存、同梱ファイル |
+| 公開先 | PyPIかTestPyPIか、名称の利用可否、同じバージョンの有無 |
+| workflow | 起動条件、対象commit、公開環境、Trusted Publisher等の認証設定 |
+| 作業範囲 | 準備・試験公開・本番公開のどこまでが依頼されているか |
 
-- local `twine upload` は使わない。
-- current turn の明示確認なしに production tag push や `target=pypi` workflow を実行しない。
-- `spec/publishing.md` または `.github/workflows/publish.yml` がなければ停止する。
-- candidate version、tag、Trusted Publisher 設定、local gate、CI、publish workflow が runbook と矛盾する場合は停止する。
-- PyPI に同一 version が存在する場合は停止する。
+公開設定が食い違う場合は、対象を確定してから公開します。初回準備と既設の手順による公開では、必要な作業量が異なります。
 
-## 報告
+## 配布物を確かめる
 
-version、release branch / PR、tag、workflow run、PyPI / TestPyPI URL、gate、smoke、停止条件を報告する。
+公開対象のcommitとバージョンを揃え、配布物の作成・メタデータ検査・隔離環境へのインストール確認を行います。PyPIに同じバージョンがある場合は、そのバージョンを再公開しません。
+
+ローカル確認の基本例です。
+
+```powershell
+uv lock --check
+uv build
+uv run twine check --strict dist/*
+```
+
+検査・公開の対象は今回のバージョンの成果物に揃えます。過去のファイルが `dist/` に残っている場合、今回の成果物と混ぜて公開しないよう対象を選びます。
+
+ソースツリーからの実行だけでなく、配布物を入れた環境でimport・起動を確認します。設定例やリソースの同梱、キャプチャーworkerの起動・終了など、変更した配布内容に対応する確認を選びます。全機器の実測をリリースごとに追加するという意味ではありません。
+
+## 公開と失敗時の確認
+
+公開は設定済みのGitHub Actions経由で行い、ローカルの `twine upload` は使いません。公開先・バージョンを含むユーザーの実行許可がある範囲で進め、既に得た許可をターンごとに取り直しません。準備のみの依頼なら、公開可能な状態まで整えてから実行の確認を求めます。
+
+tag起動ならtagが指すcommit、手動起動ならworkflowのrefと入力値を確認して実行します。PR作成やマージが必要なら、通常のPR・CI確認を行います。
+
+公開後はworkflowの結果、配布先にある対象バージョンと配布物、インストール・起動を確認します。失敗時は公開先の状態を確認してから次の操作を判断し、同じバージョンの再送を繰り返しません。
+
+例えばworkflowが途中で失敗しても、一部の配布物は既に公開されている可能性があります。実行ログと公開先を照合してから、手順の修正や新しいバージョンの必要性を判断します。
+
+TestPyPIでの確認は、その公開先と配布物についての結果です。本番公開を行った場合は本番側の配布物を確認します。
+
+結果はバージョン、対象commit、公開先・実行結果へのリンク、配布物の確認内容をチャットやPRにまとめます。

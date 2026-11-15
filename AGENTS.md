@@ -1,139 +1,73 @@
 # Project_Gigas Agent Guide
 
-## 対話
+## プロジェクト
 
-- ユーザとの対話は日本語で行う。
-- 技術文書と回答は、事実、仮説、提案、未検証事項を分けて書く。
-- 未確認の外部仕様、未実行の検証、推測で補った設計判断は確認済みとして扱わない。
-- 変更を伴う依頼では、作業前に現在の repo 状態を確認する。
+GIGASは、Windows上で映像を観測し、ゲームを操作するPythonアプリケーションです。利用開始と関連文書の入口はREADMEです。
 
-## プロジェクト概要
+対話は日本語で行います。
 
-`gigas` は Python `>=3.12` を前提にしたパッケージである。
+## 開発
 
-| 種別 | 値 |
+### 進め方
+
+要求・開発計画と関連する仕様・コードを参照し、今回変えること、範囲、完成条件をチャットで揃えます。
+
+実装・検証後は差分を見直し、要求を満たすことと、責務・状態・依存が不必要に増えていないことを確認します。変更によって説明が古くなった文書を更新し、結果を報告します。
+
+### 判断の分担
+
+実装方法、検証方法、範囲内の構造整理はエージェントが判断します。内部設計を大きく変える場合は、実装前に方針と影響を共有します。合意した要求・範囲・開発計画の変更が必要なら相談します。
+
+### 文書
+
+以下は文書の整理先です。現行資料の整理は未実施のため、当面は既存の `docs/` と `spec/` も参照します。
+
+| 配置 | 役割 |
 |---|---|
-| 配布名 | `gigas` |
-| import ルート | `gigas` |
-| 説明 | Windows-native interactive gaming agent system. |
-| 起動コマンド | `uv run gigas` / `uv run python -m gigas` |
+| `docs/requirements.md` | 製品の目的・対象範囲・主要な要求 |
+| `docs/roadmap.md` | プロジェクト全体のマイルストーン・完成条件・依存関係・現在の到達点 |
+| `docs/architecture.md` | 現在の全体構成、主要な責務・依存・実行構成 |
+| `docs/design/functions/` | ユースケース・機能仕様 |
+| `docs/design/ui/` | 画面・操作仕様 |
+| `docs/design/interfaces/` | 外部API・通信・機器接続の仕様 |
+| `docs/design/data/` | データモデル・保存形式 |
+| `docs/decisions/` | 再検討に役立つ選択肢・制約・採用理由を残すADR |
+| `docs/guides/` | 利用・開発・公開の手順 |
+| `spec/wip/unit_<id>/` → `spec/complete/unit_<id>/` | 変更作業の資料と、完了時点の履歴 |
 
-初期設計の正本は `spec/initial/` に置く。実装、公開 API、CI、リリース、エージェント作業の流れを変更するときは、関連する仕様書と品質ゲートの整合を確認する。
+仕様・アーキテクチャは、採用している振る舞いと構造を説明します。採用理由を通常の記載項目にせず、利用上の制約は該当する仕様に置きます。
 
-## 作業仕様
+各ディレクトリの文書は対象ごとに分割できます。unitはまとまった変更の検討に使えますが、全作業での作成や固定の章立ては求めません。完了unitは当時の記録として扱い、現行仕様へ追従させません。
 
-このリポジトリは `spec/planned` → `spec/wip` → `spec/complete` で作業仕様を管理する。仕様書は対象範囲、対象外、着手条件、TDD 状態、検証結果、先送り事項を束ねる作業単位である。
+プロジェクト全体の進捗はロードマップで、個別作業の進捗はその作業のチャットで扱います。unitを使う場合は、必要な範囲で残作業などをそこに置けます。個別作業の細かな進行をロードマップへ転記する必要はありません。
 
-| 目的 | パス |
-|---|---|
-| 初期設計・運用規約 | `spec/initial/` |
-| 未着手の作業仕様 | `spec/planned/unit_XXX/FEATURE_NAME.md` |
-| 着手中の作業仕様 | `spec/wip/unit_XXX/FEATURE_NAME.md` |
-| 完了した作業仕様 | `spec/complete/unit_XXX/FEATURE_NAME.md` |
-| 小さい観測・先送り判断 | `spec/dev-journal.md` |
-| 公開手順 | `spec/publishing.md` |
+作業の経緯や逐次の検証結果はチャット・実行ログとCodexの履歴・記憶管理に任せ、必要なら再調査します。
 
-作業仕様には、目的、対象範囲、対象外、関連文書、振る舞い仕様、TDD Test List、対象ファイル、検証、先送り事項、完了チェックリストを含める。
+## 実装上の取り決め
 
-`unit_XXX` は3つの状態ディレクトリを通した一意の連番で、工程番号 U01〜U10 とは別である。着手時・完了時は同じ unit をディレクトリごと移動し、複製せず参照リンクを更新する。
+- Python実行と依存管理は `uv` を使います。
+- 公開APIのdocstringはGoogle形式にします。
+- TDDは適する作業で使います。
+- 文書の説明文、見出し、状態語への固定文字列一致を品質検査にしません。
 
-マイルストーンの親仕様は未着手でも先に具体化できる。親は到達点、前提、冒頭の調査・設計、工程内の分割、受入条件、未決事項の担当・期限を持つ。子仕様は着手する範囲の詳細契約・TDD・検証結果を所有し、必要になった時点で作る。未着手の子仕様や空の雛形を一括生成しない。次の実行対象は、依存と着手条件を満たす作業を1つだけ選ぶ。
+## GUI
 
-親仕様を書いたことは工程への着手・実装完了を意味しない。工程の最初の調査・設計作業に着手するとき、親を `wip` へ移す。親の調査・設計、製品実装、接続・実機検証の状態を分け、子の完了だけでなく工程全体の受入条件が揃ったときに親を `complete` へ移す。
+文言と配置は実画面でも確認します。
 
-## Agent Skills
+### 通常画面
 
-リポジトリ内 skill は `.agents/skills` を正本として管理する。`.github/skills` には重複配置しない。利用する手順は以下の一覧と各 `SKILL.md` で確認する。
+- 使い方・機能範囲・操作後の効果を説明する本文やツールチップは置かず、利用手順はガイドへ書きます。
+- ボタン名・項目名・見出し、短い状態名・確認対象、パスや値は表示できます。説明文を短いラベルへ分割して埋め込むことはしません。
+- Codexの応答・質問・承認内容とユーザーの文章はこの制約の対象外です。
 
-主な skill:
+### エラー
 
-- `agentic-sdd`: `AGENTS.md` と `spec/initial` から次の作業単位を選び、計画、実装、品質ゲートへ進める。
-- `agentic-self-review`: 作業完了前、PR 前、引き継ぎ前に品質ゲート結果と未検証リスクを整理する。
-- `diagnosing-bugs`: Matt Pocock 氏の第三者提供 skill。再現困難な不具合と性能退行で、赤にできる再現手順、仮説、計測、回帰テストを順に作る。
-- `type-boundary-review`: `ty` の結果、公開 API、標準ライブラリの型構文、`Any` / `Unknown` / `None` / `Protocol` / `TYPE_CHECKING` / `py.typed` の型境界を確認する。
-- `docstring-style`: 公開 API の Google 形式 docstring を、型注釈、ruff pydocstyle、README/docs と整合させる。
-- `spec-format`: `spec/planned` / `spec/wip` / `spec/complete` の作業仕様を作成、更新、着手・完了移動する。
-- `dev-journal`: 仕様書へ昇格する前の小さい観測や先送り判断を `spec/dev-journal.md` に記録する。
-- `tdd-workflow`: TDD Test List から red / green / refactor を進める。
-- `tdd-test-list`: 振る舞いベースの TDD Test List を作成、更新する。
-- `tdd-one-cycle`: TDD Test List の 1 項目だけを red / green / refactor で進める。
-- `refactor-after-green`: green 後に観測可能な振る舞いを変えず構造を整える。
-- `tidy-first`: 振る舞い変更と構造変更を分ける。
-- `test-desiderata-review`: テスト価値と trade-off を確認する。
-- `pr-merge-cleanup`: PR 作成、merge、default branch 同期、branch cleanup を行う。
-- `pypi-release`: PyPI / TestPyPI release の preflight、version bump、tag、publish、smoke check を扱う。
+- 文章で説明でき、失敗した操作、原因・影響、復旧操作を伝えます。
+- 詳細は後から再確認できるようにし、ログ全文を主画面へ常設しません。
+- 通知のためのモーダルで停止・切断を妨げません。
 
-## Python
+## Git
 
-- Python 実行と依存管理は `uv` 経由に統一する。
-- Python スクリプトは `python ...` ではなく `uv run python ...` で実行する。
-- 依存追加は `uv add <package>`、開発依存は `uv add --dev <package>` を使う。
-- パッケージメタデータや依存を変更したら `uv lock` を実行し、`uv.lock` を commit する。
-- 型注釈は Python 3.12+ の構文を使う。
-- 標準ライブラリで表現できる型を優先し、`3.12` 前提では `typing_extensions` などの互換用パッケージは原則不要。
-- 実行時に不要な型だけの import は `if TYPE_CHECKING:` に置く。
-- `from __future__ import annotations` は、相互参照や実行時評価の遅延が必要な場合だけ使う。
-- public API には Google style の docstring を書く。
-- `print` は CLI 境界以外に置かない。ライブラリコードでは戻り値、例外、logging を使う。
-
-## Docs / Public Text
-
-- GUIには文章を原則として記載しない。使い方、UIの意味、機能範囲、操作後の効果を説明する本文・案内文・説明用ツールチップは置かず、利用手順はREADME/docsへ書く。
-- GUIのボタン名・項目名・見出し、短い状態名・確認対象・エラー理由、パスや値は必要な識別情報として表示できる。文章を短いラベルへ分割して説明を埋め込む回避はしない。
-- Codexが送るテキスト（応答・計画・質問・承認内容等）とユーザーが投入する文章は例外とする。
-- エラーメッセージは例外として文章で説明してよい。失敗した操作、確認できた原因・影響、利用者が取れる復旧操作を具体的に伝え、推測の原因を断定しない。この例外を通常画面の使い方・機能説明へ広げない。
-- エラーは一時通知だけで消さず、詳細を再確認できる導線を用意する。ログ全文を主画面に常設せず、状態と診断詳細を分ける。確認が必要な操作以外でモーダルを乱発し、既存接続の中断・切断を妨げない。
-- GUIの文言は実画面とコードを読んで確認する。説明文の禁止を、自然言語の固定文字列や句読点だけを検査するテストへ置き換えない。
-
-- README は利用開始の入口として短く保ち、詳細な API 契約、実機ログ、agent 運用、作業履歴は `docs/`、`spec/`、`AGENTS.md` に分ける。
-- 公開 docs には、利用者が確認できる現在の仕様、手順、制約を書く。開発者向けメタ表現や対話内だけの文言を残さない。
-- public API、package metadata、release の挙動を変更したら、docstring と利用者向け docs の更新を完了条件に含める。
-- docs test が落ちた場合は、文書の誤りとテスト設計の誤りを同列に調査する。自然言語の固定文字列、見出し、説明順、禁止語、checkbox、状態語だけを検査する assertion は原則追加しない。
-- 自動検査へ落とすのは、Markdown link、参照先、frontmatter、YAML/TOML 構文、schema、生成物、実行可能な製品契約など、機械的に観測できる契約に限る。説明の正確さ、読みやすさ、根拠、未検証表示は対象文書を読んで確認する。
-- 文書の変更と固定期待文字列を同じ変更で追加しても、その一致だけを意味上の整合確認の根拠にしない。変更対象を読まない test の成功も、当該文書の検証結果に含めない。
-- docs site や Pages 公開を対象範囲に含めた場合、local build だけで完了にしない。remote workflow、deployment、公開 URL の確認を根拠に含める。
-- 公開 API の型注釈、`py.typed`、`# type: ignore`、`cast()` を変更した場合は `$type-boundary-review` を使う。
-- 公開 API の docstring、README/docs の API 説明、D 系 lint を変更した場合は `$docstring-style` を使う。
-
-## テストと検証
-
-製品コード、package metadata、依存、テスト基盤を変更した場合は、変更範囲に対応する次の gate を選ぶ。すべての command を機械的に実行するのではなく、実行した command が何を検査するかを検証記録に書く。
-
-```powershell
-uv sync --dev
-uv lock --check
-uv run ruff format --check .
-uv run ruff check .
-uv run ty check --no-progress
-uv run pytest tests/unit
-uv build
-git diff --check
-```
-
-対象となる integration test tree がある変更では、`uv run pytest tests/integration` も実行する。対象 tree がまだない場合、該当 gate は未実行理由を報告する。
-
-docs / spec / skill だけの変更では、対象文書の事実整合、根拠、未検証表示、リンク・参照先、仮テキスト残りを確認する。リンク、frontmatter、schema などの機械的契約に対応する command がある場合だけ実行する。変更対象を検査しない unit test、type check、package build はローカル必須 gate にせず、その成功を文書品質の根拠にしない。
-
-repo-local skill を変更した場合は、実行環境の skill-creator に付属する scripts/quick_validate.py の所在を確認し、その絶対パスを環境変数 SKILL_VALIDATOR に設定する。
-
-```powershell
-uv run --with pyyaml python -X utf8 $env:SKILL_VALIDATOR .agents\skills\<skill-name>
-```
-
-## Git / PR
-
-- 変更を伴う作業では開始時に branch と `git status --short` を確認する。
-- default branch への直接 commit は、ユーザの明示指示がある場合を除き避ける。
-- dirty worktree では既存変更を読んで、ユーザ変更を破棄しない。
-- commit は 1 つの論理変更に絞る。
-- PR 本文には `.github/PULL_REQUEST_TEMPLATE.md` を使い、実行 command と結果を具体的に書く。
-- `not run` と `not applicable` を混同しない。
-- PR merge 後は default branch を同期し、安全な場合だけ作業 branch を削除する。
-
-Conventional Commits に準拠する。
-
-```text
-<type>(<scope>): <subject>
-```
-
-type は `feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `test` / `build` / `ci` / `chore` / `revert` を使う。subject は日本語で記述し、末尾句点は付けない。
+- 明示指示がない限り作業ブランチを使います。
+- コミットはConventional Commitsの `type(scope): subject` 形式とし、subjectは日本語、末尾句点なしにします。
+- マージ後はdefault branchを同期し、取り込み済みと確認できた作業ブランチを整理します。

@@ -1,4 +1,4 @@
 interface:
   display_name: "PR Merge Cleanup"
-  short_description: "Merge a pull request and clean up"
-  default_prompt: "Use $pr-merge-cleanup with Git and GitHub CLI to create and merge the PR, synchronize the default branch, and delete merged local and remote branches."
+  short_description: "Handle requested PR and branch operations"
+  default_prompt: "Use $pr-merge-cleanup to carry out the requested PR, merge, or branch cleanup operations within the agreed scope."

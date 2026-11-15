@@ -1,4 +1,4 @@
 interface:
   display_name: "PyPI Release"
-  short_description: "Prepare and publish a release"
-  default_prompt: "Run release preflight, publish the package, and verify the published artifact."
+  short_description: "Prepare or publish the requested release"
+  default_prompt: "Use $pypi-release to prepare or execute the requested release within the authorized target and version scope."

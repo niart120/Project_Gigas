@@ -1,91 +1,59 @@
 ---
 name: docstring-style
-description: "この Python repo の public API docstring を Google style、ruff pydocstyle、型注釈、README/docs と整合させる skill。ユーザが docstring、公開 API 説明、Args、Returns、Raises、Examples、README/docs との整合、D lint、pydocstyle の修正を依頼したときに使う。"
+description: "公開APIのdocstringやAPIガイドを整える。Google形式の記述、説明の過不足、型注釈との不一致を見直す場面で使う。"
 ---
 
-# Docstring Style
+# APIの説明
 
-public API の docstring を、利用者が呼び出し方と失敗条件を判断できる契約として書く。
+## 説明する範囲
 
-## 対象
+公開APIのdocstringはGoogle形式とし、呼び出し側が判断に使う内容を書きます。形式の設定は `pyproject.toml` のruff設定に従います。
 
-必須:
+公開範囲は、`__init__.py` のexport、利用ガイドで紹介しているAPI、実際の呼び出し側から確認します。名前が公開形式だからという理由だけで、内部実装の説明を長くする必要はありません。
 
-- `src/<package>/__init__.py` から export される関数、class、例外、dataclass。
-- CLI entry point の public helper。
-- docs / README で紹介している API。
-- package が `py.typed` を含む場合、利用者が型を参照する public surface。
+内部helperは、名前とコードから読み取れない前提がある場合に説明します。例えば時間の単位、呼び出せる状態、資源の所有が引き渡される条件は、短く書いておくと呼び出し側で判断できます。
 
-内部 helper は、複雑な前提、例外、単位、状態変化がある場合だけ書く。単純な実装説明は書かない。
+## Google形式の使い方
 
-## 形式
+冒頭で何を行うAPIかを短く説明し、必要な節を使います。
 
-Google style を使う。ruff の `[tool.ruff.lint.pydocstyle] convention = "google"` を前提にする。
+| 節 | 書く内容 |
+|---|---|
+| Args | 型注釈だけでは分からない制約、単位、既定値や `None` の意味 |
+| Returns | 戻り値の意味。自明な場合は省略 |
+| Raises | 呼び出し側が対処すべき例外と、その条件 |
+| Examples | 呼び出し方や状態変化を具体例で説明する必要がある場合 |
+
+設定読込APIの説明例です。節は実際の契約に合わせて選びます。
 
 ```python
-def load_config(path: str, *, strict: bool = True) -> Config:
-    """Load a configuration file.
+"""Read settings from a TOML file.
 
-    Args:
-        path: Configuration file path.
-        strict: If true, reject unknown keys.
+Args:
+    path: Settings file. Relative paths use the process working directory.
 
-    Returns:
-        Parsed configuration.
+Returns:
+    Settings populated with defaults for omitted entries.
 
-    Raises:
-        ConfigError: The file is missing, unreadable, or invalid.
-    """
+Raises:
+    OSError: The file cannot be read.
+    ValueError: The file contains invalid settings.
+"""
 ```
 
-## 確認規則
+型注釈の型名をArgsへ書き直すより、相対パスの基準や省略時の扱いを説明します。例外は呼び出し側が対処すべきものを扱い、内部で偶然発生し得る例外を列挙しません。
 
-- 1 行目は命令文ではなく、何を返す・何を行う API かを短く書く。
-- Args には型を書き直さない。型注釈にない制約、単位、default の意味、`None` の意味を書く。
-- Returns は戻り値が自明でない場合に書く。`None` を返す command helper では省略してよい。
-- Raises は利用者が捕捉すべき例外だけを書く。内部実装の偶発例外を羅列しない。
-- Examples は public API、CLI、複雑な状態遷移、エラー処理を説明するときに使う。
-- docstring と型注釈が矛盾したら、先に API 契約を決める。必要なら `type-boundary-review` を使う。
-- README/docs の説明と docstring が同じ内容を違う言葉で二重管理している場合、README は入口、docstring は API 契約へ分担する。
-- 「便利」「簡単」「適宜」ではなく、具体的な入力、戻り値、失敗条件を書く。
-- private helper に説明を足して public API の不足を隠さない。
+取消し・close・再接続などのAPIでは、呼び出し後に何が完了しているかも契約です。「処理を停止する」だけで曖昧なら、受付を閉じるのか、実行中の処理や資源解放まで待つのかを説明します。
 
-## 手順
+## 他の文書との分担
 
-1. public surface を確認する: `src/<package>/__init__.py`、`py.typed`、README/docs、対象 spec。
-2. `uv run ruff check .` で D 系 rule と ANN 系 rule を確認する。
-3. docstring を追加・更新する前に、型注釈と公開契約を確定する。
-4. Args / Returns / Raises / Examples を必要な section だけ追加する。
-5. `uv run ruff format --check .` で docstring code block の format drift を確認する。
+APIガイドは利用例や複数APIの使い方、docstringは個々の契約を担当し、同じ説明を二重に維持する量を抑えます。通信形式や保存形式のまとまった説明は `docs/design/interfaces/` や `docs/design/data/` に置けます。
 
-## Commands
+## 確認
 
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
-uv run ty check --no-progress
-uv run pytest tests/unit
 ```
 
-対象 API の洗い出し:
-
-```powershell
-rg -n "__all__|def |class |Args:|Returns:|Raises:|Examples:" src README.md docs
-```
-
-## 報告
-
-```markdown
-### Docstring Review
-
-変更:
-- API:
-- 追加 section:
-
-確認:
-- command:
-- docs:
-
-残リスク:
--
-```
+説明と実装が食い違う場合は、どちらを直すべきか契約から判断します。形式はruff、意味はコードと呼び出し側を読んで確認します。
