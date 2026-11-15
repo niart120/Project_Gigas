@@ -6,29 +6,29 @@
 
 ```powershell
 $env:QT_QPA_PLATFORM = 'windows'
-uv run python spec/wip/unit_082/prototype/demo.py
+uv run python spec/complete/unit_082/prototype/demo.py
 ```
 
 「試作」メニューで短い／長いPlan、活動詳細、推論欄の表示を切り替える。F5でストリーミングを再生し、F6で再生を中断する。回答内の外部リンクはこの試作では開かない。
 
 ```powershell
 # QWidgetの描画を保存し、終了する。--stayを付けると画面を残す。
-uv run python spec/wip/unit_082/prototype/demo.py --capture tmp/activity-display-m1/render
+uv run python spec/complete/unit_082/prototype/demo.py --capture tmp/activity-display-m1/render
 
 # 単一のGUIスレッドで解析する比較方式
-uv run python spec/wip/unit_082/prototype/benchmark.py --out tmp/activity-display-m1/sync.json
+uv run python spec/complete/unit_082/prototype/benchmark.py --out tmp/activity-display-m1/sync.json
 
 # 採用方式：解析ワーカーを使用。全12条件、各3秒の送信
-uv run python spec/wip/unit_082/prototype/benchmark.py --worker --out tmp/activity-display-m1/worker.json
+uv run python spec/complete/unit_082/prototype/benchmark.py --worker --out tmp/activity-display-m1/worker.json
 
 # 高負荷を6回繰り返し、待ちデータとメモリを確認
-uv run python spec/wip/unit_082/prototype/benchmark.py --worker --history 1000 --length 100000 --interval 50 --duration 5 --repeat 6 --out tmp/activity-display-m1/repeated.json
+uv run python spec/complete/unit_082/prototype/benchmark.py --worker --history 1000 --length 100000 --interval 50 --duration 5 --repeat 6 --out tmp/activity-display-m1/repeated.json
 
 # 描画・選択・非同期境界の自動試験
 $env:QT_QPA_PLATFORM = 'offscreen'
-uv run pytest spec/wip/unit_082/prototype -q
-uv run ruff check spec/wip/unit_082/prototype
-uv run ruff format --check spec/wip/unit_082/prototype
+uv run pytest spec/complete/unit_082/prototype -q
+uv run ruff check spec/complete/unit_082/prototype
+uv run ruff format --check spec/complete/unit_082/prototype
 ```
 
 `windows`でも試験できるが、OSのクリップボードやUI Automationの影響を受ける。自動試験の再現用は`offscreen`、見た目と性能の確認は`windows`を使い分ける。ベンチマークの待機は送信スレッドとQtイベントループが終了条件を満たすまで続くため、試験中にウィンドウを閉じない。
@@ -43,12 +43,12 @@ uv run ruff format --check spec/wip/unit_082/prototype
 
 ```powershell
 $env:QT_QPA_PLATFORM = 'windows'
-uv run python spec/wip/unit_082/prototype/product_demo.py --capture tmp/activity-display-m3/render --stay
-uv run python spec/wip/unit_082/prototype/benchmark_product.py --out tmp/activity-display-m3/matrix.json
-uv run python spec/wip/unit_082/prototype/benchmark_product.py --history 1000 --length 100000 --duration 5 --repeat 6 --out tmp/activity-display-m3/repeated.json
-uv run python spec/wip/unit_082/prototype/benchmark_product.py --history-only --out tmp/activity-display-m3/history.json
-uv run python spec/wip/unit_082/prototype/benchmark_product.py --history-only --default-font --out tmp/activity-display-m3/history-default-font.json
-uv run python spec/wip/unit_082/prototype/benchmark_product.py --plain-first-paint --out tmp/activity-display-m3/plain-first-paint.json
+uv run python spec/complete/unit_082/prototype/product_demo.py --capture tmp/activity-display-m3/render --stay
+uv run python spec/complete/unit_082/prototype/benchmark_product.py --out tmp/activity-display-m3/matrix.json
+uv run python spec/complete/unit_082/prototype/benchmark_product.py --history 1000 --length 100000 --duration 5 --repeat 6 --out tmp/activity-display-m3/repeated.json
+uv run python spec/complete/unit_082/prototype/benchmark_product.py --history-only --out tmp/activity-display-m3/history.json
+uv run python spec/complete/unit_082/prototype/benchmark_product.py --history-only --default-font --out tmp/activity-display-m3/history-default-font.json
+uv run python spec/complete/unit_082/prototype/benchmark_product.py --plain-first-paint --out tmp/activity-display-m3/plain-first-paint.json
 ```
 
 製品表示の再生はF1が通常、F2が長いPlanと推論、F5がストリーミング、F6が中断。明色の検証には`--light`を付ける。明色パレットの強制は検証用で、製品のテーマ設定を追加するものではない。OSが150%の環境で100%相当を描画する場合は、そのプロセスを起動する前に`$env:QT_SCALE_FACTOR = '0.6666666667'`を設定し、確認後は`Remove-Item Env:QT_SCALE_FACTOR`で戻す。OS設定は変更しない。
