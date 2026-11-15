@@ -27,6 +27,8 @@
 
 [U08](../complete/unit_013/RESUME.md)はM0の設計、M1〜M6の製品実装・結合検証、[M7のGUI・実機受入](../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。次の工程候補は[U10の連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md)です。U07の独立工程は廃止し、U09は初期版対象外です。依存と実施順は[05](05-implementation.md)を正本とします。
 
+追加工程の[仮想コントローラとアプリサービスの責務分離](../complete/unit_078/VIRTUAL_CONTROLLER.md)は完了しています。Codex固有処理の抽出、入力所有・接続管理の独立、別ウィンドウの手動操作の3段階を実装し、採用GUI・実接続・短時間の実機受入を記録しています。U10の長時間運転は別工程です。
+
 作業を始める際は、`AGENTS.md`、現在のコード・依存・テスト、planned / wip / completeを確認し、次の作業を一つ選びます。親仕様を先に揃えても、未着手の子仕様や空クラスを一括作成する指示にはなりません。
 
 # 要求・設計・検証の区別

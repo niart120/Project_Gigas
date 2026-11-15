@@ -33,7 +33,7 @@ from gigas.runtime.codex.models import (
     TextEvent,
 )
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
-from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
+from gigas.services.application import AnswerResult, ApplicationServiceThread, MessageResult
 from gigas.storage import records
 from gigas.storage.records import GameIoRecordWriter, RecordError
 from tests.integration.test_input_service import Device
@@ -43,12 +43,11 @@ from tests.unit.test_codex_connection import FakePeer, _question, _terminal
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
     from gigas.game_io.observation import ObservationResolution
-    from gigas.services.codex import (
+    from gigas.services.application import (
         InputConnectionResult,
         ProjectResult,
         ServiceEvent,
         ServiceResult,
-        _OperationCall,
         _OperationContext,
     )
     from gigas.services.conversations import ManagementResult
@@ -122,7 +121,7 @@ def _call_game_tool(
 def test_connection_execution_settings_reach_the_first_thread(qtbot: QtBot, tmp_path: Path) -> None:
     peer = FakePeer()
     results: list[ServiceResult] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -167,7 +166,7 @@ def test_saved_execution_settings_replace_pending_start_but_not_existing_thread(
         options_seen.append(options)
         return CodexConnection(peer, options, emit)
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     initial = ExecutionSettings(False, False, "user")
     service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=initial))
@@ -227,7 +226,7 @@ def test_execution_settings_changed_during_preparation_wait_for_next_new_thread(
     first, second = PreparingPeer(), FakePeer()
     peers = iter((first, second))
     results: list[ServiceResult] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(next(peers), options, emit),
@@ -295,7 +294,7 @@ def test_initial_bind_failure_is_not_sent_and_retry_keeps_the_created_thread(
     peer = FakePeer()
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -352,7 +351,7 @@ def test_late_project_selection_does_not_replace_changed_target_or_closed_connec
 
     peer = DelayedProjectPeer()
     _project_responses(peer, target)
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -415,7 +414,7 @@ def test_recording_keeps_submitted_and_confirmed_progress_bodies_without_ui_meta
     peer = FakePeer()
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -500,7 +499,7 @@ def test_sandbox_setup_awaits_completion_without_blocking_disconnect(
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.received.connect(events.append)
     service.start()
@@ -567,7 +566,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         return CodexConnection(peer, options, emit)
 
     frame = sample_frame(2048, 1536)
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path, CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)), factory
     )
     service.completed.connect(results.append)
@@ -718,7 +717,7 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         return [json.loads(line) for line in (archive / "events.jsonl").read_bytes().splitlines()]
 
     frame = sample_frame(64, 48)
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
         factory,
@@ -893,7 +892,7 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
         return CodexConnection(peer, options, emit)
 
     monkeypatch.setattr(GameIoRecordWriter, "create", classmethod(delayed_create))
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -927,7 +926,7 @@ def test_shutdown_closes_without_submitting_an_additional_stop(
         connections.append(connection)
         return connection
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -941,7 +940,7 @@ def test_shutdown_closes_without_submitting_an_additional_stop(
     assert not any(result.operation == "stop" for result in results)
 
 
-def _submit_delivery(service: CodexServiceThread, operation: str, text: str) -> None:
+def _submit_delivery(service: ApplicationServiceThread, operation: str, text: str) -> None:
     if operation == "answer":
         service.answer(text, decision="accept")
     else:
@@ -960,7 +959,7 @@ def _not_sent(result: "ServiceResult", token: str) -> bool:
 def test_submission_without_connection_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
@@ -980,7 +979,7 @@ def test_submission_without_connection_reports_not_sent(
 def test_submission_discarded_before_start_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     _submit_delivery(service, operation, "queued")
@@ -996,12 +995,14 @@ def test_submission_discarded_before_start_reports_not_sent(
 def test_submission_cancelled_before_execution_reports_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
-    class CancelBeforeRunService(CodexServiceThread):
+    class CancelBeforeRunService(ApplicationServiceThread):
         """Inject cancellation after task creation but before its first execution."""
 
-        def _start_operation(self, context: "_OperationContext", call: "_OperationCall") -> None:
-            super()._start_operation(context, call)
-            for task in self._tasks:
+        def _dispatch(
+            self, start: Callable[[], None], context: "_OperationContext | None" = None
+        ) -> None:
+            super()._dispatch(start, context)
+            for task in self.codex._tasks:
                 task.cancel()
 
     service = CancelBeforeRunService(tmp_path, CaptureReader(CaptureSnapshot))
@@ -1022,7 +1023,7 @@ def test_submission_cancelled_before_execution_reports_not_sent(
 def test_submission_after_service_shutdown_is_reported_not_sent(
     qtbot: QtBot, tmp_path: Path, operation: str
 ) -> None:
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()
@@ -1045,7 +1046,7 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
         message = "private credential"
         raise OSError(message)
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.connect_runtime(ConnectionOptions(tmp_path))
@@ -1054,7 +1055,7 @@ def test_shutdown_before_start_and_factory_failure_leave_no_worker(
     qtbot.waitUntil(lambda: service.wait(0))
     assert not called.is_set()
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), failed_factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -1079,7 +1080,7 @@ def test_shutdown_still_closes_when_input_close_fails(qtbot: QtBot, tmp_path: Pa
 
     device = Device()
     device.fail_close = True
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path, CaptureReader(CaptureSnapshot), factory, input_factory=lambda _config: device
     )
     applied = []
@@ -1108,7 +1109,7 @@ def test_input_settings_apply_without_codex_or_chat_and_close_on_shutdown(
         devices.append(device)
         return device
 
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path, CaptureReader(CaptureSnapshot), input_factory=device_factory
     )
     service.input_changed.connect(applied.append)
@@ -1148,7 +1149,7 @@ def test_offline_apply_retries_close_after_initial_open_cleanup_fails(
 
     device = FailedOpen()
     device.fail_close = True
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path, CaptureReader(CaptureSnapshot), input_factory=lambda _config: device
     )
     applied = []
@@ -1195,7 +1196,9 @@ def test_input_switch_keeps_latest_target_even_after_stop(
         devices.append(device)
         return device
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), input_factory=factory)
+    service = ApplicationServiceThread(
+        tmp_path, CaptureReader(CaptureSnapshot), input_factory=factory
+    )
     service.input_changed.connect(applied.append)
     service.start()
     try:
@@ -1238,7 +1241,7 @@ def test_body_save_failure_does_not_prevent_send_or_following_records(
     ) -> CodexConnection:
         return CodexConnection(FakePeer(), options, emit)
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.recording_failed.connect(lambda _reference, _path, reason: failures.append(reason))
     service.start()
@@ -1277,7 +1280,7 @@ def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path:
         peers.append(peer)
         return CodexConnection(peer, options, emit)
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.start()
     try:
@@ -1308,7 +1311,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
     events: list[ServiceEvent] = []
     inputs: list[InputConnectionResult] = []
     busy: list[bool] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -1405,7 +1408,7 @@ def test_stop_waiting_for_terminal_can_disconnect_without_circular_wait(
     peer = FakePeer()
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -1450,7 +1453,7 @@ def test_send_result_collects_turn_notification_and_preserves_delivery_classific
         peer.failure = "turn/start"
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -1511,7 +1514,7 @@ def test_question_and_answer_delivery_do_not_suspend_input_and_stop_joins_delive
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
     inputs: list[InputConnectionResult] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
         lambda options, emit: CodexConnection(peer, options, emit),
@@ -1613,7 +1616,7 @@ def test_goal_delete_preserves_turn_and_common_stop_preserves_objective(
     peer = GoalPeer()
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
-    service = CodexServiceThread(
+    service = ApplicationServiceThread(
         tmp_path,
         CaptureReader(CaptureSnapshot),
         lambda options, emit: CodexConnection(peer, options, emit),

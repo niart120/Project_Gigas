@@ -12,7 +12,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.models import ConnectionOptions, ConversationStatus, SessionStatus
 from gigas.runtime.codex.transport import JsonObject, JsonValue
-from gigas.services.codex import CodexServiceThread, ServiceEvent
+from gigas.services.application import ApplicationServiceThread, ServiceEvent
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.unit.test_codex_connection import FakePeer
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from gigas.runtime.codex.connection import RuntimeEvent
-    from gigas.services.codex import ServiceResult
+    from gigas.services.application import ServiceResult
     from gigas.ui.notifications import Notice
 
 
@@ -69,7 +69,7 @@ def make_shell(
     ) -> CodexConnection:
         return CodexConnection(peer, options, emit)
 
-    service = CodexServiceThread(path.parent, capture.reader(), factory)
+    service = ApplicationServiceThread(path.parent, capture.reader(), factory)
     shell = ApplicationShell(path, io, service=service, capture_service=capture)
     return shell, peer, capture
 

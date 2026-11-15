@@ -21,7 +21,7 @@ from gigas.runtime.codex.models import (
 )
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification, ServerRequest
 from gigas.services._conversation_resources import ConversationResources
-from gigas.services.codex import CodexServiceThread, ServiceResult
+from gigas.services.application import ApplicationServiceThread, ServiceResult
 from gigas.services.conversations import (
     BrowseResult,
     HistoryResult,
@@ -36,7 +36,7 @@ from tests.unit.test_codex_connection import FakePeer
 
 if TYPE_CHECKING:
     from gigas.runtime.codex.connection import RuntimeEvent
-    from gigas.services.codex import ProjectResult, ServiceEvent
+    from gigas.services.application import ProjectResult, ServiceEvent
 
 
 class _Session:
@@ -59,7 +59,9 @@ class _Session:
             self.notifications = emit
             return CodexConnection(self.peer, options, emit)
 
-        self.service = CodexServiceThread(path, reader or CaptureReader(CaptureSnapshot), factory)
+        self.service = ApplicationServiceThread(
+            path, reader or CaptureReader(CaptureSnapshot), factory
+        )
         self.service.completed.connect(self.results.append)
         self.service.management_completed.connect(self.management.append)
         self.service.received.connect(self.events.append)
@@ -179,8 +181,8 @@ def test_project_picker_can_replace_stopped_loaded_conversation_with_public_meta
         assert result.path == target
         assert result.project == ProjectInfo("project-1", target.name, target)
         assert s.service.selected_target == NewConversationTarget("project-1")
-        assert not s.service._resources.records_bound
-        assert s.service._resources._mcp is None
+        assert not s.service.codex._resources.records_bound
+        assert s.service.codex._resources._mcp is None
         assert list(target.iterdir()) == []
         assert [
             (method, params) for method, params in peer.calls if method == "thread/unsubscribe"
@@ -207,10 +209,10 @@ def test_switch_requires_idle_and_releases_old_resources_before_adopting_same_cw
         s.notify(_terminal())
         selected = s.manage("select", lambda: s.service.select_conversation("stored-2"))
         assert not selected.error
-        assert not s.service._resources.records_bound
-        assert s.service._resources._mcp is None
-        assert s.service._conversation is not None
-        assert s.service._conversation.snapshot == ConversationStatus()
+        assert not s.service.codex._resources.records_bound
+        assert s.service.codex._resources._mcp is None
+        assert s.service.codex._conversation is not None
+        assert s.service.codex._conversation.snapshot == ConversationStatus()
         assert [(m, p) for m, p in peer.calls if m == "thread/unsubscribe"] == [
             ("thread/unsubscribe", {"threadId": "thread-1"})
         ]
@@ -248,7 +250,7 @@ def test_disconnect_keeps_started_target_and_explicit_execution_resumes_it(
     peer = FakePeer()
     with _session(qtbot, tmp_path, peer) as s:
         assert not s.command("send", lambda: s.service.send("first")).error
-        target = s.service._selection.target
+        target = s.service.codex._selection.target
         assert isinstance(target, StoredConversationTarget)
         s.notify(
             RpcNotification(
@@ -265,8 +267,8 @@ def test_disconnect_keeps_started_target_and_explicit_execution_resumes_it(
             )
         )
         assert not s.command("disconnect", s.service.disconnect_runtime).error
-        assert s.service._selection.target is target
-        assert s.service._selection.goal == GoalState("saved goal", "active", 7, 1)
+        assert s.service.codex._selection.target is target
+        assert s.service.codex._selection.goal == GoalState("saved goal", "active", 7, 1)
         s.peer = next_peer = ResumePeer()
         assert not s.command(
             "connect", lambda: s.service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
@@ -292,8 +294,8 @@ def test_browse_model_commits_catalog_choice_without_thread_settings(
         assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error
         assert not s.command("select_model", lambda: s.service.select_model("other", "low")).error
         assert s.command("select_model", lambda: s.service.select_model("not-a-model", "low")).error
-        assert s.service._connection is not None
-        assert s.service._connection.selection.model == "other"
+        assert s.service.codex._connection is not None
+        assert s.service.codex._connection.selection.model == "other"
     assert not any(
         m in {"thread/settings/update", "thread/resume", "thread/start"} for m, _ in peer.calls
     )
@@ -318,8 +320,8 @@ def test_model_change_is_rejected_while_new_start_is_waiting_for_its_id(
         qtbot.waitUntil(entered.is_set)
         result = s.command("select_model", lambda: s.service.select_model("other", "low"))
         assert result.error
-        assert s.service._connection is not None
-        assert s.service._connection.selection.model == "catalog-default"
+        assert s.service.codex._connection is not None
+        assert s.service.codex._connection.selection.model == "catalog-default"
         assert s.command("goal_clear", s.service.clear_goal).error
         release.set()
         qtbot.waitUntil(lambda: any(r.operation == "send" for r in s.results))
@@ -350,7 +352,7 @@ def test_browse_goal_clear_correlates_global_notification_without_readiness(
             s.notify(RpcNotification("thread/goal/cleared", {"threadId": "stored-1"}))
         qtbot.waitUntil(lambda: any(r.operation == "goal_clear" for r in s.results))
         assert not s.results[-1].error
-        assert (s.service._selection.goal is None) == cleared
+        assert (s.service.codex._selection.goal is None) == cleared
         if cleared:
             assert notifications[-1][0] == 1
             assert notifications[-1][1].target is s.service.selected_target
@@ -506,7 +508,7 @@ def test_failed_resource_release_retains_target_goal_but_publishes_unloaded_exec
     peer.responses["thread/unsubscribe"] = {"status": "unsubscribed"}
     with _session(qtbot, tmp_path, peer) as s:
         assert not s.command("send", lambda: s.service.send("first")).error
-        old_target = s.service._selection.target
+        old_target = s.service.codex._selection.target
         s.notify(_terminal())
         s.notify(
             RpcNotification(
@@ -525,8 +527,8 @@ def test_failed_resource_release_retains_target_goal_but_publishes_unloaded_exec
         _saved(peer, tmp_path / "other", "stored-2")
         result = s.manage("select", lambda: s.service.select_conversation("stored-2"))
         assert result.error
-        assert s.service._selection.target is old_target
-        assert s.service._selection.goal == GoalState("retained", "paused", 5, 2)
+        assert s.service.codex._selection.target is old_target
+        assert s.service.codex._selection.goal == GoalState("retained", "paused", 5, 2)
         statuses = [e.event for e in s.events if isinstance(e.event, ConversationStatus)]
         assert statuses[-1] == ConversationStatus()
 
@@ -557,7 +559,7 @@ def test_selection_blocks_submission_but_does_not_block_stop_or_disconnect(
             release.set()
             qtbot.waitUntil(lambda: bool(s.management))
             assert s.management[-1].error
-            assert s.service._selection.target == NewConversationTarget()
+            assert s.service.codex._selection.target == NewConversationTarget()
     finally:
         release.set()
 
@@ -587,13 +589,13 @@ def test_old_history_success_and_failure_are_discarded_after_same_id_is_reselect
     try:
         with _session(qtbot, tmp_path, peer) as s, _release_after(release):
             assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error
-            old_target = s.service._selection.target
+            old_target = s.service.codex._selection.target
             s.service.load_history(cursor="opaque:/+?")
             qtbot.waitUntil(entered.is_set)
             assert not s.manage("new", s.service.new_conversation).error
             assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error
-            assert s.service._selection.target == old_target
-            assert s.service._selection.target is not old_target
+            assert s.service.codex._selection.target == old_target
+            assert s.service.codex._selection.target is not old_target
             release.set()
             qtbot.waitUntil(finished.is_set)
             s.notify(RpcNotification("unrelated", {}))

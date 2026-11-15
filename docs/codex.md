@@ -16,7 +16,7 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準の生成・参照をまとめて切り替え、OFFでも既存の記憶を削除しません。生成は候補となる会話や実行条件に従い、ON直後の生成は保証しません。作業フォルダーのAGENTS.mdと標準探索先のSkillsを読み込み、GIGAS独自の探索処理や資料様式は設けません。Apps・Plugins・Hooksと外部通知は無効です。
 
-`CodexConnection`は通信、認証、モデル候補と確定選択、Windows実行環境を所有します。`request(method, params)`、`respond(request_id, result)`、`reject(request_id, code, message)`でRPCを配送し、会話の通知・要求をコールバックへ渡します。接続自身は会話・Goal・機器入力を制御しません。アプリでの送信・Goal・停止は[CodexServiceThread](codex-gui.md#サービスapi)を使い、内部の会話実行が調整します。
+`CodexConnection`は通信、認証、モデル候補と確定選択、Windows実行環境を所有します。`request(method, params)`、`respond(request_id, result)`、`reject(request_id, code, message)`でRPCを配送し、会話の通知・要求をコールバックへ渡します。接続自身は会話・Goal・機器入力を制御しません。アプリでの送信・Goal・停止は[ApplicationServiceThread](codex-gui.md#サービスapi)を使い、CodexServiceと内部の会話実行が処理します。
 
 `open()`は初期化・認証状態・モデル一覧を確認します。未認証時の`LoginEvent.url`は明示的な`login()`後にだけ届きます。ブラウザは利用側が開き、`account/login/completed`とアカウント再取得で結果を確認します。URLは認証処理の終了時に破棄してください。
 

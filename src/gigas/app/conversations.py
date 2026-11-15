@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 from gigas.runtime.codex.history import history_entries
 from gigas.runtime.codex.management_models import ProjectPage, ThreadPage
 from gigas.runtime.codex.models import ConversationStatus, DialogueEvent, SessionStatus
-from gigas.services.codex import ProjectResult, ServiceEvent, ServiceResult
+from gigas.services.application import ProjectResult, ServiceEvent, ServiceResult
 from gigas.services.conversations import (
     BrowseGoalEvent,
     BrowseResult,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from gigas.runtime.codex.management_models import ProjectInfo, ThreadInfo
-    from gigas.services.codex import CodexServiceThread
+    from gigas.services.application import ApplicationServiceThread
     from gigas.ui.main_window import MainWindow
 
 
@@ -39,7 +39,7 @@ class ConversationController(QObject):
     """
 
     def __init__(
-        self, window: "MainWindow", service: "CodexServiceThread", parent: QObject
+        self, window: "MainWindow", service: "ApplicationServiceThread", parent: QObject
     ) -> None:
         """Wire view intent without connecting to Codex or fetching any pages."""
         super().__init__(parent)

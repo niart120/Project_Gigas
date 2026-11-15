@@ -14,7 +14,7 @@ from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.management_models import ProjectInfo, ProjectPage, TurnPage
 from gigas.runtime.codex.models import ConnectionOptions, DialogueEvent, GoalState
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
-from gigas.services.codex import CodexServiceThread, ProjectResult, ServiceEvent
+from gigas.services.application import ApplicationServiceThread, ProjectResult, ServiceEvent
 from gigas.services.conversations import (
     BrowseGoalEvent,
     HistoryResult,
@@ -127,7 +127,7 @@ def _shell(qtbot: QtBot, root: Path) -> tuple[ApplicationShell, ConversationPeer
     ) -> CodexConnection:
         return CodexConnection(peer, options, emit)
 
-    service = CodexServiceThread(root, capture.reader(), factory)
+    service = ApplicationServiceThread(root, capture.reader(), factory)
     shell = ApplicationShell(root / "settings.toml", service=service, capture_service=capture)
     shell.start()
     qtbot.waitUntil(lambda: shell.ready)

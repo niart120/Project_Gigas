@@ -14,12 +14,13 @@ from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
 from gigas.game_io.input.serial import SerialPort
 from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
-from gigas.services.codex import (
-    CodexServiceThread,
+from gigas.services.application import (
+    ApplicationServiceThread,
     InputConnectionResult,
     ProjectResult,
     ServiceResult,
 )
+from gigas.services.input import OperationResult as InputOperationResult
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
@@ -27,9 +28,11 @@ from gigas.ui.main_window import MainWindow
 from gigas.ui.notifications import Notice
 from gigas.ui.request_card import AnswerSubmission
 from gigas.ui.settings_dialog import SettingsDialog
+from gigas.ui.virtual_controller import VirtualController
 
 if TYPE_CHECKING:
     from gigas.app.video import CapturePort
+    from gigas.game_io.input.config import InputProtocol
 
 
 @dataclass(frozen=True)
@@ -57,7 +60,7 @@ class ApplicationShell(QObject):
     Args:
         path: Explicit settings path; tests must supply an isolated location.
         io: Synchronous settings operations isolated in the owned thread.
-        service: Optional unstarted Codex service owned until application shutdown.
+        service: Optional unstarted application service thread owned until shutdown.
         capture_service: Optional unstarted capture service owned until confirmed cleanup.
     """
 
@@ -69,7 +72,7 @@ class ApplicationShell(QObject):
         path: "Path",
         io: SettingsIO | None = None,
         *,
-        service: CodexServiceThread | None = None,
+        service: ApplicationServiceThread | None = None,
         capture_service: "CapturePort | None" = None,
     ) -> None:
         """Construct views without displaying them."""
@@ -78,6 +81,9 @@ class ApplicationShell(QObject):
         self._startup_cwd = Path.cwd()
         self.window = MainWindow()
         self.dialog: SettingsDialog | None = None
+        self.controller: VirtualController | None = None
+        self._manual_available = False
+        self._input_protocol: InputProtocol | None = None
         self._serial_ports: tuple[SerialPort, ...] = ()
         self._serial_searching = False
         self._serial_discovery_error = ""
@@ -95,7 +101,7 @@ class ApplicationShell(QObject):
         self._shutdown_failure = ""
         self.video = VideoController(self.window.video, capture_service, self)
         self.service = (
-            CodexServiceThread(path.parent, self.video.service.reader())
+            ApplicationServiceThread(path.parent, self.video.service.reader())
             if service is None
             else service
         )
@@ -117,6 +123,7 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._worker.retire)
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
+        self.window.controller_requested.connect(self.open_controller)
         self.window.new_project_requested.connect(self._new_project)
         self.window.input_menu.aboutToShow.connect(self.refresh_input_ports)
         self.window.input_port_requested.connect(self._select_input_port)
@@ -158,6 +165,8 @@ class ApplicationShell(QObject):
         self.service.recording_failed.connect(self._recording_failed)
         self.service.input_ports.connect(self._input_ports_received)
         self.service.input_changed.connect(self._input_changed)
+        self.service.manual_changed.connect(self._manual_changed)
+        self.service.manual_completed.connect(self._manual_completed)
         self.service.finished.connect(self._service_finished)
         self.conversations = ConversationController(self.window, self.service, self)
         panel.state_changed.connect(self._render)
@@ -208,6 +217,59 @@ class ApplicationShell(QObject):
     def interrupt(self) -> None:
         """Interrupt execution without cancelling submitted settings application."""
         self.service.interrupt()
+
+    def open_controller(self) -> None:
+        """Show or raise the single controller without changing service state."""
+        if self.controller is None:
+            self.controller = VirtualController(self.window)
+            self.controller.input_changed.connect(self.service.update_manual)
+            self.controller.release_requested.connect(self.service.release_manual)
+            self.controller.setScreen(self.window.screen())
+            self.controller.move(self.window.pos())
+        self._render_controller()
+        self.controller.showNormal()
+        fit_to_screen(self.controller)
+        self.controller.raise_()
+        self.controller.activateWindow()
+
+    @Slot(bool, object)
+    def _manual_changed(self, available: bool, protocol: "InputProtocol | None") -> None:
+        self._manual_available = available
+        self._input_protocol = protocol
+        self._render_controller()
+
+    def _render_controller(self) -> None:
+        if self.controller is not None:
+            self.controller.set_input_available(
+                self._manual_available
+                and not self._exit_requested
+                and not self.committed
+                and not self._service_unavailable,
+                self._input_protocol,
+            )
+
+    @Slot(object)
+    def _manual_completed(self, result: InputOperationResult) -> None:
+        if result.code not in {"OK", "INTERRUPTED"}:
+            self.window.notifications.publish(
+                Notice(
+                    "input",
+                    "入力失敗",
+                    "接続中の機器に対応しない入力のため、送信しませんでした。操作部を確認してください。"
+                    if result.code == "INVALID_SEQUENCE"
+                    else (
+                        "手動入力の送信・解除を確認できませんでした。入力接続を再適用してください。"
+                    ),
+                    result.message,
+                )
+            )
+
+    def _set_exit_requested(self, requested: bool) -> None:
+        self._exit_requested = requested
+        if requested:
+            self._manual_available = False
+        self.service.set_exit_requested(requested)
+        self._render_controller()
 
     def refresh_input_ports(self) -> None:
         """Discover serial identifiers without opening them."""
@@ -624,7 +686,7 @@ class ApplicationShell(QObject):
                 )
                 if request.capture and not request.snapshot.capture_device:
                     explanation += "映像取得は停止していません。"
-                self._exit_requested = False
+                self._set_exit_requested(False)
                 self.wait_timer.stop()
                 self.wait_expired = False
             self._settings_error_notice = Notice("settings", title, explanation, result.error)
@@ -637,6 +699,7 @@ class ApplicationShell(QObject):
     @Slot()
     def _render(self) -> None:
         closing = self._exit_requested or self.committed
+        self._render_controller()
         state = "終了待ち" if closing else ""
         if closing and self.wait_expired:
             targets = []
@@ -709,9 +772,9 @@ class ApplicationShell(QObject):
         """Interrupt Codex and wait for submitted I/O before confirming shutdown."""
         if self.committed or self._exit_requested:
             return
+        self._set_exit_requested(True)
         self.interrupt()
         self.video.cancel_pending()
-        self._exit_requested = True
         if self._io_request is None and not self._project_pending:
             self._resolve_close()
         else:
@@ -740,7 +803,7 @@ class ApplicationShell(QObject):
         elif result == QMessageBox.StandardButton.Discard:
             self._commit_close()
         else:
-            self._exit_requested = False
+            self._set_exit_requested(False)
         self._render()
 
     def _commit_close(self) -> None:
@@ -768,6 +831,7 @@ class ApplicationShell(QObject):
         if not self.committed:
             self._service_unavailable = True
             self.window.connection.service_finished()
+            self._render_controller()
         self._finish_shutdown()
 
     @Slot()
@@ -813,6 +877,8 @@ class ApplicationShell(QObject):
         self.wait_timer.stop()
         if self.dialog is not None:
             self.dialog.hide()
+        if self.controller is not None:
+            self.controller.close()
         self.window.allow_close = True
         self.window.close()
         self.stopped.emit()

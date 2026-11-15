@@ -10,14 +10,17 @@
 
 ```mermaid
 flowchart TB
-  U["Qt GUI"] -->|"操作"| S["CodexServiceThread"]
+  U["Qt GUI"] -->|"操作"| Q["ApplicationServiceThread"]
+  Q -->|"所有・配送"| S["CodexService"]
+  Q -->|"所有"| I["InputService"]
   S --> E["ConversationExecution"]
   S --> L["ConversationSelection"]
   L -->|"公開管理API"| C["CodexConnection"]
   E -->|"RPC"| C["CodexConnection"]
   C -->|"通知・要求"| S
   E -->|"表示・記録"| S
-  S -->|"表示更新"| U
+  S -->|"型付き結果"| Q
+  Q -->|"Qt通知"| U
   E --> R["ConversationResources"]
   R --> M["stateless MCP"]
   M -->|"操作列"| E
@@ -33,7 +36,8 @@ flowchart TB
 | 所有者 | 保持する情報・処理と寿命 |
 | --- | --- |
 | GUI | 下書き、表示内容、Qt配送結果待ち。接続と会話の通知から活性を導出する |
-| `CodexServiceThread` | Qt操作の配送、接続世代、部品の組立、接続全体の終了task。サービスの寿命で所有する |
+| `ApplicationServiceThread` | Qt操作の配送、要求世代の発行、同一ループ上のCodexService・InputServiceの寿命。終了時は両サービスの回収を待つ |
+| `CodexService` | 接続・認証、会話部品の組立、Codex操作taskと結果解釈。入力サービスを借用し、入力接続の生成・終了は所有しない |
 | `CodexConnection` | stdio、認証、モデル候補と確定選択、Windows実行環境、受信処理。一接続の寿命 |
 | `ConversationSelection` | 新規会話の所属、または保存済みID・cwd・所属の不変値、閲覧metadata・Goalと取得中task。選択は接続を跨いで保持し、履歴ページの全文を蓄積しない |
 | `ConversationExecution` | 最新Goal、現在turn、送信task、停止taskと実行準備。一接続の現在対象に一つ。切替時には旧実行を回収して交換し、turn内容と要求は個別の所有者へ委譲する |
@@ -59,6 +63,8 @@ Qtのメインスレッドは表示と操作受付、サービス用QThreadの�
 映像ドライバーの列挙・open/read/releaseは専用子プロセスが所有し、監視スレッドが最新一枚と状態を読みます。期限付き終了と回収は取得側が管理し、異常終了した共有資源を次の接続へ再利用しません。入力の同期シリアル呼出しは単一workerへ直列化します。操作列の取消しは待ち行列へ積まず、実行中taskへ届けます。開始済みwriteを回収してから実行部がneutralを送出し、別経路から解除bytesを割り込ませません。
 
 入力taskは解除まで一件だけです。`InputService.start()`は同期的にtaskを登録し、処理中はBUSYを返します。`stop()`は現在のtaskへ取消しを要求してそのtaskを返します。停止所有者は捕捉したtaskの解除結果を回収し、後から始まった別の操作を取り消しません。画像加工・保存は入力枠から外し、停止完了のために画像完成を待ちません。
+
+手動保持もInputServiceの同じ操作枠を使います。ApplicationServiceThreadはCodexの開始準備・turn・active Goal・回答待ち・停止と、入力側の接続・所有・終了要求を確認して配送します。GUIは通知された受付可否を表示に使い、実受付はサービスループで再確認します。会話実行の既存送信taskが、開始を伴う要求だけ手動解除を待ってから準備・RPCへ進みます。小窓の開閉はCodexへ通知せず、手動保持の終了だけを入力側へ依頼します。Codex切断は開始時に捕捉した有限操作を回収し、後続の手動操作を待ちません。
 
 観測は最新キャッシュを一度採用し、要求後の新フレームを待ちません。操作後の観測でも同じ契約を使い、画像の選択前に次の入力が始まる場合があります。符号化中の別観測はBUSYですが、保存中であることを理由に次の観測を拒否しません。開始済み符号化・保存は要求取消し後も各所有者が回収します。
 

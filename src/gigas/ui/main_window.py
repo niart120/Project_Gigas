@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
     """Present shared menus, video, conversation, and current status."""
 
     settings_requested = Signal()
+    controller_requested = Signal()
     new_project_requested = Signal()
     close_requested = Signal()
     window_size_requested = Signal(str)
@@ -173,6 +174,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         self.notifications = NotificationCenter(self)
         self.view_menu.addSeparator()
+        self.controller_action = self.view_menu.addAction("コントローラ")
+        self.controller_action.triggered.connect(self.controller_requested)
         self.view_menu.addAction(self.notifications.entry_action)
         layout.addWidget(self.notifications.banner)
         self.close_progress = QWidget(central)

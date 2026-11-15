@@ -1,0 +1,61 @@
+{"time": 113278.234, "kind": "manual", "allowed": false, "protocol": null}
+{"time": 113278.25, "kind": "input_open"}
+{"time": 113278.25, "kind": "input_connection", "connected": true, "error": ""}
+{"time": 113278.25, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113278.25, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113357.859, "kind": "input_sent", "state": {"buttons": [], "left_stick": [-6, -6], "right_stick": [0, 0], "touch": null}}
+{"time": 113357.89, "kind": "input_sent", "state": {"buttons": [], "left_stick": [-100, -5], "right_stick": [0, 0], "touch": null}}
+{"time": 113357.89, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113357.89, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113357.89, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113357.89, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113385.343, "kind": "input_sent", "state": {"buttons": [], "left_stick": [-100, -5], "right_stick": [0, 0], "touch": null}}
+{"time": 113385.375, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113385.375, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113385.375, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113385.375, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113397.14, "kind": "input_sent", "state": {"buttons": ["B"], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113397.14, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113397.14, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113397.14, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113397.14, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113436.359, "kind": "completed", "operation": "connect", "error": ""}
+{"time": 113485.281, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113486.062, "kind": "completed", "operation": "goal_set", "error": ""}
+{"time": 113504.203, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113575.468, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113575.5, "kind": "completed", "operation": "send", "error": ""}
+{"time": 113619.828, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113619.828, "kind": "completed", "operation": "stop", "error": ""}
+{"time": 113638.734, "kind": "input_sent", "state": {"buttons": ["B"], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113638.75, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113638.75, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113638.75, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113638.75, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113652.765, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [-6, -100], "touch": null}}
+{"time": 113652.781, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113652.781, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113652.781, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113652.781, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113663.781, "kind": "input_sent", "state": {"buttons": ["UP"], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113663.796, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113663.796, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113663.796, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113663.796, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113706.531, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113706.531, "kind": "input_closed"}
+{"time": 113706.531, "kind": "input_connection", "connected": false, "error": ""}
+{"time": 113706.531, "kind": "manual", "allowed": false, "protocol": null}
+{"time": 113736.328, "kind": "input_open"}
+{"time": 113736.328, "kind": "input_connection", "connected": true, "error": ""}
+{"time": 113736.328, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113736.328, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113760.906, "kind": "completed", "operation": "disconnect", "error": ""}
+{"time": 113780.39, "kind": "input_sent", "state": {"buttons": ["B"], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113780.406, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113780.406, "kind": "input_sent", "state": {"buttons": [], "left_stick": [0, 0], "right_stick": [0, 0], "touch": null}}
+{"time": 113780.406, "kind": "manual", "allowed": true, "protocol": "ch552"}
+{"time": 113780.406, "kind": "manual_result", "code": "OK", "message": ""}
+{"time": 113811.671, "kind": "manual", "allowed": false, "protocol": "ch552"}
+{"time": 113811.671, "kind": "input_closed"}
+{"time": 113811.875, "kind": "exit", "code": 0, "shutdown_error": "", "capture_error": ""}
