@@ -22,9 +22,12 @@ def video_shell(
 ) -> Iterator[tuple[ApplicationShell, ControlledCapture]]:
     capture = ControlledCapture()
     path = tmp_path / "settings.toml"
-    save_settings(path, Settings(capture_device="path-b"))
+    save_settings(path, Settings())
     shell = ApplicationShell(path, capture_service=capture)
     shell.start()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    # Seed stopped saved settings; startup restoration has separate coverage.
+    shell.apply_settings(replace(shell.baseline, capture_device="path-b"), capture=False)
     qtbot.waitUntil(lambda: shell.operation is None)
     yield shell, capture
     capture.finish_shutdown = True

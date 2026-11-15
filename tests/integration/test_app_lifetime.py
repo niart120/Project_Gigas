@@ -73,21 +73,21 @@ def test_slow_io_keeps_gui_responsive_and_rejects_duplicate_requests(
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    shell.dialog.model.setText("snapshot")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     shell.dialog.save_button.click()
     qtbot.waitUntil(io.entered.is_set)
     pulse = Event()
     QTimer.singleShot(0, pulse.set)
     qtbot.waitUntil(pulse.is_set)
     assert io.thread != QThread.currentThread()
-    assert shell.dialog.model.isReadOnly()
+    assert not shell.dialog.preview_fps.isEnabled()
     assert not shell.dialog.save_button.isEnabled()
     assert not shell.apply_settings()
     io.release.set()
     qtbot.waitUntil(lambda: shell.operation is None)
     assert (io.loads, io.saves) == (1, 1)
-    assert shell.baseline.model == "snapshot"
-    assert not shell.dialog.model.isReadOnly()
+    assert shell.baseline.preview_fps == 60
+    assert shell.dialog.preview_fps.isEnabled()
 
 
 @pytest.mark.parametrize("target", ["dialog", "app"])
@@ -99,7 +99,7 @@ def test_pending_close_follows_save_result(
     io.fail = fail
     dialog = shell.dialog
     assert dialog is not None
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     if target == "dialog":
         dialog.ok_button.click()
     else:
@@ -116,7 +116,7 @@ def test_pending_close_follows_save_result(
         assert shell.window.isVisible()
         assert dialog.isVisible()
         assert dialog.save_button.isEnabled()
-        assert dialog.model.text() == "edited"
+        assert dialog.preview_fps.currentData() == 60
     else:
         qtbot.waitUntil(lambda: not dialog.isVisible())
         if target == "app":
@@ -134,7 +134,7 @@ def test_closing_editor_during_save_keeps_submitted_result(
     dialog = shell.dialog
     assert dialog is not None
     io.fail = fail
-    dialog.model.setText("submitted")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.ok_button.click()
     qtbot.waitUntil(io.entered.is_set)
     qtbot.keyClick(dialog, Qt.Key.Key_Escape)
@@ -148,11 +148,11 @@ def test_closing_editor_during_save_keeps_submitted_result(
     assert io.saves == 1
     assert shell.window.isVisible()
     shell.open_settings()
-    assert dialog.model.text() == ("" if fail else "submitted")
+    assert dialog.preview_fps.currentData() == (30 if fail else 60)
     if fail:
         assert shell.window.notifications.notices["settings"].details
     else:
-        assert load_settings(shell.path).model == "submitted"
+        assert load_settings(shell.path).preview_fps == 60
 
 
 def test_close_during_initial_load_finishes_after_result(qtbot: QtBot, tmp_path: Path) -> None:
@@ -209,7 +209,7 @@ def test_save_from_close_confirmation_finishes_before_shutdown(
 ) -> None:
     shell, io = controlled
     assert shell.dialog is not None
-    shell.dialog.model.setText("saved-on-close")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     shell.request_close()
     assert shell.confirmation is not None
     shell.confirmation.button(QMessageBox.StandardButton.Save).click()
@@ -218,7 +218,7 @@ def test_save_from_close_confirmation_finishes_before_shutdown(
     assert shell.window.isVisible()
     io.release.set()
     qtbot.waitUntil(lambda: not shell.window.isVisible())
-    assert load_settings(shell.path).model == "saved-on-close"
+    assert load_settings(shell.path).preview_fps == 60
 
 
 def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
@@ -248,7 +248,7 @@ def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
         qtbot.waitUntil(lambda: shell.ready)
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setText("saved before shutdown")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         shell.apply_settings()
         qtbot.waitUntil(entered.is_set)
         shell.request_close()
@@ -263,7 +263,7 @@ def test_settings_worker_is_destroyed_on_gui_before_shutdown_completes(
         assert events[0][1] != gui_thread
         assert events[1][1] == gui_thread
         assert events[2][1] == gui_thread
-        assert load_settings(shell.path).model == "saved before shutdown"
+        assert load_settings(shell.path).preview_fps == 60
         assert shell.io_thread.wait(0)
     finally:
         release.set()

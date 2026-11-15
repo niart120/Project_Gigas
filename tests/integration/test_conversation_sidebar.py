@@ -306,7 +306,7 @@ def test_window_sidebar_toggle_returns_width_and_keeps_existing_content_and_sett
     assert (
         window.settings_button.mapToGlobal(window.settings_button.rect().topRight()).x()
         < window.menuBar()
-        .mapToGlobal(window.menuBar().actionGeometry(window.project_menu.menuAction()).topLeft())
+        .mapToGlobal(window.menuBar().actionGeometry(window.connection_menu.menuAction()).topLeft())
         .x()
     )
     assert isinstance(window.sidebar_button, QToolButton)
@@ -318,3 +318,24 @@ def test_window_sidebar_toggle_returns_width_and_keeps_existing_content_and_sett
         left = pane.mapToGlobal(QPoint()).x()
         center = status.mapToGlobal(status.rect().center()).x()
         assert left <= center < left + pane.width()
+
+
+def test_empty_placeholder_requires_completed_empty_page(qtbot: QtBot) -> None:
+    sidebar = _sidebar(qtbot)
+    sidebar.upsert_project(ProjectInfo("empty", "Empty", Path.cwd()))
+    sidebar.expand_project("empty")
+    group = sidebar._groups["empty"]
+    qtbot.waitUntil(group.content.isVisible)
+    assert not group.empty.isVisible()
+    sidebar.set_threads_loading("empty", True)
+    assert not group.empty.isVisible()
+    sidebar.set_threads_loading("empty", False)
+    assert not group.empty.isVisible()
+    sidebar.set_threads("empty", ThreadPage((), None, None))
+    assert group.empty.isVisible()
+    assert group.threads.count() == 0
+    sidebar.set_threads_loading("empty", True)
+    assert not group.empty.isVisible()
+    sidebar.set_threads("empty", ThreadPage((_thread("one", "empty"),), None, None))
+    assert not group.empty.isVisible()
+    assert group.threads.count() == 1

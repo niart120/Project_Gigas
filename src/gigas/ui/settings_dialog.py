@@ -52,7 +52,6 @@ class SettingsDialog(QDialog):
         """Create the form and action buttons."""
         super().__init__(parent)
         self._snapshot = Settings()
-        self._loaded_text: dict[QLineEdit, tuple[str, str]] = {}
         self._devices: tuple[DeviceInfo, ...] = ()
         self._serial_ports: tuple[SerialPort, ...] = ()
         self.setModal(True)
@@ -154,13 +153,6 @@ class SettingsDialog(QDialog):
         agent_form = self._tab("Codex")
         self.codex_tab = self.tabs.count() - 1
         self.codex_form = agent_form
-        agent_form = self._group(agent_form, "接続時の既定値")
-        self.model = self._text_field()
-        self.effort = self._text_field()
-        self.model.setPlaceholderText("既定")
-        self.effort.setPlaceholderText("既定")
-        agent_form.addRow("モデル", self.model)
-        agent_form.addRow("推論レベル", self.effort)
         execution_form = self._group(self.codex_form, "実行")
         self.web_search_enabled = QCheckBox("Web検索", self)
         self.web_search_enabled.setChecked(True)
@@ -227,11 +219,6 @@ class SettingsDialog(QDialog):
         form = QFormLayout(group)
         parent_form.addRow(group)
         return form
-
-    def _text_field(self) -> QLineEdit:
-        field = QLineEdit(self)
-        field.textChanged.connect(self.changed)
-        return field
 
     def _rate_field(self, default: int) -> QComboBox:
         field = QComboBox(self)
@@ -345,8 +332,6 @@ class SettingsDialog(QDialog):
             serial_port=str(self.serial_port.currentData() or ""),
             serial_protocol=str(self.serial_protocol.currentData()),
             serial_baudrate=int(self.serial_baudrate.currentData()),
-            model=self._text_value(self.model),
-            effort=self._text_value(self.effort),
             capture_fps=int(self.capture_fps.currentData()),
             preview_fps=int(self.preview_fps.currentData()),
             window_size_preset=str(self.window_size_preset.currentData()),
@@ -363,12 +348,6 @@ class SettingsDialog(QDialog):
         """Replace the complete edited snapshot without emitting change notifications."""
         self._snapshot = values
         with QSignalBlocker(self):
-            for field, value in (
-                (self.model, values.model),
-                (self.effort, values.effort),
-            ):
-                field.setText(value)
-                self._loaded_text[field] = (value, field.text())
             self._sync_serial_choice(values.serial_port)
             with QSignalBlocker(self.serial_protocol):
                 self.serial_protocol.setCurrentIndex(
@@ -398,15 +377,8 @@ class SettingsDialog(QDialog):
                 self.observation_resolution.findData(values.observation_resolution)
             )
 
-    def _text_value(self, field: QLineEdit) -> str:
-        current = field.text()
-        original, displayed = self._loaded_text.get(field, (current, current))
-        return original if current == displayed else current
-
     def set_editable(self, enabled: bool) -> None:
         """Control editing during I/O while retaining copying and dialog closure."""
-        for field in (self.model, self.effort):
-            field.setReadOnly(not enabled)
         for field in (
             self.serial_port,
             self.serial_protocol,

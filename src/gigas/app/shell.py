@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from gigas.app.conversations import ConversationController
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
@@ -14,7 +14,12 @@ from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
 from gigas.game_io.input.serial import SerialPort
 from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
-from gigas.services.codex import CodexServiceThread, InputConnectionResult, ProjectResult
+from gigas.services.codex import (
+    CodexServiceThread,
+    InputConnectionResult,
+    ProjectResult,
+    ServiceResult,
+)
 from gigas.storage.settings import Settings
 from gigas.ui.confirmation import changes_confirmation
 from gigas.ui.geometry import fit_to_screen
@@ -36,12 +41,14 @@ class _SettingsRequest:
         capture: Apply the saved capture configuration after successful saving.
         input_apply: Apply saved input settings unless explicitly stopped before completion.
         close_dialog: Close a still-visible editor after successful saving.
+        connection_memory: Preserve editor drafts when remembering a Codex connection.
     """
 
     snapshot: Settings | None = None
     capture: bool = False
     input_apply: bool = False
     close_dialog: bool = False
+    connection_memory: bool = False
 
 
 class ApplicationShell(QObject):
@@ -76,6 +83,7 @@ class ApplicationShell(QObject):
         self._serial_discovery_error = ""
         self.baseline = Settings()
         self._io_request: _SettingsRequest | None = None
+        self._pending_codex_connection: bool | None = None
         self._project_pending = False
         self.ready = False
         self._settings_error_notice: Notice | None = None
@@ -110,7 +118,6 @@ class ApplicationShell(QObject):
         self.io_thread.finished.connect(self._finish_shutdown)
         self.window.settings_requested.connect(self.open_settings)
         self.window.new_project_requested.connect(self._new_project)
-        self.window.open_project_requested.connect(self._open_project)
         self.window.input_menu.aboutToShow.connect(self.refresh_input_ports)
         self.window.input_port_requested.connect(self._select_input_port)
         self.window.input_protocol_requested.connect(self._select_input_protocol)
@@ -144,6 +151,7 @@ class ApplicationShell(QObject):
             requested.connect(self._render)
         self.service.received.connect(panel.handle_event)
         self.service.completed.connect(panel.handle_result)
+        self.service.completed.connect(self._remember_codex_connection)
         self.service.received.connect(self._render)
         self.service.completed.connect(self._render)
         self.service.project_completed.connect(self._project_complete)
@@ -155,14 +163,14 @@ class ApplicationShell(QObject):
         panel.state_changed.connect(self._render)
 
     def start(self) -> None:
-        """Display the window and load settings without connecting capture."""
+        """Display the window and restore saved connections after loading settings."""
         self.window.show()
         fit_to_screen(self.window)
         self.io_thread.start()
         self._worker.moveToThread(self.io_thread)
         self.service.start()
         self.video.start()
-        self._request(_SettingsRequest())
+        self._request(_SettingsRequest(capture=True, input_apply=True))
 
     @property
     def operation(self) -> str | None:
@@ -320,41 +328,53 @@ class ApplicationShell(QObject):
         self.conversations.activate(self.service.connect_runtime(options))
         self._render()
 
-    @Slot()
-    def _new_project(self) -> None:
-        if not self.window.project_menu.isEnabled():
+    @Slot(object)
+    def _remember_codex_connection(self, result: object) -> None:
+        if (
+            not isinstance(result, ServiceResult)
+            or result.error
+            or result.generation != self.conversations.generation
+            or result.operation not in {"connect", "disconnect"}
+            or self.committed
+        ):
             return
-        dialog = QFileDialog(self.window, "プロジェクトを新規作成", str(self._startup_cwd))
-        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dialog.setLabelText(QFileDialog.DialogLabel.Accept, "作成")
-        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        dialog.setOption(QFileDialog.Option.DontConfirmOverwrite)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._select_project(Path(dialog.selectedFiles()[0]), create=True)
-        dialog.deleteLater()
+        self._pending_codex_connection = result.operation == "connect"
+        self._save_codex_connection()
+
+    def _save_codex_connection(self) -> None:
+        if (
+            self._pending_codex_connection is None
+            or self._io_request is not None
+            or self._project_pending
+        ):
+            return
+        connected, self._pending_codex_connection = self._pending_codex_connection, None
+        if connected != self.baseline.codex_auto_connect:
+            self._request(
+                _SettingsRequest(
+                    replace(self.baseline, codex_auto_connect=connected), connection_memory=True
+                )
+            )
 
     @Slot()
-    def _open_project(self) -> None:
-        if not self.window.project_menu.isEnabled():
+    def _new_project(self) -> None:
+        if not self.window.new_project_action.isEnabled():
             return
         selected = QFileDialog.getExistingDirectory(
             self.window,
-            "プロジェクトを開く",
+            "新規プロジェクト",
             self.baseline.last_project_path or str(self._startup_cwd),
         )
         if selected:
             self._select_project(Path(selected))
 
-    def _select_project(self, path: Path, *, create: bool = False) -> None:
-        self.conversations.confirm_switch(lambda: self._submit_project(path, create=create))
+    def _select_project(self, path: Path) -> None:
+        self.conversations.confirm_switch(lambda: self._submit_project(path))
 
-    def _submit_project(self, path: Path, *, create: bool) -> None:
+    def _submit_project(self, path: Path) -> None:
         self._project_pending = True
         self._render()
-        if create:
-            self.service.create_project(path)
-        else:
-            self.service.open_project(path)
+        self.service.open_project(path)
 
     @Slot(object)
     def _project_complete(self, result: object) -> None:
@@ -368,7 +388,7 @@ class ApplicationShell(QObject):
                     "settings",
                     "プロジェクト選択失敗",
                     "プロジェクトを選択できませんでした。保存先と詳細を確認して、"
-                    "「プロジェクト」から選び直してください。",
+                    "サイドバー下部のプロジェクト作成ボタンから選び直してください。",
                     f"{result.path}\n{result.error}",
                 )
             )
@@ -380,6 +400,7 @@ class ApplicationShell(QObject):
             self._request(
                 _SettingsRequest(replace(self.baseline, last_project_path=str(result.path)))
             )
+        self._save_codex_connection()
         if self._exit_requested and self._io_request is None:
             self._resolve_close()
         self._render()
@@ -551,7 +572,11 @@ class ApplicationShell(QObject):
         self.baseline = settings
         self.ready = True
         if self.dialog is not None and self.dialog.isVisible():
-            self.dialog.set_values(settings)
+            self.dialog.set_values(
+                replace(self.dialog.values(), codex_auto_connect=settings.codex_auto_connect)
+                if request.connection_memory
+                else settings
+            )
         self.video.set_preview_fps(settings.preview_fps)
         self.service.set_observation_resolution(settings.observation_resolution)
         self.service.set_execution_settings(_execution_settings(settings))
@@ -578,6 +603,8 @@ class ApplicationShell(QObject):
         request, self._io_request = self._io_request, None
         if result.settings is not None:
             self._apply_saved(request, result.settings)
+            if request.snapshot is None and result.settings.codex_auto_connect:
+                self.connect_codex()
         else:
             title = "読込失敗" if request.snapshot is None else "保存失敗"
             if request.snapshot is None:
@@ -587,7 +614,10 @@ class ApplicationShell(QObject):
                 )
             else:
                 explanation = (
-                    "プロジェクトは選択済みですが、次回選択時の候補を保存できませんでした。"
+                    "Codexの接続状態を保存できませんでした。接続状態は変更していません。"
+                    "設定ファイルと詳細を確認し、接続または切断をやり直してください。"
+                    if request.connection_memory
+                    else "プロジェクトは選択済みですが、次回選択時の候補を保存できませんでした。"
                     "設定ファイルと詳細を確認してから、プロジェクトを選び直してください。"
                     if request.snapshot.last_project_path != self.baseline.last_project_path
                     else "設定を保存できず、適用しませんでした。編集内容と詳細を確認してください。"
@@ -599,7 +629,8 @@ class ApplicationShell(QObject):
                 self.wait_expired = False
             self._settings_error_notice = Notice("settings", title, explanation, result.error)
             self.window.notifications.publish(self._settings_error_notice)
-        if self._exit_requested and not self._project_pending:
+        self._save_codex_connection()
+        if self._exit_requested and not self._project_pending and self._io_request is None:
             self._resolve_close()
         self._render()
 
@@ -635,7 +666,7 @@ class ApplicationShell(QObject):
         self.conversations.set_available(
             not closing and not self._service_unavailable, project_pending=self._project_pending
         )
-        self.window.project_menu.setEnabled(
+        self.window.new_project_action.setEnabled(
             self._can_edit
             and self.conversations.can_switch
             and (self.dialog is None or not self.dialog.isVisible())

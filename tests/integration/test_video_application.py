@@ -297,10 +297,10 @@ def test_modal_edit_blocks_menu_until_cancel_then_switches_device(
 ) -> None:
     shell, capture, io = application
     assert shell.dialog is not None
-    shell.dialog.model.setText("draft")
+    shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     shell.window.video_device_actions["path-b"].trigger()
     assert io.saves == 0
-    assert shell.dialog.model.text() == "draft"
+    assert shell.dialog.preview_fps.currentData() == 60
     shell.dialog.close_button.click()
     shell.window.video_device_actions["path-b"].trigger()
     qtbot.waitUntil(lambda: shell.operation is None)

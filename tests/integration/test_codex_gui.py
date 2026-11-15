@@ -762,7 +762,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
                 approvals_reviewer="auto_review",
             )
         )
-        shell.dialog.model.setText("unsaved")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         assert not snapshots
         shell.dialog.tabs.setCurrentIndex(shell.dialog.codex_tab)
         panel = shell.window.connection
@@ -790,7 +790,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
             ServiceEvent(1, AccountInfo("returned@example.test", "plus", None, True))
         )
         shell.open_settings()
-        assert shell.dialog.model.text() != "unsaved"
+        assert shell.dialog.preview_fps.currentData() != 60
         assert "returned@example.test" in panel.codex_settings.account.text()
         assert len(snapshots) == 1
     finally:

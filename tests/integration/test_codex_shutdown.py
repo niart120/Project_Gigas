@@ -16,7 +16,7 @@ from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
 from gigas.runtime.codex.models import ConnectionOptions, ConversationStatus
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from gigas.services.codex import CodexServiceThread
-from gigas.storage.settings import Settings, SettingsError, load_settings
+from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.unit.test_codex_connection import FakePeer, _terminal
 
 if TYPE_CHECKING:
@@ -98,6 +98,7 @@ def _start(
             for item in events
         )
     )
+    qtbot.waitUntil(lambda: shell.operation is None)
     return shell, connections[0]
 
 
@@ -108,6 +109,9 @@ def test_close_interrupts_before_settings_finish_and_never_resumes(
     release_save = Event()
 
     def save(_path: Path, _settings: Settings) -> None:
+        if _settings.preview_fps != 60:
+            save_settings(_path, _settings)
+            return
         saving.set()
         if not release_save.wait(5):
             message = "test did not release save"
@@ -119,7 +123,7 @@ def test_close_interrupts_before_settings_finish_and_never_resumes(
     try:
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setText("changed")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         shell.apply_settings()
         qtbot.waitUntil(saving.is_set)
         shell.request_close()
@@ -146,7 +150,7 @@ def test_cancel_dirty_confirmation_does_not_resume_turn(qtbot: QtBot, tmp_path: 
     try:
         shell.open_settings()
         assert shell.dialog is not None
-        shell.dialog.model.setText("unsaved")
+        shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
         shell.request_close()
         assert shell.confirmation is not None
         shell.confirmation.button(QMessageBox.StandardButton.Cancel).click()

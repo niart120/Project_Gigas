@@ -30,6 +30,8 @@ class Settings:
         model: Requested model. An empty string leaves it unset.
         effort: Requested reasoning effort. An empty string leaves it unset.
         auth_method: Authentication preference. Only chatgpt is supported.
+        codex_auto_connect: Restore the last successful Codex connection at startup.
+            Explicit disconnection clears this value; application shutdown does not.
         capture_fps: Requested integer capture rate, from 1 to 120 frames per second.
         preview_fps: GUI update limit, from 1 to 60 frames per second.
         window_size_preset: Display size key: hd, full_hd, wqhd, or four_k.
@@ -66,6 +68,7 @@ class Settings:
     web_search_enabled: bool = True
     memory_enabled: bool = True
     approvals_reviewer: Literal["auto_review", "user"] = "auto_review"
+    codex_auto_connect: bool = False
 
 
 class SettingsError(ValueError):
@@ -153,6 +156,7 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
         model=_text(agent, "model", path),
         effort=_text(agent, "effort", path),
         auth_method=auth_method,
+        codex_auto_connect=_boolean(agent.get("auto_connect", False), path, "agent.auto_connect"),
         capture_fps=_integer(capture, "fps", path, 60, 1, 120),
         preview_fps=_integer(capture, "preview_fps", path, 30, 1, 60),
         window_size_preset=_window_size_preset(gui.get("window_size_preset", "full_hd"), path),
@@ -225,6 +229,7 @@ def save_settings(path: "Path", settings: Settings) -> None:
     _set_text(agent, "effort", settings.effort)
     _set_text(agent, "auth_method", settings.auth_method)
     for key, value in (
+        ("auto_connect", settings.codex_auto_connect),
         ("web_search_enabled", settings.web_search_enabled),
         ("memory_enabled", settings.memory_enabled),
     ):

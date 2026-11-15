@@ -129,7 +129,9 @@ def test_all_presets_share_settings_selection_and_fit_available_screen(
         assert not shell.window.settings_button.icon().isNull()
         assert (
             shell.window.settings_button.geometry().right()
-            < shell.window.menuBar().actionGeometry(shell.window.project_menu.menuAction()).left()
+            < shell.window.menuBar()
+            .actionGeometry(shell.window.connection_menu.menuAction())
+            .left()
         )
         assert shell.window.video_device_actions[""].isCheckable()
         assert shell.window.connection.connect_action in shell.window.codex_menu.actions()
@@ -265,10 +267,9 @@ def test_saved_display_fps_changes_without_reconnecting_and_dirty_edits_block_me
     assert dialog is not None
     dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(15))
     dialog.window_size_preset.setCurrentIndex(dialog.window_size_preset.findData("hd"))
-    dialog.model.setText("unsaved")
     assert all(not action.isEnabled() for action in shell.window.window_size_actions.values())
     shell.window.window_size_actions["four_k"].trigger()
-    assert dialog.values().model == "unsaved"
+    assert dialog.values().preview_fps == 15
     assert shell.operation is None
     assert shell.baseline.window_size_preset == "full_hd"
     dialog.save_button.click()

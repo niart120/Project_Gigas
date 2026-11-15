@@ -5,11 +5,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
+    QSizePolicy,
     QSplitter,
     QToolButton,
     QVBoxLayout,
@@ -105,7 +107,6 @@ class MainWindow(QMainWindow):
 
     settings_requested = Signal()
     new_project_requested = Signal()
-    open_project_requested = Signal()
     close_requested = Signal()
     window_size_requested = Signal(str)
     input_port_requested = Signal(str)
@@ -148,11 +149,8 @@ class MainWindow(QMainWindow):
         corner_layout.addWidget(self.sidebar_button)
         corner_layout.addWidget(self.settings_button)
         self.menuBar().setCornerWidget(corner, Qt.Corner.TopLeftCorner)
-        self.project_menu = self.menuBar().addMenu("プロジェクト")
-        self.new_project_action = self.project_menu.addAction("新規作成")
+        self.new_project_action = QAction("プロジェクト", self)
         self.new_project_action.triggered.connect(self.new_project_requested)
-        self.open_project_action = self.project_menu.addAction("開く")
-        self.open_project_action.triggered.connect(self.open_project_requested)
         self.connection_menu = self.menuBar().addMenu("接続")
         self.video_menu = self.connection_menu.addMenu("映像")
         self.video_menu.setToolTipsVisible(True)
@@ -215,10 +213,40 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 2)
         self.splitter.setStretchFactor(1, 3)
         self.sidebar = ConversationSidebar(central)
-        self.sidebar.setFixedWidth(232)
-        self.sidebar_button.toggled.connect(self.sidebar.setVisible)
+        self.sidebar_pane = QWidget(central)
+        self.sidebar_pane.setFixedWidth(232)
+        sidebar_layout = QVBoxLayout(self.sidebar_pane)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.addWidget(self.sidebar, 1)
+        project_footer = QWidget(self.sidebar_pane)
+        footer_layout = QHBoxLayout(project_footer)
+        footer_layout.setContentsMargins(8, 8, 8, 12)
+        self.new_project_button = QPushButton(self.new_project_action.text(), project_footer)
+        self.new_project_button.clicked.connect(self.new_project_action.trigger)
+        self.new_project_action.changed.connect(
+            lambda: self.new_project_button.setEnabled(self.new_project_action.isEnabled())
+        )
+        self.new_project_button.setAccessibleName("新規プロジェクト")
+        self.new_project_button.setToolTip("")
+        self.new_project_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.new_project_button.setMinimumHeight(36)
+        project_icon = QPixmap()
+        project_icon.loadFromData(
+            Path(__file__)
+            .with_name("plus.svg")
+            .read_bytes()
+            .replace(b"currentColor", self.palette().buttonText().color().name().encode()),
+            "SVG",
+        )
+        self.new_project_button.setIcon(QIcon(project_icon))
+        self.new_project_button.setIconSize(QSize(20, 20))
+        footer_layout.addWidget(self.new_project_button)
+        sidebar_layout.addWidget(project_footer)
+        self.sidebar_button.toggled.connect(self.sidebar_pane.setVisible)
         panes = QHBoxLayout()
-        panes.addWidget(self.sidebar)
+        panes.addWidget(self.sidebar_pane)
         panes.addWidget(self.splitter, 1)
         layout.addLayout(panes, 1)
         self.setCentralWidget(central)

@@ -132,7 +132,7 @@ def test_save_error_details_remain_accessible_from_settings(
     assert dialog.error_details_button.isHidden()
     io.fail = True
     io.release.set()
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
@@ -144,7 +144,7 @@ def test_save_error_details_remain_accessible_from_settings(
     assert details.parentWidget() is dialog
     assert details.isModal()
     assert details.details.toPlainText() == shell.error
-    assert dialog.model.text() == "edited"
+    assert dialog.preview_fps.currentData() == 60
     assert dialog.observation_resolution.currentData() == "hd"
     assert shell.baseline.observation_resolution == "full_hd"
     stopped: list[bool] = []
@@ -167,7 +167,7 @@ def test_form_details_keep_current_error_after_another_settings_failure(
     assert dialog is not None
     io.fail = True
     io.release.set()
-    dialog.model.setText("edited")
+    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
     original = shell.window.notifications.notices["settings"]

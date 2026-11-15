@@ -178,6 +178,7 @@ class ConversationController(QObject):
         self._projects[project.id] = project
         self.sidebar.upsert_project(project)
         self._replace_new(target)
+        self.sidebar.expand_project(project.id)
         return True
 
     def _project_name(self, project_id: str | None) -> str:

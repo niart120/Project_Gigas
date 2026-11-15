@@ -468,7 +468,7 @@ def test_input_busy_blocks_switch_but_keeps_send_clear_and_stop_and_close_cancel
         assert panel.plan_panel.clear_button.isEnabled()
         assert panel.interrupt_button.isEnabled()
         assert not shell.window.sidebar._groups[None].new_button.isEnabled()
-        assert not shell.window.project_menu.isEnabled()
+        assert not shell.window.new_project_action.isEnabled()
         shell.service.input_busy_changed.emit(False)
         shell.window.sidebar._groups[None].new_button.click()
         box = shell.conversations.confirmation

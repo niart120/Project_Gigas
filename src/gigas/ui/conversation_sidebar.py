@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -110,6 +110,7 @@ class _ConversationGroup(QWidget):
         self._listing_enabled = False
         self._loading = False
         self._cursor: str | None = None
+        self._has_page = False
         self._selected: str | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -132,6 +133,8 @@ class _ConversationGroup(QWidget):
         content = QVBoxLayout(self.content)
         content.setContentsMargins(12, 0, 0, 0)
         self.loading = QLabel("読込中", self.content)
+        self.empty = QLabel("スレッドはありません", self.content)
+        self.empty.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         self.threads = QListWidget(self.content)
         self.threads.setFrameShape(QFrame.Shape.NoFrame)
         self.threads.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -145,6 +148,7 @@ class _ConversationGroup(QWidget):
         self.more_button = QPushButton("続きを表示", self.content)
         self.more_button.clicked.connect(self._more)
         content.addWidget(self.loading)
+        content.addWidget(self.empty)
         content.addWidget(self.threads)
         content.addWidget(self.more_button)
         layout.addWidget(self.content)
@@ -166,6 +170,7 @@ class _ConversationGroup(QWidget):
             self.opened.emit()
 
     def set_threads(self, page: "ThreadPage", *, append: bool) -> None:
+        self._has_page = True
         if not append:
             self.threads.clear()
         rows = {
@@ -216,6 +221,12 @@ class _ConversationGroup(QWidget):
             self.more_requested.emit(self._cursor)
 
     def _render(self) -> None:
+        self.empty.setVisible(
+            self._has_page
+            and not self._loading
+            and not self.threads.count()
+            and self._cursor is None
+        )
         self.new_button.setEnabled(self._enabled)
         self.threads.setEnabled(self._enabled and not self._loading)
         self.loading.setVisible(self._loading)
@@ -252,11 +263,11 @@ class ConversationSidebar(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setAccessibleName("会話")
+        self.setAccessibleName("プロジェクト")
         body = QWidget(self)
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel("会話", body))
+        layout.addWidget(QLabel("プロジェクト", body))
         self._rows = QVBoxLayout()
         layout.addLayout(self._rows)
         self.loading = QLabel("読込中", body)
@@ -292,6 +303,17 @@ class ConversationSidebar(QScrollArea):
             self._add_group(project.id, project.name)
         else:
             group.set_name(project.name)
+
+    def expand_project(self, project_id: str) -> None:
+        """Expand a displayed Project and emit its normal list-loading request.
+
+        Args:
+            project_id: Public ID of an already displayed Project.
+
+        Raises:
+            KeyError: The Project group has not been displayed.
+        """
+        self._groups[project_id].heading.setChecked(True)
 
     @property
     def expanded_projects(self) -> tuple[str | None, ...]:
