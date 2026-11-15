@@ -54,8 +54,8 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 |---|---|---|---|---|
 | refactor-skipped | 手動保持の更新・短い押下・解除を順序どおり送り、有限列との排他・protocol・失敗・終了回収を守る | new / edge | integration | item 1、677a425。API未定義のred→7件green。軸集約・中央通過・取消された解除待ち・task完了直後の再受付も確認。追加構造変更不要 |
 | refactor-skipped | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2、8e32662。解除せず送信するred→11件green。追加構造変更不要 |
-| green | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。コミット後に完了記録 |
-| todo | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4。モデルと小窓、protocol別 |
+| refactor-skipped | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3、c2e31b7。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。追加構造変更不要 |
+| green | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4。未定義moduleのred→モデル11件・GUI11件green。コミット後に完了記録 |
 | todo | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。Shell結合と既存終了経路 |
 
 ## 7. 設計メモ
@@ -83,7 +83,10 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | 独立レビュー・再現テスト | 修正 | 終了要求と取消しの同期callbackが先行する手動更新taskを追い越すP2を採用。要求前後2列でredを確認し、終了要求も既存task配送順へ揃えた。受付世代や別の調整役は追加していない |
 | uv run pytest tests/integration/test_manual_application.py tests/integration/test_manual_input.py tests/integration/test_input_configuration.py -q | pass | 順序修正後21 passed（2.26秒） |
 | uv run pytest tests/integration/test_manual_application.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py -q | pass | 58 passed（11.16秒）。item 3単独8件。ruff check/format・ty・diff checkもpass |
-| native画面・画像比較・実機 | not run | 実装後に記録 |
+| uv run pytest tests/unit/test_controller_model.py tests/integration/test_virtual_controller.py -q | pass | 22 passed（0.30秒）。円内制限、8方向、中央保持、pending軸破棄、窓イベント、protocol、font。ruff check/format・tyもpass |
+| 独立GUIレビュー | 修正 | 縦長時の描画fontが横幅を超えるP2を採用し、幅・高さへ収めた。調整役・世代管理なし。その他の修正必須指摘なし |
+| native画面・画像比較 | pass | [design-qa](../../../design-qa.md)。DPR 1.5、標準/最小/無効/3DS/18pt/縦長。初回P2を修正し同寸法再比較。Windowsで操作部外のreleaseを観測。窓境界外releaseはCUA API制約で未検証 |
+| 実機の手動操作 | not run | Shell結合後に記録 |
 
 ## 10. 先送り事項
 

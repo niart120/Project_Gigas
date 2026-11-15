@@ -1,32 +1,38 @@
-# プロジェクト作成ボタンの照合
+# 仮想コントローラの画面照合
 
-対象はサイドバー下部のProject作成ボタン。U08の採用モックを参照し、2026-11-15の指摘に対応した。画面全体の再設計は対象外。
+source visual truth: [採用画像](spec/wip/unit_078/assets/virtual-controller-proposal.png)
 
-## 参照と実画面
+実装はPySide6のネイティブウィンドウ。通常状態はCH552、640×420論理px、Windows 150%（DPR 1.5）、Yu Gothic UI。画像のタイトルバーと背景余白を除いた1264×826を640×420へ縮小し、960×630の実装client画像も640×420へ正規化した。CSSは対象外。
 
-- 正本: [U08の採用モック](spec/complete/unit_068/assets/conversation-sidebar-proposal.png)（1448 × 1086 px）。
-- 初回実装: [修正前](spec/complete/unit_076/assets/project-controls-before.png)（1920 × 1200 px）。
-- 再照合: [修正後](spec/complete/unit_076/assets/project-controls-after.png)（1440 × 1080 px、Qt論理サイズ960 × 720、表示倍率150%）。
-- Windowsの実ウィンドウでもComputer Useで同じボタン配置を確認した。保存画像はその画面と同じQtクライアント領域のgrabで、OSのタイトルバーを含まない。
+## 比較履歴
 
-## 手順・指摘・修正
+1. [初回比較](spec/wip/unit_078/assets/controller-comparison-1.png) / [実装1](spec/wip/unit_078/assets/controller-native-1.png)
+   - [P2] ABXYと中央の記号が採用画像より小さく、操作部の識別性が下がっている。操作部の高さに合わせて描画文字を拡大する。
+   - [P2] 暗色QPaletteのMidでは外周と背景の差が小さく、stickとpadの境界が読みにくい。前景色から半透明の外周色を作り、padの中央境界も描く。
+   - 配置、左右stickの色、上部・中央・下部の構成は維持。標準タイトルバー、単色背景、ネイティブパレットは意図した差分。
+2. [修正後比較](spec/wip/unit_078/assets/controller-comparison-2.png)で外周とABXYの識別性を確認。中央±はまだ弱いため線描へ変更。独立レビューの縦長時の文字切れも採用し、描画fontを部品の幅・高さへ収めた。
+3. [最終比較](spec/wip/unit_078/assets/controller-comparison-3.png) / [実装3](spec/wip/unit_078/assets/controller-native-3.png)で再確認。中央±・ABXY・外周のP2を解消。最小・無効・3DS・拡大font・縦長3DSを別撮影し、操作部の重なりや文字切れがないことを確認。
 
-1. モックと初回実装を確認。P2: 文字幅だけの小さなボタンで、モックのサイドバー幅を使った操作領域・余白・「＋ プロジェクト」の表記と異なっていた。
-2. 幅を広げた実装をWindows上で撮影。P2: QToolButtonでは＋が左端、文字が中央に離れていたため、通常のQPushButtonへ変更した。
-3. 修正後の実画面を撮影し、モックと同じ比較入力で確認。アイコンと文字を中央にまとめ、左右の余白、下部の固定位置、36論理px以上の高さを確保した。現在の対象範囲に未解決のP0/P1/P2指摘なし。
+## 必須観点
 
-## 照合した面
+文字: Yu Gothic UI。ABXYは高さへ合わせ、幅と高さに収まる範囲へ制限。中央±は線描。採用画像の字形・太さを完全一致させずWindowsのフォントを使用する差分は許容。説明文・状態バー・見えるstick名はない。
 
-| 面 | 結果 |
-|---|---|
-| 文字 | 表記をモックの「＋ プロジェクト」に合わせた。フォントは既存Qt画面のシステムフォントを維持。生成モックの書体・文字サイズは初期仕様で固定要件としていない |
-| 配置・余白 | スクロール領域の外、サイドバー下部に固定。横方向へ広がるボタンと左右8・下12論理pxの余白を設定。＋と文字は隣接して中央配置 |
-| 色 | ボタン背景・枠・無効表示はQt標準、アイコンは生成時のButtonText色を使用。生成モックのグラデーションを別途導入しない |
-| 画像 | Lucideのplus.svgを利用。出典はlucide-icons/lucideのicons/plus.svg、ISC/MITの上流ライセンス全文を同梱。自作の代替画像ではない |
-| 操作・内容 | アクセシビリティ名は「新規プロジェクト」。既存QActionの有効・無効と同期し、押下でフォルダー選択へ進む |
+余白・配置: 上部6ボタン、左上stick、右上ABXY、中央2×2、左下pad、右下stick。画像はclient領域に正規化した。
 
-## 限界
+色: 左シアン・右赤を維持。前景色から作った半透明の外周で背景との差を確保した。無効状態はパレットの無効前景と薄い軸色を使用。
 
-モックは履歴表示・接続済み、今回の配置確認は会話未選択の画面。照合は常設ボタンとその周囲に限定し、画面全体の一致を主張しない。生成モックの密度は不明なため、絶対ピクセルの一致ではなくサイドバーに対する幅と余白を比較した。読み上げによる操作、起動中のOSテーマ切替、複数DPI間の移動は未検証。
+画像品質: 操作部はQPainterによるベクトル描画。撮影・HOMEは標準機能を表す単純なアイコン。製品写真・ロゴ等の画像資産はない。
 
-final result: pass（プロジェクト作成ボタンの範囲）
+内容: 採用された操作ラベルのみ。3DSではSELECT/STARTへ置換し、LS/RS/撮影を無効表示。
+
+## 追加状態・操作証跡
+
+[最小サイズ](spec/wip/unit_078/assets/controller-minimum.png)、[3DS](spec/wip/unit_078/assets/controller-3ds.png)、[無効](spec/wip/unit_078/assets/controller-disabled.png)、[18pt font](spec/wip/unit_078/assets/controller-large-font.png)、[縦長3DS](spec/wip/unit_078/assets/controller-tall-3ds.png)。すべてDPR 1.5。最小寸法は520×350を下限とし、fontMetricsから文字高さ・SELECT幅に必要な分だけ増やす。
+
+全景の640×420比較で全ラベル・外周が読めるため、部分切抜きは不要と判断した。追加状態はnative clientの原寸画像でも確認した。Qtのマウスイベントで保持・外部座標release・最小化・非アクティブ化・無効化を検査し、Windows上でも操作部外へのドラッグ→解放で解除通知と中央復帰を観測。CUAのdrag APIは窓境界外の座標を拒否するため、実際に窓の外で離す操作は未検証。非対応protocolの実機やクロスモニタDPI変更も未検証。ブラウザconsole検査はnative Qtのため対象外。
+
+残るP3: 採用画像の背景質感・陰影・字の太さはネイティブパレットと標準フォントへ置換している。追加の装飾は行わない。
+
+実施: 文字と外周の修正、修正後の同寸法再比較、追加状態の確認。未解決のP0/P1/P2はない。
+
+final result: passed
