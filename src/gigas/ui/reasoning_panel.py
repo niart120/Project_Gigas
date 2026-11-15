@@ -56,7 +56,9 @@ class ReasoningPanel(QWidget):
         if not self._active or event.turn_id != self._turn:
             return
         nonempty = [part for part in event.summary if part.text]
-        if not nonempty and not event.completed:
+        # An item with no public summary does not retract the preceding item's text.
+        # An empty completion can still correct an item that supplied a subtitle.
+        if not nonempty and (not event.completed or event.item_id not in self._items):
             return
         if event.item_id not in self._items:
             self._items.append(event.item_id)

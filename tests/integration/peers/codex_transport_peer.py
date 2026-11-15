@@ -306,6 +306,7 @@ def dialogue() -> None:
         "input": [{"type": "text", "text": "質問は保留し、門の前で止まる"}],
         "model": "fixture-model",
         "effort": "low",
+        "summary": "auto",
     }
     send({"id": additional["id"], "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
     answer = json.loads(_dialogue_input())

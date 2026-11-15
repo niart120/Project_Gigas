@@ -280,3 +280,21 @@ def test_subtitle_reflow_keeps_latest_tail(qtbot: "QtBot") -> None:
     bar = panel.text.verticalScrollBar()
     assert bar.value() == bar.maximum()
     assert panel.height() == height
+
+
+def test_empty_later_reasoning_does_not_erase_subtitle(qtbot: "QtBot") -> None:
+    panel = ReasoningPanel()
+    qtbot.addWidget(panel)
+    panel.start("turn")
+    panel.receive(ReasoningEvent("turn", "a", (SummaryPart(0, "公開要約"),), completed=True))
+    panel.receive(ReasoningEvent("turn", "b", ()))
+    panel.receive(ReasoningEvent("turn", "b", (), completed=True))
+    panel.finish(interrupted=True)
+    assert panel.text.toPlainText() == "公開要約"
+
+    panel.start("next")
+    assert not panel.text.toPlainText()
+    panel.receive(ReasoningEvent("next", "c", (SummaryPart(0, "訂正前"),)))
+    panel.receive(ReasoningEvent("next", "c", (), completed=True))
+    panel.finish()
+    assert not panel.text.toPlainText()

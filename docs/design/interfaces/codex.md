@@ -24,6 +24,8 @@ GIGASアプリは専用のCodex homeを使う。認証情報・会話・Project�
 
 通常依頼、Goal、停止・再開の利用上の意味は[会話機能](../functions/conversations.md)、公開Python APIは[Codex API](codex-api.md)にまとめる。
 
+`turn/start`では`summary: "auto"`を指定し、公開推論要約を要求する。この指定は同じthreadの後続turnにも適用される。表示設定OFFは受信を止めず、要約の要求方法も変えない。要約本文が返るかはモデルと応答に依存し、空の場合は本文を補わない。
+
 ## threadの実行設定
 
 新規開始と再開には、作業場所、現在のモデル・推論レベル、準備開始時の実行設定、GIGASが開いたゲームMCPの接続先を渡す。開始・再開の応答ではthread ID、Project所属、作業場所、モデル、承認方法、sandboxの実効値を照合する。
