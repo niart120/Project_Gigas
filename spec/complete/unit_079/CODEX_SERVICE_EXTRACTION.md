@@ -2,13 +2,13 @@
 
 ## 1. 概要
 
-状態はwip。unit_078の段階1を担当する子仕様。Qtのスレッド・配送とCodex固有処理を分け、既存の入力・停止・会話管理の挙動を維持する。
+状態はcomplete。unit_078の段階1を担当する子仕様。Qtのスレッド・配送とCodex固有処理を分け、既存の入力・停止・会話管理の挙動を維持した。実装コミットはc991671。
 
 ### 起点 / source
 
 | source | 内容 | path |
 |---|---|---|
-| ユーザー依頼 | unit_078をTDDで完遂する | [親仕様](../unit_078/VIRTUAL_CONTROLLER.md) |
+| ユーザー依頼 | unit_078をTDDで完遂する | [親仕様](../../wip/unit_078/VIRTUAL_CONTROLLER.md) |
 | 現行実装 | 調査基準efa4237、仕様確定8b00d3e | [codex.py](../../../src/gigas/services/codex.py) |
 
 ### use case
@@ -38,7 +38,7 @@ ApplicationServiceThreadへQt配送とループ寿命を残し、CodexServiceへ
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | Qtのスレッドを作らず接続・通常送信・切断の結果を受け取り、Codex終了後も借用した入力機器を利用できる | new | integration | test_codex_coreでred→green。既存GUI境界を抽出先へ接続し1027件の回帰を確認。コミット後に完了記録 |
+| refactor-done | Qtのスレッドを作らず接続・通常送信・切断の結果を受け取り、Codex終了後も借用した入力機器を利用できる | new | integration | c991671。test_codex_coreでred→green。既存GUI境界を抽出先へ接続し1027件の回帰を確認 |
 
 ## 7. 設計メモ
 
@@ -70,7 +70,7 @@ services/codex.py、services/application.py、services/codex_models.py、appの�
 ## 11. チェックリスト
 
 - [x] 対象範囲・対象外・変更前のgreenを確認
-- [ ] 非Qt境界のTDD項目をコミット
+- [x] 非Qt境界のTDD項目をコミット
 - [x] 既存の停止・切断・会話管理を回帰確認
 - [x] 型・docstring・公開説明・必要なgateを確認
 - [x] 実接続とGUIの確認結果を記録

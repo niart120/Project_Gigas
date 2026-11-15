@@ -6,19 +6,17 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThread, Signal
 
-from gigas.game_io.input.serial import SerialInput, list_serial_ports
 from gigas.runtime.codex.models import ExecutionSettings
 from gigas.services.codex import CodexService, _OperationContext, rejected_result
 from gigas.services.codex_models import (
     AnswerResult,
     ConnectionFactory,
-    InputConnectionResult,
     MessageResult,
     ProjectResult,
     ServiceEvent,
     ServiceResult,
 )
-from gigas.services.input import InputService
+from gigas.services.input import InputConnectionResult, InputService
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -73,11 +71,15 @@ class ApplicationServiceThread(QThread):
         reader: "CaptureReader",
         factory: ConnectionFactory | None = None,
         *,
-        input_factory: "Callable[[SerialConfig], InputDevice]" = SerialInput,
+        input_factory: "Callable[[SerialConfig], InputDevice] | None" = None,
     ) -> None:
         """Bind service dependencies without starting a thread or connecting devices."""
         super().__init__()
-        self.inputs = InputService(on_busy_changed=self.input_busy_changed.emit)
+        self.inputs = InputService(
+            factory=input_factory,
+            on_connection_changed=self.input_changed.emit,
+            on_busy_changed=self.input_busy_changed.emit,
+        )
         self.codex = CodexService(
             data_root,
             reader,
@@ -90,10 +92,6 @@ class ApplicationServiceThread(QThread):
             browse_goal_changed=self.browse_goal_changed.emit,
             recording_failed=self.recording_failed.emit,
         )
-        self._input_factory = input_factory
-        self._input_config: SerialConfig | None = None
-        self._input_target: SerialConfig | None = None
-        self._input_pending = False
         self._input_apply_task: asyncio.Task[None] | None = None
         self._lock = Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -162,8 +160,7 @@ class ApplicationServiceThread(QThread):
             self._reject_submission(context)
 
     def _signal_shutdown(self) -> None:
-        self._input_pending = False
-        self.inputs.stop()
+        self.inputs.begin_close()
         if self._done is not None:
             self._done.set()
 
@@ -177,9 +174,7 @@ class ApplicationServiceThread(QThread):
         start()
 
     def _accept_input(self, config: "SerialConfig | None") -> None:
-        changing = config != self._input_config or (
-            config is not None and not self.inputs.connected
-        )
+        changing = self.inputs.request_config(config)
         execution = self.codex._conversation
         if changing and execution is not None:
             snapshot = execution.snapshot
@@ -190,36 +185,19 @@ class ApplicationServiceThread(QThread):
             ):
                 context = _OperationContext(self.codex._active_generation, "stop")
                 self.codex._start_operation(context, execution.stop)
-        self._input_target = config
-        self._input_pending = True
         if self._input_apply_task is not None and not self._input_apply_task.done():
             self.inputs.stop()
             return
-        self._input_apply_task = asyncio.create_task(self._apply_input())
+        self._input_apply_task = asyncio.create_task(self.inputs.apply_config())
         self._track(self._input_apply_task)
 
     async def _refresh_input_ports(self) -> None:
         try:
-            ports = await asyncio.to_thread(list_serial_ports)
+            ports = await self.inputs.list_ports()
         except Exception as error:  # noqa: BLE001 -- discovery failure must reach the GUI.
             self.input_ports.emit((), str(error))
         else:
             self.input_ports.emit(ports, "")
-
-    async def _apply_input(self) -> None:
-        while self._input_pending:
-            config = self._input_target
-            self._input_pending = False
-            error = ""
-            try:
-                if config is None or config != self._input_config or not self.inputs.connected:
-                    device = None if config is None else self._input_factory(config)
-                    self.inputs.stop()
-                    await self.inputs.connect(device)
-                self._input_config = config
-            except Exception as failure:  # noqa: BLE001 -- preserve a displayable input diagnostic.
-                error = str(failure)
-            self.input_changed.emit(InputConnectionResult(config, self.inputs.connected, error))
 
     def list_projects(self, *, cursor: str | None = None) -> None:
         """Read one public Project page; management_completed carries its result."""

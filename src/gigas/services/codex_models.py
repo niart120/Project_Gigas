@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from gigas.game_io.input.config import SerialConfig
     from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
     from gigas.runtime.codex.management import ProjectInfo
     from gigas.runtime.codex.models import ConnectionEvent, ConnectionOptions
@@ -31,15 +30,6 @@ type AnswerOutcome = Literal["sent", "not_sent", "unknown"]
 type ConnectionFactory = Callable[
     [ConnectionOptions, Callable[[RuntimeEvent], None]], CodexConnection
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class InputConnectionResult:
-    """Applied serial configuration and connection outcome for the GUI."""
-
-    config: "SerialConfig | None"
-    connected: bool
-    error: str = ""
 
 
 @dataclass(frozen=True, slots=True)

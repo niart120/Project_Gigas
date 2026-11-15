@@ -6,11 +6,21 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
 from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
+from gigas.game_io.input.serial import SerialInput, SerialPort, list_serial_ports
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from gigas.game_io.input.config import InputProtocol
+    from gigas.game_io.input.config import InputProtocol, SerialConfig
+
+
+@dataclass(frozen=True, slots=True)
+class InputConnectionResult:
+    """Applied serial configuration and connection outcome for the application."""
+
+    config: "SerialConfig | None"
+    connected: bool
+    error: str = ""
 
 
 class InputDevice(Protocol):
@@ -70,21 +80,85 @@ class InputService:
     observation or persistence state.
     """
 
-    def __init__(self, *, on_busy_changed: "Callable[[bool], None] | None" = None) -> None:
+    def __init__(
+        self,
+        *,
+        factory: "Callable[[SerialConfig], InputDevice] | None" = None,
+        on_connection_changed: "Callable[[InputConnectionResult], None] | None" = None,
+        on_busy_changed: "Callable[[bool], None] | None" = None,
+    ) -> None:
         """Prepare the input owner without connecting or creating a chat archive.
 
         Args:
+            factory: Construct an unopened device from settings, or None for SerialInput.
+            on_connection_changed: Synchronous callback after each settings application.
             on_busy_changed: Optional synchronous callback on the owning loop.
                 True follows admitted task ownership; False follows completion
                 of the current task, including neutral recovery. Rejections and
                 stop requests alone do not notify. The callback must not raise.
         """
         self._on_busy_changed = on_busy_changed
+        self._factory = SerialInput if factory is None else factory
+        self._on_connection_changed = on_connection_changed
+        self._config: SerialConfig | None = None
+        self._target: SerialConfig | None = None
+        self._pending = False
+        self._apply_task: asyncio.Task[None] | None = None
+        self._closing = False
         self._device: InputDevice | None = None
         self._available = False
         self._operation: asyncio.Task[OperationResult] | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._connect_cancelled = False
+
+    def request_config(self, config: "SerialConfig | None") -> bool:
+        """Retain the latest settings and report whether the connection must change.
+
+        Application coordination may wait for its execution to stop before calling
+        apply_config. Repeated requests replace only the pending target.
+        """
+        if self._closing:
+            return False
+        self._target = config
+        self._pending = True
+        return config != self._config or (config is not None and not self.connected)
+
+    async def apply_config(self) -> None:
+        """Apply pending settings, retaining ownership through caller cancellation."""
+        if self._closing:
+            return
+        if self._apply_task is None or self._apply_task.done():
+            self._apply_task = asyncio.create_task(self._apply_config())
+            self._apply_task.add_done_callback(_retrieve_exception)
+        await asyncio.shield(self._apply_task)
+
+    async def _apply_config(self) -> None:
+        while self._pending and not self._closing:
+            config = self._target
+            self._pending = False
+            error = ""
+            try:
+                if config is None or config != self._config or not self.connected:
+                    device = None if config is None else self._factory(config)
+                    await self.connect(device)
+                self._config = config
+            except Exception as failure:  # noqa: BLE001 -- input diagnostics belong here.
+                error = str(failure)
+            if self._on_connection_changed is not None:
+                self._on_connection_changed(InputConnectionResult(config, self.connected, error))
+
+    @staticmethod
+    async def list_ports() -> tuple[SerialPort, ...]:
+        """Enumerate current serial ports without opening a device."""
+        return await asyncio.to_thread(list_serial_ports)
+
+    def begin_close(self) -> None:
+        """Withdraw unapplied settings and stop input before asynchronous cleanup."""
+        self._closing = True
+        self._pending = False
+        self._connect_cancelled = True
+        self._available = False
+        self.stop()
 
     @property
     def connected(self) -> bool:
@@ -175,10 +249,10 @@ class InputService:
         Raises:
             InputServiceError: Closing fails; the connection owner is retained.
         """
-        self._connect_cancelled = True
-        self._available = False
-        self.stop()
+        self.begin_close()
         await self.drain_input()
+        if self._apply_task is not None:
+            await asyncio.shield(asyncio.gather(self._apply_task, return_exceptions=True))
         if self._connection_task is not None:
             await asyncio.shield(asyncio.gather(self._connection_task, return_exceptions=True))
         try:
