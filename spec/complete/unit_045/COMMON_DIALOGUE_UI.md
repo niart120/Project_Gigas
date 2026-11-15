@@ -8,7 +8,7 @@
 
 2026-11-13の追加指摘により、画面の収まりだけで完了とせず、通常サイズと縮小時の余白・パーツ配分を再検討した。APIの秘密入力指定に対応する必要性と、検証用の内部用語を画面へ持ち込んだ問題も見直した。D08までの自動検証成功と、UIの受入完了を区別する。
 
-その後のUIレビューで、共通欄の送信先切替・独立した承認列・Planの表示位置を再設計した。現在の契約は[初期設計10](../../initial/10-ui-interaction.md)と[M1修正unit_046](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)へ引き継ぐ。本書の実装・検証結果はunit_045当時の記録であり、後続配置の受入を意味しない。文字拡大専用の例と検証は後続合意で廃止した。
+その後のUIレビューで、共通欄の送信先切替・独立した承認列・Planの表示位置を再設計した。現在の契約は[初期設計10](../../archive/initial/10-ui-interaction.md)と[M1修正unit_046](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)へ引き継ぐ。本書の実装・検証結果はunit_045当時の記録であり、後続配置の受入を意味しない。文字拡大専用の例と検証は後続合意で廃止した。
 
 開始時は `codex/u06-m0-goal-design`、M0の未コミット文書だけが残っていた。M0を `79eb6e5` として独立記録した。製品の起点は `ad69559`。U05の入力停止、最新キャッシュ即応、非同期保存、提出済み設定適用の継続を維持する。
 
@@ -22,7 +22,7 @@ Goal操作・目標トグル・Goal仮表示、run寿命変更、memory/guide生
 
 ## 4. 前提・関連文書
 
-[AGENTS.md](../../../AGENTS.md)、[実行管理](../../initial/02-runtime.md)、[工程](../../initial/05-implementation.md)、[検証](../../initial/07-verification.md)、[採用API](../../initial/08-sdk-compatibility.md)、[処理順](../../initial/09-control-flows.md)、[UI](../../initial/10-ui-interaction.md)を正本とする。M0の実呼出しは公開形式の成立確認であり、製品結合の成功とは分ける。
+[AGENTS.md](../../../AGENTS.md)、[実行管理](../../archive/initial/02-runtime.md)、[工程](../../archive/initial/05-implementation.md)、[検証](../../archive/initial/07-verification.md)、[採用API](../../archive/initial/08-sdk-compatibility.md)、[処理順](../../archive/initial/09-control-flows.md)、[UI](../../archive/initial/10-ui-interaction.md)を正本とする。M0の実呼出しは公開形式の成立確認であり、製品結合の成功とは分ける。
 
 開始時は質問ごとの入力欄を表示し、質問待ちに通常入力を隠していた。履歴は全本文を組み直してQPlainTextEditへ反映していた。これを共通入力とitem単位のQTextBrowser更新へ置き換え、旧経路を併存させない。
 

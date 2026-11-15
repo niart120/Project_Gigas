@@ -20,7 +20,7 @@ MCP、Codex接続、プロジェクトの作成・選択操作、R02/R04修正�
 
 ## 4. 関連文書と着手条件
 
-[03 game I/O](../../initial/03-game-io.md)、[04 保存契約](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[07 検証](../../initial/07-verification.md)を正本とする。U03の不変FrameとCaptureReader.snapshotは実装済み。既存試験を確認し、取得・描画の振る舞いは重複実装しない。外部接続に依存しないM1は、未修正のR02/R04を前提にしない。
+[03 game I/O](../../archive/initial/03-game-io.md)、[04 保存契約](../../archive/initial/04-agent-memory.md)、[05 工程](../../archive/initial/05-implementation.md)、[07 検証](../../archive/initial/07-verification.md)を正本とする。U03の不変FrameとCaptureReader.snapshotは実装済み。既存試験を確認し、取得・描画の振る舞いは重複実装しない。外部接続に依存しないM1は、未修正のR02/R04を前提にしない。
 
 ## 5. 振る舞いと公開境界
 

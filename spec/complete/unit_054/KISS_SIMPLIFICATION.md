@@ -11,7 +11,7 @@
 | ユーザー要求 | connection.pyを中心にKISSで整理し、過剰な契約・防御・到達不能経路を洗い出す。実測自体と実測から採った対処も再評価する |
 | M0要求と確認 | 残す契約・削る契約、状態の持ち方、仕様・テスト変更を具体化。2026-11-13に「その方針でM0を確定」「関連仕様へ反映したうえでM1を遂行・完遂」の指示を受けた |
 | repo | 基準commit `6794752`。文書作業branch `codex/kiss-simplification-spec`。M0開始時は前段の仕様追加・文書訂正だけが未commit |
-| 現行の正本 | [実行管理](../../initial/02-runtime.md)、[入力・観測](../../initial/03-game-io.md)、[保存・記憶](../../initial/04-agent-memory.md)、[制御フロー](../../initial/09-control-flows.md)、[UI](../../initial/10-ui-interaction.md) |
+| 現行の正本 | [実行管理](../../archive/initial/02-runtime.md)、[入力・観測](../../archive/initial/03-game-io.md)、[保存・記憶](../../archive/initial/04-agent-memory.md)、[制御フロー](../../archive/initial/09-control-flows.md)、[UI](../../archive/initial/10-ui-interaction.md) |
 | 既存の根拠 | [U06 M2](../../complete/unit_049/GOAL_MEMORY_INTEGRATION.md)、[M3](../../complete/unit_050/GOAL_ACCEPTANCE.md)、[最新の認証行変更](../../complete/unit_053/AUTH_ROW_CONSOLIDATION.md) |
 
 Intent Delta: 全既存期待を維持するリファクタリングから、利用範囲と保証の縮小を含む整理へ変える。過去の「新phaseを作らない」「既存flagだけで対応する」等の実装上の制約は継承しない。公開状態と内部構造は別に判断する。

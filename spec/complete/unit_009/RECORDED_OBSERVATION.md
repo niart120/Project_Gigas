@@ -8,7 +8,7 @@ U03の最新フレームを一つの観測として確定・保存し、同じ�
 
 M0子のcompleteは調査作業の完了を指し、実装前の設計方針はレビュー・実装結果で改訂する。[M1子仕様](../../complete/unit_032/RECORDED_OBSERVATION_IMPLEMENTATION.md)で独立した観測・保存APIを実装・検証した。[M2子仕様](../unit_035/MCP_OBSERVATION_INTEGRATION.md)を作成し着手した。同日の再レビューで、画像監査・重複メタデータ・保存工程別の取消しを簡素化した。
 
-起点は2026-11-11の[工程計画](../../initial/05-implementation.md)、2026-11-12のM0限定依頼と、その後のM1実装・検証依頼。同日の追加指摘に従い、要求受付後の新フレーム待ちを取りやめ、最新画像キャッシュをそのまま採用する方式へ変更した。
+起点は2026-11-11の[工程計画](../../archive/initial/05-implementation.md)、2026-11-12のM0限定依頼と、その後のM1実装・検証依頼。同日の追加指摘に従い、要求受付後の新フレーム待ちを取りやめ、最新画像キャッシュをそのまま採用する方式へ変更した。
 
 利用場面は、保存先を作成・選択し、Codexが現在の最新画像を観測し、後から観測IDで同じ保存画像を参照すること。
 
@@ -20,7 +20,7 @@ Codex結合には[U02](../../complete/unit_007/CODEX_CONNECTION.md)の接続と�
 
 [U02レビュー](../../dev-journal.md)のR02（受理前中断で原稿消失）・R04（failed終端後の明示的次送信が拒否される）は、M0で現在のコードと試験を読み、未修正と確認した。M2-03で再現し、接続・会話UIの拡張前に独立した修正を行った。固有の境界は模擬RPC・実Qtで、通常接続の回帰は実Codexの2ターンで確認し、修正を受け入れた。実runtimeで受理前中断・failed終端を誘発した結果ではなく、その経路は未検証リスクとして残る。詳細は[M2子仕様](../unit_035/MCP_OBSERVATION_INTEGRATION.md)を参照する。
 
-UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[主画面方針](../../initial/10-ui-interaction.md)に従い、新設する「プロジェクト」メニューの「新規作成」「開く」と既存の接続・エラー詳細だけを使う。全体対話UIはU06。U06の完成を本工程の前提にしない。
+UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と[主画面方針](../../archive/initial/10-ui-interaction.md)に従い、新設する「プロジェクト」メニューの「新規作成」「開く」と既存の接続・エラー詳細だけを使う。全体対話UIはU06。U06の完成を本工程の前提にしない。
 
 ## 3. 対象範囲・対象外
 
@@ -30,7 +30,7 @@ UIは[実装整理](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)と
 
 ## 4. 関連文書
 
-[M0の詳細契約](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[03 観測・操作](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[08 公開経路と未確認事項](../../initial/08-sdk-compatibility.md)、[07 検証](../../initial/07-verification.md)。親は工程全体の受入、子は詳細契約・検証結果を所有する。
+[M0の詳細契約](../../complete/unit_031/RECORDED_OBSERVATION_DESIGN.md)、[03 観測・操作](../../archive/initial/03-game-io.md)、[04 保存](../../archive/initial/04-agent-memory.md)、[08 公開経路と未確認事項](../../archive/initial/08-sdk-compatibility.md)、[07 検証](../../archive/initial/07-verification.md)。親は工程全体の受入、子は詳細契約・検証結果を所有する。
 
 ## 5. M0の決定とM1レビューでの見直し
 

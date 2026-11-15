@@ -4,7 +4,7 @@
 
 初期版の製品範囲は[01](01-overview.md)に従います。U07は独立工程を廃止し、U09は初期版対象外として保持します。本書は工程の入口、依存関係、実施順を所有します。各工程の到達点・分割・受入条件は親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
-U08はM0の設計から[M7の製品全体の受入](../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。各段階の検証範囲は[親仕様](../complete/unit_013/RESUME.md)に集約します。次の工程候補はU10の連続運転です。
+U08はM0の設計から[M7の製品全体の受入](../../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。各段階の検証範囲は[親仕様](../../complete/unit_013/RESUME.md)に集約します。次の工程候補はU10の連続運転です。
 
 ## 開発方針
 
@@ -20,36 +20,36 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 
 | 工程・親仕様 | 状態・前提 | 所有する範囲 |
 |---|---|---|
-| [U01 起動・設定](../complete/unit_001/APP_STARTUP.md) | complete | 起動、設定、GUIと配布の基礎 |
-| [U02 Codex接続](../complete/unit_007/CODEX_CONNECTION.md) | complete。U01に依存 | 公開app-server接続、認証、受信・要求応答・終了 |
-| [U03 映像取得](../complete/unit_008/VIDEO_CAPTURE.md) | complete。U01に依存 | 取得元、プレビュー、最新フレーム、切断・終了 |
-| [U04 記録付き観測](../complete/unit_009/RECORDED_OBSERVATION.md) | complete。U02・U03に依存 | 観測・PNG保存とMCPへの画像返却 |
-| [U05 入力と即時停止](../complete/unit_010/INPUT_AND_STOP.md) | complete。U04に依存 | 有限の入力列、事後観測、停止・解除 |
-| [U06 Goalによる継続](../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
+| [U01 起動・設定](../../complete/unit_001/APP_STARTUP.md) | complete | 起動、設定、GUIと配布の基礎 |
+| [U02 Codex接続](../../complete/unit_007/CODEX_CONNECTION.md) | complete。U01に依存 | 公開app-server接続、認証、受信・要求応答・終了 |
+| [U03 映像取得](../../complete/unit_008/VIDEO_CAPTURE.md) | complete。U01に依存 | 取得元、プレビュー、最新フレーム、切断・終了 |
+| [U04 記録付き観測](../../complete/unit_009/RECORDED_OBSERVATION.md) | complete。U02・U03に依存 | 観測・PNG保存とMCPへの画像返却 |
+| [U05 入力と即時停止](../../complete/unit_010/INPUT_AND_STOP.md) | complete。U04に依存 | 有限の入力列、事後観測、停止・解除 |
+| [U06 Goalによる継続](../../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
 | [U07 計画的終了](#u07-retired) | 廃止（2026-11-15） | 通常指示・共通停止・Goal操作へ責務を分け、独立した作業仕様は削除 |
-| [U08 Project・会話管理と再接続](../complete/unit_013/RESUME.md) | complete。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
-| [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
-| [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
+| [U08 Project・会話管理と再接続](../../complete/unit_013/RESUME.md) | complete。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
+| [U09 記憶整理](../../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
+| [U10 連続運転](../../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
 
-会話実行・共通停止は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)、契約整理は[unit_054](../complete/unit_054/KISS_SIMPLIFICATION.md)を前提とします。U08・U10の着手にU07・U09の完了は要求しません。
+会話実行・共通停止は[unit_061](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)、契約整理は[unit_054](../../complete/unit_054/KISS_SIMPLIFICATION.md)を前提とします。U08・U10の着手にU07・U09の完了は要求しません。
 
 <a id="u07-retired"></a>
 
 ## U07の廃止と残す責務
 
-2026-11-15のplanned整理で、U07の独立工程とunit_012の作業仕様を削除しました。通常指示・共通停止は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)、保存参照・再起動後の再接続は[U08](../complete/unit_013/RESUME.md)が所有します。U07として追加実装・専用受入を行う要求は残っていません。
+2026-11-15のplanned整理で、U07の独立工程とunit_012の作業仕様を削除しました。通常指示・共通停止は[unit_061](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)、保存参照・再起動後の再接続は[U08](../../complete/unit_013/RESUME.md)が所有します。U07として追加実装・専用受入を行う要求は残っていません。
 
 「保存して終えて」は通常指示として送り、作業順序とゲーム内の区切りはモデルに任せます。終了専用の状態・UI、自然文の停止意図判定、Goal休止からの自動機器停止、ゲーム内セーブ成功・全活動終了の保証は設けません。これは専用機能を実装・検証して完了したという意味ではありません。通常指示や共通停止の検証結果は各所有仕様を参照します。
 
 過去の完了仕様・ジャーナルにあるU07への割当ては当時の計画です。後続作業の予約には使わず、この廃止判断と現在の所有仕様を優先します。将来、共通機能では満たせない具体的な要求が確認された場合は、新しいunitで追加保証を定義します。欠番となるunit_012は再利用しません。
 
-U09は[契約整理M0](../complete/unit_054/KISS_SIMPLIFICATION.md)で再検討先として保持すると決めたため、今回もplannedに残します。U10は次の初期版工程候補、Bluetooth入力は初期版とは別の拡張候補として保持します。
+U09は[契約整理M0](../../complete/unit_054/KISS_SIMPLIFICATION.md)で再検討先として保持すると決めたため、今回もplannedに残します。U10は次の初期版工程候補、Bluetooth入力は初期版とは別の拡張候補として保持します。
 
 検証結果: `uv run --no-sync python -X utf8 -`で変更文書のローカルMarkdown参照先255件、廃止判断の明示anchor、74個のunit配置の重複なし、tmpが`.gitkeep`のみであることを確認しました。差分の読取で責務・過去計画との区別・仮テキスト残りを確認し、`git diff --check`はpassでした。外部URLと既存anchor全体は未検証です。製品コードは変更せず、製品テスト・型検査・ビルドは対象外、実接続・実機検証は未実行です。
 
 ## 仮想コントローラ追加の採用計画
 
-[unit_078](../complete/unit_078/VIRTUAL_CONTROLLER.md)は、Codexと入力サービスをアプリが並列に所有する構成へ整理し、別ウィンドウの手動操作を追加した親仕様です。2026-11-15に3段階の実装・回帰・実接続・短時間の実機受入を完了しました。長時間運転、他protocolの実機網羅、キーボード入力は含みません。
+[unit_078](../../complete/unit_078/VIRTUAL_CONTROLLER.md)は、Codexと入力サービスをアプリが並列に所有する構成へ整理し、別ウィンドウの手動操作を追加した親仕様です。2026-11-15に3段階の実装・回帰・実接続・短時間の実機受入を完了しました。長時間運転、他protocolの実機網羅、キーボード入力は含みません。
 
 段階1のCodex固有処理抽出→段階2の入力所有・接続管理の独立→段階3の仮想コントローラの順に実施しました。段階1は既存挙動を維持し、停止完了後に新接続へ進む順序変更は段階2、手動入力と採用GUIは段階3で扱いました。新しい上位管理レイヤ、入力専用サービススレッド、受付世代は追加していません。
 
@@ -57,7 +57,7 @@ U10やBluetoothの完了は着手条件に含めません。本親仕様の追�
 
 ## U08の到達点と作業順
 
-M1専用home・設定・管理API→M2記録と新規開始の結合→M3実行設定・標準指示の結合→M4切替・既存会話の再接続→M5会話管理UI→M6再開・設定・障害の結合検証→M7 GUI・実機の通し受入の順に進めます。開始条件と完了条件は[U08親仕様第6節](../complete/unit_013/RESUME.md#6-マイルストーン作業単位実施順)を正本とします。
+M1専用home・設定・管理API→M2記録と新規開始の結合→M3実行設定・標準指示の結合→M4切替・既存会話の再接続→M5会話管理UI→M6再開・設定・障害の結合検証→M7 GUI・実機の通し受入の順に進めます。開始条件と完了条件は[U08親仕様第6節](../../complete/unit_013/RESUME.md#6-マイルストーン作業単位実施順)を正本とします。
 
 M2はM1の管理APIを呼出し側から使い、固定memory・project.jsonの撤去とcwd・実thread ID・recordsの結合を同時に完了します。保存部品自体に管理API依存は置きません。Projectの画面操作を追加する前に、サービス経由のProjectあり／なしの開始と既存入力UIからの新規実行を確認します。
 
@@ -71,4 +71,4 @@ M4で停止後の旧資源回収と現在設定によるresume、通常送信・
 
 各工程で調査・設計の確定、製品実装、接続・実機検証を区別します。機器がなくても模擬境界の試験は進められますが、実機確認は未実施として残します。GUIは合意画面と説明文を置かない方針に従い、各機能の工程で実画面を確認します。
 
-品質ゲートの選択は[AGENTS.md](../../AGENTS.md)に従います。同梱指示を変更する工程ではT20の配布確認、新規依存を変更する工程ではlock・build等を行います。文書整備に無関係な製品テスト・型検査・ビルドを文書品質の根拠にしません。
+品質ゲートの選択は[AGENTS.md](../../../AGENTS.md)に従います。同梱指示を変更する工程ではT20の配布確認、新規依存を変更する工程ではlock・build等を行います。文書整備に無関係な製品テスト・型検査・ビルドを文書品質の根拠にしません。

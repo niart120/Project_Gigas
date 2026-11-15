@@ -18,7 +18,7 @@ CH552・PokeCon・3DS S2/T3 New Firmwareの設定解決・完全入力状態の�
 
 ## 4. 関連文書・着手条件
 
-[02 実行管理](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 記録](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[U04 M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に従う。
+[02 実行管理](../../archive/initial/02-runtime.md)、[03 ゲームI/O](../../archive/initial/03-game-io.md)、[04 記録](../../archive/initial/04-agent-memory.md)、[05 工程](../../archive/initial/05-implementation.md)、[U04 M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md)に従う。
 
 M0と現在のコード・依存・試験を照合して着手した。入力機器は未接続・実機未検証。serial停止方式はpySerial 3.5のWindows実装を確認し、7節の方式を採用した。MCP公開境界は本子では実装せず、長い要求の方式判断と実測をM2の公開前条件として引き継ぐ。
 

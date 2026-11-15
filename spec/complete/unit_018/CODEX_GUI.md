@@ -4,7 +4,7 @@
 
 U02のM2子仕様。公開app-server接続をGUIから明示的に開始し、通常ターン、質問・承認、中断、切断を操作する。状態はcomplete。接続部の実装とGUI受入を混同しない。
 
-起点は[親仕様](../unit_007/CODEX_CONNECTION.md)、[M1](../unit_017/CODEX_DIRECT_CONNECTION.md)、[実行基盤](../../initial/02-runtime.md)、[制御フロー](../../initial/09-control-flows.md)。既存の設定保存・終了契約は[U01](../../complete/unit_004/APPLICATION_SHELL.md)に従う。
+起点は[親仕様](../unit_007/CODEX_CONNECTION.md)、[M1](../unit_017/CODEX_DIRECT_CONNECTION.md)、[実行基盤](../../archive/initial/02-runtime.md)、[制御フロー](../../archive/initial/09-control-flows.md)。既存の設定保存・終了契約は[U01](../../complete/unit_004/APPLICATION_SHELL.md)に従う。
 
 | 利用者の入力・状態 | 期待する観測結果 | 制約 |
 |---|---|---|

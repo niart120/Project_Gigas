@@ -12,7 +12,7 @@ Project所属・未所属の新規開始、実映像・有限入力・共通停�
 
 ## 3. 関連文書・着手条件
 
-[02 実行](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 記録](../../initial/04-agent-memory.md)、[07 検証](../../initial/07-verification.md)、[09 操作](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md)を正本とする。
+[02 実行](../../archive/initial/02-runtime.md)、[03 ゲームI/O](../../archive/initial/03-game-io.md)、[04 記録](../../archive/initial/04-agent-memory.md)、[07 検証](../../archive/initial/07-verification.md)、[09 操作](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md)を正本とする。
 
 着手時点で、[M5](../../complete/unit_073/CONVERSATION_MANAGEMENT_UI.md)はnative画面と実app-server、[M6](../../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)は設定・故障と実resumeを確認済みだった。全体1015件・静的検査・lock/buildが成功し、現行U08構成の実機通し受入を本作業へ引き継いだ。
 

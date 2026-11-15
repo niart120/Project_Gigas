@@ -14,7 +14,7 @@
 
 ## 4. 根拠と実装との接続
 
-[親仕様](../unit_001/APP_STARTUP.md)、[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)、[初期設計04](../../initial/04-agent-memory.md)・[06](../../initial/06-repository.md)・[07のT20](../../initial/07-verification.md)に従い、現行uv_buildと標準のimportlib.resourcesを使う。
+[親仕様](../unit_001/APP_STARTUP.md)、[M0](../unit_002/ARCHITECTURE_AND_DEPENDENCIES.md)、[初期設計04](../../archive/initial/04-agent-memory.md)・[06](../../archive/initial/06-repository.md)・[07のT20](../../archive/initial/07-verification.md)に従い、現行uv_buildと標準のimportlib.resourcesを使う。
 
 [M1](../unit_003/GLOBAL_SETTINGS.md)の設定APIと[M2](../unit_004/APPLICATION_SHELL.md)の画面・終了処理を使う。M3では指示を同梱し、`gigas = gigas.app:main`と`python -m gigas`の両入口を隔離インストール後に検証した。
 

@@ -4,7 +4,7 @@
 
 状態: **complete（製品修正・受入・ローカル品質ゲート完了）**。U01〜U03のGUIを横断する独立した修正単位。[unit_024レビュー](../unit_024/UI_UX_REVIEW.md)のRV01〜RV11と、エラー説明の文章を許可する2026-11-11の追加指示を実装した。PRの状態は本書末尾の境界に従い、GitHubとGitで確認する。
 
-開始版は`fd99b84`、ブランチは`codex/uiux-review`。開始時clean、`origin/main`との差はレビュー記録の1 commitだけである。Constitutionは[AGENTS.md](../../../AGENTS.md)、[初期GUI方針](../../initial/01-overview.md)、[実行・停止の境界](../../initial/02-runtime.md)、[工程計画](../../initial/05-implementation.md)。Intent Deltaは、機器選択から接続までの一体化、画面の情報配置、再現不具合修正、エラー説明文の例外追加。
+開始版は`fd99b84`、ブランチは`codex/uiux-review`。開始時clean、`origin/main`との差はレビュー記録の1 commitだけである。Constitutionは[AGENTS.md](../../../AGENTS.md)、[初期GUI方針](../../archive/initial/01-overview.md)、[実行・停止の境界](../../archive/initial/02-runtime.md)、[工程計画](../../archive/initial/05-implementation.md)。Intent Deltaは、機器選択から接続までの一体化、画面の情報配置、再現不具合修正、エラー説明文の例外追加。
 
 ## 2. 対象範囲・対象外
 

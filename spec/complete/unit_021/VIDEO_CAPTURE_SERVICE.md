@@ -10,7 +10,7 @@ UI非依存の機器列挙、設定値からの機器解決、取得プロセス
 
 ## 3. 前提・関連文書
 
-[03](../../initial/03-game-io.md)、[02](../../initial/02-runtime.md)、[07](../../initial/07-verification.md)、M0を正本とする。OpenCV 4.14.0.94、NumPy 2.5.4、列挙1.4.0のWindows実列挙と物理機器からのBGR取得をM0で確認した。M0時点では黒・青の画像だったが、最終製品経路の実ゲーム映像は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)で確認した。
+[03](../../archive/initial/03-game-io.md)、[02](../../archive/initial/02-runtime.md)、[07](../../archive/initial/07-verification.md)、M0を正本とする。OpenCV 4.14.0.94、NumPy 2.5.4、列挙1.4.0のWindows実列挙と物理機器からのBGR取得をM0で確認した。M0時点では黒・青の画像だったが、最終製品経路の実ゲーム映像は[M2実機受入](../unit_022/HARDWARE_ACCEPTANCE.md)で確認した。
 
 ## 4. 振る舞い仕様・設計
 

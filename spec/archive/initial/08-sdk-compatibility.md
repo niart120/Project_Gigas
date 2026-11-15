@@ -47,7 +47,7 @@ MCPは共通の入力形式を検査し、現在の機器能力は`InputService.
 
 要求期限の根拠は[採用版の期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)と[要求の時間制限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)です。300秒は製品の待機期限で、MCP共通の最大値や解除完了の期限ではありません。progressで延長せず、クライアントとサーバーは別に計時します。内部入力時間の固定上限・暗黙分割・非同期ポーリングは設けません。
 
-画像は同じPNG bytesをMCPのimage contentと保存へ使い、観測ID等をJSON textで返します。保存は非同期で、モデル内部の前処理まで同一性を保証しません。stdio受信は2 MiB、送信は1 MiBの一行上限です。切詰め通知から元画像を復元せず、保存元は元のObservationとします。部品APIと取消し・失敗の詳細は[ゲームI/O MCP](../../docs/observation-mcp.md)を参照します。
+画像は同じPNG bytesをMCPのimage contentと保存へ使い、観測ID等をJSON textで返します。保存は非同期で、モデル内部の前処理まで同一性を保証しません。stdio受信は2 MiB、送信は1 MiBの一行上限です。切詰め通知から元画像を復元せず、保存元は元のObservationとします。部品APIと取消し・失敗の詳細は[ゲームI/O MCP](../../../docs/observation-mcp.md)を参照します。
 
 ## 認証・モデル・実行環境
 
@@ -78,7 +78,7 @@ Planの公開項目はstepとpending/inProgress/completed、explanationは省略
 
 ## U08の採用契約と確認範囲
 
-Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=trueを維持します。以下は採用版の公開契約です。GIGASの責務と後続への引継ぎは[M0](../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、製品受入条件は[07](07-verification.md)へ集約します。
+Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=trueを維持します。以下は採用版の公開契約です。GIGASの責務と後続への引継ぎは[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、製品受入条件は[07](07-verification.md)へ集約します。
 
 | 機能 | 採用する公開経路・制約 |
 |---|---|
@@ -91,7 +91,7 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 
 根拠は採用版の[Project schema](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server-protocol/src/protocol/v2/project.rs)、[thread処理](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/request_processors/thread_processor.rs)、[Goal継続](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/goal/src/runtime.rs)です。製品経路での実行結果と未検証範囲は、担当子仕様へ記録します。
 
-[M4](../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)では実サービスから保存会話の閲覧、プロセス再起動後のresume、同一プロセスでの停止・unsubscribe・切替後のresumeを確認しました。保存ID・cwd・所属、現在のMCP・推論レベル・承認方法と同じ記録先への追記が成立しています。active Goalへの追加指示と共通停止も確認しましたが、応答前の先行turnは今回の実接続では発生せず、遅延を制御した結合試験で確認しています。
+[M4](../../complete/unit_072/CONVERSATION_SELECTION_AND_RESUME.md)では実サービスから保存会話の閲覧、プロセス再起動後のresume、同一プロセスでの停止・unsubscribe・切替後のresumeを確認しました。保存ID・cwd・所属、現在のMCP・推論レベル・承認方法と同じ記録先への追記が成立しています。active Goalへの追加指示と共通停止も確認しましたが、応答前の先行turnは今回の実接続では発生せず、遅延を制御した結合試験で確認しています。
 
 ### 設定の所有と適用
 
@@ -114,7 +114,7 @@ Project等の実験的APIを使うためinitialize.capabilities.experimentalApi=
 
 OFFでは起動時生成と標準参照を無効にし、既存ファイルの削除APIを呼びません。generate_memories=falseで作ったthreadの生成対象状態はdisabledとして保存されます。ONへ戻す際に過去threadを一括変更・強制再抽出する処理は追加しません。将来の候補選択・抽出・統合は標準処理に任せ、即時生成を開始条件にしません。製品での確認範囲と未観測事項は次段に記します。
 
-[M3](../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)ではON/OFFの実効値、公開参照経路、OFF時の既存記憶保持と、標準統合処理による試験用summaryの形式整理を確認しました。[M6](../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)では実resumeへ設定を再適用し、ゲームMCP利用後の生成対象維持、公開参照とOFF時の保持を確認しました。M6の確認時点では標準6時間idle等の必要条件を満たす候補は0でした。[M7](../complete/unit_075/PRODUCT_ACCEPTANCE.md)では実機MCPを利用したProject・未所属の両threadでmemory_mode=enabled・source=vscodeの維持を確認しました。実会話からの抽出は引き続き未観測で、条件を変えて抽出を強制する機構は追加しません。
+[M3](../../complete/unit_071/EXECUTION_SETTINGS_AND_INSTRUCTIONS.md)ではON/OFFの実効値、公開参照経路、OFF時の既存記憶保持と、標準統合処理による試験用summaryの形式整理を確認しました。[M6](../../complete/unit_074/RESUME_SETTINGS_AND_FAILURES.md)では実resumeへ設定を再適用し、ゲームMCP利用後の生成対象維持、公開参照とOFF時の保持を確認しました。M6の確認時点では標準6時間idle等の必要条件を満たす候補は0でした。[M7](../../complete/unit_075/PRODUCT_ACCEPTANCE.md)では実機MCPを利用したProject・未所属の両threadでmemory_mode=enabled・source=vscodeの維持を確認しました。実会話からの抽出は引き続き未観測で、条件を変えて抽出を強制する機構は追加しません。
 
 [Skills探索](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/ext/skills/src/host_roots.rs)はcwd側・祖先側の.agents/skills、$HOME/.agents/skills、専用CODEX_HOME/skills等を扱います。独自の探索器は不要です。
 

@@ -78,7 +78,7 @@ Codexから別ランタイムへ変更するときは、接続部と必要な実
 
 APIの変更が必要になった場合は、影響する呼出し元と試験を同じ作業仕様に含めます。将来変更しないという前提で契約を過度に一般化するより、現在の仕様を小さく明確に保ちます。
 
-責務と状態の分離は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)に従います。ファイル分割だけを目的としたmanagerや共通基盤は追加せず、契約と不要な状態・分岐も削減します。
+責務と状態の分離は[unit_061](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)に従います。ファイル分割だけを目的としたmanagerや共通基盤は追加せず、契約と不要な状態・分岐も削減します。
 
 ## 分割理由と依存境界
 
@@ -141,7 +141,7 @@ Projectの正本をstorageへ持たせず、runtimeの公開APIをservicesが利
 
 # 依存管理と試験の配置
 
-Pythonの実行・依存管理は`uv`を使い、依存変更に伴う`uv.lock`を保存します。変更範囲別の品質確認コマンドは[AGENTS.md](../../AGENTS.md)を正本とします。文書・skillのみの変更は内容・根拠・参照を確認し、無関係な製品テストやbuildの成功を文書品質の根拠にしません。変更したskillはskill-creator付属のvalidatorで検証します。
+Pythonの実行・依存管理は`uv`を使い、依存変更に伴う`uv.lock`を保存します。変更範囲別の品質確認コマンドは[AGENTS.md](../../../AGENTS.md)を正本とします。文書・skillのみの変更は内容・根拠・参照を確認し、無関係な製品テストやbuildの成功を文書品質の根拠にしません。変更したskillはskill-creator付属のvalidatorで検証します。
 
 `tests/unit/`では機器・モデル通信を必要としない振る舞いを確認します。`tests/integration/`では保存、MCP、接続部、GUIへの通知などの境界を扱います。`tests/acceptance/`には実機と実アカウントで確認する利用場面を置き、実行条件を明示します。認証情報、実プレイ画像、個人のプロジェクト記録を固定fixtureとしてcommitしません。
 

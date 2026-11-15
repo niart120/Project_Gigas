@@ -19,7 +19,7 @@ Intent Delta: 完了済みturnへの表示・記録更新と、任意のitem・�
 ## 4. 関連文書・着手条件
 
 - [親の採用設計 5.3・5.4](../../complete/unit_054/KISS_SIMPLIFICATION.md)
-- [実行管理](../../initial/02-runtime.md)、[記録](../../initial/04-agent-memory.md)、[UI](../../initial/10-ui-interaction.md)
+- [実行管理](../../archive/initial/02-runtime.md)、[記録](../../archive/initial/04-agent-memory.md)、[UI](../../archive/initial/10-ui-interaction.md)
 - [接続API](../../../docs/codex.md)
 - [前提となる製品専用組立](../../complete/unit_055/PRODUCT_CONNECTION_ASSEMBLY.md)
 

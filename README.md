@@ -55,7 +55,8 @@ uv run python scripts/check_package.py
 - [グローバル設定](docs/settings.md)
 - [映像プレビュー](docs/video.md)
 - [Codex接続画面](docs/codex-gui.md)
-- [spec/initial/README.md](spec/initial/README.md): 設計文書一覧
+- [製品の要求](docs/requirements.md)
+- [初期設計のアーカイブ](spec/archive/initial/README.md): 過去の設計・開発計画
 - [AGENTS.md](AGENTS.md): 開発エージェントガイド
 
 ## ライセンス

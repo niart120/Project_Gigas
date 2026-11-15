@@ -31,8 +31,8 @@
 
 ## 4. 関連 docs
 
-- [実行管理](../../initial/02-runtime.md)
-- [切断](../../initial/09-control-flows.md)
+- [実行管理](../../archive/initial/02-runtime.md)
+- [切断](../../archive/initial/09-control-flows.md)
 - [API](../../../docs/codex.md)
 - [GUI](../../../docs/codex-gui.md)
 

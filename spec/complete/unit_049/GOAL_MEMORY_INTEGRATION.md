@@ -7,7 +7,7 @@
 Goal開始・目的更新・自律turn・一時停止・同一接続再開・破棄・完了、run/Grant/MCP寿命、memory限定書込、公開対話保存、Goal UIと自律turnへの設定反映を扱う。M3の認証拡張・実機工程受入、U07終了/U08再起動復旧/U09記憶整理/U10長時間、PR・マージは対象外。
 
 ## 関連・着手条件
-[親](../../complete/unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[最新M1](../../complete/unit_048/NEXT_TURN_MODEL.md)、[UI](../../initial/10-ui-interaction.md)、[記録](../../initial/04-agent-memory.md)。採用runtime0.167.0の公開schema・M0隔離結果と製品結合の証拠を区別する。
+[親](../../complete/unit_011/GOAL_EXECUTION.md)、[M0](../../complete/unit_044/GOAL_INTERACTION_DESIGN.md)、[最新M1](../../complete/unit_048/NEXT_TURN_MODEL.md)、[UI](../../archive/initial/10-ui-interaction.md)、[記録](../../archive/initial/04-agent-memory.md)。採用runtime0.167.0の公開schema・M0隔離結果と製品結合の証拠を区別する。
 
 ## 最終契約と根拠
 

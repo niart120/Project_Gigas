@@ -1,6 +1,6 @@
 # U02・U03後の実装整理 親仕様
 
-> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
+> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../archive/initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
 
 ## 1. 概要・起点
 
@@ -36,7 +36,7 @@ M1・M2はユーザー指示により実装した。全体UI/UXの比較・採�
 
 ### 4.2 後続工程との境界
 
-[U05](../../complete/unit_010/INPUT_AND_STOP.md)で即時停止と設定モーダルの関係を実機入力へ結合する。全体UI/UXは今回の整理後に別の場で検討し、[U06](../../complete/unit_011/GOAL_EXECUTION.md)の冒頭で検討結果・未決事項を確認して、Goal・追加指示・回答・認証設定を具体化する。[U07](../../initial/05-implementation.md#u07-retired)では計画的終了中の操作へ拡張する。今回の整理だけで全体UI/UXを設計済みとは扱わない。
+[U05](../../complete/unit_010/INPUT_AND_STOP.md)で即時停止と設定モーダルの関係を実機入力へ結合する。全体UI/UXは今回の整理後に別の場で検討し、[U06](../../complete/unit_011/GOAL_EXECUTION.md)の冒頭で検討結果・未決事項を確認して、Goal・追加指示・回答・認証設定を具体化する。[U07](../../archive/initial/05-implementation.md#u07-retired)では計画的終了中の操作へ拡張する。今回の整理だけで全体UI/UXを設計済みとは扱わない。
 
 ### 4.3 作業の順序
 
@@ -175,7 +175,7 @@ M0の設計レビューは第5・7節と現行ソース・試験を照合して�
 
 [NyXの調査記録](../unit_026/SETTINGS_AND_STATUS_REDESIGN.md)と今回の手元ソース読取では、OKも適用処理を呼んでから閉じる。Gigasの保存失敗・非同期機器処理の契約は別途守り、同期処理をそのまま移植しない。既存complete仕様は過去の受入記録として保持し、本書の変更を実装済みと書き換えない。
 
-工程の入口は[実装計画](../../initial/05-implementation.md)、UIの製品要求は[設計概要](../../initial/01-overview.md)、初期の画面境界は[U01の画面仕様](../../complete/unit_004/APPLICATION_SHELL.md)を参照する。
+工程の入口は[実装計画](../../archive/initial/05-implementation.md)、UIの製品要求は[設計概要](../../archive/initial/01-overview.md)、初期の画面境界は[U01の画面仕様](../../complete/unit_004/APPLICATION_SHELL.md)を参照する。
 
 ## 8. 対象ファイル
 

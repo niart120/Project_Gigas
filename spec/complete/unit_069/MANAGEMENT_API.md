@@ -14,7 +14,7 @@
 
 ## 3. 前提・関連文書
 
-M0はcomplete。採用版は0.167.0。契約は[02 実行](../../initial/02-runtime.md)、[04 保存・設定](../../initial/04-agent-memory.md)、[08 公開経路](../../initial/08-sdk-compatibility.md)、受入は[07](../../initial/07-verification.md)に従う。APIの入出力は同梱runtimeから生成したschemaと採用版ソースに照合する。
+M0はcomplete。採用版は0.167.0。契約は[02 実行](../../archive/initial/02-runtime.md)、[04 保存・設定](../../archive/initial/04-agent-memory.md)、[08 公開経路](../../archive/initial/08-sdk-compatibility.md)、受入は[07](../../archive/initial/07-verification.md)に従う。APIの入出力は同梱runtimeから生成したschemaと採用版ソースに照合する。
 
 ## 4. 振る舞い仕様
 

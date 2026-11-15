@@ -8,8 +8,8 @@
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
-| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../initial/05-implementation.md) |
-| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../initial/06-repository.md) |
+| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../archive/initial/05-implementation.md) |
+| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../archive/initial/06-repository.md) |
 
 利用場面: 利用者が継続攻略中に介入・停止し、手動操作やアプリ再起動を挟んで再開する。依頼完了後に次の明示依頼へ進み、同じ構成で連続運転できることを確認する。
 
@@ -31,12 +31,12 @@ U06の[親仕様の引継ぎ表](../../complete/unit_011/GOAL_EXECUTION.md#10-�
 
 ## 4. 関連文書
 
-- [01-overview.md](../../initial/01-overview.md)
-- [02-runtime.md](../../initial/02-runtime.md)
-- [03-game-io.md](../../initial/03-game-io.md)
-- [04-agent-memory.md](../../initial/04-agent-memory.md)
-- [08-sdk-compatibility.md](../../initial/08-sdk-compatibility.md)
-- [検証観点](../../initial/07-verification.md)
+- [01-overview.md](../../archive/initial/01-overview.md)
+- [02-runtime.md](../../archive/initial/02-runtime.md)
+- [03-game-io.md](../../archive/initial/03-game-io.md)
+- [04-agent-memory.md](../../archive/initial/04-agent-memory.md)
+- [08-sdk-compatibility.md](../../archive/initial/08-sdk-compatibility.md)
+- [検証観点](../../archive/initial/07-verification.md)
 
 ## 5. 冒頭の調査・設計
 

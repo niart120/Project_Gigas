@@ -4,7 +4,7 @@
 
 状態: **complete**。[U08親仕様](../../complete/unit_013/RESUME.md)のM5を担当し、[M4](../unit_072/CONVERSATION_SELECTION_AND_RESUME.md)の選択・履歴取得・切替・再接続サービスを、合意済みの開閉式サイドバーと既存の対話画面へ結合した。
 
-Intent Delta: none。配置と操作は[10 UI](../../initial/10-ui-interaction.md)、[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、[採用モック](../../complete/unit_068/assets/conversation-sidebar-proposal.png)を正とする。画像は配置資料であり、例文・ゲーム名・モデル値・色・寸法を製品の固定値にしない。管理・実行の所有は[02](../../initial/02-runtime.md)、手順は[09](../../initial/09-control-flows.md)に従う。
+Intent Delta: none。配置と操作は[10 UI](../../archive/initial/10-ui-interaction.md)、[M0](../../complete/unit_068/MANAGEMENT_STORAGE_DESIGN.md)、[採用モック](../../complete/unit_068/assets/conversation-sidebar-proposal.png)を正とする。画像は配置資料であり、例文・ゲーム名・モデル値・色・寸法を製品の固定値にしない。管理・実行の所有は[02](../../archive/initial/02-runtime.md)、手順は[09](../../archive/initial/09-control-flows.md)に従う。
 
 利用者はProjectまたは未所属の会話を閲覧し、必要なときだけ送信・Goal操作で再開する。同じProjectで新規会話を始める場合も、資料の保存先と現在対象を識別できるようにする。
 

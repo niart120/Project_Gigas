@@ -20,9 +20,9 @@
 
 ## 3. 関連文書・前提
 
-- [初期設計・GUI文言方針](../../initial/01-overview.md)
-- [実行状態・停止の契約](../../initial/02-runtime.md)
-- [工程と現在の実装範囲](../../initial/05-implementation.md)
+- [初期設計・GUI文言方針](../../archive/initial/01-overview.md)
+- [実行状態・停止の契約](../../archive/initial/02-runtime.md)
+- [工程と現在の実装範囲](../../archive/initial/05-implementation.md)
 - [U03 人間レビュー後の実装仕様](../../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)
 - [U03 実機受入記録](../../complete/unit_023/HARDWARE_ACCEPTANCE.md)
 - [設定ファイルの現仕様](../../../docs/settings.md)

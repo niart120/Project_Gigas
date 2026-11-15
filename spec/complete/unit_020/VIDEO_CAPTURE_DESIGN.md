@@ -14,7 +14,7 @@ API・依存の一次資料、現環境の機器一覧、取得方式の成立�
 
 ## 3. 関連文書・前提
 
-[実行管理](../../initial/02-runtime.md)、[ゲームI/O](../../initial/03-game-io.md)、[工程](../../initial/05-implementation.md)、[検証](../../initial/07-verification.md)、[U01](../unit_001/APP_STARTUP.md)を参照する。設定とGUIは実装済み。U01の取得機器の選択文字列には、識別・接続の保証がない。
+[実行管理](../../archive/initial/02-runtime.md)、[ゲームI/O](../../archive/initial/03-game-io.md)、[工程](../../archive/initial/05-implementation.md)、[検証](../../archive/initial/07-verification.md)、[U01](../unit_001/APP_STARTUP.md)を参照する。設定とGUIは実装済み。U01の取得機器の選択文字列には、識別・接続の保証がない。
 
 ## 4. 調査結果と採用判断
 

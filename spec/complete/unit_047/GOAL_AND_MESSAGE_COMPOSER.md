@@ -18,7 +18,7 @@ Goal接続・Goal送信モード・pause/resumeはM2。候補モデル取得・�
 
 ## 4. 関連文書・着手条件
 
-[初期UI](../../initial/10-ui-interaction.md)、[U06親](../../complete/unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
+[初期UI](../../archive/initial/10-ui-interaction.md)、[U06親](../../complete/unit_011/GOAL_EXECUTION.md)、[前回M1](../../complete/unit_046/CONTEXTUAL_DIALOGUE_UI.md)を引き継ぐ。開始branchはcodex/u06-m0-goal-design、HEAD 0ad2a09、worktree clean。既存PromptEdit、Transcript、PlanPanel、設定画面を使い、依存を追加しない。
 
 ## 5. 振る舞い仕様
 

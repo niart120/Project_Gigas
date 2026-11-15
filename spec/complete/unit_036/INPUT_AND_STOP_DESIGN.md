@@ -9,7 +9,7 @@
 | 利用者要求 | NyXPyの実装・テストまで追い、Gigasの既存部品を使ってM0を完了する | 2026-11-12の本作業依頼 |
 | 親工程 | 通常ターンの操作・停止・事後画像 | [U05親](../../complete/unit_010/INPUT_AND_STOP.md) |
 | 先行成果 | 最新キャッシュの観測、加工済みObservation、非同期保存、実MCP | [U04親](../../complete/unit_009/RECORDED_OBSERVATION.md)、[M2](../../complete/unit_035/MCP_OBSERVATION_INTEGRATION.md) |
-| 正本 | 所有、入力、原記録、工程、公開接続、UI | [02](../../initial/02-runtime.md)、[03](../../initial/03-game-io.md)、[04](../../initial/04-agent-memory.md)、[05](../../initial/05-implementation.md)、[08](../../initial/08-sdk-compatibility.md)、[10](../../initial/10-ui-interaction.md) |
+| 正本 | 所有、入力、原記録、工程、公開接続、UI | [02](../../archive/initial/02-runtime.md)、[03](../../archive/initial/03-game-io.md)、[04](../../archive/initial/04-agent-memory.md)、[05](../../archive/initial/05-implementation.md)、[08](../../archive/initial/08-sdk-compatibility.md)、[10](../../archive/initial/10-ui-interaction.md) |
 
 利用場面は、利用者が入力機器を選んで接続し、通常メッセージを明示送信すること。Codexの操作列を一つずつ実行し、解除後の画像を返す。設定を閉じて主画面へ戻り、保存待ちや質問待ちでも中断できる。U06のGoal状態やU07の終了専用制御は作らない。
 

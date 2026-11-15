@@ -16,11 +16,11 @@
 
 | 判断 | 確定内容 | 正本 |
 |---|---|---|
-| D1 home・設定 | 全Project共通の専用CODEX_HOMEは%LOCALAPPDATA%/GIGAS/codex_home。GIGAS側でログインし、開発用認証・設定・記憶を同期しない。GIGAS設定は同GIGAS配下のsettings.toml。独自診断保存先は追加しない | [04 保存先・設定](../../initial/04-agent-memory.md)、[08 設定経路](../../initial/08-sdk-compatibility.md) |
-| D2 Project・作業場所 | 任意のProject、1 Project＝1フォルダー。新規配置先は起動時cwdを初期位置とするピッカーで選び、既存フォルダーも登録可能。位置の正本はapp-serverのroots。未所属は`unassigned/<workspace-id>/`。既定projectsルート・位置台帳・複数roots・Project昇格・自動移動なし | [04](../../initial/04-agent-memory.md) |
-| D3 記録 | Project・未所属とも作業フォルダーの`records/<thread-id>/`。再接続でも分割しない。schema_version=1、5種JSONLとPNG、限定した提出・確定本文。単純追記、保持期限・自動削除・修復・reload待ち・旧互換なし。原記録は編集しない運用、権限による強制保護は必須にしない | [04 JSONL・保存契約](../../initial/04-agent-memory.md) |
-| D4 指示・Skills・記憶 | 最小限の共通指示、標準AGENTS/Skills探索、自由な攻略資料。Web live／disabledと標準記憶の生成・参照一括切替は既定ON、OFFでも既存記憶を削除しない。Apps・Plugins・Hooks無効、追加外部MCPなし | [04](../../initial/04-agent-memory.md)、[08](../../initial/08-sdk-compatibility.md) |
-| D5 閲覧・実行・権限 | 会話選択は履歴表示だけ。明示送信・Goal作成・目的編集・再開で実行し、Goal削除はresumeなしで行う。実行中の切替・新規は停止後に行う。開閉式サイドバー、所属別＋、下書き破棄確認。workspace-write・シェル通信制限、承認条件on-request、承認者auto_review既定／user切替 | [02 資源所有](../../initial/02-runtime.md)、[09 操作順](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md) |
+| D1 home・設定 | 全Project共通の専用CODEX_HOMEは%LOCALAPPDATA%/GIGAS/codex_home。GIGAS側でログインし、開発用認証・設定・記憶を同期しない。GIGAS設定は同GIGAS配下のsettings.toml。独自診断保存先は追加しない | [04 保存先・設定](../../archive/initial/04-agent-memory.md)、[08 設定経路](../../archive/initial/08-sdk-compatibility.md) |
+| D2 Project・作業場所 | 任意のProject、1 Project＝1フォルダー。新規配置先は起動時cwdを初期位置とするピッカーで選び、既存フォルダーも登録可能。位置の正本はapp-serverのroots。未所属は`unassigned/<workspace-id>/`。既定projectsルート・位置台帳・複数roots・Project昇格・自動移動なし | [04](../../archive/initial/04-agent-memory.md) |
+| D3 記録 | Project・未所属とも作業フォルダーの`records/<thread-id>/`。再接続でも分割しない。schema_version=1、5種JSONLとPNG、限定した提出・確定本文。単純追記、保持期限・自動削除・修復・reload待ち・旧互換なし。原記録は編集しない運用、権限による強制保護は必須にしない | [04 JSONL・保存契約](../../archive/initial/04-agent-memory.md) |
+| D4 指示・Skills・記憶 | 最小限の共通指示、標準AGENTS/Skills探索、自由な攻略資料。Web live／disabledと標準記憶の生成・参照一括切替は既定ON、OFFでも既存記憶を削除しない。Apps・Plugins・Hooks無効、追加外部MCPなし | [04](../../archive/initial/04-agent-memory.md)、[08](../../archive/initial/08-sdk-compatibility.md) |
+| D5 閲覧・実行・権限 | 会話選択は履歴表示だけ。明示送信・Goal作成・目的編集・再開で実行し、Goal削除はresumeなしで行う。実行中の切替・新規は停止後に行う。開閉式サイドバー、所属別＋、下書き破棄確認。workspace-write・シェル通信制限、承認条件on-request、承認者auto_review既定／user切替 | [02 資源所有](../../archive/initial/02-runtime.md)、[09 操作順](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md) |
 
 Project・thread・Goal・標準記憶はapp-serverが永続管理する。GIGASは公開APIから読み、独自ログによる会話復元やGoalの階層管理を持たない。外部Codexで攻略相談・資料整理をする場合は作業フォルダーを渡せるが、両アプリの会話共有・相互実行は必須にしない。
 
@@ -58,11 +58,11 @@ active Goalへの追加指示はresume→turn/startとし、追加指示受付�
 
 ## 5. 外部契約と製品検証の境界
 
-採用版の公開schema・ソースと設定の根拠は[08](../../initial/08-sdk-compatibility.md)を正本とする。settings/updateがロード済みthreadを必要とすること、goal/clearを保存済みthreadへ直接送れること、resumeで現在設定を適用する条件を実装時にも守る。
+採用版の公開schema・ソースと設定の根拠は[08](../../archive/initial/08-sdk-compatibility.md)を正本とする。settings/updateがロード済みthreadを必要とすること、goal/clearを保存済みthreadへ直接送れること、resumeで現在設定を適用する条件を実装時にも守る。
 
 認証は既存account/login/start・account/read・model/listを専用homeで使う。Windows準備も既存readiness・明示setupを使い、要求した権限と返された実効設定を照合する。専用homeは設定・記憶の保存分離であり、認証やOS権限の完全隔離を保証するものではない。
 
-APIの存在や設定値の受理を、製品経路・実モデル・Windows権限・GUI・実機の受入成功とは扱わない。製品側で確認する項目と期限は第6節と[07](../../initial/07-verification.md)へ引き継ぐ。
+APIの存在や設定値の受理を、製品経路・実モデル・Windows権限・GUI・実機の受入成功とは扱わない。製品側で確認する項目と期限は第6節と[07](../../archive/initial/07-verification.md)へ引き継ぐ。
 
 ## 6. 初期設計改訂とM1以降への引継ぎ
 
@@ -78,11 +78,11 @@ APIの存在や設定値の受理を、製品経路・実モデル・Windows権�
 | M6 再開・設定・障害の結合検証 | 新規・閲覧・実行を跨ぐモデル/Goal操作・履歴新着・権限・通知詳細 | active Goalの先行継続を許容。欠損・拒否・結果不明でも履歴・本文を守り停止可能。auto_review/user・シェル制限を実経路で確認。基本経路はM5までに完了 |
 | M7 通し受入 | GUI・実機・README/docs・配布資材 | 新規/既存・途中介入・停止・再起動・代表障害を通す。製品経路の実測と未検証を区別する |
 
-改訂した正本は[01 概要](../../initial/01-overview.md)、[02 実行](../../initial/02-runtime.md)、[03 ゲームI/O](../../initial/03-game-io.md)、[04 保存](../../initial/04-agent-memory.md)、[05 工程](../../initial/05-implementation.md)、[06 配置](../../initial/06-repository.md)、[07 検証](../../initial/07-verification.md)、[08 外部契約](../../initial/08-sdk-compatibility.md)、[09 フロー](../../initial/09-control-flows.md)、[10 UI](../../initial/10-ui-interaction.md)。公開利用文書は現行製品の説明を保ち、実装変更時に新契約へ更新する。完了済み仕様は当時の実績として保持する。
+改訂した正本は[01 概要](../../archive/initial/01-overview.md)、[02 実行](../../archive/initial/02-runtime.md)、[03 ゲームI/O](../../archive/initial/03-game-io.md)、[04 保存](../../archive/initial/04-agent-memory.md)、[05 工程](../../archive/initial/05-implementation.md)、[06 配置](../../archive/initial/06-repository.md)、[07 検証](../../archive/initial/07-verification.md)、[08 外部契約](../../archive/initial/08-sdk-compatibility.md)、[09 フロー](../../archive/initial/09-control-flows.md)、[10 UI](../../archive/initial/10-ui-interaction.md)。公開利用文書は現行製品の説明を保ち、実装変更時に新契約へ更新する。完了済み仕様は当時の実績として保持する。
 
 ## 7. 振る舞い仕様・TDD Test List
 
-本M0の製品TDDはnot applicable。合意・公開契約・根拠・初期設計・担当と期限を照合する文書作業である。[親仕様第7節](../../complete/unit_013/RESUME.md#7-振る舞い仕様tdd-test-listの受入観点)と[07のU08受入](../../initial/07-verification.md#u08で追加置換する受入)を後続TDDの起点とする。詳細項目・故障注入点は着手する子仕様で定め、文章の固定文字列や見出しの一致を製品テストにしない。
+本M0の製品TDDはnot applicable。合意・公開契約・根拠・初期設計・担当と期限を照合する文書作業である。[親仕様第7節](../../complete/unit_013/RESUME.md#7-振る舞い仕様tdd-test-listの受入観点)と[07のU08受入](../../archive/initial/07-verification.md#u08で追加置換する受入)を後続TDDの起点とする。詳細項目・故障注入点は着手する子仕様で定め、文章の固定文字列や見出しの一致を製品テストにしない。
 
 ## 8. 対象ファイル・検証
 

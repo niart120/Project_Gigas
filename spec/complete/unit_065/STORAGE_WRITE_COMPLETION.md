@@ -10,7 +10,7 @@
 
 ## 3. 前提・関連文書
 
-[unit_064](../unit_064/STORAGE_VALIDATION_BOUNDARIES.md)の検査縮小は完了し、関連72試験と静的・package gateを確認済み。[保存の正本](../../initial/04-agent-memory.md)と[公開API](../../../docs/recorded-observation.md)を同時更新した。
+[unit_064](../unit_064/STORAGE_VALIDATION_BOUNDARIES.md)の検査縮小は完了し、関連72試験と静的・package gateを確認済み。[保存の正本](../../archive/initial/04-agent-memory.md)と[公開API](../../../docs/recorded-observation.md)を同時更新した。
 
 ## 4. 振る舞い
 

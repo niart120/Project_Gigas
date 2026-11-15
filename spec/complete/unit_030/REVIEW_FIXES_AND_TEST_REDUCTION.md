@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[整理親仕様](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[M1](../../complete/unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)、[M2](../../complete/unit_029/DISPLAY_AND_REMAINDER_SIMPLIFICATION.md)、[取得設計](../../initial/03-game-io.md)、[工程](../../initial/05-implementation.md)。開始branchはcodex/implementation-scope-review。既存の未commit変更は前回レビュー文書3件だけで、これを保全する。
+[整理親仕様](../../complete/unit_027/IMPLEMENTATION_SIMPLIFICATION.md)、[M1](../../complete/unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)、[M2](../../complete/unit_029/DISPLAY_AND_REMAINDER_SIMPLIFICATION.md)、[取得設計](../../archive/initial/03-game-io.md)、[工程](../../archive/initial/05-implementation.md)。開始branchはcodex/implementation-scope-review。既存の未commit変更は前回レビュー文書3件だけで、これを保全する。
 
 ## 5. 振る舞い仕様
 

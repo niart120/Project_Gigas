@@ -1,6 +1,6 @@
 # U02 Codex接続の成立確認と最小接続 親仕様
 
-> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
+> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../archive/initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
 
 ## 1. 目的・状態・起点
 
@@ -10,8 +10,8 @@
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
-| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../initial/05-implementation.md) |
-| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../initial/06-repository.md) |
+| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../archive/initial/05-implementation.md) |
+| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../archive/initial/06-repository.md) |
 
 利用場面: 利用者が認証方式とモデルを選び、通常ターンの応答を受け取る。質問・承認への回答待ちでもGUIは応答し、中断と終了を受け付ける。
 
@@ -29,10 +29,10 @@
 
 ## 4. 関連文書
 
-- [02-runtime.md](../../initial/02-runtime.md)
-- [08-sdk-compatibility.md](../../initial/08-sdk-compatibility.md)
-- [09-control-flows.md](../../initial/09-control-flows.md)
-- [検証観点](../../initial/07-verification.md)
+- [02-runtime.md](../../archive/initial/02-runtime.md)
+- [08-sdk-compatibility.md](../../archive/initial/08-sdk-compatibility.md)
+- [09-control-flows.md](../../archive/initial/09-control-flows.md)
+- [検証観点](../../archive/initial/07-verification.md)
 
 ## 5. 冒頭の調査・設計
 
@@ -115,14 +115,14 @@ Windows x64、Python 3.12.10、PySide6/Qt 6.12.0、runtime 0.167.0。実モデ�
 
 ## 10. 未決事項・後続への引継ぎ
 
-2026-11-11の完了後追記: ログイン・接続とモデル・エフォート選択を分離する追加要求を受領した。U02の接続時固定という現実装と検証実績はそのまま残し、変更後の契約は[02](../../initial/02-runtime.md)、設計・実装・実接続確認は[U06](../../complete/unit_011/GOAL_EXECUTION.md)のM0・M2/T21へ引き継ぐ。追加要求は未実装である。完了後レビューで再現した操作上の問題と修正候補は[開発ジャーナル](../../dev-journal.md)に記録した。
+2026-11-11の完了後追記: ログイン・接続とモデル・エフォート選択を分離する追加要求を受領した。U02の接続時固定という現実装と検証実績はそのまま残し、変更後の契約は[02](../../archive/initial/02-runtime.md)、設計・実装・実接続確認は[U06](../../complete/unit_011/GOAL_EXECUTION.md)のM0・M2/T21へ引き継ぐ。追加要求は未実装である。完了後レビューで再現した操作上の問題と修正候補は[開発ジャーナル](../../dev-journal.md)に記録した。
 
 | 事項 | 担当・期限 | 理由と影響 |
 |---|---|---|
 | SDK方式の不成立と接続方式変更 | U02、M1の具体化前 | 2026-11-11に直接接続を採用する明示承認を受領。単一受信、非公開差替え禁止、独自攻略ループなしは維持 |
 | APIキー方式の実装・接続確認 | U02内の別子仕様、または[U06](../../complete/unit_011/GOAL_EXECUTION.md)完了まで | 認証経路と資格情報の管理はM0で調べる。ChatGPTだけの成功で全認証方式を確認済みにしない |
 | MCP画像・接続世代 | [U04](../../complete/unit_009/RECORDED_OBSERVATION.md)で画像接続、[U05](../../complete/unit_010/INPUT_AND_STOP.md)の入力許可前に世代失効を確認 | 公開設定・更新または接続再作成の方式。成立しなければ依存するゲーム接続を進めない |
-| Goalと終了・再開 | Goal継続はU06、通常ターン切替は[U07](../../initial/05-implementation.md#u07-retired)、再開は[U08](../../complete/unit_013/RESUME.md)の該当実装前 | M0で公開経路を調べ、動作の保証は各工程の接続試験で得る |
+| Goalと終了・再開 | Goal継続はU06、通常ターン切替は[U07](../../archive/initial/05-implementation.md#u07-retired)、再開は[U08](../../complete/unit_013/RESUME.md)の該当実装前 | M0で公開経路を調べ、動作の保証は各工程の接続試験で得る |
 
 ## 11. 完了チェックリスト
 

@@ -20,7 +20,7 @@ M2で行うのは、**保存先の保全に必要な検査と、機器操作を�
 
 ## 3. 前提と関連文書
 
-- [入力・観測の現行仕様](../../initial/03-game-io.md)、[保存・記憶の現行仕様](../../initial/04-agent-memory.md)
+- [入力・観測の現行仕様](../../archive/initial/03-game-io.md)、[保存・記憶の現行仕様](../../archive/initial/04-agent-memory.md)
 - [入力API](../../../docs/input-api.md)、[記録付き観測](../../../docs/recorded-observation.md)
 - [通常指示・停止と内部構成](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、[Goal操作](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)
 

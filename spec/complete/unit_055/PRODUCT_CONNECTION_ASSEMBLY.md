@@ -19,8 +19,8 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 ## 4. 関連文書・着手条件
 
 - [親の採用設計](../../complete/unit_054/KISS_SIMPLIFICATION.md)
-- [実行管理](../../initial/02-runtime.md)
-- [記録とmemory](../../initial/04-agent-memory.md)
+- [実行管理](../../archive/initial/02-runtime.md)
+- [記録とmemory](../../archive/initial/04-agent-memory.md)
 - [接続API](../../../docs/codex.md)
 - [開発規約](../../../AGENTS.md)
 

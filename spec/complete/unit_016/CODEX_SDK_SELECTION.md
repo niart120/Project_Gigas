@@ -11,7 +11,7 @@
 | source | 内容 | path |
 |---|---|---|
 | user request | U02を開始して完遂する。ブランチ作成、親のwip移動、採用版・接続方式の子仕様から進める | 2026-11-11の依頼 |
-| roadmap | U01の次にU02 M0を選ぶ | [05](../../initial/05-implementation.md) |
+| roadmap | U01の次にU02 M0を選ぶ | [05](../../archive/initial/05-implementation.md) |
 | parent | 工程の受入条件 | [U02](../../complete/unit_007/CODEX_CONNECTION.md) |
 
 利用場面: 実装担当が、公開配布物・API・Windows環境の根拠から接続方式を選ぶ。質問の回答待ちに受信を止める方式や暗黙の承認を製品へ持ち込まない。
@@ -26,7 +26,7 @@
 
 ## 4. 関連docsと前提
 
-[02](../../initial/02-runtime.md)、[06](../../initial/06-repository.md)、[07](../../initial/07-verification.md)、[08](../../initial/08-sdk-compatibility.md)、[09](../../initial/09-control-flows.md)、[U01](../../complete/unit_001/APP_STARTUP.md)。
+[02](../../archive/initial/02-runtime.md)、[06](../../archive/initial/06-repository.md)、[07](../../archive/initial/07-verification.md)、[08](../../archive/initial/08-sdk-compatibility.md)、[09](../../archive/initial/09-control-flows.md)、[U01](../../complete/unit_001/APP_STARTUP.md)。
 
 U01の起動・設定・GUIと設定I/Oワーカーは実装済み。認証・モデル接続・サービスループは未実装。初期調査の開発コミットは採用配布版の根拠にしない。M0で接続条件が成立してからM1を具体化する。
 

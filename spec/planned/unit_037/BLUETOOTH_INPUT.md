@@ -16,7 +16,7 @@
 
 - [U05親仕様](../../complete/unit_010/INPUT_AND_STOP.md)
 - [U05 M0](../../complete/unit_036/INPUT_AND_STOP_DESIGN.md)
-- [ゲームI/O設計](../../initial/03-game-io.md)
+- [ゲームI/O設計](../../archive/initial/03-game-io.md)
 
 調査日は2026-11-12。NyXはローカル `E:/documents/VSCodeWorkspace/Project_NyX` のcommit `648f860e5afd582f80aa58645570a16bfc68a393`、swbt-pythonはGitHubの0.6.0を示すmainの公開API・依存定義・実装を参照した。mainリンクは可変のため、導入時に採用版を再確認する。PRの実機結果は既存記録の参照であり、Gigasでの実行結果ではない。
 

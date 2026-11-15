@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[設計概要](../../initial/01-overview.md)、[ランタイム](../../initial/02-runtime.md)、[I/O](../../initial/03-game-io.md)、[工程](../../initial/05-implementation.md)を正本とする。着手時は`codex/implementation-scope-review`、`6dfbb28`、作業ツリーはclean。収集済み試験は512件。
+[設計概要](../../archive/initial/01-overview.md)、[ランタイム](../../archive/initial/02-runtime.md)、[I/O](../../archive/initial/03-game-io.md)、[工程](../../archive/initial/05-implementation.md)を正本とする。着手時は`codex/implementation-scope-review`、`6dfbb28`、作業ツリーはclean。収集済み試験は512件。
 
 ## 5. 振る舞い仕様
 
