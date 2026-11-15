@@ -50,6 +50,7 @@ if TYPE_CHECKING:
         ManagementOperation,
         ManagementValue,
     )
+    from gigas.services.input import OperationResult
 
 __all__ = [
     "AnswerOutcome",
@@ -308,8 +309,17 @@ class CodexService:
         )
 
     def interrupt(self) -> None:
-        """Request common stop; the result reports actual stop completion."""
+        """Request Codex execution and finite-input stop, reporting its completion."""
         self._submit("stop", lambda execution: execution.stop())
+
+    @property
+    def manual_blocked(self) -> bool:
+        """Whether current Codex execution blocks manual input on the shared loop."""
+        return (
+            self._closing is None
+            and self._conversation is not None
+            and self._conversation.manual_blocked
+        )
 
     @property
     def execution_busy(self) -> bool:
@@ -673,24 +683,27 @@ class CodexService:
             return asyncio.create_task(connection.close())
         if self._closing is None:
             execution = self._conversation or execution
+            operation = self._input.stop_finite()
             self._closing = asyncio.create_task(
-                self._release_connection(connection, execution),
+                self._release_connection(connection, execution, operation),
                 name="gigas-connection-resources-close",
             )
             execution.connection_closing()
             self._selection.connection_closing()
-            self._input.stop()
         return self._closing
 
     async def _release_connection(
-        self, connection: CodexConnection, execution: ConversationExecution
+        self,
+        connection: CodexConnection,
+        execution: ConversationExecution,
+        operation: "asyncio.Task[OperationResult] | None",
     ) -> None:
         # Never join the stop task or Qt command that requested this shutdown.
         outcomes = await asyncio.gather(
             connection.close(), self._resources.close_endpoint(), return_exceptions=True
         )
         drained = await asyncio.gather(
-            execution.drain(), self._input.drain_input(), return_exceptions=True
+            execution.drain(), self._input.wait_operation(operation), return_exceptions=True
         )
         async with self._resources_lock:
             try:

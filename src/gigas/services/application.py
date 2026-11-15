@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.input.config import SerialConfig
+    from gigas.game_io.input.models import InputState
     from gigas.game_io.observation import ObservationResolution
     from gigas.runtime.codex.models import ConnectionOptions
     from gigas.services.conversations import ConversationTarget
@@ -70,6 +71,8 @@ class ApplicationServiceThread(QThread):
     input_changed = Signal(object)
     input_busy_changed = Signal(bool)
     input_ports = Signal(object, str)
+    manual_changed = Signal(bool, object)
+    manual_completed = Signal(object)
 
     def __init__(
         self,
@@ -83,15 +86,16 @@ class ApplicationServiceThread(QThread):
         super().__init__()
         self.inputs = InputService(
             factory=input_factory,
-            on_connection_changed=self.input_changed.emit,
-            on_busy_changed=self.input_busy_changed.emit,
+            on_connection_changed=self._input_changed,
+            on_busy_changed=self._input_busy_changed,
+            on_manual_result=self.manual_completed.emit,
         )
         self.codex = CodexService(
             data_root,
             reader,
             self.inputs,
             factory=factory,
-            received=self.received.emit,
+            received=self._receive,
             completed=self.completed.emit,
             project_completed=self.project_completed.emit,
             management_completed=self.management_completed.emit,
@@ -103,10 +107,68 @@ class ApplicationServiceThread(QThread):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queued: list[tuple[Callable[[], None], _OperationContext | None]] = []
         self._ending = False
+        self._exit_requested = False
+        self._stops_pending = 0
         self._generation = 0
         self._tasks: set[asyncio.Task[None]] = set()
         self._done: asyncio.Event | None = None
         self.shutdown_error = ""
+
+    def _receive(self, event: ServiceEvent) -> None:
+        self.received.emit(event)
+        self._publish_manual()
+
+    def _input_changed(self, result: InputConnectionResult) -> None:
+        self.input_changed.emit(result)
+        self._publish_manual()
+
+    def _input_busy_changed(self, busy: bool) -> None:
+        self.input_busy_changed.emit(busy)
+        self._publish_manual()
+
+    def _manual_allowed(self) -> bool:
+        return (
+            not self._ending
+            and not self._exit_requested
+            and not self._stops_pending
+            and not self.codex.manual_blocked
+            and self.inputs.manual_available
+        )
+
+    def _publish_manual(self) -> None:
+        self.manual_changed.emit(self._manual_allowed(), self.inputs.protocol)
+
+    def update_manual(self, state: "InputState") -> None:
+        """Queue a complete manual state, checking execution admission on this loop."""
+        self._enqueue(lambda: self._track(asyncio.create_task(self._update_manual(state))))
+
+    async def _update_manual(self, state: "InputState") -> None:
+        # Match Codex command task ordering so an earlier send registers first.
+        if self._manual_allowed():
+            result = self.inputs.update_manual(state)
+            if result.code != "OK":
+                self.manual_completed.emit(result)
+        self._publish_manual()
+
+    def release_manual(self) -> None:
+        """Queue manual-only release; closing a window never stops Codex or finite input."""
+        self._enqueue(lambda: self._track(asyncio.create_task(self._release_manual())))
+
+    async def _release_manual(self) -> None:
+        # Keep the same task ordering as preceding manual updates.
+        self.inputs.stop_manual()
+        self._publish_manual()
+
+    def set_exit_requested(self, requested: bool) -> None:
+        """Suspend manual input from exit request through confirmation or cancellation."""
+        self._enqueue(lambda: self._track(asyncio.create_task(self._set_exit_requested(requested))))
+
+    async def _set_exit_requested(self, requested: bool) -> None:
+        # Exit/cancellation must not overtake manual updates already dispatched.
+        self._exit_requested = requested
+        if requested:
+            self.inputs.stop_manual()
+        self._publish_manual()
 
     @property
     def selected_target(self) -> "ConversationTarget":
@@ -181,6 +243,7 @@ class ApplicationServiceThread(QThread):
 
     def _accept_input(self, config: "SerialConfig | None") -> None:
         self.inputs.request_config(config)
+        self._publish_manual()
         if self._input_apply_task is not None and not self._input_apply_task.done():
             return
         self._input_apply_task = asyncio.create_task(self._apply_input())
@@ -198,6 +261,8 @@ class ApplicationServiceThread(QThread):
             self.inputs.reject_config(str(error))
         except Exception:  # noqa: BLE001 -- don't expose upstream exception text.
             self.inputs.reject_config("入力接続を変更する前の停止に失敗しました")
+        finally:
+            self._publish_manual()
 
     async def _refresh_input_ports(self) -> None:
         try:
@@ -317,7 +382,9 @@ class ApplicationServiceThread(QThread):
         self._enqueue(lambda: self._track(asyncio.create_task(self._stop(context))), context)
 
     async def _stop(self, context: _OperationContext) -> None:
+        self._stops_pending += 1
         operation = self.inputs.stop()
+        self._publish_manual()
         error = ""
         try:
             try:
@@ -334,6 +401,9 @@ class ApplicationServiceThread(QThread):
             error = str(failure)
         except Exception:  # noqa: BLE001 -- sanitize the application result boundary.
             error = "停止の完了を確認できません"
+        finally:
+            self._stops_pending -= 1
+            self._publish_manual()
         self.completed.emit(ServiceResult(context.generation, "stop", error))
 
     def disconnect_runtime(self) -> None:

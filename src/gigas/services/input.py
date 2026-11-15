@@ -260,7 +260,8 @@ class InputService:
             manual.changed.set()
         return OperationResult("OK")
 
-    def _end_manual(self) -> asyncio.Task[OperationResult] | None:
+    def stop_manual(self) -> asyncio.Task[OperationResult] | None:
+        """Request manual release without waiting, returning the captured operation."""
         manual = self._manual
         if manual is None:
             return None
@@ -276,7 +277,7 @@ class InputService:
         Raises:
             InputServiceError: Sending or neutral recovery was not confirmed.
         """
-        operation = self._end_manual()
+        operation = self.stop_manual()
         if operation is None:
             return
         try:
@@ -360,7 +361,7 @@ class InputService:
         normal completion callback clears this service's current-operation slot.
         """
         if self._manual is not None:
-            return self._end_manual()
+            return self.stop_manual()
         task = self._operation
         if task is not None and not task.done() and not task.cancelling():
             task.cancel()
@@ -372,7 +373,15 @@ class InputService:
         An operation cancelled before its coroutine starts returns None and sends
         no input. Cancelling this wait leaves the operation owned by this service.
         """
-        task = self._operation
+        return await self.wait_operation(self._operation)
+
+    @staticmethod
+    async def wait_operation(task: asyncio.Task[OperationResult] | None) -> OperationResult | None:
+        """Wait for a captured operation without joining a subsequently accepted one.
+
+        Cancellation before the operation starts returns None. Cancelling the
+        waiter leaves the task owned by the input service.
+        """
         if task is None:
             return None
         try:

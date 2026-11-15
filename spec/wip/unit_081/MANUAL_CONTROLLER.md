@@ -53,8 +53,8 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | 手動保持の更新・短い押下・解除を順序どおり送り、有限列との排他・protocol・失敗・終了回収を守る | new / edge | integration | item 1、677a425。API未定義のred→7件green。軸集約・中央通過・取消された解除待ち・task完了直後の再受付も確認。追加構造変更不要 |
-| green | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2。解除せず送信するred→11件green。コミット後に完了記録 |
-| todo | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3。アプリ配送と捕捉対象 |
+| refactor-skipped | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2、8e32662。解除せず送信するred→11件green。追加構造変更不要 |
+| green | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。コミット後に完了記録 |
 | todo | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4。モデルと小窓、protocol別 |
 | todo | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。Shell結合と既存終了経路 |
 
@@ -80,6 +80,9 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | uv run pytest tests/integration/test_manual_execution.py tests/integration/test_conversation_control.py tests/integration/test_conversation_resume.py tests/integration/test_conversation_execution.py -q | pass | item 2、63 passed（13.63秒）。Goal通知を返す既存ResumePeerで実際の完了条件を検証 |
 | 独立レビュー→ケース補強 | 採用 | 読込済みGoal不在での新規Goal作成、send/goal_set両方の未送信結果を追加。修正必須の実装指摘なし |
 | uv run pytest tests/integration/test_manual_execution.py -q | pass | 補強後11 passed（2.89秒）。ruff check/format・tyもpass |
+| 独立レビュー・再現テスト | 修正 | 終了要求と取消しの同期callbackが先行する手動更新taskを追い越すP2を採用。要求前後2列でredを確認し、終了要求も既存task配送順へ揃えた。受付世代や別の調整役は追加していない |
+| uv run pytest tests/integration/test_manual_application.py tests/integration/test_manual_input.py tests/integration/test_input_configuration.py -q | pass | 順序修正後21 passed（2.26秒） |
+| uv run pytest tests/integration/test_manual_application.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py -q | pass | 58 passed（11.16秒）。item 3単独8件。ruff check/format・ty・diff checkもpass |
 | native画面・画像比較・実機 | not run | 実装後に記録 |
 
 ## 10. 先送り事項
