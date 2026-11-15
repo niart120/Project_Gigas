@@ -1,7 +1,8 @@
 """One input connection and one finite, interruptible operation at a time."""
 
 import asyncio
-from dataclasses import dataclass, replace
+from collections import deque
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
@@ -70,6 +71,14 @@ class OperationResult:
     message: str = ""
 
 
+@dataclass(slots=True)
+class _ManualInput:
+    pending: deque[InputState | None] = field(default_factory=deque)
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    state: InputState = field(default_factory=InputState)
+    releasing: bool = False
+
+
 class InputService:
     """Own input on one asyncio loop, independently of observation and persistence.
 
@@ -86,18 +95,21 @@ class InputService:
         factory: "Callable[[SerialConfig], InputDevice] | None" = None,
         on_connection_changed: "Callable[[InputConnectionResult], None] | None" = None,
         on_busy_changed: "Callable[[bool], None] | None" = None,
+        on_manual_result: "Callable[[OperationResult], None] | None" = None,
     ) -> None:
         """Prepare the input owner without connecting or creating a chat archive.
 
         Args:
             factory: Construct an unopened device from settings, or None for SerialInput.
             on_connection_changed: Synchronous callback after each settings application.
+            on_manual_result: Synchronous callback when a manual operation finishes.
             on_busy_changed: Optional synchronous callback on the owning loop.
                 True follows admitted task ownership; False follows completion
                 of the current task, including neutral recovery. Rejections and
                 stop requests alone do not notify. The callback must not raise.
         """
         self._on_busy_changed = on_busy_changed
+        self._on_manual_result = on_manual_result
         self._factory = SerialInput if factory is None else factory
         self._on_connection_changed = on_connection_changed
         self._config: SerialConfig | None = None
@@ -108,6 +120,8 @@ class InputService:
         self._device: InputDevice | None = None
         self._available = False
         self._operation: asyncio.Task[OperationResult] | None = None
+        self._manual: _ManualInput | None = None
+        self._closing_operation: asyncio.Task[OperationResult] | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._connect_cancelled = False
 
@@ -182,11 +196,99 @@ class InputService:
 
     def begin_close(self) -> None:
         """Withdraw unapplied settings and stop input before asynchronous cleanup."""
+        if not self._closing:
+            self._closing_operation = self.stop()
         self._closing = True
         self._pending = False
         self._connect_cancelled = True
         self._available = False
-        self.stop()
+
+    @property
+    def protocol(self) -> "InputProtocol | None":
+        """Return capabilities of the connected owner, or None when unavailable."""
+        return self._device.protocol if self.connected and self._device is not None else None
+
+    @property
+    def manual_available(self) -> bool:
+        """Whether a manual update can continue or begin on this input owner."""
+        return (
+            self.connected
+            and not self.changing
+            and not self._closing
+            and (
+                not self.busy if self._manual is None else self.busy and not self._manual.releasing
+            )
+        )
+
+    def update_manual(self, state: InputState) -> OperationResult:
+        """Admit a manual state, retaining button transitions and latest unsent axes.
+
+        Neutral is an update during a gesture. release_manual ends the gesture.
+        No conversation or record archive is created. Invalid or busy input is
+        rejected without sending; an empty idle update is a no-op.
+        """
+        manual = self._manual
+        if manual is None and state == InputState():
+            return OperationResult("OK")
+        if not self.manual_available:
+            code = "BUSY" if self.busy or self.changing or manual is not None else "INPUT_DISABLED"
+            return OperationResult(code, message="手動入力を受け付けません")
+        device = self._device
+        if device is None:
+            return OperationResult("INPUT_DISABLED", message="入力機器を使用できません")
+        try:
+            validate_state(state, device.protocol)
+        except InvalidSequenceError as error:
+            return OperationResult("INVALID_SEQUENCE", message=str(error))
+        if manual is None:
+            manual = self._manual = _ManualInput()
+            task = asyncio.create_task(self._execute_manual(manual, device))
+            self._operation = task
+            task.add_done_callback(self._release_operation)
+            if self._on_busy_changed is not None:
+                self._on_busy_changed(True)
+        if state != manual.state:
+            if (
+                manual.pending
+                and (previous := manual.pending[-1]) is not None
+                and (previous.buttons == state.buttons)
+            ):
+                manual.pending[-1] = state
+            else:
+                manual.pending.append(state)
+            manual.state = state
+            manual.changed.set()
+        return OperationResult("OK")
+
+    def _end_manual(self) -> asyncio.Task[OperationResult] | None:
+        manual = self._manual
+        if manual is None:
+            return None
+        if not manual.releasing:
+            manual.releasing = True
+            manual.pending.append(None)
+            manual.changed.set()
+        return self._operation
+
+    async def release_manual(self) -> None:
+        """Release only the captured manual gesture and wait through cancellation.
+
+        Raises:
+            InputServiceError: Sending or neutral recovery was not confirmed.
+        """
+        operation = self._end_manual()
+        if operation is None:
+            return
+        try:
+            result = await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            await asyncio.gather(operation, return_exceptions=True)
+            raise
+        _require_released(result)
+
+    def stop_finite(self) -> asyncio.Task[OperationResult] | None:
+        """Cancel the captured finite operation without touching a manual gesture."""
+        return self.stop() if self._manual is None else None
 
     @property
     def connected(self) -> bool:
@@ -252,11 +354,13 @@ class InputService:
             raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
 
     def stop(self) -> asyncio.Task[OperationResult] | None:
-        """Cancel once and return the captured operation for release-result recovery.
+        """End manual input or cancel a finite operation, returning its captured task.
 
         Returning the task lets a stop caller collect its result even when the
         normal completion callback clears this service's current-operation slot.
         """
+        if self._manual is not None:
+            return self._end_manual()
         task = self._operation
         if task is not None and not task.done() and not task.cancelling():
             task.cancel()
@@ -286,7 +390,11 @@ class InputService:
             InputServiceError: Closing fails; the connection owner is retained.
         """
         self.begin_close()
-        await self.drain_input()
+        outcome: OperationResult | BaseException | None = None
+        if self._closing_operation is not None:
+            (outcome,) = await asyncio.shield(
+                asyncio.gather(self._closing_operation, return_exceptions=True)
+            )
         if self._apply_task is not None:
             await asyncio.shield(asyncio.gather(self._apply_task, return_exceptions=True))
         if self._connection_task is not None:
@@ -295,6 +403,8 @@ class InputService:
             await self._close_device()
         except OSError as error:
             raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
+        if isinstance(outcome, OperationResult):
+            _require_released(outcome)
 
     async def _close_device(self) -> None:
         self._available = False
@@ -323,7 +433,7 @@ class InputService:
             return OperationResult("BUSY", message="入力接続の切替中です")
         if not self._available or device is None:
             return OperationResult("INPUT_DISABLED", message="入力機器を使用できません")
-        if self._operation is not None and not self._operation.done():
+        if self._manual is not None or self.busy:
             return OperationResult("BUSY", message="入力操作を実行中です")
         try:
             for step in sequence:
@@ -340,9 +450,61 @@ class InputService:
 
     def _release_operation(self, task: asyncio.Task[OperationResult]) -> None:
         if self._operation is task:
+            manual = self._manual
+            self._manual = None
             self._operation = None
             if self._on_busy_changed is not None:
                 self._on_busy_changed(False)
+            if manual is not None and not task.cancelled() and self._on_manual_result is not None:
+                self._on_manual_result(task.result())
+
+    async def _execute_manual(self, manual: _ManualInput, device: InputDevice) -> OperationResult:
+        result = OperationResult("OK", "input")
+        failed = False
+        neutral_attempted = False
+        try:
+            while True:
+                while not manual.pending:
+                    manual.changed.clear()
+                    await manual.changed.wait()
+                state = manual.pending.popleft()
+                if state is None:
+                    break
+                neutral_attempted = state == InputState()
+                result = replace(
+                    result,
+                    phase="neutral" if neutral_attempted else "input",
+                    input_sent="unknown",
+                    neutral="unconfirmed",
+                )
+                cancelled = await _settle_io(device.send(state))
+                result = replace(
+                    result,
+                    input_sent="sent",
+                    neutral="sent" if neutral_attempted else "unconfirmed",
+                )
+                if cancelled:
+                    raise asyncio.CancelledError  # noqa: TRY301 -- preserve completed write.
+        except asyncio.CancelledError:
+            result = replace(result, code="INTERRUPTED", message="手動入力を停止しました")
+        except Exception as error:  # noqa: BLE001 -- recover input before reporting failure.
+            failed = True
+            result = replace(result, code="DEVICE_UNAVAILABLE", message=str(error))
+        if result.neutral == "unconfirmed" and not neutral_attempted:
+            try:
+                await _settle_io(device.send(InputState()))
+                result = replace(result, neutral="sent")
+            except OSError as error:
+                result = replace(
+                    result, code="DEVICE_UNAVAILABLE", phase="neutral", message=str(error)
+                )
+                failed = True
+        if failed or result.neutral == "unconfirmed":
+            try:
+                await _settle_io(self._close_device())
+            except OSError as error:
+                result = replace(result, message=f"{result.message}; 接続終了失敗: {error}")
+        return result
 
     async def _execute(
         self,
@@ -407,6 +569,11 @@ async def _settle_io(operation: "Coroutine[object, object, None]") -> bool:
         await asyncio.shield(task)
         return True
     return False
+
+
+def _require_released(result: OperationResult) -> None:
+    if result.code not in {"OK", "INTERRUPTED"}:
+        raise InputServiceError(result.code, result.message or "入力の解除を確認できません")
 
 
 async def _wait(duration_ms: int) -> None:

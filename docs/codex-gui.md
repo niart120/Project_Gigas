@@ -178,6 +178,8 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 Qtを使わない呼出し側は`gigas.services.codex.CodexService(data_root, reader, inputs, factory=..., received=..., completed=..., project_completed=..., management_completed=..., browse_goal_changed=..., recording_failed=...)`を使用できます。各コールバックはQt Signalと同じ内容を所有ループ上で同期的に受け取り、例外を送出しないものとします。`connect_runtime(options, generation)`には呼出し側の要求番号を渡します。コマンドは同じループ上で呼び、結果はコールバックで受け取ります。`await close()`はCodex・会話・記録を回収しますが、借用した`inputs`の接続は閉じません。入力側の終了は呼出し側で別途待ってください。
 
+接続変更などのアプリ側連携には`execution_busy`と`await stop_execution()`を使えます。後者はCodex実行の停止を待ち、確認できない場合は例外を返します。コマンド結果は通知せず、会話がなければ入力へ作用しません。ApplicationServiceThreadの`interrupt()`は入力解除も含めた共通停止として、既存の`completed`へ結果を通知します。入力設定・機器生成・適用結果は[InputService](input-api.md)が所有します。
+
 注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で入力を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
 
 会話の一覧・選択は次のサービスAPIを使います。`management_completed`は`ManagementResult(generation, operation, value, error, project_id)`を返し、空の`error`が成功です。結果の世代を現在の接続と照合してください。会話の選択と初回履歴取得は一件ずつ受け付けます。

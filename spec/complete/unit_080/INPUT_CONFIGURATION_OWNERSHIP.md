@@ -2,11 +2,11 @@
 
 ## 1. 概要
 
-状態はwip。[unit_078](../unit_078/VIRTUAL_CONTROLLER.md)段階2の子仕様。段階1（c991671）の抽出を前提に、入力設定の正本・機器生成・適用・接続終了をInputServiceへ移す。
+状態はcomplete。[unit_078](../../wip/unit_078/VIRTUAL_CONTROLLER.md)段階2の子仕様。段階1（c991671）の抽出を前提に、入力設定の正本・機器生成・適用・接続終了をInputServiceへ移した。
 
 | source | 内容 | path |
 |---|---|---|
-| 設計合意・実装依頼 | 並列所有と短いアプリ側連携 | [親仕様](../unit_078/VIRTUAL_CONTROLLER.md) |
+| 設計合意・実装依頼 | 並列所有と短いアプリ側連携 | [親仕様](../../wip/unit_078/VIRTUAL_CONTROLLER.md) |
 | 抽出完了 | 既存回帰1027件と実接続・Windows起動終了を確認 | [unit_079](../../complete/unit_079/CODEX_SERVICE_EXTRACTION.md) |
 
 利用者がCodexなしで入力設定を適用でき、エージェント実行中の接続変更は停止完了後に新機器へ進む。
@@ -41,7 +41,7 @@
 |---|---|---|---|---|
 | refactor-done | 入力サービス単独で設定適用・同一設定・切断・再接続ができる | new | integration | item 1、c247633。factory引数未定義のred→green。設定所有を移し既存Qt配送を回帰 |
 | refactor-done | 接続変更はCodex停止完了後に最新設定を適用し、同一設定・停止失敗・終了を区別する | new / edge | integration | item 2、362ad44。停止終端前にCOM2/3を生成するred→成功/失敗/終了の全ケースgreen |
-| green | 旧入力の解除失敗では新接続を開かず、後続の明示適用で回復できる | edge | integration | item 3。解除失敗後に新機器がopenするred→捕捉taskの結果を確認してgreen。コミット後に完了記録 |
+| refactor-skipped | 旧入力の解除失敗では新接続を開かず、後続の明示適用で回復できる | edge | integration | item 3、9713b8d。解除失敗後に新機器がopenするred→捕捉taskの結果を確認してgreen。追加の構造変更不要 |
 
 ## 7. 設計メモ
 
@@ -64,7 +64,11 @@ services/input.py、application.py、codex.py、codex_models.py、関連integrat
 | 独立レビュー→イベント同期テスト | 修正 | open待ち中の新turn→次の設定変更で停止境界が抜ける指摘を採用。turn/interrupt未到達のredを確認し、入力側の一回適用とアプリ側の各回停止連携へ整理 |
 | uv run pytest tests/integration/test_input_configuration.py tests/integration/test_codex_service.py -q | pass | 上記修正後50 passed（10.14秒）。ruff check/format・tyもpass |
 | uv run pytest tests/integration/test_input_configuration.py tests/integration/test_input_service.py tests/integration/test_codex_service.py -q | pass | item 3、68 passed（10.39秒）。解除失敗での新機器抑止・明示再適用、既存入力回帰。ruff・ty・diffもpass |
-| 実接続・Windows画面 | not run | 段階2変更後に確認 |
+| uv run pytest tests/unit tests/integration -q | pass | 1033 passed（91.59秒） |
+| uv lock --check / uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress / uv build / git diff --check | pass | 298ファイル、依存変更なし、sdist・wheel成立 |
+| uv run python -X utf8 tmp/u80_gui.py / Computer Use | pass | COM8・CH552・9600 baudをCodexなしで接続。実app-serverで送信→完了後停止→切断を順に確認し、入力接続保持を観測。主画面を目視確認し終了exit 0・shutdown_error空。ゲーム操作なし |
+
+実接続用補助スクリプトの初回は停止・切断を同時に依頼し、停止未確認の結果を得た。停止結果後に切断する検証列へ直し、上記の順序を確認した。停止中の実機押下、ゲーム画面の変化、手動入力は段階3の通し受入に残る。
 
 ## 10. 先送り事項
 
@@ -73,6 +77,6 @@ services/input.py、application.py、codex.py、codex_models.py、関連integrat
 ## 11. チェックリスト
 
 - [x] 責務と調査結果、対象外を確認
-- [ ] TDD各項目を検証・コミット
-- [ ] 回帰と必要な品質gateを確認
-- [ ] 初期設計・公開API・実接続の記録を更新
+- [x] TDD各項目を検証・コミット
+- [x] 回帰と必要な品質gateを確認
+- [x] 初期設計・公開API・実接続の記録を更新

@@ -42,6 +42,10 @@ steps = parse_sequence(
 
 `gigas.services.input.InputService()`は、一つの入力接続と実行中の操作列を所有します。観測・記録先・会話IDは受け取りません。入力機器は`protocol`、非同期の`open()`・`send(InputState)`・`close()`を持つ`InputDevice`として渡し、`SerialInput`をそのまま使えます。
 
+設定から利用する場合は`InputService(factory=None, on_connection_changed=callback)`へ通知先を渡し、`request_config(config)`で変更先を受け付け、`await apply_config()`で最新設定を一度適用します。`factory=None`では入力サービスが`SerialInput`を生成します。コールバックは同じループ上で`InputConnectionResult(config, connected, error)`を受け取ります。同じ設定で正常接続中なら再接続しません。`None`は明示切断です。
+
+適用中の追加設定は`config_pending`として残ります。アプリは各回の`connection_change_required`を見て、必要なCodex停止が完了してから次の`apply_config()`を呼びます。停止失敗は`reject_config(reason)`で入力の結果として通知でき、新機器を開きません。`changing`の間は入力を拒否します。`begin_close()`は未適用設定を撤回し、`await close()`が開始済み接続と機器の終了を待ちます。`await list_ports()`はループを塞がず一覧だけを取得します。
+
 読み取り専用の`busy`は、受け付けた操作の実行またはneutralへの復帰がまだ完了していない間だけ`True`です。接続の有無や、会話の実行状態とは別の値です。
 
 `InputService(on_busy_changed=callback)`では、操作taskの受付登録後に`callback(True)`、現在のtaskの回収完了後に`callback(False)`を呼びます。受付拒否では通知せず、停止要求だけでは`False`にしません。開始前の取消しも回収後に`False`となります。callbackは入力を所有するイベントループで同期的に呼ばれるため、待機や例外送出をしない関数を渡してください。
@@ -75,7 +79,15 @@ finally:
 
 `stop()`は現在の操作taskへ一度だけ取消しを要求し、捕捉した`asyncio.Task[OperationResult]`を返します。操作がなければ`None`です。停止呼出し側がこのtaskを保持すれば、通常の完了処理が入力サービスの現在枠を解放した後も、対象の解除結果を回収できます。`await drain_input()`は開始済みwriteと必要なneutral送出まで待ち、`OperationResult`を返します。操作なし・coroutine開始前の取消しでは`None`です。この待機の取消しで入力taskを放棄しません。正常な停止後は、同じ入力接続で新しい操作列を開始できます。会話全体の停止中に新規要求を拒否するのは、会話の受付側の責務です。
 
-`connect(device)`は旧列を止めて回収し、旧機器を閉じてから新機器を開きます。`connect(None)`は切断です。旧機器のclose失敗では所有を保持し、次の機器を開きません。操作停止は接続処理を取り消しません。`close()`は未開始のopenを抑止し、開始済みopenも回収して機器を閉じます。送信・解除失敗後は機器を使用不能とし、明示的な接続の適用で復旧します。
+`connect(device)`は旧列を止めて捕捉したtaskの結果を回収し、旧機器を閉じてから新機器を開きます。`connect(None)`は切断です。旧列の解除失敗では新機器へ進まず、旧機器のclose失敗では所有を保持します。操作停止は接続処理を取り消しません。`close()`は未開始のopenを抑止し、開始済みopenも回収して機器を閉じます。送信・解除失敗後は機器を使用不能とし、明示的な接続の適用で復旧します。
+
+## 手動入力API
+
+`update_manual(InputState)`は手動状態を更新し、受付結果を`OperationResult`で返します。ボタンの押下・解放の遷移は保持し、重複状態と未送信の連続した同じボタン状態の軸更新は最新値へまとめます。`InputState()`は保持中の中立更新です。`await release_manual()`が手動操作を終了し、捕捉したtaskの解除完了を待ちます。この待機を取り消しても入力側の解除は回収します。解除に失敗した場合は`InputServiceError`になります。保持がなければ何も送らず、有限操作列へは作用しません。
+
+`manual_available`は機器と入力所有から求めた受付可否です。アプリ側はCodex実行・終了要求も確認してください。有限列と手動保持は同時に受け付けず、手動の解除中も新たな保持を拒否します。`protocol`は使用可能な機器の能力を返します。`on_manual_result`は手動操作終了時の結果を同じループ上で通知し、失敗後は機器の再適用が必要です。手動入力だけで会話や記録先は作りません。
+
+`stop_finite()`は捕捉した有限操作列だけを取り消します。`stop()`は手動も含む現在操作を停止してtaskを返します。`begin_close()`と`close()`は終了時に捕捉した操作の解除結果も保持し、解除失敗を接続終了の成功だけで隠しません。
 
 ## 観測・記録との組合せ
 
