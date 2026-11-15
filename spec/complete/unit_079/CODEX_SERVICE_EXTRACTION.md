@@ -8,7 +8,7 @@
 
 | source | 内容 | path |
 |---|---|---|
-| ユーザー依頼 | unit_078をTDDで完遂する | [親仕様](../../wip/unit_078/VIRTUAL_CONTROLLER.md) |
+| ユーザー依頼 | unit_078をTDDで完遂する | [親仕様](../../complete/unit_078/VIRTUAL_CONTROLLER.md) |
 | 現行実装 | 調査基準efa4237、仕様確定8b00d3e | [codex.py](../../../src/gigas/services/codex.py) |
 
 ### use case

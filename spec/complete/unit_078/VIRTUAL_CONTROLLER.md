@@ -4,7 +4,7 @@
 
 ### 1.1 目的・状態
 
-状態は **wip（段階3の手動コントローラに着手）**。Codexと入力サービスの所有を分け、別ウィンドウの仮想コントローラを追加するまでの3段階を束ねる親仕様である。2026-11-15の設計合意を記録する。[段階1](../../complete/unit_079/CODEX_SERVICE_EXTRACTION.md)と[段階2](../../complete/unit_080/INPUT_CONFIGURATION_OWNERSHIP.md)を完了し、[段階3](../unit_081/MANUAL_CONTROLLER.md)へ着手する。手動入力と実機操作の受入は未実施。
+状態は **complete**。Codexと入力サービスの所有を分け、別ウィンドウの仮想コントローラを追加する3段階を完了した。2026-11-15の設計合意と実装・受入結果を記録する。[段階1](../unit_079/CODEX_SERVICE_EXTRACTION.md)、[段階2](../unit_080/INPUT_CONFIGURATION_OWNERSHIP.md)、[段階3](../unit_081/MANUAL_CONTROLLER.md)を参照。全製品回帰、実app-server、Windows GUI、COM8/CH552の短時間の受入を実施した。確認範囲と限界は第9節に記す。
 
 利用者がエージェントを停止した後、同じ入力機器で手動の疎通確認・ゲーム操作を行えるようにする。MCP経由で観測された疎通問題の原因は未確定であり、本機能を原因の修正や機器障害からの復旧保証とは位置付けない。
 
@@ -18,7 +18,7 @@
 | 現行GIGASのコード読取 | 調査基準はcommit `efa4237`。Qt配送、Codex処理、入力接続適用が同じクラスにある | [codex.py](../../../src/gigas/services/codex.py)、[input.py](../../../src/gigas/services/input.py) |
 | NyXPyの参考実装 | 操作部の配置、押下・解放、スティック、手動入力モデル。マクロ実行中は手動操作を無効化する | [pane](https://github.com/niart120/Project_NyX/blob/master/src/nyxpy/gui/panes/virtual_controller_pane.py)、[model](https://github.com/niart120/Project_NyX/blob/master/src/nyxpy/gui/models/virtual_controller_model.py)、[main window](https://github.com/niart120/Project_NyX/blob/master/src/nyxpy/gui/main_window.py) |
 
-NyXPyは参考であり、その接続管理を移植する決定ではない。リンクのmasterは可変のため、実装着手時に参照版を確認する。NyXPyのコード読取・保存済み画面の確認を、今回のGIGASの実機検証とは扱わない。
+NyXPyは参考であり、その接続管理は移植していない。実装時の参照版は648f860e5afd582f80aa58645570a16bfc68a393（unit_081に固定リンク）。NyXPyのコード読取・保存済み画面の確認を、今回のGIGASの実機検証とは扱わない。
 
 ### 1.3 use case
 
@@ -54,7 +54,7 @@ NyXPyは参考であり、その接続管理を移植する決定ではない。
 
 ### 4.1 前提・着手条件
 
-現行の停止・切断・会話管理・入力接続が基準となる。着手時にrepo状態、上記正本、実装・既存テストを再確認する。本書は採用予定の差分であり、初期設計の現行構成を実装済みとして置き換えない。段階ごとの実装時に第8節の初期設計へ反映する。
+現行の停止・切断・会話管理・入力接続が基準となる。着手時にrepo状態、上記正本、実装・既存テストを再確認する。設計時には採用予定の差分として管理し、各段階の実装に合わせて第8節の初期設計へ反映した。
 
 段階1→段階2→段階3の順に進める。実装開始の依頼を受けて本親仕様をwipへ移した。段階1は[unit_079](../../complete/unit_079/CODEX_SERVICE_EXTRACTION.md)が担当する。U10の連続運転やBluetooth対応を本工程の前提にはしない。
 
@@ -69,7 +69,7 @@ NyXPyは参考であり、その接続管理を移植する決定ではない。
 | 手動入力の診断記録を既存通知・ログのどこへ残すか | 段階3担当。実装前。会話・recordsの自動生成は行わない |
 | 接続・実機受入に使える機器、protocol、操作対象、未検証として残す範囲 | 各段階担当。受入計画時に決定し、段階3完了前に結果を記録 |
 
-上記は詳細化する事項であり、並列所有、実行中の手動拒否、小窓開閉の無干渉という合意を再選択するものではない。
+上記は着手時の確認事項であり、各子仕様で具体化・検証を完了した。入力適用は一回ごとの最新設定、開始前解除は既存_Submission内の直接呼出し、小窓は640×420を初期値としてフォントに合わせた最小寸法、診断は既存通知履歴へ確定した。並列所有、実行中の手動拒否、小窓開閉の無干渉という合意を維持した。
 
 ### 4.3 工程内の分割
 
@@ -79,7 +79,7 @@ NyXPyは参考であり、その接続管理を移植する決定ではない。
 | 2: 入力所有・接続管理の独立 | アプリ側で両サービスを生成。機器生成、適用済み・変更先設定、接続適用をInputServiceへ移す。アプリ側に短い停止連携を残す | 入力側へturn/Goalの知識を入れない。Codex切断は入力接続を閉じない。新しい入力方式は加えない | Codexなしでの接続、設定切替、同一設定、停止待ち中の変更、失敗時の所有、アプリ終了。停止完了後に新機器へ進む順序 |
 | 3: 仮想コントローラ | 採用GUI、手動入力モデル、InputServiceの手動更新・解除、実行開始前の解除と実行中の拒否を結合 | キーボードは拡張可能な境界だけ。Codex側の入力回収を有限操作列に限定し、MCPの観測・記録契約を維持 | マウス操作、実行中の小窓開閉、開始と編集の区別、解除失敗時の未送信、Codex切断、終了要求の取消し、実画面・実機による通し受入 |
 
-現行 `_accept_input` はCodex停止と入力接続適用を並行に開始する。到達点では停止完了を待ってから新接続へ進む。この順序変更は段階2の振る舞い変更であり、段階1の構造整理へ混ぜない。各段階の後も製品として起動・停止・終了できる区切りにする。
+調査基準commitでは `_accept_input` がCodex停止と入力接続適用を並行に開始していた。段階2で停止完了を待ってから新接続へ進む順序へ変更した。この順序変更は段階2の振る舞い変更であり、段階1の構造整理へ混ぜない。各段階の後も製品として起動・停止・終了できる区切りにする。
 
 ## 5. 振る舞い仕様
 
@@ -102,7 +102,7 @@ NyXPyは参考であり、その接続管理を移植する決定ではない。
 
 初回は主画面と同じモニター内に配置し、少なくともアプリ起動中は移動後の位置を保持する。閉じた小窓の再表示だけでは入力を発生させない。常時最前面や終了後の位置保存は今回の必須要件にしない。小窓を閉じてもアプリは終了せず、入力接続も保持する。
 
-画像はSwitch系の操作部を示す。表示・送信可能なボタンは既存protocolの能力に従う。3DSのSTART/SELECTなどは段階3で具体化し、非対応ボタンを送信しない。タッチ操作は追加しない。
+画像はSwitch系の操作部を示す。表示・送信可能なボタンは既存protocolの能力に従う。3DSはMINUS/PLUSの位置をSELECT/STARTへ置き換え、LS/RS/CAPTUREを無効表示とする。非対応ボタンを送信せず、タッチ操作は追加しない。
 
 ### 5.2 マウス操作
 
@@ -143,7 +143,7 @@ MCPの入力受付に手動入力の活性条件をそのまま流用しない�
 | アプリ終了要求 | 設定保存・確認待ちに入る前に手動受付を閉じ、共通停止を要求する | 停止・手動解除は待機中も進める。終了要求が取り消されるまで手動受付を再開しない |
 | アプリ終了確定 | shutdownを要求し、両サービスの終了を待つ | 各サービスが内部タスクを収束させる。一方の失敗でも他方の後処理を飛ばさず、ループ終了を先行させない |
 
-開始前の解除待ちは既存の `_Submission` の取消し・完了待ちに含め、停止が開始要求を見失う区間を作らない。親仕様ではこの契約だけを固定する。既に借用しているInputServiceをCodex側から直接呼ぶか、アプリ側から開始前処理を渡すかは、段階3の子仕様で変更量と取消し経路を比較して決める。汎用フックや別の開始要求管理は追加しない。
+開始前の解除待ちは既存の `_Submission` の取消し・完了待ちに含め、停止が開始要求を見失う区間を作らない。段階3で、既に借用しているInputServiceを会話実行の_prepareから直接呼ぶ方式を採用した。汎用フックや別の開始要求管理は追加していない。
 
 | 操作・状態 | 手動入力との関係 |
 |---|---|
@@ -174,24 +174,24 @@ Codex切断の入力回収は、その切断で終了させる有限操作列を
 
 ## 6. TDD Test List（親の受入観点）
 
-全項目は未実施。子仕様化時に既存テストの再利用・改訂を先に確認し、着手範囲だけを小さい振る舞いへ分ける。GUIの表示要件は実画面でも確認し、固定ラベル・文書文字列の一致を製品契約の代用にしない。
+全項目を子仕様の実行可能な検証へ対応付けた。下表の状態は子で検証・コミット済みであることを示す。GUIは実画面でも確認した。固定ラベル・文書文字列の一致を製品契約の代用にはしていない。
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | 認証・通常送信・Goal・回答・停止・切断の結果と取消しが抽出前の契約を維持する | regression | integration | 段階1 |
-| todo | 会話切替・履歴・記録の帰属と、古い通知・結果の破棄が維持される | regression | integration | 段階1 |
-| todo | Codex未接続で入力接続でき、Codex切断では入力接続が閉じない | regression | integration | 段階2。既存の接続独立性を維持 |
-| todo | Codex切断が手動保持を解除せず、旧Codexの入力回収が後から受理した入力を停止・待機しない | new | integration | 段階3。GUIフォーカス移動とは分けてサービス境界で確認 |
-| todo | 接続変更は旧入力を解除し、必要なCodex停止完了後に新接続へ進み、同一設定では再接続しない | new | integration | 段階2 |
-| todo | 停止・解除・接続終了の失敗を成功扱いにせず、新接続や実行へ進まない | edge | integration | 段階2・3 |
-| todo | ボタン・十字キー・左右スティックを保持中に更新でき、短い押下・解放を失わず、離す・小窓を閉じる等で手動保持だけ解除される | new | unit / integration | 段階3。protocol適合も確認 |
-| todo | 実行準備・実行・回答待ち・active Goalのターン間・停止中に手動入力を受け付けない | new | integration | 段階3。閲覧Goalと区別 |
-| todo | 送信・Goal新規作成・再開と保存済み会話の実行は解除後に進み、実行を始めない編集・設定では不要な解除をしない | new | integration | 段階3。第5.4節の操作分類。thread/resume応答前の動作と、追加送信が既存の操作列を止めないことも確認 |
-| todo | 開始前の解除失敗では開始要求を送らず、未送信の結果と入力側の診断を保持する | edge | integration | 段階3。not_sentとunknownを区別。保持のない未接続時・失敗後の通常会話も確認 |
-| todo | エージェント実行中の小窓開閉が、出力・停止・接続へ作用しない | new | integration | 段階3 |
-| todo | 開始待ち中の停止で開始が復活せず、解除中の再表示でも解除完了前に次の入力を受け付けない | edge | integration | 段階3。時間待ちだけに頼らずイベント同期 |
-| todo | 終了要求後の設定保存・確認待ち中は手動入力を拒否し、取消し・保存失敗後も旧押下を復元せず、条件が整えば新たな操作を受け付ける | new | integration | 段階3。小窓と既存の終了要求・確定経路を結合 |
-| todo | アプリ終了が入力解除・接続終了・Codex資源回収を待ち、失敗した所有者の後処理を放棄しない | regression | integration | 全段階 |
+| refactor-done | 認証・通常送信・Goal・回答・停止・切断の結果と取消しが抽出前の契約を維持する | regression | integration | unit_079（c991671）、既存Codex/会話制御テストの回帰 |
+| refactor-done | 会話切替・履歴・記録の帰属と、古い通知・結果の破棄が維持される | regression | integration | unit_079、会話切替・履歴・記録と既存世代の回帰 |
+| refactor-done | Codex未接続で入力接続でき、Codex切断では入力接続が閉じない | regression | integration | unit_080、test_input_configuration。実Codex切断後のCOM8保持も確認 |
+| refactor-skipped | Codex切断が手動保持を解除せず、旧Codexの入力回収が後から受理した入力を停止・待機しない | new | integration | unit_081 item 3・6、test_manual_application。捕捉有限入力の失敗も通知 |
+| refactor-done | 接続変更は旧入力を解除し、必要なCodex停止完了後に新接続へ進み、同一設定では再接続しない | new | integration | unit_080 item 2、test_input_configuration。適用中に届く次設定でも停止を再確認 |
+| refactor-skipped | 停止・解除・接続終了の失敗を成功扱いにせず、新接続や実行へ進まない | edge | integration | unit_080 item 3 / unit_081 item 1・2・3・6。失敗注入による確認 |
+| refactor-skipped | ボタン・十字キー・左右スティックを保持中に更新でき、短い押下・解放を失わず、離す・小窓を閉じる等で手動保持だけ解除される | new | unit / integration | unit_081 item 1・4、test_manual_input / test_controller_model / test_virtual_controller |
+| refactor-skipped | 実行準備・実行・回答待ち・active Goalのターン間・停止中に手動入力を受け付けない | new | integration | unit_081 item 3、test_manual_application。実実行中の無効表示も確認 |
+| refactor-skipped | 送信・Goal新規作成・再開と保存済み会話の実行は解除後に進み、実行を始めない編集・設定では不要な解除をしない | new | integration | unit_081 item 2、test_manual_execution。thread/resume前・既存Goal編集・追加送信を区別 |
+| refactor-skipped | 開始前の解除失敗では開始要求を送らず、未送信の結果と入力側の診断を保持する | edge | integration | unit_081 item 2・3、test_manual_execution / test_manual_application |
+| refactor-skipped | エージェント実行中の小窓開閉が、出力・停止・接続へ作用しない | new | integration | unit_081 item 5、test_controller_shell。実Codex実行中の開閉も確認 |
+| refactor-skipped | 開始待ち中の停止で開始が復活せず、解除中の再表示でも解除完了前に次の入力を受け付けない | edge | integration | unit_081 item 1・2・4、イベント同期とpending軸破棄の検証 |
+| refactor-skipped | 終了要求後の設定保存・確認待ち中は手動入力を拒否し、取消し・保存失敗後も旧押下を復元せず、条件が整えば新たな操作を受け付ける | new | integration | unit_081 item 3・5、test_manual_application / test_controller_shell |
+| refactor-skipped | アプリ終了が入力解除・接続終了・Codex資源回収を待ち、失敗した所有者の後処理を放棄しない | regression | integration | unit_079〜081、test_codex_shutdown / test_controller_shell。実GUI正常終了も確認 |
 
 ## 7. 設計メモ
 
@@ -199,7 +199,7 @@ Codex切断の入力回収は、その切断で終了させる有限操作列を
 
 ```text
 ApplicationShell
-└─ ApplicationServiceThread（仮称）
+└─ ApplicationServiceThread
    ├─ CodexService（現CodexServiceThreadから抽出）
    └─ InputService（既存を拡張）
       └─ SerialInput
@@ -227,9 +227,11 @@ flowchart TB
 
 ApplicationServiceThreadは単純な改名ではない。Codex応答解釈、機器固有処理、GUIの座標・キー変換を持たせない。両サービスは結果値・コールバックで通知し、QtのGUI配送はアプリ側で行う。
 
-### 7.2 現行メソッド・状態の移動先
+### 7.2 調査基準commitからのメソッド・状態の移動先
 
-| 現行処理 | 移動先・分割境界 |
+以下はefa4237時点からの移動表。現在の名前・APIは各子仕様と実装を正とする。
+
+| 移行前の処理 | 移動先・分割境界 |
 |---|---|
 | run / _enqueue / _dispatch | アプリ側のスレッド・ループ・依頼配送 |
 | shutdown / _serve / _signal_shutdown | アプリ側はサービス終了を呼んで待つ。内部資源の終了は各サービスへ |
@@ -241,7 +243,7 @@ ApplicationServiceThreadは単純な改名ではない。Codex応答解釈、機
 | _execute / _complete / _reject_submission | Codex応答の解釈・結果生成はCodex側。未配送要求の拒否はアプリ側が既存の結果型で通知し、終了済みのCodex側へ再配送しない |
 | _close_connection / _begin_close / _release_connection | Codex側。対象の有限操作列だけを停止・回収し、手動保持・後から受理した入力・入力接続を終了しない |
 | _accept_input | Codex停止との連携はアプリ側、変更先設定の保持・適用は入力側 |
-| _apply_input / 機器生成 / ポート列挙の実処理 | InputService。列挙関数は既存を利用 |
+| _apply_input / 機器生成 / ポート列挙の実処理 | InputServiceが接続を一回適用。アプリの_apply_inputには各回前のCodex停止連携だけを残した。列挙関数は既存を利用 |
 
 | 移動先 | 状態 |
 |---|---|
@@ -259,7 +261,7 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 
 ### 7.3 複雑さを増やさないための境界
 
-現行コードで確認できた点と、手動入力を加える際の設計判断を分ける。手動入力は未実装であり、下記を現行製品で再現済みの不具合とは扱わない。
+以下はefa4237時点のコード読取と、今回採用した対応の対照表。手動入力の追加前に整理した設計上の注意点であり、すべてが当時の製品で再現した不具合ではない。具体的なredと修正は各子仕様へ記録した。
 
 | コードで確認したこと | 採用する最小の対応 |
 |---|---|
@@ -272,15 +274,15 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 
 ## 8. 対象ファイル
 
-以下は実装段階で変更する候補であり、今回の製品変更一覧ではない。新しいファイル名は各子仕様で決める。
+主な変更箇所を示す。段階ごとの変更・検証結果は子仕様に記録した。
 
 | path | change | 内容 |
 |---|---|---|
-| [services/codex.py](../../../src/gigas/services/codex.py)、[codex_models.py](../../../src/gigas/services/codex_models.py)、新しいアプリサービスの配置先 | modify / new | 段階1・2。抽出、結果型、所有・配送 |
+| [services/codex.py](../../../src/gigas/services/codex.py)、[codex_models.py](../../../src/gigas/services/codex_models.py)、[application.py](../../../src/gigas/services/application.py) | modify / new | 段階1・2。抽出、結果型、所有・配送 |
 | [services/input.py](../../../src/gigas/services/input.py) | modify | 段階2・3。設定・接続適用、手動状態と解除 |
 | [services/_conversation_execution.py](../../../src/gigas/services/_conversation_execution.py) | modify | 既存送信要求内の開始前処理、操作列停止との結合 |
 | [app/shell.py](../../../src/gigas/app/shell.py)、[app/conversations.py](../../../src/gigas/app/conversations.py) | modify | アプリサービスへの接続、通知・終了の結合 |
-| [ui/main_window.py](../../../src/gigas/ui/main_window.py)、追加する小窓・手動入力モデル | modify / new | 段階3。入口・配置・表示・マウス操作 |
+| [ui/main_window.py](../../../src/gigas/ui/main_window.py)、[virtual_controller.py](../../../src/gigas/ui/virtual_controller.py)・[controller_model.py](../../../src/gigas/ui/controller_model.py) | modify / new | 段階3。入口・配置・表示・マウス操作 |
 | [tests/unit](../../../tests/unit)、[tests/integration](../../../tests/integration) | modify / new | 段階ごとの回帰・新規契約。既存test_codex_service、test_input_service等を優先 |
 | [02](../../initial/02-runtime.md)、[03](../../initial/03-game-io.md)、[09](../../initial/09-control-flows.md)、[10](../../initial/10-ui-interaction.md)、[docs](../../../docs) | modify | 各段階で所有・操作順・GUI・利用手順を反映 |
 
@@ -288,19 +290,22 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 
 ## 9. 検証
 
-### 9.1 製品実装時の検証計画
+### 9.1 製品実装の検証結果
 
 各段階で既存テストを照合し、対象のunit・integrationを実行する。該当するintegration treeは既に存在する。公開APIの型・docstringを変更する段階ではtype-boundary-review / docstring-styleを適用し、利用者向け説明も更新する。
 
-| command / 方法 | 検査対象 | 現在の結果 |
+| command / 方法 | 検査対象 | 結果 |
 |---|---|---|
-| uv sync --dev / uv lock --check | 開発環境と依存lockの整合 | not run。製品工程未着手 |
-| uv run ruff format --check . / uv run ruff check . | Python書式・静的規約 | not run。今回は文書のみ |
-| uv run ty check --no-progress | 抽出後の型境界・公開API | not run。今回は文書のみ |
-| uv run pytest tests/unit / uv run pytest tests/integration | 第6節の回帰・新規契約 | not run。実装・テスト変更なし |
-| uv build | 公開API・追加GUI資材を含む配布成立 | not run。実装段階で実施 |
-| Windows実画面・実app-server | 段階1・2の開始／停止／切断、段階3の採用配置・無効表示・小窓開閉 | not run。各段階の受入で結果を分離して記録 |
-| 実機操作 | ボタン・左右スティック・十字キー、手動解除、実行開始・停止・接続変更・終了 | not run。段階3で対象機器と観測範囲を明記 |
+| uv sync --dev / uv lock --check | 開発環境・依存lock | pass。syncは段階1、lockは段階3でも確認。依存変更なし |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | Python書式・静的規約・型境界 | pass。307ファイル、最終修正後に確認 |
+| uv run pytest tests/unit tests/integration -q | 第6節の製品契約と既存回帰 | 最終集計はunit_081の検証記録を参照 |
+| uv build / uv run python scripts/check_package.py | wheel・sdist、隔離環境の資源・capture worker・GUI入口 | 021c95f前にpass。module / console scriptとも主画面を開閉して正常終了。修正後の再検査はCIで実施予定 |
+| Windows実画面・実app-server | 抽出後の接続・送信・停止・切断、採用配置、実行中の小窓開閉 | pass。[画面照合](../../../design-qa.md)・unit_079〜081に根拠 |
+| COM8/CH552・USB Video Device | 手動操作、停止後の再受付、接続変更、Codex切断後の利用、終了 | 短時間の受入pass。[実機記録](../unit_081/MANUAL_CONTROLLER.md) |
+
+実機試走はB、左右stick、pad上のPC側送信とneutral完了を確認し、左stickで画面上の移動を観測した。実行中の小窓開閉はCUAによる実画面観測、送信・接続の無変化はログを根拠にする。保持中の開始・終了待ち、送信失敗は自動テストで検証した。機器ACK、正確な解除時間、全ボタン・8方向の実機網羅、他protocol実機、窓外release、複数モニター間DPI変更、長時間運転は未検証。MCP疎通問題の原因は未特定。
+
+最終の独立レビューでは、捕捉済み有限操作の解除失敗がCodex切断結果へ反映されない指摘を021c95fで修正した。ほかに未解消のP1/P2指摘なし。完了移動後、変更Markdown 16件のローカル参照196件、80個のunit配置の一意性、証跡JSONL構文を検査した。本文の事実・未検証表示は別途読み合わせ、git diff --checkも成功した。
 
 ### 9.2 設計確定時の文書検証（8b00d3e）
 
@@ -314,7 +319,7 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 | uv run --no-sync python -X utf8 - | pass | 変更Markdown 3件のローカル参照先74件、77個のunit配置の一意性、画像、末尾改行・空白・仮テキスト残り、親仕様の表の列数とコードブロックの閉じを再検査 |
 | git diff --check | pass | 追跡済み差分の空白エラーなし。新規文書の空白は上記Pythonでも検査 |
 
-外部URLと既存文書内のanchor全体は今回再検証していない。画像は1487×1058のPNGとして同梱した。製品テスト・型検査・ビルドは文書のみの変更に対してnot applicableであり、第9.1節は将来の実装時に行う検証を示す。
+外部URLと既存文書内のanchor全体は今回再検証していない。画像は1487×1058のPNGとして同梱した。製品テスト・型検査・ビルドは文書のみの変更に対してnot applicableであり、当時の製品検証は未実施。現在の結果は第9.1節を参照する。
 
 ## 10. 先送り事項
 
@@ -336,7 +341,7 @@ Bluetoothは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)、長時間運
 
 - [x] 段階1の回帰確認とCodex抽出を完了した
 - [x] 段階2の並列所有・接続管理・停止連携を完了した
-- [ ] 段階3の仮想コントローラと操作契約を結合した
-- [ ] 初期設計・公開API説明・利用手順を実装に合わせた
-- [ ] 各段階の品質gate、実接続・GUI・実機の結果と未検証範囲を記録した
-- [ ] 全体の受入条件を満たしてから親仕様をcompleteへ移す
+- [x] 段階3の仮想コントローラと操作契約を結合した
+- [x] 初期設計・公開API説明・利用手順を実装に合わせた
+- [x] 各段階の品質gate、実接続・GUI・実機の結果と未検証範囲を記録した
+- [x] 全体の受入条件を満たしてから親仕様をcompleteへ移す

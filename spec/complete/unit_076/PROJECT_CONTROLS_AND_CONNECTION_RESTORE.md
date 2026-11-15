@@ -34,7 +34,7 @@
 
 ## 7. 対象ファイル
 
-src/gigas/app/shell.py、src/gigas/ui/main_window.py、src/gigas/storage/settings.py、対応するtests/integration、docs、spec/initial、plus.svgとライセンス、[画面照合記録](../../../design-qa.md)。
+src/gigas/app/shell.py、src/gigas/ui/main_window.py、src/gigas/storage/settings.py、対応するtests/integration、docs、spec/initial、plus.svgとライセンス、[画面照合記録](DESIGN_QA.md)。
 
 ## 8. 検証
 

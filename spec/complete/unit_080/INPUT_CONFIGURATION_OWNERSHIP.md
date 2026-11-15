@@ -2,11 +2,11 @@
 
 ## 1. 概要
 
-状態はcomplete。[unit_078](../../wip/unit_078/VIRTUAL_CONTROLLER.md)段階2の子仕様。段階1（c991671）の抽出を前提に、入力設定の正本・機器生成・適用・接続終了をInputServiceへ移した。
+状態はcomplete。[unit_078](../../complete/unit_078/VIRTUAL_CONTROLLER.md)段階2の子仕様。段階1（c991671）の抽出を前提に、入力設定の正本・機器生成・適用・接続終了をInputServiceへ移した。
 
 | source | 内容 | path |
 |---|---|---|
-| 設計合意・実装依頼 | 並列所有と短いアプリ側連携 | [親仕様](../../wip/unit_078/VIRTUAL_CONTROLLER.md) |
+| 設計合意・実装依頼 | 並列所有と短いアプリ側連携 | [親仕様](../../complete/unit_078/VIRTUAL_CONTROLLER.md) |
 | 抽出完了 | 既存回帰1027件と実接続・Windows起動終了を確認 | [unit_079](../../complete/unit_079/CODEX_SERVICE_EXTRACTION.md) |
 
 利用者がCodexなしで入力設定を適用でき、エージェント実行中の接続変更は停止完了後に新機器へ進む。

@@ -188,7 +188,9 @@ Qtを使わない呼出し側は`gigas.services.codex.CodexService(data_root, re
 
 `update_manual(InputState)`・`release_manual()`は同じサービスループへ配送します。手動受付は`CodexService.manual_blocked`と入力側の機器・操作所有、停止・終了要求から計算し、`manual_changed(bool, protocol)`でGUIへ通知します。配送時にも確認するため、GUIの通知遅延を操作権として扱いません。`manual_completed(OperationResult)`は失敗の診断に使います。`set_exit_requested(bool)`で終了確認中の受付を閉じ、取消しでは新しい操作から再開します。手動入力専用のスレッドや会話・記録先は作りません。
 
-注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で入力を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
+Codex切断では、切断開始時に捕捉した有限操作の終了を待ちます。その解除失敗は切断結果にも通知し、後から受け付けた手動操作は停止・待機しません。入力機器の接続終了は入力側が所有します。
+
+注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で捕捉した有限操作列を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
 
 会話の一覧・選択は次のサービスAPIを使います。`management_completed`は`ManagementResult(generation, operation, value, error, project_id)`を返し、空の`error`が成功です。結果の世代を現在の接続と照合してください。会話の選択と初回履歴取得は一件ずつ受け付けます。
 

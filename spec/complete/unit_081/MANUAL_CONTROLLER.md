@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-状態はwip。[unit_078](../unit_078/VIRTUAL_CONTROLLER.md)の段階3。段階1・2のサービス分離を前提に、採用配置の別ウィンドウ、手動状態、既存実行との排他を追加する。
+状態はcomplete。[unit_078](../unit_078/VIRTUAL_CONTROLLER.md)の段階3。段階1・2のサービス分離を前提に、採用配置の別ウィンドウ、手動状態、既存実行との排他を追加する。
 
 | source | 内容 | path |
 |---|---|---|
@@ -40,7 +40,7 @@ release_manualは手動だけを解除して捕捉taskを待つ。呼出し側�
 
 ### ウィンドウと操作部
 
-表示→コントローラから一つだけ開く。初期640×420、最小520×350論理pxを出発点に実画面で調整する。ネイティブのタイトルバー、QPalette基調、左シアン・右赤を使う。肩ZL/L/LS・RS/R/ZR、左上スティック・右上ABXY、中央2×2、左下十字・右下スティック。見えるスティック名・状態バー・接続先・説明文は置かない。accessibleNameは識別のため付ける。
+表示→コントローラから一つだけ開く。初期640×420、最小520×350論理pxを下限とし、fontMetricsで文字の収まりに必要な分だけ最小寸法を増やす。Windows 150%・標準12ptでは最小520×408となった。ネイティブのタイトルバー、QPalette基調、左シアン・右赤を使う。肩ZL/L/LS・RS/R/ZR、左上スティック・右上ABXY、中央2×2、左下十字・右下スティック。見えるスティック名・状態バー・接続先・説明文は置かない。accessibleNameは識別のため付ける。
 
 ボタンはマウス保持、stickは円内に制限した-100..100（右・下が正）、padは8方向と中央。キーボードのSpace等が偶然発火しないようfocus・shortcut・autoRepeatを無効にする。CH552/PokeConは全操作、3DSはSELECT/STARTに置換しLS/RS/CAPTUREを無効表示する。配置は保持する。
 
@@ -57,7 +57,7 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 | refactor-skipped | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3、c2e31b7。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。追加構造変更不要 |
 | refactor-skipped | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4、712e058。未定義moduleのred→モデル11件・GUI11件green。追加の抽象化不要 |
 | refactor-skipped | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5、e0b17af。メニュー未定義の5件red→サービス終了も追加し6件green。終了要求時に古いGUI受付キャッシュを空にする。追加構造変更不要 |
-| green | Codex切断で捕捉した有限操作の解除失敗を結果へ返し、後から受理した手動入力へ作用しない | edge | integration | item 6。切断結果が空errorになるred→捕捉済み結果だけを確認してgreen。結果解釈だけで足り、追加構造変更不要。コミット後に完了記録 |
+| refactor-skipped | Codex切断で捕捉した有限操作の解除失敗を結果へ返し、後から受理した手動入力へ作用しない | edge | integration | item 6、021c95f。切断結果が空errorになるred→捕捉済み結果だけを確認してgreen。結果解釈だけで足り、追加構造変更不要。検証・コミット済み |
 
 ## 7. 設計メモ
 
@@ -69,11 +69,10 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 
 ## 9. 検証
 
-各項目のred/greenと既存回帰、全品質gate、採用モックとnative画面の比較を実施する。実画面は標準・最小寸法、DPI相当の拡大、フォント拡大、無効・3DS表示、ウィンドウ外でのマウス解放を確認する。COM8/CH552とUSB Video Deviceを候補にし、実際に列挙・映像を確認してから短いゲーム操作を行う。機器ACK・正確な解除時間、他protocol実機・長時間運転を確認済みにしない。
+着手時にはred/green、既存回帰、全品質gate、採用画像との比較、実画面と実機操作を計画した。下表に実施結果を記す。窓外でのマウス解放は自動テストと実画面の確認範囲を分け、実画面の未検証部分を残す。機器ACK・正確な解除時間、他protocol実機・長時間運転は確認済みにしない。
 
 | command / 方法 | result | notes |
 |---|---|---|
-| 段階3のTDD・品質gate | not run | 着手時点 |
 | uv run pytest tests/integration/test_manual_input.py tests/integration/test_input_service.py tests/integration/test_input_configuration.py -q | pass | 入力単独の初期5件と回帰、28 passed（1.99秒） |
 | uv run pytest tests/integration/test_manual_input.py tests/integration/test_codex_shutdown.py tests/integration/test_input_service.py -q | pass | 軸集約・中央通過を追加後28 passed（1.97秒）。manual単独は6件 |
 | 独立レビュー・再現テスト | 修正 | 手動task完了から所有解除callbackまでの隙間に新しい入力を受理して失うP2を採用。再現red後、旧manualが残る間の新規受付を拒否する最小修正 |
@@ -87,7 +86,7 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | uv run pytest tests/unit/test_controller_model.py tests/integration/test_virtual_controller.py -q | pass | 22 passed（0.30秒）。円内制限、8方向、中央保持、pending軸破棄、窓イベント、protocol、font。ruff check/format・tyもpass |
 | 独立GUIレビュー | 修正 | 縦長時の描画fontが横幅を超えるP2を採用し、幅・高さへ収めた。調整役・世代管理なし。その他の修正必須指摘なし |
 | native画面・画像比較 | pass | [design-qa](../../../design-qa.md)。DPR 1.5、標準/最小/無効/3DS/18pt/縦長。初回P2を修正し同寸法再比較。Windowsで操作部外のreleaseを観測。窓境界外releaseはCUA API制約で未検証 |
-| 実機の手動操作 | not run | Shell結合後に記録 |
+| 実機の手動操作 | pass（短時間） | 下記の実機受入。PC側送信と画面観測の根拠を分離 |
 | uv run pytest tests/integration/test_controller_shell.py tests/integration/test_codex_shutdown.py tests/integration/test_app_settings.py tests/integration/test_virtual_controller.py -q | pass | 42 passed（3.72秒）。Shell6件、既存終了・設定・小窓の回帰 |
 | 独立Shellレビュー | 採用 | 新たな競合・責務膨張の指摘なし。INVALID_SEQUENCEを送信前拒否と説明するP3を採用。固定文言テストは追加せずコードと画面文言を確認 |
 | uv run pytest tests/unit tests/integration -q | pass | 1087 passed（95.76秒）。段階1〜3の全製品回帰 |
@@ -95,6 +94,28 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | pass | 307ファイル。診断文の行長・format調整後に確認 |
 | 最終独立レビュー・再現テスト | 修正 | 従来からのCodex切断経路が有限操作の解除失敗を結果へ反映しない点を採用。callback完了を待つfixtureへ修正後、空errorのredを確認。切断完了前に再接続した手動入力を止めず、旧有限入力の失敗だけを返す |
 | uv run pytest tests/integration/test_manual_application.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py -q | pass | item 6、59 passed（11.04秒）。ruff format/check・tyもpass。ほかに最終レビューのP1/P2なし |
+| uv run pytest tests/unit tests/integration -q | pass | 最終修正021c95f後、1088 passed（93.99秒） |
+| uv run python scripts/check_package.py | pass | wheel/sdist内資源、隔離venvのcapture worker、module/console script両方のGUI起動・正常終了。最終の切断結果修正前に実行し、修正後はCIで再検査 |
+
+### 実機と実Codexの通し受入（2026-11-15）
+
+`uv run python -X utf8 tmp/u81_live.py`で隔離設定・記録先を用意し、実際のApplicationShell / ApplicationServiceThread / SerialInput / CaptureServiceを使用した。WindowsのネイティブGUIをComputer Useで操作。COM8、CH552、9600 baudとUSB Video Device（1280×720）を列挙・接続して確認した。Codexは既存の準備済みcodex_homeと実app-serverを使用した。利用者の保存設定は変更していない。
+
+SerialInput派生の観測用クラスはsuperのopen/send/closeが正常完了した後だけログを残す。元ログ600行・約8分54秒から、入力と受付の変化・操作結果を[抜粋](../unit_078/assets/controller-live-events.jsonl)した。timeは同一プロセスの単調時計であり、ハードウェアACKやゲーム反映時刻ではない。
+
+| 操作列 | 確認結果・根拠 |
+|---|---|
+| Codex未接続→小窓→左stick/B | 左stick・Bとneutralを送信。左stick操作後、ポケモンセンター内でプレイヤーが左へ移動して停止することを映像で観測。[前](../unit_078/assets/controller-live-before.png) / [後](../unit_078/assets/controller-live-after.png) |
+| Codex接続→観測のみのGoal→自然完了 | GUIでobserveを20回要求し、実画面で観測呼出しと完了を確認。小窓を開いた時点は自然完了後だったため、この列だけを実行中無効化の根拠にしない |
+| 観測のみの通常送信→実行中クリック→小窓close/open→中断 | [無効状態](../unit_078/assets/controller-live-running.png)を目視。無効なBクリックで送信なし。開閉後も実行が続き、入力open/close/送信なし。中断完了後に受付再開し、[有効状態](../unit_078/assets/controller-live-stopped.png)で新しいB・右stick・pad上を送信 |
+| 入力ポートを未接続→COM8 | 旧接続close後に新接続open。旧押下を再送しない |
+| Codex切断→B→アプリ終了 | Codex切断だけでは入力接続をcloseせず、Bとneutralの送信に成功。[切断後](../unit_078/assets/controller-live-disconnected.png)。最後に入力close、Shell.stoppedを経てexit 0、サービスのshutdown_error空。残存ウィンドウなし |
+
+手動操作7件の結果はすべてOK。observeは実画面で確認したもので、抜粋ログの汎用mcpToolCall種別だけからツール名・成功を推定していない。第2の観測要求は100回の途中で明示中断し、100回完了を主張しない。今回のMCP利用は観測のみで、実機への有限操作列の新規受入とは区別する。
+
+ログのcapture_errorは観測用スクリプトが存在しない属性に空文字を補った値なので、映像終了診断の根拠には使わない。終了の根拠はShellの正常終了経路とexit 0である。
+
+終了時はすでに手動解除済み。保持中の開始前解除・終了待ち・取消し・実機送信失敗の代替境界は自動テストで確認した。窓外releaseはCUA API制約で未検証（部品外releaseは実画面、窓外座標のハンドラーは自動テスト）。PokeCon/3DS実機、全ボタン・8方向の実機網羅、クロスモニタDPI変更、機器ACK、正確な解除時間、長時間運転、MCP疎通問題の原因特定は未検証。これらを短時間の受入成功に含めない。
 
 ## 10. 先送り事項
 
@@ -103,7 +124,7 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 ## 11. チェックリスト
 
 - [x] 配置・責務・既存機構との境界を確認
-- [ ] TDD項目を検証・コミット
-- [ ] 初期設計・公開API・利用手順を更新
-- [ ] 品質gate・採用画像比較・実機の結果と限界を記録
-- [ ] 親の全受入観点へ結果を対応付ける
+- [x] TDD項目を検証・コミット
+- [x] 初期設計・公開API・利用手順を更新
+- [x] 品質gate・採用画像比較・実機の結果と限界を記録
+- [x] 親の全受入観点へ結果を対応付ける
