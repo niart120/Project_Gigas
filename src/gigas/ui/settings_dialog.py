@@ -121,7 +121,12 @@ class SettingsDialog(QDialog):
         self.capture_resolution.currentIndexChanged.connect(self.changed)
         capture_form.addRow("取得解像度", self.capture_resolution)
         self.observation_resolution = QComboBox(self)
-        for label, key in (("オリジナル", "original"), ("FullHD", "full_hd"), ("HD", "hd")):
+        for label, key in (
+            ("オリジナル", "original"),
+            ("FullHD", "full_hd"),
+            ("HD", "hd"),
+            ("SD", "sd"),
+        ):
             self.observation_resolution.addItem(label, key)
         self.observation_resolution.setCurrentIndex(self.observation_resolution.findData("full_hd"))
         self.observation_resolution.currentIndexChanged.connect(self.changed)

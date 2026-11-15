@@ -129,14 +129,15 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
         )
     )
     panel.handle_event(
-        ServiceEvent(1, ReasoningEvent("turn", "reason", (SummaryPart(0, "確定要約"),)))
+        ServiceEvent(
+            1, ReasoningEvent("turn", "reason", (SummaryPart(0, "確定要約"),), completed=True)
+        )
     )
     panel.handle_event(
         ServiceEvent(1, ActivityEvent("turn", "web", "webSearch", "ラッキー", "completed", "図鑑"))
     )
     panel.transcript.prepend_items(history_entries("thread", page))
     qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
-    panel.transcript.toggle_details(item_key("thread", "turn", "reason", kind="reasoning"))
     panel.transcript.toggle_details(item_key("thread", "turn", "web", kind="activity"))
     body = panel.transcript.toPlainText()
     assert "途中本文" not in body

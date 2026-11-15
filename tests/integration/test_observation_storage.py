@@ -27,13 +27,18 @@ def sample_frame(width: int = 16, height: int = 16) -> Frame:
         (3840, 2160, "hd", 1280, 720),
         (1920, 1440, "hd", 960, 720),
         (1921, 1081, "hd", 1279, 720),
+        (1920, 1080, "sd", 720, 405),
+        (1440, 960, "sd", 720, 480),
+        (640, 480, "sd", 640, 480),
+        (240, 160, "sd", 240, 160),
+        (480, 720, "sd", 320, 480),
     ],
 )
 def test_record_preserves_pixels_bytes_id_and_source_time(
     tmp_path: Path,
     width: int,
     height: int,
-    resolution: Literal["original", "full_hd", "hd"] | None,
+    resolution: Literal["original", "full_hd", "hd", "sd"] | None,
     output_width: int,
     output_height: int,
 ) -> None:

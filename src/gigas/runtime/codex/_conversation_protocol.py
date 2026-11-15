@@ -104,6 +104,7 @@ def _thread_params(
     config.update(configuration.mcp_config)
     config.update(config_overrides(settings))
     config["model_reasoning_effort"] = selection.effort
+    config["model_reasoning_summary"] = "auto"
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")

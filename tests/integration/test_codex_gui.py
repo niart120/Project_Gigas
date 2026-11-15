@@ -276,7 +276,11 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert "観測済み" not in history
     assert "公開要約" not in history
     panel.transcript.toggle_details(item_key("thread", "old", "shared", kind="activity"))
-    panel.transcript.toggle_details(item_key("thread", "old", "shared", kind="reasoning"))
+    panel.handle_event(
+        ServiceEvent(
+            1, ReasoningEvent("old", "shared", (SummaryPart(0, "公開要約"),), completed=True)
+        )
+    )
     assert "観測済み" in panel.transcript.toPlainText()
     assert "公開要約" in panel.transcript.toPlainText()
     panel.handle_event(ServiceEvent(1, ConversationStatus("thread")))
@@ -297,11 +301,12 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
     panel.handle_event(
-        ServiceEvent(1, ReasoningEvent("new", "shared", (SummaryPart(0, "新しい要約"),)))
+        ServiceEvent(
+            1, ReasoningEvent("new", "shared", (SummaryPart(0, "新しい要約"),), completed=True)
+        )
     )
     assert "移動" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
-    panel.transcript.toggle_details(item_key("thread", "new", "shared", kind="reasoning"))
     assert "新しい要約" in panel.transcript.toPlainText()
     assert "公開要約" in panel.transcript.toPlainText()
     panel.interrupt()

@@ -79,7 +79,11 @@ def test_launch_and_thread_use_execution_settings_without_suppressing_standard_i
         "sandbox_workspace_write.exclude_slash_tmp": True,
     }
     assert overrides == expected
-    assert params["config"] == {**expected, "model_reasoning_effort": "high"}
+    assert params["config"] == {
+        **expected,
+        "model_reasoning_effort": "high",
+        "model_reasoning_summary": "auto",
+    }
     assert params["approvalPolicy"] == "on-request"
     assert params["approvalsReviewer"] == reviewer
     assert params["sandbox"] == "workspace-write"

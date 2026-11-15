@@ -1,14 +1,19 @@
 from threading import Event
 from time import sleep
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from PySide6.QtCore import QObject, QPoint, Qt, QUrl, Signal
 from PySide6.QtGui import QFont, QTextDocument, QTextFormat
 from PySide6.QtWidgets import QApplication
 
-from gigas.runtime.codex.history import HistoryEntry
-from gigas.runtime.codex.models import ConversationStatus, ReasoningEvent, SummaryPart
+from gigas.runtime.codex.history import HistoryEntry, activity_entry
+from gigas.runtime.codex.models import (
+    ActivityEvent,
+    ConversationStatus,
+    ReasoningEvent,
+    SummaryPart,
+)
 from gigas.services.codex import ServiceEvent
 from gigas.ui._markdown import Parsed, ParseJob, block_snapshot
 from gigas.ui.connection_panel import ConnectionPanel
@@ -21,6 +26,112 @@ if TYPE_CHECKING:
 
 class _ConversationSwitch(QObject):
     requested = Signal()
+
+
+def _activity(
+    number: int,
+    status: Literal["completed", "failed", "declined", "inProgress"] = "completed",
+    turn: str = "turn",
+) -> HistoryEntry:
+    return activity_entry(
+        "thread",
+        ActivityEvent(
+            turn,
+            str(number),
+            "mcpToolCall",
+            "gigas_test/act_and_observe",
+            status,
+            details=f"操作結果{number}",
+            completed=status != "inProgress",
+        ),
+    )
+
+
+def test_completed_activity_group_has_nested_details_and_keeps_failures_visible(
+    qtbot: "QtBot",
+) -> None:
+    view = ConversationTranscript()
+    qtbot.addWidget(view)
+    first, second = _activity(1), _activity(2)
+    view.update_entry(first)
+    view.update_entry(second)
+    view.update_entry(_activity(3, "failed"))
+    view.update_entry(_activity(4, "inProgress"))
+    assert "2件実行しました" in view.toPlainText()
+    assert "失敗" in view.toPlainText()
+    assert "実行中" in view.toPlainText()
+    assert "操作結果1" not in view.toPlainText()
+    view.anchorClicked.emit(QUrl("gigas-group:" + first.key))
+    assert "操作結果1" not in view.toPlainText()
+    view.toggle_details(second.key)
+    assert "操作結果2" in view.toPlainText()
+    view.anchorClicked.emit(QUrl("gigas-group:" + first.key))
+    view.selectAll()
+    view.copy()
+    assert "操作結果2" not in QApplication.clipboard().text()
+    view.shutdown()
+    qtbot.waitUntil(lambda target=view: target.shutdown_complete)
+
+
+def test_completed_summary_is_body_and_separates_activity_groups(qtbot: "QtBot") -> None:
+    view = ConversationTranscript()
+    qtbot.addWidget(view)
+    view.update_entry(_activity(1))
+    view.update_entry(HistoryEntry("reason", "reasoning", "北へ進む", completed=False))
+    assert "北へ進む" not in view.toPlainText()
+    view.update_entry(_activity(2))
+    view.update_entry(HistoryEntry("reason", "reasoning", "北へ進む", completed=True))
+    assert "北へ進む" in view.toPlainText()
+    assert "2件実行しました" not in view.toPlainText()
+    assert not view.document().find("北へ進む").charFormat().isAnchor()
+    view.set_reasoning_visible(False)
+    assert "北へ進む" not in view.toPlainText()
+    view.set_reasoning_visible(True)
+    assert "北へ進む" in view.toPlainText()
+    view.shutdown()
+    qtbot.waitUntil(lambda target=view: target.shutdown_complete)
+
+
+def test_history_grouping_matches_live_and_does_not_cross_turns(qtbot: "QtBot") -> None:
+    live, history = ConversationTranscript(), ConversationTranscript()
+    entries = (_activity(1), _activity(2), _activity(3, turn="next"))
+    for view in (live, history):
+        qtbot.addWidget(view)
+    for entry in entries:
+        live.update_entry(entry)
+    history.prepend_items(entries[1:])
+    history.prepend_items(entries[:1])
+    assert live.toPlainText() == history.toPlainText()
+    assert "2件実行しました" in live.toPlainText()
+    assert "3件実行しました" not in live.toPlainText()
+    for view in (live, history):
+        view.shutdown()
+        qtbot.waitUntil(lambda target=view: target.shutdown_complete)
+
+
+def test_group_updates_keep_expansion_and_status_corrections_split_it(qtbot: "QtBot") -> None:
+    view = ConversationTranscript()
+    qtbot.addWidget(view)
+    view.resize(500, 400)
+    view.show()
+    for entry in (_activity(1), _activity(2), _activity(3, "inProgress")):
+        view.update_entry(entry)
+    view.anchorClicked.emit(QUrl("gigas-group:" + _activity(1).key))
+    view.toggle_details(_activity(2).key)
+    view.update_entry(_activity(3))
+    assert "3件実行しました" in view.toPlainText()
+    assert "操作結果2" in view.toPlainText()
+    view.resize(300, 400)
+    assert view.toPlainText().count("操作結果2") == 1
+    view.update_entry(_activity(2, "failed"))
+    assert "3件実行しました" not in view.toPlainText()
+    assert "失敗" in view.toPlainText()
+    assert "操作結果2" in view.toPlainText()
+    view.clear()
+    view.prepend_items((_activity(1), _activity(2)))
+    assert "操作結果2" not in view.toPlainText()
+    view.shutdown()
+    qtbot.waitUntil(lambda: view.shutdown_complete)
 
 
 def test_markdown_heading_phase_and_literal_tool_details(qtbot: "QtBot") -> None:
