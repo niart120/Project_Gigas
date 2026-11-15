@@ -218,7 +218,7 @@ def test_live_transport_loss_releases_records_and_preserves_document_until_expli
         original = panel.transcript.toPlainText()
         panel.prompt.setPlainText("次に提出する原稿")
         session.service._enqueue(lambda: peer.events.put_nowait(TransportClosed("connection lost")))
-        qtbot.waitUntil(lambda: session.service._connection is None)
+        qtbot.waitUntil(lambda: session.service.codex._connection is None)
         qtbot.waitUntil(lambda: "codex" in session.shell.window.notifications.notices)
         assert session.shell.window.notifications.notices["codex"].details
         assert panel.transcript.document() is document

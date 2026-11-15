@@ -8,11 +8,11 @@ from pytestqt.qtbot import QtBot
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex import launch
 from gigas.runtime.codex.models import ConnectionOptions
-from gigas.services.codex import CodexServiceThread
+from gigas.services.application import ApplicationServiceThread
 from tests.unit.test_codex_connection import FakePeer
 
 if TYPE_CHECKING:
-    from gigas.services.codex import ServiceResult
+    from gigas.services.application import ServiceResult
 
 
 def test_default_service_uses_app_home_without_touching_development_home(
@@ -39,7 +39,7 @@ def test_default_service_uses_app_home_without_touching_development_home(
         return peer
 
     monkeypatch.setattr(launch, "StdioTransport", transport)
-    service = CodexServiceThread(data_root, CaptureReader(CaptureSnapshot))
+    service = ApplicationServiceThread(data_root, CaptureReader(CaptureSnapshot))
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     service.start()

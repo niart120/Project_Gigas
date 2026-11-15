@@ -12,7 +12,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
 from gigas.runtime.codex.models import ConnectionOptions
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
-from gigas.services.codex import CodexServiceThread, ServiceResult
+from gigas.services.application import ApplicationServiceThread, ServiceResult
 from tests.integration.peers.codex_resume import ResumePeer
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.unit.test_codex_history import _thread
@@ -85,7 +85,7 @@ class ConversationGui:
             self.options.append(options)
             return CodexConnection(self.peer, options, emit)
 
-        self.service = CodexServiceThread(root, capture.reader(), factory)
+        self.service = ApplicationServiceThread(root, capture.reader(), factory)
         self.service.completed.connect(self.results.append)
         self.shell = ApplicationShell(
             root / "settings.toml", service=self.service, capture_service=capture

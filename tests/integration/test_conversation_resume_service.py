@@ -98,7 +98,7 @@ def test_early_resume_message_and_mcp_observation_share_saved_records_before_rep
         saved = Event()
 
         async def drain_records() -> None:
-            recording = s.service._resources._recording
+            recording = s.service.codex._resources._recording
             assert recording is not None
             await recording.drain()
             saved.set()
@@ -159,14 +159,14 @@ def test_disconnect_drains_sent_resume_without_submitting_body_and_retains_targe
         s.service.disconnect_runtime()
         qtbot.waitUntil(lambda: peer.closed)
         assert not any(r.operation == "disconnect" for r in s.results)
-        assert s.service._resources.records_bound
+        assert s.service.codex._resources.records_bound
         peer.release.set()
         qtbot.waitUntil(lambda: any(r.operation == "disconnect" for r in s.results))
         assert not next(r.error for r in s.results if r.operation == "disconnect")
         assert not any(m == "turn/start" for m, _ in peer.calls)
         assert s.service.selected_target is target
-        assert s.service._selection.goal == GoalState("early fact", "paused", 41, 3)
-        assert not s.service._resources.records_bound
+        assert s.service.codex._selection.goal == GoalState("early fact", "paused", 41, 3)
+        assert not s.service.codex._resources.records_bound
         # Reconnection constructs a fresh loader while retaining the same saved ID.
         s.peer = resumed = ResumePeer("project-1")
         s.service.set_execution_settings(ExecutionSettings(False, False, "user"))

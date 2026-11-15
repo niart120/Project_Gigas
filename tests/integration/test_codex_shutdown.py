@@ -15,12 +15,12 @@ from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.connection import CodexConnection, RuntimeEvent
 from gigas.runtime.codex.models import ConnectionOptions, ConversationStatus
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
-from gigas.services.codex import CodexServiceThread
+from gigas.services.application import ApplicationServiceThread
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
 from tests.unit.test_codex_connection import FakePeer, _terminal
 
 if TYPE_CHECKING:
-    from gigas.services.codex import ServiceEvent
+    from gigas.services.application import ServiceEvent
 
 
 class LifetimePeer(FakePeer):
@@ -81,7 +81,7 @@ def _start(
     shell = ApplicationShell(
         tmp_path / "settings.toml",
         io,
-        service=CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory),
+        service=ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory),
     )
     events: list[ServiceEvent] = []
     shell.service.received.connect(events.append)

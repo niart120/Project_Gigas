@@ -36,9 +36,9 @@ from gigas.runtime.codex.models import (
     UsageEvent,
 )
 from gigas.runtime.codex.transport import StdioTransport
-from gigas.services.codex import (
+from gigas.services.application import (
     AnswerResult,
-    CodexServiceThread,
+    ApplicationServiceThread,
     MessageResult,
     ServiceEvent,
     ServiceResult,
@@ -174,7 +174,7 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         peer = StdioTransport((*PEER_COMMAND, "dialogue"), options.cwd)
         return CodexConnection(peer, options, emit)
 
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     results: list[ServiceResult] = []
     service.completed.connect(results.append)
     shell = ApplicationShell(tmp_path / "settings.toml", service=service)
@@ -735,7 +735,7 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
 ) -> None:
     saved = Settings(web_search_enabled=False, memory_enabled=False, approvals_reviewer="user")
     save_settings(tmp_path / "settings.toml", saved)
-    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
+    service = ApplicationServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     shell = ApplicationShell(tmp_path / "settings.toml", service=service)
     snapshots: list[ConnectionOptions] = []
     applied: list[ExecutionSettings] = []

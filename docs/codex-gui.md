@@ -174,7 +174,9 @@ Planの「今回の作業」には現在turnから届いた公開計画と、提
 
 履歴と新着の公開項目にはthread・turn・itemのIDと表示種別を含む同じ表示キーを使います。`TextEvent.turn_id`は公開turnに属する本文で設定され、ローカルで提出したユーザー本文では`None`です。GIGASが付けた提出本文のIDと公開履歴のIDを文字列一致で結合する処理はありません。この表示用のIDをゲームI/O記録へ追加することもありません。
 
-`gigas.services.codex.CodexServiceThread(data_root, reader, factory=..., input_factory=...)` は専用QThread内のasyncioループでCodex・入力接続・ゲームI/O MCP・保存先を所有します。`data_root`は未選択チャットの親となるアプリデータフォルダー、`reader`は既存映像取得サービスの`CaptureReader`です。`input_factory`は解決済み入力設定から機器を作り、既定では`SerialInput`を使います。`start()`だけではCodexにも入力機器にも接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
+`gigas.services.application.ApplicationServiceThread(data_root, reader, factory=..., input_factory=...)` は専用QThread内の一つのasyncioループでCodexServiceとInputServiceを動かします。`data_root`は未選択チャットの親となるアプリデータフォルダー、`reader`は既存映像取得サービスの`CaptureReader`です。`input_factory`は解決済み入力設定から機器を作り、既定では`SerialInput`を使います。`start()`だけではCodexにも入力機器にも接続しません。`connect_runtime(ConnectionOptions)`が返す世代番号と、`received`の`ServiceEvent.generation`、`completed`の`ServiceResult.generation`を照合して通知を受け取ります。
+
+Qtを使わない呼出し側は`gigas.services.codex.CodexService(data_root, reader, inputs, factory=..., received=..., completed=..., project_completed=..., management_completed=..., browse_goal_changed=..., recording_failed=...)`を使用できます。各コールバックはQt Signalと同じ内容を所有ループ上で同期的に受け取り、例外を送出しないものとします。`connect_runtime(options, generation)`には呼出し側の要求番号を渡します。コマンドは同じループ上で呼び、結果はコールバックで受け取ります。`await close()`はCodex・会話・記録を回収しますが、借用した`inputs`の接続は閉じません。入力側の終了は呼出し側で別途待ってください。
 
 注入する`factory`は`(options, emit)`を受け取り、未開始の`CodexConnection`を返します。接続・認証は接続部、thread・Goal・送信・停止は内部の会話実行、MCP・観測・記録先は会話資源が所有します。初回送信で記録先とMCPを準備し、同じ会話では入口を維持します。ランタイム自発終了時もサービスの共通終了処理で入力を止め、MCP受付と保存を回収します。詳しくは[接続API](codex.md)を参照してください。
 

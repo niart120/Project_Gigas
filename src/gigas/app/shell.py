@@ -14,8 +14,8 @@ from gigas.app.video import VideoController
 from gigas.game_io.input.config import get_protocol, resolve_baudrate, resolve_serial_config
 from gigas.game_io.input.serial import SerialPort
 from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
-from gigas.services.codex import (
-    CodexServiceThread,
+from gigas.services.application import (
+    ApplicationServiceThread,
     InputConnectionResult,
     ProjectResult,
     ServiceResult,
@@ -69,7 +69,7 @@ class ApplicationShell(QObject):
         path: "Path",
         io: SettingsIO | None = None,
         *,
-        service: CodexServiceThread | None = None,
+        service: ApplicationServiceThread | None = None,
         capture_service: "CapturePort | None" = None,
     ) -> None:
         """Construct views without displaying them."""
@@ -95,7 +95,7 @@ class ApplicationShell(QObject):
         self._shutdown_failure = ""
         self.video = VideoController(self.window.video, capture_service, self)
         self.service = (
-            CodexServiceThread(path.parent, self.video.service.reader())
+            ApplicationServiceThread(path.parent, self.video.service.reader())
             if service is None
             else service
         )
