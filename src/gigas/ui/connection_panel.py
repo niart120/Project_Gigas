@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gigas.runtime.codex.history import activity_entry, item_key
+from gigas.runtime.codex.history import activity_entry, reasoning_entry, text_entry
 from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
@@ -363,17 +363,9 @@ class ConnectionPanel(QWidget):
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
                 self.login_url.setText(event.url)
         elif isinstance(event, TextEvent):
-            key = (
-                item_key(
-                    self._display.thread_id or "",
-                    event.turn_id,
-                    event.item_id,
-                    kind=event.role,
-                )
-                if event.turn_id is not None
-                else f"message:{event.item_id}"
+            self.transcript.update_entry(
+                text_entry(self._display.thread_id or "", event), append=not event.replace
             )
-            self.transcript.update_item(key, event.text, kind=event.role, append=not event.replace)
         elif isinstance(event, PlanEvent):
             self._display.receive_plan(
                 event,
@@ -381,23 +373,10 @@ class ConnectionPanel(QWidget):
                 interrupted=self._conversation.stopping or "stop" in self._pending,
             )
         elif isinstance(event, ReasoningEvent):
-            self.transcript.update_item(
-                item_key(
-                    self._display.thread_id or "",
-                    event.turn_id,
-                    event.item_id,
-                    kind="reasoning",
-                ),
-                "\n\n".join(event.summary),
-                kind="reasoning",
-            )
+            self.transcript.update_entry(reasoning_entry(self._display.thread_id or "", event))
         elif isinstance(event, ActivityEvent):
             entry = activity_entry(self._display.thread_id or "", event)
-            self.transcript.update_item(
-                entry.key,
-                entry.text,
-                kind=entry.kind,
-            )
+            self.transcript.update_entry(entry)
         elif isinstance(event, HumanRequest):
             if (
                 event.token not in self.requests

@@ -4,9 +4,15 @@ import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QTextCursor
 
-from gigas.runtime.codex.history import HistoryEntry, history_entries
+from gigas.runtime.codex.history import HistoryEntry, history_entries, item_key
 from gigas.runtime.codex.management_models import TurnPage
-from gigas.runtime.codex.models import ActivityEvent, ConversationStatus, ReasoningEvent, TextEvent
+from gigas.runtime.codex.models import (
+    ActivityEvent,
+    ConversationStatus,
+    ReasoningEvent,
+    SummaryPart,
+    TextEvent,
+)
 from gigas.services.codex import ServiceEvent
 from gigas.ui.connection_panel import ConnectionPanel
 from tests.integration.test_inline_transcript import _form, _history
@@ -110,9 +116,21 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     panel.handle_event(
-        ServiceEvent(1, TextEvent("answer", "確定本文", replace=True, turn_id="turn"))
+        ServiceEvent(
+            1,
+            TextEvent(
+                "answer",
+                "確定本文",
+                replace=True,
+                turn_id="turn",
+                phase="final_answer",
+                completed=True,
+            ),
+        )
     )
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("turn", "reason", ("確定要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("turn", "reason", (SummaryPart(0, "確定要約"),)))
+    )
     panel.handle_event(
         ServiceEvent(1, ActivityEvent("turn", "web", "webSearch", "ラッキー", "completed", "図鑑"))
     )
@@ -124,6 +142,17 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
     assert "完了 · ラッキー\n図鑑" in body
     assert "進路\n北\n南" in body
     assert not panel.requests
+    answer = panel.transcript.item_entry(item_key("thread", "turn", "answer", kind="assistant"))
+    assert answer is not None
+    assert (answer.text, answer.phase, answer.completed) == ("確定本文", "final_answer", True)
+    reason_key = item_key("thread", "turn", "reason", kind="reasoning")
+    panel.transcript.set_reasoning_visible(False)
+    reason = panel.transcript.item_entry(reason_key)
+    assert reason is not None
+    assert reason.summary == (SummaryPart(0, "確定要約"),)
+    assert "確定要約" not in panel.transcript.toPlainText()
+    panel.transcript.set_reasoning_visible(True)
+    assert panel.transcript.item_entry(reason_key) == reason
     panel.handle_event(
         ServiceEvent(1, TextEvent("answer", "次のturn", replace=True, turn_id="next"))
     )

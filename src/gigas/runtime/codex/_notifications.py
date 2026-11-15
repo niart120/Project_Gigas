@@ -2,6 +2,8 @@
 
 import json
 from contextlib import suppress
+from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Literal
 
 from gigas.runtime.codex.models import (
@@ -10,13 +12,14 @@ from gigas.runtime.codex.models import (
     PlanEvent,
     PlanStep,
     ReasoningEvent,
+    SummaryPart,
     TextEvent,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from gigas.runtime.codex.models import ConnectionEvent
+    from gigas.runtime.codex.models import ConnectionEvent, MessagePhase
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
@@ -32,6 +35,27 @@ def _text(value: "JsonValue") -> str:
         return value
     message = "Codexの応答形式が不正"
     raise ValueError(message)
+
+
+def message_phase(value: "JsonValue") -> "MessagePhase | None":
+    """Keep a recognized public phase without guessing from text or turn state."""
+    if isinstance(value, str) and value in ("commentary", "partial_answer", "final_answer"):
+        return value
+    return None
+
+
+def summary_parts(value: "JsonValue") -> tuple[SummaryPart, ...]:
+    """Read an authoritative public summary without shifting paragraph indices.
+
+    Raises:
+        ValueError: The summary is not an array of strings.
+    """
+    if not isinstance(value, list) or any(not isinstance(part, str) for part in value):
+        message = "公開推論要約の形式が不正"
+        raise ValueError(message)
+    return tuple(
+        SummaryPart(index, part) for index, part in enumerate(value) if isinstance(part, str)
+    )
 
 
 def file_change_details(value: "JsonValue") -> str:
@@ -128,6 +152,7 @@ def item_activity(
     item: "JsonObject",
     *,
     web_status: Literal["inProgress", "completed"] | None = None,
+    completed: bool | None = None,
 ) -> ActivityEvent | None:
     """Convert a public activity item without requests or recording side effects.
 
@@ -137,6 +162,7 @@ def item_activity(
         item: Public item body; unrelated and unsupported types are ignored.
         web_status: Received notification lifecycle for Web search, or None for
             saved items, whose public payload has no lifecycle status.
+        completed: Received item lifecycle, or None when unavailable in saved history.
 
     Returns:
         One display snapshot, or None for unsupported or incomplete activity data.
@@ -147,7 +173,9 @@ def item_activity(
     kind, status = item.get("type"), item.get("status")
     if kind == "webSearch":
         title, details = _web_details(item)
-        return ActivityEvent(turn_id, item_id, "webSearch", title, web_status, details)
+        return ActivityEvent(
+            turn_id, item_id, "webSearch", title, web_status, details, completed=completed
+        )
     if (
         not isinstance(kind, str)
         or not isinstance(status, str)
@@ -156,15 +184,20 @@ def item_activity(
     ):
         return None
     details: list[str] = []
+    cwd = None
+    exit_code = None
+    arguments = None
     if kind == "commandExecution":
         title = _text(item.get("command"))
-        for key in ("cwd", "aggregatedOutput"):
-            value = item.get(key)
-            if isinstance(value, str) and value:
-                details.append(value)
-        exit_code = item.get("exitCode")
-        if type(exit_code) is int:
-            details.append(f"終了コード: {exit_code}")
+        raw_cwd, output, raw_exit = (
+            item.get("cwd"),
+            item.get("aggregatedOutput"),
+            item.get("exitCode"),
+        )
+        cwd = raw_cwd if isinstance(raw_cwd, str) else None
+        exit_code = raw_exit if type(raw_exit) is int else None
+        if isinstance(output, str):
+            details.append(output)
     elif kind == "fileChange":
         changes = item.get("changes")
         if not isinstance(changes, list):
@@ -173,6 +206,7 @@ def item_activity(
         title = "\n".join(_text(_object(change).get("path")) for change in changes)
     else:
         title = f"{_text(item.get('server'))}/{_text(item.get('tool'))}"
+        arguments = deepcopy(item.get("arguments"))
         result = item.get("result")
         if isinstance(result, dict) and isinstance(content := result.get("content"), list):
             for block in content:
@@ -183,120 +217,189 @@ def item_activity(
         error = item.get("error")
         if isinstance(error, dict) and isinstance(message := error.get("message"), str):
             details.append(message)
-    return ActivityEvent(turn_id, item_id, kind, title, status, "\n".join(details))
+    return ActivityEvent(
+        turn_id,
+        item_id,
+        kind,
+        title,
+        status,
+        "\n".join(details),
+        cwd,
+        exit_code,
+        arguments,
+        completed,
+    )
+
+
+type _Content = TextEvent | ReasoningEvent | ActivityEvent
+
+
+def _dialogue(event: _Content, *, partial: bool) -> DialogueEvent:
+    payload: JsonObject = {"item_id": event.item_id, "partial": partial}
+    if isinstance(event, TextEvent):
+        kind = "message"
+        payload["text"] = event.text
+        if event.phase is not None:
+            payload["phase"] = event.phase
+    elif isinstance(event, ReasoningEvent):
+        kind = "reasoning"
+        payload["summary"] = [{"index": part.index, "text": part.text} for part in event.summary]
+    else:
+        kind = "activity"
+        payload.update(
+            {
+                "type": event.kind,
+                "title": event.title,
+                "status": event.status,
+                "details": event.details,
+                "cwd": event.cwd,
+                "exit_code": event.exit_code,
+                "arguments": deepcopy(event.arguments),
+            }
+        )
+    payload["kind"] = kind
+    return DialogueEvent(kind, payload, event.turn_id)
 
 
 class TurnContent:
-    """Accumulate only the public summaries and unfinished records of one turn."""
+    """Accumulate only public, unfinished snapshots of one accepted turn."""
 
     def __init__(self, turn_id: str) -> None:
-        """Create empty content for an already accepted turn."""
+        """Create content for an accepted turn, independent of UI and storage."""
         self._turn_id = turn_id
-        self._summaries: dict[str, dict[int, str]] = {}
-        self._pending: dict[str, JsonObject] = {}
+        self._pending: dict[str, _Content] = {}
+        self._completed: set[str] = set()
+        self._finished = False
 
     def accept(self, method: str, params: "JsonObject") -> "Iterator[ConnectionEvent]":
         """Convert a notification already matched to this turn by the connection.
 
-        Malformed optional display data is ignored. Message identity failures
-        remain protocol failures for the connection to report.
+        Optional malformed display data is ignored. Completed items and finished
+        turns reject late deltas; item identity errors remain protocol failures.
 
         Raises:
             ValueError: A message or item envelope has no usable identity or shape.
         """
-        with suppress(ValueError):
-            yield from self._public(method, params)
+        if self._finished:
+            return
+        item = _object(params.get("item")) if method in {"item/started", "item/completed"} else None
+        identity = item.get("id") if item is not None else params.get("itemId")
+        if isinstance(identity, str) and identity in self._completed:
+            return
         if method == "item/agentMessage/delta":
             delta = params.get("delta")
             if isinstance(delta, str):
-                item_id = _text(params.get("itemId"))
-                yield TextEvent(item_id, delta, turn_id=self._turn_id)
-                previous = self._pending.get(item_id, {}).get("text", "")
-                self._pending[item_id] = {
-                    "item_id": item_id,
-                    "kind": "message",
-                    "text": str(previous) + delta,
-                }
-        elif method in {"item/started", "item/completed"}:
-            item = _object(params.get("item"))
-            text = item.get("text")
-            if (
-                item.get("type") == "agentMessage"
-                and method == "item/completed"
-                and isinstance(text, str)
-            ):
-                item_id = _text(item.get("id"))
-                yield TextEvent(item_id, text, replace=True, turn_id=self._turn_id)
-                yield self._complete(item_id, {"item_id": item_id, "kind": "message", "text": text})
+                item_id = _text(identity)
+                previous = self._pending.get(item_id)
+                phase = previous.phase if isinstance(previous, TextEvent) else None
+                text = previous.text if isinstance(previous, TextEvent) else ""
+                event = TextEvent(item_id, delta, turn_id=self._turn_id, phase=phase)
+                self._pending[item_id] = replace(event, text=text + delta, replace=True)
+                yield event
+        elif item is not None and item.get("type") == "agentMessage":
+            if isinstance(text := item.get("text"), str):
+                yield from self._publish(
+                    TextEvent(
+                        _text(identity),
+                        text,
+                        replace=True,
+                        turn_id=self._turn_id,
+                        phase=message_phase(item.get("phase")),
+                        completed=method == "item/completed",
+                    )
+                )
+        else:
+            with suppress(ValueError):
+                yield from self._public(method, params, item)
 
-    def _public(self, method: str, params: "JsonObject") -> "Iterator[ConnectionEvent]":
+    def _public(
+        self, method: str, params: "JsonObject", item: "JsonObject | None"
+    ) -> "Iterator[ConnectionEvent]":
         if method == "turn/plan/updated":
             if (plan := _plan(self._turn_id, params)) is not None:
                 yield plan
         elif method == "item/reasoning/summaryTextDelta":
             index, delta = params.get("summaryIndex"), params.get("delta")
-            if type(index) is not int or index < 0 or not isinstance(delta, str):
+            if type(index) is not int or index < 0 or not isinstance(delta, str) or not delta:
                 return
             item_id = _text(params.get("itemId"))
-            summary = self._summaries.setdefault(item_id, {})
+            previous = self._pending.get(item_id)
+            summary = (
+                {part.index: part.text for part in previous.summary}
+                if isinstance(previous, ReasoningEvent)
+                else {}
+            )
             summary[index] = summary.get(index, "") + delta
-            paragraphs = tuple(summary[i] for i in sorted(summary))
-            yield ReasoningEvent(self._turn_id, item_id, paragraphs)
-            self._pending[item_id] = {
-                "item_id": item_id,
-                "kind": "reasoning",
-                "summary": list(paragraphs),
-            }
-        elif method in {"item/started", "item/completed"}:
-            item = _object(params.get("item"))
-            item_id = _text(item.get("id"))
-            if item.get("type") == "reasoning" and method == "item/completed":
-                raw_summary = item.get("summary", [])
-                if not isinstance(raw_summary, list):
-                    return
-                summary = {}
-                for index, paragraph in enumerate(raw_summary):
-                    if not isinstance(paragraph, str):
-                        return
-                    summary[index] = paragraph
-                self._summaries[item_id] = summary
-                yield ReasoningEvent(self._turn_id, item_id, tuple(summary.values()))
-                yield self._complete(
+            yield from self._publish(
+                ReasoningEvent(
+                    self._turn_id,
                     item_id,
-                    {"item_id": item_id, "kind": "reasoning", "summary": list(summary.values())},
+                    tuple(SummaryPart(i, summary[i]) for i in sorted(summary)),
                 )
+            )
+        elif method in {"item/commandExecution/outputDelta", "item/mcpToolCall/progress"}:
+            item_id = _text(params.get("itemId"))
+            previous = self._pending.get(item_id)
+            if not isinstance(previous, ActivityEvent):
+                return
+            if (
+                method == "item/commandExecution/outputDelta"
+                and previous.kind == "commandExecution"
+            ):
+                if isinstance(delta := params.get("delta"), str) and delta:
+                    yield from self._publish(replace(previous, details=previous.details + delta))
             elif (
-                activity := item_activity(
+                method == "item/mcpToolCall/progress"
+                and previous.kind == "mcpToolCall"
+                and isinstance(message := params.get("message"), str)
+            ):
+                yield from self._publish(replace(previous, details=message))
+        elif item is not None:
+            item_id = _text(item.get("id"))
+            completed = method == "item/completed"
+            if item.get("type") == "reasoning":
+                yield from self._publish(
+                    ReasoningEvent(
+                        self._turn_id,
+                        item_id,
+                        summary_parts(item.get("summary", [])),
+                        completed=completed,
+                    )
+                )
+            else:
+                activity = item_activity(
                     self._turn_id,
                     item_id,
                     item,
-                    web_status="completed" if method == "item/completed" else "inProgress",
+                    web_status="completed" if completed else "inProgress",
+                    completed=completed,
                 )
-            ) is not None:
-                yield activity
-                snapshot: JsonObject = {
-                    "item_id": item_id,
-                    "kind": "activity",
-                    "type": activity.kind,
-                    "title": activity.title,
-                    "status": activity.status,
-                    "details": activity.details,
-                }
-                if method == "item/completed":
-                    yield self._complete(item_id, snapshot)
-                else:
-                    self._pending[item_id] = snapshot
+                if activity is not None:
+                    previous = self._pending.get(item_id)
+                    if (
+                        completed
+                        and activity.kind == "commandExecution"
+                        and not isinstance(item.get("aggregatedOutput"), str)
+                        and isinstance(previous, ActivityEvent)
+                        and previous.kind == activity.kind
+                    ):
+                        activity = replace(activity, details=previous.details)
+                    yield from self._publish(activity)
 
-    def _complete(self, item_id: str, payload: "JsonObject") -> DialogueEvent:
-        self._pending.pop(item_id, None)
-        return DialogueEvent(str(payload["kind"]), {**payload, "partial": False}, self._turn_id)
+    def _publish(self, event: _Content) -> "Iterator[ConnectionEvent]":
+        if event.completed:
+            self._pending.pop(event.item_id, None)
+            self._completed.add(event.item_id)
+        else:
+            self._pending[event.item_id] = event
+        yield event
+        if event.completed:
+            yield _dialogue(event, partial=False)
 
     def finish(self) -> list[DialogueEvent]:
-        """Discard accumulation and return each unfinished snapshot exactly once."""
-        records = [
-            DialogueEvent(str(payload["kind"]), {**payload, "partial": True}, self._turn_id)
-            for payload in self._pending.values()
-        ]
-        self._summaries.clear()
+        """Close the turn and return each unfinished snapshot exactly once."""
+        self._finished = True
+        records = [_dialogue(event, partial=True) for event in self._pending.values()]
         self._pending.clear()
+        self._completed.clear()
         return records

@@ -1,6 +1,6 @@
 """Item-based conversation text that retains selection and the visible passage."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -42,6 +42,7 @@ class _Item:
     displayed: str = ""
     emphasis: tuple[tuple[int, int], ...] = ()
     control: QWidget | None = None
+    entry: "HistoryEntry | None" = None
 
 
 def _utf16_length(text: str) -> int:
@@ -170,6 +171,26 @@ class Transcript(QTextBrowser):
         item.emphasis = ()
         self._render_item(item)
 
+    def update_entry(self, entry: "HistoryEntry", *, append: bool = False) -> None:
+        """Retain structured public data while rendering the current literal projection.
+
+        Args:
+            entry: Live or saved display data with a stable item identity.
+            append: Whether entry.text is a delta to append to the accumulated text.
+        """
+        self.update_item(entry.key, entry.text, kind=entry.kind, append=append)
+        item = self._items[entry.key]
+        item.entry = replace(entry, text=item.text)
+
+    def item_entry(self, item_id: str) -> "HistoryEntry | None":
+        """Return retained public data, or None for an absent or local-only item.
+
+        Args:
+            item_id: Stable display identity used by update_entry or prepend_items.
+        """
+        item = self._items.get(item_id)
+        return item.entry if item is not None else None
+
     def update_plan(
         self,
         item_id: str,
@@ -233,10 +254,10 @@ class Transcript(QTextBrowser):
 
         Args:
             entries: Oldest-first entries from the preceding public history page.
-                Entries contain only text and never create request controls.
+                Entries retain display data and never create request controls.
         """
         added = {
-            entry.key: _Item(entry.kind, 0, text=entry.text)
+            entry.key: _Item(entry.kind, 0, text=entry.text, entry=entry)
             for entry in entries
             if entry.key not in self._items
         }

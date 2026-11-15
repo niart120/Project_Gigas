@@ -12,6 +12,7 @@ from gigas.runtime.codex.models import (
     PlanEvent,
     PlanStep,
     ReasoningEvent,
+    SummaryPart,
     TextEvent,
     TurnStarted,
 )
@@ -76,6 +77,7 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
                 "status": "inProgress",
             }
             _notify(c, "item/started", {"item": command})
+            _notify(c, "item/commandExecution/outputDelta", {"itemId": "cmd-1", "delta": "取得中"})
             _notify(
                 c,
                 "item/completed",
@@ -131,14 +133,46 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
                 PlanEvent("turn-1", ()),
             ]
             assert [event for event in c.events if isinstance(event, ReasoningEvent)] == [
-                ReasoningEvent("turn-1", "reason-1", ("道を確認",)),
-                ReasoningEvent("turn-1", "reason-1", ("公開", "道を確認")),
-                ReasoningEvent("turn-1", "reason-1", ("公開要約", "道を確認")),
-                ReasoningEvent("turn-1", "reason-1", ("確定した公開要約",)),
+                ReasoningEvent("turn-1", "reason-1", (SummaryPart(1, "道を確認"),)),
+                ReasoningEvent(
+                    "turn-1",
+                    "reason-1",
+                    (
+                        SummaryPart(0, "公開"),
+                        SummaryPart(1, "道を確認"),
+                    ),
+                ),
+                ReasoningEvent(
+                    "turn-1",
+                    "reason-1",
+                    (
+                        SummaryPart(0, "公開要約"),
+                        SummaryPart(1, "道を確認"),
+                    ),
+                ),
+                ReasoningEvent(
+                    "turn-1", "reason-1", (SummaryPart(0, "確定した公開要約"),), completed=True
+                ),
             ]
             assert [event for event in c.events if isinstance(event, ActivityEvent)] == [
                 ActivityEvent(
-                    "turn-1", "cmd-1", "commandExecution", "Get-Date", "inProgress", "C:/archive"
+                    "turn-1",
+                    "cmd-1",
+                    "commandExecution",
+                    "Get-Date",
+                    "inProgress",
+                    cwd="C:/archive",
+                    completed=False,
+                ),
+                ActivityEvent(
+                    "turn-1",
+                    "cmd-1",
+                    "commandExecution",
+                    "Get-Date",
+                    "inProgress",
+                    "取得中",
+                    cwd="C:/archive",
+                    completed=False,
                 ),
                 ActivityEvent(
                     "turn-1",
@@ -146,11 +180,29 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
                     "commandExecution",
                     "Get-Date",
                     "completed",
-                    "C:/archive\n時刻\n終了コード: 0",
+                    "時刻",
+                    cwd="C:/archive",
+                    exit_code=0,
+                    completed=True,
                 ),
-                ActivityEvent("turn-1", "mcp-1", "mcpToolCall", "game/observe", "inProgress"),
                 ActivityEvent(
-                    "turn-1", "mcp-1", "mcpToolCall", "game/observe", "completed", "frame-1"
+                    "turn-1",
+                    "mcp-1",
+                    "mcpToolCall",
+                    "game/observe",
+                    "inProgress",
+                    arguments={"authorization": "PRIVATE-ARGUMENT"},
+                    completed=False,
+                ),
+                ActivityEvent(
+                    "turn-1",
+                    "mcp-1",
+                    "mcpToolCall",
+                    "game/observe",
+                    "completed",
+                    "frame-1",
+                    arguments={"authorization": "PRIVATE-ARGUMENT"},
+                    completed=True,
                 ),
                 ActivityEvent(
                     "turn-1",
@@ -159,9 +211,16 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
                     "memory.md",
                     "completed",
                     "add: memory.md\n+記録",
+                    completed=True,
                 ),
             ]
-            assert "PRIVATE-" not in repr(c.events)
+            for excluded in (
+                "PRIVATE-REASONING",
+                "PRIVATE-IMAGE",
+                "PRIVATE-STRUCTURED",
+                "PRIVATE-META",
+            ):
+                assert excluded not in repr(c.events)
 
             c.turn("turn/completed")
             c.peer.responses["turn/start"] = {"turn": {"id": "turn-2", "status": "inProgress"}}
@@ -189,7 +248,7 @@ def test_public_progress_preserves_turn_identity_and_excludes_private_payloads(
                 turn="turn-2",
             )
             assert c.events[len(before) :] == [
-                ReasoningEvent("turn-2", "reason-1", ("新しい公開要約",))
+                ReasoningEvent("turn-2", "reason-1", (SummaryPart(0, "新しい公開要約"),))
             ]
             assert c.execution.snapshot.turn_id == "turn-2"
             assert [event for event in c.events if isinstance(event, TurnStarted)] == [

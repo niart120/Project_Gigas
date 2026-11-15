@@ -31,6 +31,7 @@ from gigas.runtime.codex.models import (
     RequestResolved,
     SandboxEvent,
     SessionStatus,
+    SummaryPart,
     TextEvent,
     UsageBucket,
     UsageEvent,
@@ -252,7 +253,9 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     panel.handle_event(ServiceEvent(1, PlanEvent("old", ())))
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("old", (PlanStep("調査", "inProgress"),))))
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("old", "shared", ("公開要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("old", "shared", (SummaryPart(0, "公開要約"),)))
+    )
     panel.handle_event(
         ServiceEvent(
             1, ActivityEvent("old", "shared", "mcpToolCall", "gigas/observe", "inProgress")
@@ -285,7 +288,9 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
     _ready(panel, 1, "m", "low")
     assert panel.plan_panel.view.toPlainText() == "—"
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("移動", "pending"),))))
-    panel.handle_event(ServiceEvent(1, ReasoningEvent("new", "shared", ("新しい要約",))))
+    panel.handle_event(
+        ServiceEvent(1, ReasoningEvent("new", "shared", (SummaryPart(0, "新しい要約"),)))
+    )
     assert "移動" in panel.plan_panel.view.toPlainText()
     assert "調査" in panel.transcript.toPlainText()
     assert "新しい要約" in panel.transcript.toPlainText()
