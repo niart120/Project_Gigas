@@ -311,6 +311,28 @@ class CodexService:
         """Request common stop; the result reports actual stop completion."""
         self._submit("stop", lambda execution: execution.stop())
 
+    @property
+    def execution_busy(self) -> bool:
+        """Whether current Codex work must stop before a device connection changes."""
+        if self._conversation is None:
+            return False
+        snapshot = self._conversation.snapshot
+        return (
+            snapshot.sending
+            or snapshot.stopping
+            or snapshot.turn_id is not None
+            or (snapshot.goal is not None and snapshot.goal.status == "active")
+        )
+
+    async def stop_execution(self) -> None:
+        """Wait for current Codex execution to stop, raising if stop is unconfirmed.
+
+        This is an application coordination boundary; it emits no command result
+        and does not release unrelated input when there is no conversation.
+        """
+        if self._conversation is not None:
+            await self._conversation.stop()
+
     def disconnect_runtime(self) -> None:
         """Close the current connection while keeping the service loop available."""
         self._submit_connection("disconnect", lambda _connection: self._close_connection())
@@ -449,8 +471,6 @@ class CodexService:
         execution = self._conversation
         if execution is None or command.generation != self._active_generation:
             if command.operation == "stop":
-                self._input.stop()
-                await self._input.drain_input()
                 return None
             raise CodexConnectionError("この接続では送信を受け付けない")
         if command.operation != "stop" and self._selection.busy:

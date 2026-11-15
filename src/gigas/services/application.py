@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThread, Signal
 
+from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.models import ExecutionSettings
 from gigas.services.codex import CodexService, _OperationContext, rejected_result
 from gigas.services.codex_models import (
@@ -16,7 +17,12 @@ from gigas.services.codex_models import (
     ServiceEvent,
     ServiceResult,
 )
-from gigas.services.input import InputConnectionResult, InputService
+from gigas.services.input import (
+    InputConnectionResult,
+    InputService,
+    InputServiceError,
+    OperationResult,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -174,22 +180,24 @@ class ApplicationServiceThread(QThread):
         start()
 
     def _accept_input(self, config: "SerialConfig | None") -> None:
-        changing = self.inputs.request_config(config)
-        execution = self.codex._conversation
-        if changing and execution is not None:
-            snapshot = execution.snapshot
-            if (
-                snapshot.sending
-                or snapshot.turn_id is not None
-                or (snapshot.goal is not None and snapshot.goal.status == "active")
-            ):
-                context = _OperationContext(self.codex._active_generation, "stop")
-                self.codex._start_operation(context, execution.stop)
+        self.inputs.request_config(config)
         if self._input_apply_task is not None and not self._input_apply_task.done():
-            self.inputs.stop()
             return
-        self._input_apply_task = asyncio.create_task(self.inputs.apply_config())
+        self._input_apply_task = asyncio.create_task(self._apply_input())
         self._track(self._input_apply_task)
+
+    async def _apply_input(self) -> None:
+        try:
+            while self.inputs.config_pending and not self._ending:
+                if self.inputs.connection_change_required and self.codex.execution_busy:
+                    await self.codex.stop_execution()
+                if self._ending:
+                    return
+                await self.inputs.apply_config()
+        except CodexConnectionError as error:
+            self.inputs.reject_config(str(error))
+        except Exception:  # noqa: BLE001 -- don't expose upstream exception text.
+            self.inputs.reject_config("入力接続を変更する前の停止に失敗しました")
 
     async def _refresh_input_ports(self) -> None:
         try:
@@ -306,7 +314,27 @@ class ApplicationServiceThread(QThread):
     def interrupt(self) -> None:
         """Request common stop; the result reports actual stop completion."""
         context = _OperationContext(self._generation, "stop")
-        self._enqueue(self.codex.interrupt, context)
+        self._enqueue(lambda: self._track(asyncio.create_task(self._stop(context))), context)
+
+    async def _stop(self, context: _OperationContext) -> None:
+        operation = self.inputs.stop()
+        error = ""
+        try:
+            try:
+                await self.codex.stop_execution()
+            finally:
+                if operation is not None:
+                    (outcome,) = await asyncio.gather(operation, return_exceptions=True)
+                    if isinstance(outcome, OperationResult) and outcome.code not in {
+                        "OK",
+                        "INTERRUPTED",
+                    }:
+                        raise InputServiceError(outcome.code, outcome.message)
+        except (CodexConnectionError, InputServiceError) as failure:
+            error = str(failure)
+        except Exception:  # noqa: BLE001 -- sanitize the application result boundary.
+            error = "停止の完了を確認できません"
+        self.completed.emit(ServiceResult(context.generation, "stop", error))
 
     def disconnect_runtime(self) -> None:
         """Close the current connection while keeping the service loop available."""

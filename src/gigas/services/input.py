@@ -111,20 +111,48 @@ class InputService:
         self._connection_task: asyncio.Task[None] | None = None
         self._connect_cancelled = False
 
-    def request_config(self, config: "SerialConfig | None") -> bool:
-        """Retain the latest settings and report whether the connection must change.
+    def request_config(self, config: "SerialConfig | None") -> None:
+        """Retain the latest settings for application after caller coordination.
 
         Application coordination may wait for its execution to stop before calling
         apply_config. Repeated requests replace only the pending target.
         """
         if self._closing:
-            return False
+            return
         self._target = config
         self._pending = True
-        return config != self._config or (config is not None and not self.connected)
+
+    @property
+    def config_pending(self) -> bool:
+        """Whether the latest settings still need an application attempt."""
+        return self._pending
+
+    @property
+    def connection_change_required(self) -> bool:
+        """Whether the latest target differs from a healthy applied connection."""
+        return self._target != self._config or (self._target is not None and not self.connected)
+
+    @property
+    def changing(self) -> bool:
+        """Whether settings or a submitted connection transition still await completion."""
+        return (
+            self._pending
+            or (self._apply_task is not None and not self._apply_task.done())
+            or (self._connection_task is not None and not self._connection_task.done())
+        )
+
+    def reject_config(self, reason: str) -> None:
+        """Report a failed application prerequisite without starting the pending device."""
+        self._pending = False
+        if self._on_connection_changed is not None:
+            self._on_connection_changed(InputConnectionResult(self._target, self.connected, reason))
 
     async def apply_config(self) -> None:
-        """Apply pending settings, retaining ownership through caller cancellation."""
+        """Apply one latest target, retaining ownership through caller cancellation.
+
+        Settings arriving during this attempt remain config_pending. The caller
+        coordinates its execution again before requesting the next attempt.
+        """
         if self._closing:
             return
         if self._apply_task is None or self._apply_task.done():
@@ -133,7 +161,7 @@ class InputService:
         await asyncio.shield(self._apply_task)
 
     async def _apply_config(self) -> None:
-        while self._pending and not self._closing:
+        if self._pending and not self._closing:
             config = self._target
             self._pending = False
             error = ""
@@ -283,6 +311,8 @@ class InputService:
             A task cancelled before it starts has no input result or side effects.
         """
         device = self._device
+        if self.changing:
+            return OperationResult("BUSY", message="入力接続の切替中です")
         if not self._available or device is None:
             return OperationResult("INPUT_DISABLED", message="入力機器を使用できません")
         if self._operation is not None and not self._operation.done():

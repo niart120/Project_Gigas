@@ -29,7 +29,7 @@
 |---|---|
 | 設定受付 | InputService.request_configが最新値を保持。適用待ち中は入力を受け付けない。同一設定の正常接続は再接続・Codex停止不要 |
 | 接続変更 | アプリが必要なCodex停止をawaitし、InputService.apply_configを呼ぶ。停止失敗は入力設定の結果へ返し、新機器を開かない |
-| 連続変更 | 停止待ち中は最新値だけ適用。開始済みopenは回収後、最新値へ進む。明示停止は設定適用を撤回しない |
+| 連続変更 | 停止待ち中は最新値だけ適用。開始済みopenは回収後、アプリが再び停止要否を確認して最新値へ進む。open待ち中に始まったturnも次の変更前には停止する。明示停止は設定適用を撤回しない |
 | 解除失敗 | 対象taskを捕捉して結果を回収。失敗なら新機器を開かない。次の明示設定適用では再試行できる |
 | 終了確定 | 未開始の設定を撤回し、開始済みI/Oと旧所有者を回収。停止待ちが戻っても新接続を始めない |
 
@@ -39,13 +39,13 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | 入力サービス単独で設定適用・同一設定・切断・再接続ができる | new | integration | item 1。factory引数未定義のred→green。設定所有を移し既存Qt配送を回帰。コミット後に完了記録 |
-| todo | 接続変更はCodex停止完了後に最新設定を適用し、同一設定・停止失敗・終了を区別する | new / edge | integration | item 2。停止待ちをイベント同期 |
+| refactor-done | 入力サービス単独で設定適用・同一設定・切断・再接続ができる | new | integration | item 1、c247633。factory引数未定義のred→green。設定所有を移し既存Qt配送を回帰 |
+| green | 接続変更はCodex停止完了後に最新設定を適用し、同一設定・停止失敗・終了を区別する | new / edge | integration | item 2。停止終端前にCOM2/3を生成するred→成功/失敗/終了の全ケースgreen。コミット後に完了記録 |
 | todo | 旧入力の解除失敗では新接続を開かず、後続の明示適用で回復できる | edge | integration | item 3。捕捉taskの完了callback後も結果を失わない |
 
 ## 7. 設計メモ
 
-InputServiceはrequest_configとapply_configを分け、変更先を一箇所で所有する。アプリに残すtaskは停止待ちの連携だけ。入力の適用taskと機器接続taskは開始済みI/Oの取消し・回収責任が異なるため維持する。Codexの待機可能な停止窓口は会話を停止するだけとし、設定の知識を持たない。
+InputServiceはrequest_configとapply_configを分け、変更先を一箇所で所有する。apply_configは最新値を一度適用し、その間に届いた値はconfig_pendingとして残す。アプリに残すtaskは各適用前に停止を待つ短いループだけ。入力の適用taskと機器接続taskは開始済みI/Oの取消し・回収責任が異なるため維持する。Codexの待機可能な停止窓口は会話を停止するだけとし、設定の知識を持たない。
 
 ## 8. 対象ファイル
 
@@ -59,6 +59,10 @@ services/input.py、application.py、codex.py、codex_models.py、関連integrat
 |---|---|---|
 | uv run pytest tests/integration/test_input_configuration.py tests/integration/test_input_service.py tests/integration/test_codex_service.py -q | pass | item 1、63 passed（9.51秒） |
 | uv run ruff check src/gigas/services tests/integration/test_input_configuration.py / uv run ruff format --check src/gigas/services tests/integration/test_input_configuration.py / uv run ty check --no-progress | pass | item 1の型・書式・静的規約 |
+| uv run pytest tests/integration/test_input_configuration.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py tests/integration/test_conversation_control.py -q | pass | item 2、86 passed（18秒）。通常停止・Goal停止失敗・終了の回帰 |
+| uv run pytest tests/integration/test_input_configuration.py -q | pass | 最新設定の再判定・同一設定を含む一括配送へ変更後4 passed（1.46秒） |
+| 独立レビュー→イベント同期テスト | 修正 | open待ち中の新turn→次の設定変更で停止境界が抜ける指摘を採用。turn/interrupt未到達のredを確認し、入力側の一回適用とアプリ側の各回停止連携へ整理 |
+| uv run pytest tests/integration/test_input_configuration.py tests/integration/test_codex_service.py -q | pass | 上記修正後50 passed（10.14秒）。ruff check/format・tyもpass |
 | 実接続・Windows画面 | not run | 段階2変更後に確認 |
 
 ## 10. 先送り事項
