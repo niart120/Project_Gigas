@@ -1,0 +1,15 @@
+{
+  "runtime": "0.167.0",
+  "initial_goal_absent": true,
+  "fixture_persisted": true,
+  "first_closed": true,
+  "unauthenticated_and_not_ready": true,
+  "invalid_model_does_not_block": true,
+  "cold_get": true,
+  "cold_clear": true,
+  "read_after_clear": true,
+  "second_clear_reports_absent": true,
+  "thread_still_not_loaded": true,
+  "second_closed": true,
+  "success": true
+}

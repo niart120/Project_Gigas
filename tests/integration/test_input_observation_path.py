@@ -17,9 +17,9 @@ from gigas.services._game_io_tools import act_and_observe
 from gigas.services.input import InputService, OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage import project
+from gigas.storage import records as records_module
 from gigas.storage.input_events import OperationStarted
-from gigas.storage.project import ProjectWriter
+from gigas.storage.records import GameIoRecordWriter
 from tests.integration.test_input_service import Harness, press
 from tests.integration.test_observation_storage import sample_frame
 
@@ -49,7 +49,7 @@ class Port:
 
 
 def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path: Path) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     port = Port()
     original = sample_frame()
 
@@ -77,7 +77,6 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
                 start_input=service.start,
                 observations=observations,
                 recording=recording,
-                thread_id="real-thread-id",
             )
             assert result.code == "OK"
             assert result.completed_steps == 2
@@ -103,7 +102,7 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
         )
         assert (writer.path / recorded["image_path"]).read_bytes() == observation.png_bytes
         assert rows[0]["payload"]["sequence"] == [step.to_json() for step in sequence]
-        assert rows[0]["payload"]["thread_id"] == "real-thread-id"
+        assert "thread_id" not in rows[0]["payload"]
         assert all("run_id" not in row["payload"] for row in rows)
         assert all(
             "port" not in row["payload"] and "baudrate" not in row["payload"] for row in rows
@@ -119,7 +118,7 @@ def test_serial_sequence_and_latest_observation_share_recorded_outcome(tmp_path:
 
 
 def test_missing_image_preserves_input_and_accepts_next_sequence(tmp_path: Path) -> None:
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
         h.snapshot = CaptureSnapshot(phase="idle", generation=0)
         try:
@@ -130,7 +129,6 @@ def test_missing_image_preserves_input_and_accepts_next_sequence(tmp_path: Path)
                     start_input=h.service.start,
                     observations=h.observations,
                     recording=h.recording,
-                    thread_id="thread",
                 )
                 assert result.code == "OK"
                 assert result.neutral == "sent"
@@ -147,7 +145,7 @@ def test_missing_image_preserves_input_and_accepts_next_sequence(tmp_path: Path)
         finally:
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))
 
 
@@ -164,7 +162,7 @@ def test_cancelled_observation_leaves_next_input_running(
 
     monkeypatch.setattr(Observation, "from_frame", encode)
 
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
         try:
             await h.service.connect(h.device)
@@ -174,7 +172,6 @@ def test_cancelled_observation_leaves_next_input_running(
                     start_input=h.service.start,
                     observations=h.observations,
                     recording=h.recording,
-                    thread_id="thread",
                 )
             )
             assert await asyncio.to_thread(entered.wait, 3)
@@ -202,12 +199,12 @@ def test_cancelled_observation_leaves_next_input_running(
             release.set()
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))
 
 
 def test_cancelled_input_is_released_and_recorded(tmp_path: Path) -> None:
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
         try:
             await h.service.connect(h.device)
@@ -217,7 +214,6 @@ def test_cancelled_input_is_released_and_recorded(tmp_path: Path) -> None:
                     start_input=h.service.start,
                     observations=h.observations,
                     recording=h.recording,
-                    thread_id="thread",
                 )
             )
             await h.device.pressed.wait()
@@ -233,14 +229,14 @@ def test_cancelled_input_is_released_and_recorded(tmp_path: Path) -> None:
         finally:
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))
 
 
 def test_encoding_failure_preserves_input_and_allows_following_operation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
         try:
             await h.service.connect(h.device)
@@ -251,7 +247,6 @@ def test_encoding_failure_preserves_input_and_allows_following_operation(
                     start_input=h.service.start,
                     observations=h.observations,
                     recording=h.recording,
-                    thread_id="thread",
                 )
             assert result.code == "OK"
             assert result.completed_steps == 1
@@ -264,7 +259,6 @@ def test_encoding_failure_preserves_input_and_allows_following_operation(
                 start_input=h.service.start,
                 observations=h.observations,
                 recording=h.recording,
-                thread_id="thread",
             )
             assert following.code == "OK"
             assert isinstance(image, Observation)
@@ -282,7 +276,7 @@ def test_encoding_failure_preserves_input_and_allows_following_operation(
         finally:
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))
 
 
@@ -290,9 +284,9 @@ def test_encoding_failure_preserves_input_and_allows_following_operation(
 def test_save_failure_preserves_returned_input_image_and_next_operation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
-    record_input = ProjectWriter.record_input
+    record_input = GameIoRecordWriter.record_input
 
-    def fail_start(writer: ProjectWriter, event: "InputEvent") -> None:
+    def fail_start(writer: GameIoRecordWriter, event: "InputEvent") -> None:
         if isinstance(event, OperationStarted):
             message = "injected operation start save failure"
             raise OSError(message)
@@ -303,11 +297,11 @@ def test_save_failure_preserves_returned_input_image_and_next_operation(
         raise OSError(message)
 
     if boundary == "input_start":
-        monkeypatch.setattr(ProjectWriter, "record_input", fail_start)
+        monkeypatch.setattr(GameIoRecordWriter, "record_input", fail_start)
     else:
-        monkeypatch.setattr(project, "_publish_image", fail_image)
+        monkeypatch.setattr(records_module, "_publish_image", fail_image)
 
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
         try:
             await h.service.connect(h.device)
@@ -317,7 +311,6 @@ def test_save_failure_preserves_returned_input_image_and_next_operation(
                     start_input=h.service.start,
                     observations=h.observations,
                     recording=h.recording,
-                    thread_id="thread",
                 )
                 assert result.code == "OK"
                 assert result.completed_steps == 1
@@ -336,12 +329,12 @@ def test_save_failure_preserves_returned_input_image_and_next_operation(
         finally:
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))
 
 
 def test_stop_before_input_starts_records_interruption_without_delivery(tmp_path: Path) -> None:
-    async def scenario(writer: ProjectWriter) -> None:
+    async def scenario(writer: GameIoRecordWriter) -> None:
         h = Harness(writer)
 
         def start_then_stop(
@@ -358,7 +351,6 @@ def test_stop_before_input_starts_records_interruption_without_delivery(tmp_path
                 start_input=start_then_stop,
                 observations=h.observations,
                 recording=h.recording,
-                thread_id="thread",
             )
             assert result.code == "INTERRUPTED"
             assert result.operation_id is not None
@@ -385,5 +377,5 @@ def test_stop_before_input_starts_records_interruption_without_delivery(tmp_path
         finally:
             await h.close()
 
-    with closing(ProjectWriter.create(tmp_path / "game")) as writer:
+    with closing(GameIoRecordWriter.create(tmp_path / "game")) as writer:
         asyncio.run(scenario(writer))

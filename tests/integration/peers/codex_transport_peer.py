@@ -141,6 +141,16 @@ def inherited_pipe_child() -> None:
         time.sleep(0.01)
 
 
+def _dialogue_input() -> bytes:
+    """Allow public read-only listings alongside the scripted dialogue commands."""
+    while raw := sys.stdin.buffer.readline():
+        request = json.loads(raw)
+        if request.get("method") not in {"project/list", "thread/list"}:
+            return raw
+        send({"id": request["id"], "result": {"data": [], "nextCursor": None}})
+    return b""
+
+
 def dialogue() -> None:
     """Validate one GUI dialogue without recording RPC data."""
     thread_id, turn_id = "dialogue-thread", "dialogue-turn"
@@ -159,6 +169,8 @@ def dialogue() -> None:
             result = {"status": "ready"}
         elif method == "config/read":
             result = {"config": {"mcp_servers": {}}}
+        elif method in {"project/list", "thread/list"}:
+            result = {"data": [], "nextCursor": None}
         elif method == "model/list":
             result = {
                 "data": [
@@ -175,13 +187,15 @@ def dialogue() -> None:
         elif method == "thread/start":
             assert params["sandbox"] == "workspace-write"
             assert params["approvalPolicy"] == "on-request"
-            assert params["approvalsReviewer"] == "user"
+            assert params["approvalsReviewer"] in {"auto_review", "user"}
             result = {
-                "thread": {"id": thread_id},
+                "thread": {"id": thread_id, "projectId": params["projectId"]},
                 "model": params["model"],
+                "reasoningEffort": params["config"]["model_reasoning_effort"],
                 "approvalPolicy": "on-request",
-                "approvalsReviewer": "user",
+                "approvalsReviewer": params["approvalsReviewer"],
                 "cwd": params["cwd"],
+                "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
                 "sandbox": {
                     "type": "workspaceWrite",
                     "writableRoots": [],
@@ -285,7 +299,7 @@ def dialogue() -> None:
             },
         }
     )
-    additional = json.loads(sys.stdin.buffer.readline())
+    additional = json.loads(_dialogue_input())
     assert additional["method"] == "turn/start"
     assert additional["params"] == {
         "threadId": thread_id,
@@ -294,7 +308,7 @@ def dialogue() -> None:
         "effort": "low",
     }
     send({"id": additional["id"], "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
-    answer = json.loads(sys.stdin.buffer.readline())
+    answer = json.loads(_dialogue_input())
     answer_matches = answer == {
         "id": "dialogue-question",
         "result": {
@@ -331,7 +345,7 @@ def dialogue() -> None:
             },
         }
     )
-    decision = json.loads(sys.stdin.buffer.readline())
+    decision = json.loads(_dialogue_input())
     assert decision == {"id": "dialogue-approval", "result": {"decision": "decline"}}
     notice("serverRequest/resolved", {"requestId": "dialogue-approval"})
     notice("item/completed", {"item": {**command, "status": "declined"}})

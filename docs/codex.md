@@ -2,9 +2,9 @@
 
 Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイムを使用します。Python SDKは使用せず、公開app-serverプロトコルの標準入出力で接続します。Goalによるターンの開始・継続はapp-serverへ任せ、GIGASは指示の配送、公開情報の表示・記録、機器操作、明示停止を担当します。
 
-認証情報はCodexランタイムが管理します。既定では標準のCodex homeに保存されたChatGPT認証を利用し、GIGASの設定へ資格情報を保存しません。APIキー認証は未対応です。切断はログアウトではありません。
+認証情報はCodexランタイムが管理します。GIGASアプリは専用のcodex_homeでChatGPTへログインし、GIGASのsettings.tomlへ資格情報を保存しません。APIキー認証は未対応です。切断はログアウトではありません。
 
-モデルと推論レベルは接続時のモデル一覧に照合します。空欄は一覧の既定値を使い、無効な値を別の候補へ自動変更しません。無効な既定値でも接続・ログインを維持し、入力欄から選び直せます。有効な選択まで送信・Goal操作はできません。モデル一覧の取得失敗では診断を確認し、明示的に切断・再接続してください。
+モデルと推論レベルは接続時のモデル一覧に照合します。空欄は一覧の既定値を使い、無効な値を別の候補へ自動変更しません。無効な既定値でも接続・ログインを維持し、入力欄から選び直せます。有効な選択まで送信・Goal作成・再開はできません。サービスのGoal削除は接続・認証だけを要求し、モデル・sandboxの準備とは分けます。モデル一覧の取得失敗では診断を確認し、明示的に切断・再接続してください。
 
 利用枠は認証後と公開更新通知の受信時に取得します。公開された期間、使用済み割合から求めた残割合、リセット日時等を表示し、未提供の値は補いません。取得失敗時は最後の取得値と取得不能の状態を表示します。利用枠の表示値だけで送信・再開を拒否したり、ターンや入力を停止したりしません。実際の要求の可否はサーバーが判断します。自動再試行、予算増額、課金先変更は行いません。
 
@@ -12,29 +12,82 @@ Codex接続には `openai-codex-cli-bin==0.167.0` に同梱されたランタイ
 
 `gigas.runtime.codex.launch.create_connection(options, emit, *, codex_home=None)` は接続を作成します。`options` は `ConnectionOptions`、`emit` は `RuntimeEvent` を受け取る短い同期コールバックです。作成時にはプロセスを起動しません。同じasyncioループで `open()`、必要なら `login()` を呼び、最後に `close()` を待ちます。
 
+`ConnectionOptions.execution_settings`は`ExecutionSettings`を受け取ります。`web_search_enabled`と`memory_enabled`は真偽値で、どちらも既定は`True`です。`approvals_reviewer`は`"auto_review"`（代わりに承認、既定）または`"user"`（自分で承認）を指定します。接続起動時とthreadの新規開始・再開に同じ設定変換を使います。
+
+Web検索は`live`／`disabled`へ対応します。自動記憶はCodex標準の生成・参照をまとめて切り替え、OFFでも既存の記憶を削除しません。生成は候補となる会話や実行条件に従い、ON直後の生成は保証しません。作業フォルダーのAGENTS.mdと標準探索先のSkillsを読み込み、GIGAS独自の探索処理や資料様式は設けません。Apps・Plugins・Hooksと外部通知は無効です。
+
 `CodexConnection`は通信、認証、モデル候補と確定選択、Windows実行環境を所有します。`request(method, params)`、`respond(request_id, result)`、`reject(request_id, code, message)`でRPCを配送し、会話の通知・要求をコールバックへ渡します。接続自身は会話・Goal・機器入力を制御しません。アプリでの送信・Goal・停止は[CodexServiceThread](codex-gui.md#サービスapi)を使い、内部の会話実行が調整します。
 
 `open()`は初期化・認証状態・モデル一覧を確認します。未認証時の`LoginEvent.url`は明示的な`login()`後にだけ届きます。ブラウザは利用側が開き、`account/login/completed`とアカウント再取得で結果を確認します。URLは認証処理の終了時に破棄してください。
 
-`propose_model(model, effort)`は候補の妥当性を検査し、`commit_model(selection)`は確定選択を通知します。製品では会話実行が、threadがあれば`thread/settings/update`の成功を待って確定します。通常指示は選択値を`turn/start`へ渡し、Goalの自律ターンはサーバーが設定を受理した後から使います。実行中のターンの設定は書き換えません。
+`propose_model(model, effort)`は候補の妥当性を検査し、`commit_model(selection)`は確定選択を通知します。製品ではロード済みthreadへの`thread/settings/update`が成功してから確定します。閲覧中の選択では設定RPCを送らず、有効な候補だけを保持します。通常指示は選択値を`turn/start`へ渡し、Goalの自律ターンはサーバーが設定を受理した後から使います。実行中のターンの設定は書き換えません。
 
 `SessionStatus`は接続・認証の状態で、phaseは`connecting / login_required / authenticating / ready / error / closed`です。`ConversationStatus(thread_id, turn_id, goal, sending, stopping, waiting_for_answer)`は会話実行が保持するサーバー情報と処理中taskの投影です。送信、停止、回答待ちを接続phaseへ混ぜず、表示側に独立した実行状態機械を持ちません。
 
 `AccountInfo`は公開アカウント情報、`UsageEvent`は利用枠の取得結果です。`available`は直近取得の成否、`ordinary_usage_allowed`は公開された通常利用の可否です。背景取得taskは接続側が回収し、部分通知から値を推測せず情報を再取得します。これらは表示情報であり、会話の受付条件には使いません。
 
+## Project管理API
+
+`gigas.runtime.codex.management.CodexManagement(connection)`は、開いている`CodexConnection`を通してProjectを作成・一覧・取得します。接続の終了は呼出し側が担当します。管理操作はモデルの選択やWindows実行環境の準備を要求せず、threadの開始・resume、MCPや記録部品の準備を行いません。
+
+| メソッド | 入力と結果 |
+| --- | --- |
+| `create_project(name, root, *, idempotency_key)` | 呼出し側が決めた作成操作のキーと絶対パスの`Path`を渡し、`ProjectInfo`を取得する |
+| `list_projects(*, cursor=None, limit=None)` | サーバー順の1ページを`ProjectPage`として取得する。省略した値はサーバーの既定値を使う |
+| `read_project(project_id)` | 指定IDの最新の`ProjectInfo`を取得する |
+
+`ProjectInfo`は`id`、`name`、`root: Path`を持ちます。作業フォルダーは1件に限り、複数rootsのProjectは対応対象外です。フォルダーの作成・選択・存在確認は呼出し側が行います。管理APIはディレクトリを作成せず、Projectの位置や一覧を別途保存しません。
+
+`ProjectPage.projects`は`ProjectInfo`のtuple、`next_cursor`は次ページ用の文字列または`None`です。cursorの内容は解析せず、次の`list_projects(cursor=page.next_cursor)`へそのまま渡します。ページの自動取得・キャッシュ・失敗時の自動再送は行いません。
+
+相対rootの入力は`ValueError`、不正な応答や非対応のrootsは`CodexConnectionError`です。接続が閉じている場合も`CodexConnectionError`になります。通信失敗・サーバー拒否は既存の`TransportError`・`RpcError`として伝えます。
+
+## 保存済み会話と履歴の取得API
+
+同じ`CodexManagement`から会話の所属・保存cwd・履歴を取得できます。取得だけでは`thread/start`・`thread/resume`を呼ばず、実行対象の選択やモデルの確定値を変更しません。保存cwdが既に存在しなくても取得でき、ディレクトリを再作成しません。
+
+| メソッド | 入力と結果 |
+| --- | --- |
+| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None)` | 指定Projectの会話を`ThreadPage`で取得する。`None`は明示的に未所属を選び、全モデルプロバイダーを対象にする |
+| `read_thread(thread_id)` | `includeTurns=false`で`ThreadInfo`を取得する。本文の一括取得は行わない |
+| `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None)` | `itemsView=full`を明示し、1ページのturnと各turnに含まれる公開itemを`TurnPage`で取得する |
+| `list_items(thread_id, *, turn_id=None, cursor=None, limit=None, sort_direction=None)` | 1ページの公開itemを`ItemPage`で取得する。`turn_id`指定時はそのturnに絞る |
+
+`ThreadInfo`は`id`、`name`、`preview`、`cwd`、`project_id`、`created_at`・`updated_at`、`model`・`reasoning_effort`、公開`status`を持ちます。タイトルやモデル情報が未提供の場合は`None`のまま返し、代替値を補いません。
+
+`TurnInfo`は`id`・`status`、`items`、`items_view`、公開エラー`error`と任意の時刻・所要時間・`root_turn_id`を持ちます。`ThreadItemInfo`は`turn_id`と`item`、任意の`started_at_ms`・`completed_at_ms`を持ちます。itemの本文、画像参照、reasoning、Web検索などの種類別データは、公開されたJSONオブジェクトをそのまま保持します。本文の短縮、表示イベントへの変換、古い質問への回答受付は行いません。
+
+各ページの`threads`・`turns`・`items`はサーバー順のtupleです。`next_cursor`は続きの取得に使い、`backwards_cursor`は`sort_direction`を反転して取得するときに使います。どちらも不透明な文字列または`None`で、クライアントは解析しません。`sort_direction`は`asc`・`desc`、省略時は会話・turn一覧が降順、item一覧が昇順です。ページ取得は1回の要求で終了し、全件を自動収集しません。不正応答・通信失敗の例外はProject管理APIと共通です。
+
+## 保存済みGoalの取得・削除API
+
+`CodexManagement.get_goal(thread_id)`は保存済み会話のGoalを既存の`GoalState`で返し、Goalがなければ`None`を返します。目的、状態、利用量、予算をサーバーの値から補正しません。
+
+`clear_goal(thread_id)`は明示的なユーザー操作として`origin=user`で削除を依頼し、サーバーが返す`cleared`の真偽値を返します。事前のGoal取得は不要で、削除通知も待ちません。`False`は削除が起きなかったことを表します。削除はturnの中断や機器入力の停止ではありません。
+
+どちらも開いている接続とthread IDで操作でき、認証・モデル・Sandboxの実行準備や保存cwdの存在確認を要求しません。会話のresume、MCP・記録部品の準備、自動再送は行いません。不正応答・通信失敗の例外はProject管理APIと共通です。
+
 ## 実行環境と初回準備
 
 `SandboxEvent(readiness, setting_up, detail, reconnect_required)`はWindows実行環境の状態です。`readiness`は`ready / notConfigured / updateRequired`、取得不能は`None`です。接続後に認証と独立して取得します。`setup_windows_sandbox()`は明示的な準備を依頼し、開始受付だけでなく完了通知と状態再取得を待ちます。Windowsの確認操作は本人が行います。
 
-準備失敗・取得不能は理由を残して失敗を返し、接続を維持します。成功後も非readyなら`reconnect_required=True`となり、明示的な再接続が必要です。受付不明では再送せず通知を待ちます。待機中も切断できますが、Windows側の準備取消しは保証しません。GUIはturn・active Goal・送信・停止処理がある間の準備操作を無効にします。
+準備失敗・取得不能は理由を残して失敗を返し、接続を維持します。成功後も非readyなら`reconnect_required=True`となり、Codex App Serverの明示的な切断・再接続が必要です。受付不明では再送せず通知を待ちます。待機中も切断できますが、Windows側の準備取消しは保証しません。GUIはturn・active Goal・送信・停止処理がある間の準備操作を無効にします。
 
-通常指示とGoal操作は、接続・認証、有効なモデルと推論レベル、準備済みの実行環境を要求します。別の送信または停止処理中は受け付けません。turn実行中、質問待ち、機器未接続、映像未取得、利用枠の表示だけでは拒否しません。回答は元要求の有効性と接続・停止状態で判断し、通常指示の送信中にも配送できます。
+通常指示とGoalの作成・編集・再開は、接続・認証、有効なモデルと推論レベル、準備済みの実行環境を要求します。Goal削除は接続・認証だけで操作できます。別の送信または停止処理中は受け付けません。turn実行中、質問待ち、機器未接続、映像未取得、利用枠の表示だけでは拒否しません。回答は元要求の有効性と接続・停止状態で判断し、通常指示の送信中にも配送できます。
 
-初回の通常指示またはGoal作成で、記録先、`memory/`、観測・記録サービス、ゲームI/O MCPを準備して永続threadを作ります。接続・ログインだけでは記録先を要求しません。threadのcwdと書込先は記録先の`memory/`に限定し、追加書込先・一時領域・ネットワークは許可しません。応答のモデル、cwd、承認設定、sandboxを検証します。ユーザー側のMCP設定は接続用に無効化し、GIGASが明示した設定だけを使います。
+初回の通常指示またはGoal作成で、作業フォルダーとゲームI/O MCPを準備して永続threadを作ります。Project所属なら公開APIで取得した唯一のroot、未所属なら新しい`unassigned/<workspace-id>/`をcwd・runtimeWorkspaceRootsに指定します。Project IDも明示し、未所属はnullです。選択モデルと推論レベルはthread/startの`model`・`config.model_reasoning_effort`へ渡し、Goal開始前に適用します。接続・ログインだけでは会話の作業場所や記録先を作成しません。
 
-配布物内の`play.md`と、`observations/<観測ID>.png`・`events.jsonl`の参照方法を開発者指示として渡します。MCPのURL・認証値をその案内や表示・原記録へ含めません。画像保存は非同期で、応答直後のファイル存在や障害時の全画像保存は保証しません。
+作業フォルダーをworkspace-writeの通常書込先にし、追加書込先は空、シェルのネットワークは無効、一時領域は除外します。承認はon-requestと選択した承認方法を使います。「代わりに承認」はCodexによる審査であり、無条件の許可ではありません。応答の所属、モデル、推論レベル、cwd、runtimeWorkspaceRoots、承認設定、sandboxを確認します。ユーザー側の外部MCP設定はこの会話で無効化し、GIGASが用意したゲームMCPだけを使います。
 
-同じ会話ではthreadとMCP入口を再利用します。送信・Goal再開ごとの`thread/unsubscribe`・`thread/resume`や入口の作り直しは行いません。初回thread IDの記録は非同期に提出し、保存完了をターン開始の条件にしません。準備失敗は操作の失敗として返し、認証を維持します。
+配布物内の`play.md`をdeveloperInstructionsとして渡します。保存の案内は作業場所配下の`records/<thread-id>/events.jsonl`・`observations/<observation-id>.png`という構造と、原記録を編集しないことです。固定の攻略資料名を指定せず、正確な会話別パスを渡すための追加APIやMCP応答項目も設けません。必要な保存画像は観測IDから探せます。MCPのURL・認証値をその案内や原記録へ含めません。
+
+thread/startの応答で得た実IDを保持し、作業場所の`records/<thread-id>/`へwriterを結び付けてからturn/startやGoal開始を提出します。記録先の準備に失敗した場合は未送信として返し、認証と取得済みIDを保持します。次の明示操作は同じIDへの準備を行い、自動再試行はしません。既存の作業フォルダーが欠けた場合は再作成しません。
+
+保存済み会話への明示送信・Goal作成/編集/再開では、保存cwdに現在のMCPと同じ`records/<thread-id>/`を準備し、`thread/resume`を完了してから指定操作を送ります。再開要求は現在のモデル・推論レベルと、準備開始時の設定を使用します。受信対象IDと記録先は要求前に結び付け、応答前の通知・質問・観測も受け付けます。active Goalが追加本文より先に動く可能性があり、その順序を変える補助操作は行いません。
+
+resume送信前の準備失敗では、次の明示操作で再び準備できます。resumeを送信した後、応答または実効設定を確認できなかった場合は、Codex App Serverを切断・再接続してから実行してください。自動再送や新規threadへの置換はしません。保持するGoalの削除と共通停止・切断は引き続き使えます。
+
+ロード済みの同じ会話ではthreadとMCP入口を再利用し、毎回のunsubscribe・resumeや入口の作り直しは行いません。結合後の画像・入力・本文は非同期に保存し、その成否をMCP応答・次の入力・停止の条件にしません。画像が応答直後に存在することや、異常終了時に全記録が残ることは保証しません。
 
 ## 通常指示とGoal
 
@@ -58,6 +111,8 @@ Goalのcomplete・paused・blocked・制限状態、turnの自然終了・失敗
 共通停止は送信中にも割り込みます。停止taskがある間は新しい指示・Goal操作・回答・機器入力を拒否します。入力列へ取消しを届け、開始済みwriteと必要なneutral送出を回収します。未提出の送信を取り消し、提出済みの要求・回答は配送結果を確認します。既知turnの中断と入力解除は、Goal変更の決着を待たずに進めます。
 
 送信済みGoal操作の結果と通知を処理した上で、Goalがactiveなら保持したままpausedを要求します。completeや制限状態など既に非activeの値は上書きしません。停止中に新たな自律turnが始まった場合も同じ停止処理で中断し、各対象の中断応答と終端通知を待ちます。
+
+resume待機中も共通停止を使えます。resume要求前なら準備だけを取り消し、閲覧中のGoalを休止しません。要求済みなら本文を送らず再開要求の結果を回収し、早期turn・active Goalを同じ停止処理で扱います。本文の未送信は、resumeによる実行がなかったことを意味しません。
 
 停止の正常結果は、サーバー側の停止と捕捉した入力列の解除・回収が完了した意味です。完了後は通常の受付へ戻り、別の再受付状態や機器の再許可操作はありません。保持Goalの自律継続には利用者の再開操作が必要です。停止は全バックグラウンドプロセスの終了や、ゲーム内セーブの成功を保証しません。
 
@@ -83,8 +138,10 @@ Goalのcomplete・paused・blocked・制限状態、turnの自然終了・失敗
 
 ## 制約と検証範囲
 
-`codex_home`を指定すると認証・履歴の保存先を分離できます。資格情報をその場所へコピーしません。プロセスのcwdは絶対パスの既存フォルダーを指定し、開発リポジトリから分けてください。
+GIGASアプリはsettings.tomlと同じディレクトリの`codex_home`を使います。既定配置は`%LOCALAPPDATA%/GIGAS/codex_home`です。普段のCodexの認証・設定・会話・記憶は引き継がず、GIGASの認証操作からログインします。起動だけではCodexへ接続しません。
+
+部品として`create_connection`を使う場合は`codex_home`で保存先を指定できます。省略時はCodexの標準homeを使います。資格情報をその場所へコピーしません。プロセスのcwdはhomeとは別に絶対パスの既存フォルダーを指定し、開発リポジトリから分けてください。
 
 標準入出力のJSON一行は末尾改行を含め受信2 MiB、送信1 MiBまでです。MCP画像はHTTP応答で配送し、stdioのpreviewから元画像を復元しません。
 
-会話・GUI・MCP・機器入力の分担は模擬app-server・機器と実HTTPで試験し、実モデルとの接続とCH552による短いゲーム操作・中断も確認しています。GUIから実機までの通し操作、他の入力機器・OS、長時間運転は未検証です。詳細は[実接続の確認](codex-verification.md)を参照してください。専用の計画的終了は初期版対象外で、「保存して終えて」も通常指示として扱います。
+会話・GUI・MCP・機器入力の分担は模擬app-server・機器と実HTTPで試験しています。現行のProject・会話別記録を使い、GUIから実モデル・CH552への短い入力と画面変化、共通停止時の中立入力送信、アプリ再起動後の同じ会話・記録先での明示再開を確認しています。機器側の解除保証や長時間運転を含む確認範囲と制約は[実接続の確認](codex-verification.md)を参照してください。専用の計画的終了は初期版対象外で、「保存して終えて」も通常指示として扱います。

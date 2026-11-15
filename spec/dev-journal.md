@@ -89,7 +89,7 @@ pauseはGoalを保持し、stopはGoalを破棄する。どちらも推論中断
 
 ### 方針
 
-表示・共通入力・Goal操作は[U06](complete/unit_011/GOAL_EXECUTION.md)、追加指示による計画的終了は[U07](planned/unit_012/PLANNED_STOP.md)、保持Goalの明示的再開は[U08](planned/unit_013/RESUME.md)へ割り当てた。[API未確認事項](initial/08-sdk-compatibility.md#ui-api-open)に担当と実装前の確認期限を分離した。仕様本文を正本とし、この記録に詳細を重複させない。製品工程へは自動着手せず、実装時は既存の振る舞い試験の書き換え・統合・経路廃止に伴う削除を優先する。
+表示・共通入力・Goal操作は[U06](complete/unit_011/GOAL_EXECUTION.md)、追加指示による計画的終了は[U07](planned/unit_012/PLANNED_STOP.md)、保持Goalの明示的再開は[U08](complete/unit_013/RESUME.md)へ割り当てた。[API未確認事項](initial/08-sdk-compatibility.md#ui-api-open)に担当と実装前の確認期限を分離した。仕様本文を正本とし、この記録に詳細を重複させない。製品工程へは自動着手せず、実装時は既存の振る舞い試験の書き換え・統合・経路廃止に伴う削除を優先する。
 
 文書検証: 変更対象12文書のローカルMarkdown参照193件と仮テキストを`uv run python -c`の一回限りの検査で確認し、エラー0件。`git diff --check`成功。要求・担当・旧専用ターン案の位置付けと未検証表示は本文を読んで確認した。製品pytest・型検査・ビルドは文書のみの変更のため対象外。実接続でのGoal操作・新画面のQt表示・実機停止は未実施。
 

@@ -12,23 +12,22 @@ from gigas.game_io.input.models import InputStep
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage import project
+from gigas.storage import records as records_module
 from gigas.storage.input_events import OperationFinished, OperationStarted
-from gigas.storage.project import ProjectBusyError, ProjectError, ProjectWriter
+from gigas.storage.records import GameIoRecordWriter, RecordBusyError, RecordError
 from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
-    from gigas.runtime.codex.transport import JsonObject
 
 
 def test_submitted_records_keep_storage_order_and_drain_ownership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
     entered, release = Event(), Event()
-    append = project._append_row
+    append = records_module._append_row
 
     def delayed_append(path: Path, row: bytes) -> None:
         if json.loads(row)["type"] == "input.operation_started":
@@ -38,30 +37,21 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
                 raise TimeoutError(message)
         append(path, row)
 
-    monkeypatch.setattr(project, "_append_row", delayed_append)
+    monkeypatch.setattr(records_module, "_append_row", delayed_append)
 
     async def scenario() -> None:
-        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),)))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
             observation = Observation.from_frame(sample_frame())
             recording.submit_observation(observation)
-            payload: JsonObject = {"text": "公開応答"}
-            recording.submit_dialogue(
-                "dialogue.message", payload, thread_id="thread", turn_id="turn"
-            )
-            payload["text"] = "変更後"
+            recording.submit_dialogue("dialogue.message", "公開応答")
             recording.submit_input(
                 OperationFinished("operation-1", "interrupted", 0, phase="input", reason="stopped")
             )
-            with pytest.raises(ProjectBusyError):
+            with pytest.raises(RecordBusyError):
                 writer.close()
             assert not (writer.path / observation.image_path).exists()
-            preparing = asyncio.create_task(recording.ensure_memory())
-            await asyncio.sleep(0)
-            preparing.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await preparing
             waiting = asyncio.create_task(recording.drain())
             await asyncio.sleep(0)
             assert not waiting.done()
@@ -78,15 +68,9 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
             "dialogue.message",
             "input.operation_finished",
         ]
-        recorded_payload = records[2]["payload"]
-        assert recorded_payload.pop("received_at") <= records[2]["occurred_at"]
-        assert recorded_payload == {
-            "thread_id": "thread",
-            "turn_id": "turn",
-            "content": {"text": "公開応答"},
-        }
+        assert records[2]["payload"] == {"text": "公開応答"}
         assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
-        assert (writer.path / "memory/current.md").is_file()
+        assert not (writer.path / "memory").exists()
 
     try:
         asyncio.run(scenario())
@@ -98,7 +82,7 @@ def test_submitted_records_keep_storage_order_and_drain_ownership(
 def test_record_failure_reaches_shared_failure_callback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
     failures: list[Exception] = []
 
@@ -106,12 +90,12 @@ def test_record_failure_reaches_shared_failure_callback(
         message = "injected recording failure"
         raise OSError(message)
 
-    monkeypatch.setattr(project, "_append_row", fail_append)
+    monkeypatch.setattr(records_module, "_append_row", fail_append)
 
     async def scenario() -> None:
         recording.on_failure = failures.append
-        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),), "thread"))
-        recording.submit_dialogue("dialogue.delivery", {"outcome": "unknown"}, thread_id="thread")
+        recording.submit_input(OperationStarted("operation-1", (InputStep("wait", 1),)))
+        recording.submit_dialogue("dialogue.message", "公開応答")
         await recording.drain()
         assert len(failures) == 2
         assert "operation-1" in caplog.text
@@ -127,7 +111,7 @@ def test_observe_uses_cached_frame_and_retains_its_time(
 ) -> None:
     frame = sample_frame()
     reader = CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame))
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
 
     async def scenario() -> None:
@@ -160,11 +144,11 @@ def test_observe_uses_cached_frame_and_retains_its_time(
 def test_save_is_independent_and_cancellation_retains_work_until_drain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, *, save_fails: bool
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
     snapshot = CaptureSnapshot(phase="streaming", frame=sample_frame())
     entered, release = Event(), Event()
-    publish = project._publish_image
+    publish = records_module._publish_image
     encode = Observation.from_frame
     failures: list[tuple[Observation, Exception]] = []
     shared_failures: list[Exception] = []
@@ -188,20 +172,18 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
     if boundary == "encode":
         monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_encode))
     else:
-        monkeypatch.setattr(project, "_publish_image", delayed_publish)
+        monkeypatch.setattr(records_module, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
         service = ObservationService(
             CaptureReader(lambda: snapshot),
             recording,
             on_save_error=lambda observation, error: failures.append((observation, error)),
-            thread_id="thread-1",
         )
         recording.on_failure = shared_failures.append
         request = asyncio.create_task(service.observe())
         try:
             assert await asyncio.to_thread(entered.wait, 3)
-            service.thread_id = "thread-2"
             if boundary == "encode":
                 request.cancel()
                 with pytest.raises(asyncio.CancelledError):
@@ -209,7 +191,8 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
                 with pytest.raises(ObservationError) as busy:
                     await service.observe()
                 assert busy.value.code == "BUSY"
-                writer.reload()  # Encoding does not own the storage mutex.
+                # Encoding does not own the storage mutex.
+                writer.record_dialogue("dialogue.message", "during encoding")
             else:
                 first = await asyncio.wait_for(request, 3)
                 second = await asyncio.wait_for(service.observe(), 3)
@@ -217,12 +200,12 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
                 # Both observations returned while the first save is still blocked.
                 assert not (writer.path / first.image_path).exists()
                 assert not (writer.path / second.image_path).exists()
-                with pytest.raises(ProjectBusyError):
+                with pytest.raises(RecordBusyError):
                     writer.close()
-                with pytest.raises(ProjectBusyError):
-                    writer.reload()
-            with pytest.raises(ProjectError):
-                ProjectWriter.open(writer.path).close()
+                with pytest.raises(RecordBusyError):
+                    writer.record_dialogue("dialogue.message", "while busy")
+            with pytest.raises(RecordError):
+                GameIoRecordWriter.open(writer.path).close()
             waiting = asyncio.create_task(
                 service.drain() if boundary == "encode" else recording.drain()
             )
@@ -253,11 +236,10 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
                 json.loads(line)
                 for line in (writer.path / "events.jsonl").read_bytes().splitlines()
             ]
+            if boundary == "encode":
+                assert records.pop(0)["payload"] == {"text": "during encoding"}
             assert len(records) == (1 if boundary == "encode" else 2)
-            assert [record["payload"]["thread_id"] for record in records] == (
-                ["thread-1"] if boundary == "encode" else ["thread-1", "thread-2"]
-            )
-            assert [record["sequence"] for record in records] == list(range(1, len(records) + 1))
+            assert all("thread_id" not in record["payload"] for record in records)
             assert all(
                 (writer.path / record["payload"]["image_path"]).is_file() for record in records
             )
@@ -279,7 +261,7 @@ def test_save_is_independent_and_cancellation_retains_work_until_drain(
     ],
 )
 def test_unavailable_snapshot_does_not_save(tmp_path: Path, snapshot: CaptureSnapshot) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
     service = ObservationService(CaptureReader(lambda: snapshot), recording)
     try:
@@ -294,11 +276,11 @@ def test_unavailable_snapshot_does_not_save(tmp_path: Path, snapshot: CaptureSna
 def test_encoding_drain_failure_leaves_existing_save_owned_by_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     recording = RecordingService(writer)
     snapshot = CaptureSnapshot(phase="streaming", frame=sample_frame())
     entered, release = Event(), Event()
-    publish = project._publish_image
+    publish = records_module._publish_image
 
     def delayed_publish(path: Path, data: bytes) -> None:
         entered.set()
@@ -307,7 +289,7 @@ def test_encoding_drain_failure_leaves_existing_save_owned_by_recording(
             raise OSError(message)
         publish(path, data)
 
-    monkeypatch.setattr(project, "_publish_image", delayed_publish)
+    monkeypatch.setattr(records_module, "_publish_image", delayed_publish)
 
     async def scenario() -> None:
         service = ObservationService(CaptureReader(lambda: snapshot), recording)

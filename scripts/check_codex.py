@@ -14,9 +14,11 @@ from uuid import uuid4
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.runtime.codex.launch import create_connection
+from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     DialogueEvent,
+    ExecutionSettings,
     HumanRequest,
     RequestResolved,
     SessionStatus,
@@ -24,6 +26,8 @@ from gigas.runtime.codex.models import (
 )
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources
+from gigas.services._conversation_selection import ConversationSelection
+from gigas.services._workspaces import select_project
 from gigas.services.input import InputService
 
 if TYPE_CHECKING:
@@ -49,7 +53,7 @@ PROMPTS = {
     ),
     "file-approval": (
         "This is a file-approval integration check. Use apply_patch to add only the file "
-        "../gigas-u02-approval-check.txt outside the writable memory directory, "
+        "{probe_file} outside the writable workspace, "
         "containing GIGAS_U02_FILE. "
         "Request the required approval before writing. If permission is declined, "
         "report that and finish without trying again. Do not use shell commands."
@@ -65,9 +69,9 @@ def _require(condition: bool, message: str) -> None:
 async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, object]:
     baseline = asyncio.all_tasks()
     events: asyncio.Queue[ConnectionEvent] = asyncio.Queue()
-    archive = cwd / "checks" / str(uuid4())
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    probe_file = archive / "gigas-u02-approval-check.txt"
+    workspace = cwd / "checks" / str(uuid4())
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    probe_file = workspace.parent / f"gigas-u02-approval-{workspace.name}.txt"
     storage_failures: list[str] = []
     resources = ConversationResources(
         cwd,
@@ -80,8 +84,11 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
     def receive(event: "RuntimeEvent") -> None:
         execution.receive(event)
 
+    settings = ExecutionSettings(approvals_reviewer="user")
     connection = create_connection(
-        ConnectionOptions(cwd=cwd, effort="low"), receive, codex_home=home
+        ConnectionOptions(cwd=cwd, effort="low", execution_settings=settings),
+        receive,
+        codex_home=home,
     )
 
     async def release() -> None:
@@ -109,11 +116,14 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
             inputs.stop()
         return closing
 
+    selection = ConversationSelection()
     execution = ConversationExecution(
         connection,
         resources,
         inputs,
         events.put_nowait,
+        selection=selection,
+        settings=settings,
         closing=lambda: closing is not None,
         request_close=request_close,
     )
@@ -126,16 +136,23 @@ async def _exercise(scenario: str, cwd: Path, home: Path | None) -> dict[str, ob
     stop_completed = False
     observed_model = ""
     try:
-        await resources.select_project(archive, create=True)
         await connection.open()
         while not events.empty():
             initial = events.get_nowait()
             if isinstance(initial, SessionStatus):
                 _require(initial.phase != "login_required", "ChatGPT login is required")
                 observed_model = initial.model or observed_model
+        project = await select_project(CodexManagement(connection), workspace, create=True)
+        await selection.new(project.id, release=resources.close)
         async with asyncio.timeout(120):
-            turn_id = await execution.send(PROMPTS[scenario])
+            prompt = PROMPTS[scenario].format(probe_file=f"../{probe_file.name}")
+            turn_id = await execution.send(prompt)
             _require(turn_id is not None, "Message was not submitted")
+            thread_id = execution.snapshot.thread_id
+            if thread_id is None:
+                message = "No thread was adopted after message submission"
+                raise RuntimeError(message)
+            archive = workspace / "records" / thread_id
             while True:
                 event = await events.get()
                 if isinstance(event, TextEvent) and event.role == "assistant":

@@ -71,6 +71,7 @@ def test_omitted_and_unknown_fields_use_defaults(tmp_path: Path) -> None:
         ("[controller]\nserial = []\n", "serial"),
         ("[agent]\nmodel = 10\n", "model"),
         ('[agent]\nauth_method = "invalid"\n', "auth_method"),
+        ('[agent]\nauth_method = "api_key"\n', "auth_method"),
         ('project = "folder"\n', "project"),
         ("[project]\nlast_path = 42\n", "last_path"),
         ("[gui]\nshow_reasoning = 1\n", "show_reasoning"),
@@ -89,7 +90,12 @@ def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: s
 
 @pytest.mark.parametrize(
     ("field", "invalid"),
-    [("auth_method", "invalid"), ("show_reasoning", 0), ("show_reasoning", "false")],
+    [
+        ("auth_method", "invalid"),
+        ("auth_method", "api_key"),
+        ("show_reasoning", 0),
+        ("show_reasoning", "false"),
+    ],
 )
 def test_invalid_setting_cannot_be_saved(tmp_path: Path, field: str, invalid: object) -> None:
     path = tmp_path / "settings.toml"

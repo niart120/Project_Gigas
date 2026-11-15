@@ -238,7 +238,10 @@ def test_interrupted_turn_flushes_pending_text_once_at_terminal_notification(
                 event
                 for event in c.events
                 if isinstance(event, TextEvent) and event.role == "assistant"
-            ] == [TextEvent("answer", "one"), TextEvent("answer", " two")]
+            ] == [
+                TextEvent("answer", "one", turn_id="turn-1"),
+                TextEvent("answer", " two", turn_id="turn-1"),
+            ]
         finally:
             await c.close()
 

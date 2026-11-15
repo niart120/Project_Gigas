@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.runtime.codex.history import activity_entry, item_key
 from gigas.runtime.codex.models import (
     AccountInfo,
     ActivityEvent,
@@ -31,16 +31,18 @@ from gigas.runtime.codex.models import (
     can_submit,
 )
 from gigas.services.codex import ServiceEvent, ServiceResult
+from gigas.ui._conversation_display import ConversationDisplay
 from gigas.ui.codex_settings import CodexSettings
 from gigas.ui.message_composer import MessageComposer
 from gigas.ui.notifications import Notice
-from gigas.ui.plan_panel import PlanPanel
 from gigas.ui.request_card import RequestRecord
 from gigas.ui.request_view import RequestView
-from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from gigas.runtime.codex.history import HistoryEntry
+    from gigas.runtime.codex.models import GoalState
 
 _PHASE_LABELS = {
     "connecting": "接続中",
@@ -59,6 +61,8 @@ class ConnectionPanel(QWidget):
     failure IDs correlate state events with command results; activating a new
     connection discards those IDs, without modifying retained notification history.
     MainWindow places the connection status in its shared status bar.
+    The state_changed signal reports changes to can_list_conversations or
+    can_switch_conversation; it does not replace service target notifications.
 
     Args:
         parent: Owning widget, if any.
@@ -77,6 +81,7 @@ class ConnectionPanel(QWidget):
     interrupt_requested = Signal()
     answer_requested = Signal(object)
     failed = Signal(object)
+    state_changed = Signal()
 
     def __init__(
         self,
@@ -94,9 +99,10 @@ class ConnectionPanel(QWidget):
         self._sandbox = SandboxEvent()
         self._status = SessionStatus("closed")
         self._conversation = ConversationStatus()
+        self._input_busy = False
+        self._management_availability: tuple[bool, bool] | None = None
         self._pending: set[str] = set()
         self._submitted = ""
-        self._current_plan: PlanEvent | None = None
         self._error = ""
         self._failure_ids: set[int] = set()
         self.requests: dict[str, RequestRecord] = {}
@@ -130,12 +136,12 @@ class ConnectionPanel(QWidget):
         login.addWidget(self.login_url, 1)
         login.addWidget(self.open_login_button)
         self.codex_settings.rows.addLayout(login, 3, 0, 1, 3)
-        self.plan_panel = PlanPanel(self)
-        self.plan_panel.hide()  # MainWindow places this in the right pane.
-        self.transcript = Transcript(self)
-        self.transcript.setAccessibleName("会話")
-        self.transcript.setFrameShape(QFrame.Shape.NoFrame)
-        layout.addWidget(self.transcript, 1)
+        self._display = ConversationDisplay(self)
+        self.plan_panel = self._display.plan_panel
+        self.heading = self._display.heading
+        self.transcript = self._display.transcript
+        self.history_button = self._display.history_button
+        layout.addWidget(self._display, 1)
         self.composer = MessageComposer(self)
         self.composer.model_selected.connect(self._select_model)
         self.composer.goal_mode.toggled.connect(self._render)
@@ -162,34 +168,134 @@ class ConnectionPanel(QWidget):
         self.model_requested.emit(model, effort)
 
     def activate(self, generation: int) -> None:
-        """Reset the view for a newly submitted connection generation."""
+        """Adopt a connection generation without replacing the displayed conversation.
+
+        Runtime facts and model candidates reset, while history, draft, displayed
+        Goal and retained Plan stay in their documents. Old requests expire and
+        remain readable. Only replace_target discards the prior display.
+        """
+        self._expire_requests()
+        self._display.archive_plan(self._conversation.turn_id)
         self.composer.set_choices(None)
         self.codex_settings.reset()
         self._sandbox = SandboxEvent()
         self._conversation = ConversationStatus()
-        self.plan_panel.set_goal(None)
         self._generation = generation
         self._failure_ids.clear()
         self._connected = True
         self._status = SessionStatus("connecting")
         self._error = ""
         self._pending = {"connect"}
-        self._current_plan = None
-        for record in self.requests.values():
-            record.invalidate()
-        self.requests.clear()
-        self.request_views.clear()
-        self.transcript.clear()
-        self._clear_plan()
         self.login_url.clear()
         self._render()
+
+    @property
+    def draft(self) -> str:
+        """Return the current committed draft without committing IME preedit."""
+        return self._message_draft
+
+    def discard_draft(self) -> None:
+        """Discard the current draft and IME composition after caller confirmation."""
+        self.prompt.set_draft("")
+
+    def replace_target(
+        self,
+        project: str,
+        title: str,
+        *,
+        thread_id: str | None = None,
+        entries: "tuple[HistoryEntry, ...]" = (),
+        goal: "GoalState | None" = None,
+    ) -> None:
+        """Display a caller-confirmed selection without preparing or resuming it.
+
+        The caller checks service target identity before invoking this method.
+        Old history, request controls and Plan are discarded only here. The draft
+        and current connection's model candidates remain unchanged.
+
+        Args:
+            project: Project name or unassigned label for the confirmed selection.
+            title: Saved conversation title or new-conversation label.
+            thread_id: Public saved ID, or None for an unstarted conversation.
+            entries: Chronological public display entries for the first page.
+            goal: Saved Goal, or None for a new conversation or confirmed absence.
+        """
+        self._expire_requests()
+        self.requests.clear()
+        self.request_views.clear()
+        self._conversation = ConversationStatus()
+        self._display.replace(project, title, thread_id, entries, goal)
+        self._render()
+
+    def set_browse_goal(self, goal: "GoalState | None") -> None:
+        """Display a confirmed browsing Goal without changing local execution facts.
+
+        The caller verifies that the notification belongs to the current target.
+        Passing None means confirmed removal, not an uninitialized runtime snapshot.
+        """
+        self._display.set_goal(goal)
+        self._render()
+
+    def update_target_heading(self, project: str, title: str) -> None:
+        """Update confirmed names without clearing live text or request controls."""
+        self._display.set_heading(project, title)
+
+    def set_input_busy(self, busy: bool) -> None:
+        """Project input ownership across Codex generations and keep stop available."""
+        self._input_busy = busy
+        self._render()
+
+    def begin_loading(self, project: str, title: str) -> None:
+        """Hide retained content while fetching the named candidate's first page.
+
+        No document is cleared or copied. Execution controls are disabled except
+        stop and disconnect, which retain their existing admission conditions.
+        """
+        self._display.begin_loading(project, title)
+        self._render()
+
+    def cancel_loading(self) -> None:
+        """Restore the retained display after a failed or cancelled initial read."""
+        self._display.cancel_loading()
+        self._render()
+
+    @property
+    def can_list_conversations(self) -> bool:
+        """Whether connection facts permit read-only management requests."""
+        return (
+            self._available
+            and self._connected
+            and self._status.phase in {"ready", "login_required"}
+            and "disconnect" not in self._pending
+        )
+
+    @property
+    def can_switch_conversation(self) -> bool:
+        """Whether display and runtime facts permit switching to another target.
+
+        The controller additionally checks input recovery and its own pending
+        selection. Saved browsing Goals are not locally running Goals.
+        """
+        state = self._conversation
+        return (
+            self.can_list_conversations
+            and self._settings_ready
+            and not self._display.loading
+            and not self._input_busy
+            and not state.sending
+            and not state.stopping
+            and state.turn_id is None
+            and not (state.goal is not None and state.goal.status == "active")
+            and not self._pending
+            and not self._sandbox.setting_up
+        )
 
     def set_available(self, available: bool, *, settings_ready: bool = True) -> None:
         """Update command availability without coupling sessions to settings I/O.
 
         Args:
             available: Whether application lifetime permits session commands.
-            settings_ready: Whether settings permit a new connection.
+            settings_ready: Whether settings and workspace selection permit new execution.
         """
         self._available = available
         self._settings_ready = settings_ready
@@ -202,9 +308,9 @@ class ConnectionPanel(QWidget):
         self._notify_failure(self._status.detail)
         self.login_url.clear()
         self._expire_requests()
-        self._archive_plan()
+        self._display.archive_plan(self._conversation.turn_id)
         if self._conversation.turn_id is not None:
-            self.plan_panel.set_plan(self._current_plan, interrupted=True)
+            self.plan_panel.set_plan(self._display.plan, interrupted=True)
         self._render()
 
     @Slot(object)
@@ -224,19 +330,8 @@ class ConnectionPanel(QWidget):
         elif isinstance(event, UsageEvent):
             self.codex_settings.set_usage(event)
         elif isinstance(event, ConversationStatus):
-            if event.turn_id != self._conversation.turn_id:
-                self._archive_plan()
-                if event.turn_id is not None:
-                    self._clear_plan()
-                elif self._conversation.turn_id is not None:
-                    interrupted = (
-                        event.stopping or self._conversation.stopping or "stop" in self._pending
-                    )
-                    self.plan_panel.set_plan(
-                        self._current_plan, interrupted=interrupted, finished=not interrupted
-                    )
+            self._display.observe(self._conversation, event, stopping="stop" in self._pending)
             self._conversation = event
-            self.plan_panel.set_goal(event.goal)
         elif isinstance(event, ModelSelection):
             self.composer.set_choices(event)
         elif isinstance(event, SessionStatus):
@@ -258,9 +353,9 @@ class ConnectionPanel(QWidget):
                 self._notify_failure(event.detail, operation="select_model")
             if event.phase in {"closed", "error"}:
                 self._expire_requests()
-                self._archive_plan()
+                self._display.archive_plan(self._conversation.turn_id)
                 if self._conversation.turn_id is not None:
-                    self.plan_panel.set_plan(self._current_plan, interrupted=True)
+                    self.plan_panel.set_plan(self._display.plan, interrupted=True)
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, LoginEvent):
@@ -268,44 +363,40 @@ class ConnectionPanel(QWidget):
             if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
                 self.login_url.setText(event.url)
         elif isinstance(event, TextEvent):
-            self.transcript.update_item(
-                f"message:{event.item_id}", event.text, kind=event.role, append=not event.replace
+            key = (
+                item_key(
+                    self._display.thread_id or "",
+                    event.turn_id,
+                    event.item_id,
+                    kind=event.role,
+                )
+                if event.turn_id is not None
+                else f"message:{event.item_id}"
             )
+            self.transcript.update_item(key, event.text, kind=event.role, append=not event.replace)
         elif isinstance(event, PlanEvent):
-            if event.turn_id == self._conversation.turn_id:
-                self._current_plan = event
-                self.plan_panel.set_plan(
-                    event,
-                    interrupted=self._conversation.stopping or "stop" in self._pending,
-                )
-            else:
-                self.transcript.update_plan(
-                    f"plan:{event.turn_id}",
-                    event.steps,
-                    event.explanation,
-                    inactive=True,
-                )
+            self._display.receive_plan(
+                event,
+                self._conversation.turn_id,
+                interrupted=self._conversation.stopping or "stop" in self._pending,
+            )
         elif isinstance(event, ReasoningEvent):
             self.transcript.update_item(
-                f"reasoning:{(event.turn_id, event.item_id)!r}",
+                item_key(
+                    self._display.thread_id or "",
+                    event.turn_id,
+                    event.item_id,
+                    kind="reasoning",
+                ),
                 "\n\n".join(event.summary),
                 kind="reasoning",
             )
         elif isinstance(event, ActivityEvent):
-            statuses = {
-                "inProgress": "実行中",
-                "completed": "完了",
-                "failed": "失敗",
-                "declined": "拒否",
-            }
+            entry = activity_entry(self._display.thread_id or "", event)
             self.transcript.update_item(
-                f"activity:{(event.turn_id, event.item_id)!r}",
-                "\n".join(
-                    value
-                    for value in (f"{statuses[event.status]} · {event.title}", event.details)
-                    if value
-                ),
-                kind="activity",
+                entry.key,
+                entry.text,
+                kind=entry.kind,
             )
         elif isinstance(event, HumanRequest):
             if (
@@ -357,11 +448,15 @@ class ConnectionPanel(QWidget):
 
     def interrupt(self) -> None:
         """Immediately block repeated interruption and enqueue a stop request."""
-        if not self._connected or "stop" in self._pending or "disconnect" in self._pending:
+        if (
+            (not self._connected and not self._input_busy)
+            or "stop" in self._pending
+            or "disconnect" in self._pending
+        ):
             return
         self._pending.add("stop")
         if self._conversation.turn_id is not None:
-            self.plan_panel.set_plan(self._current_plan, interrupted=True)
+            self.plan_panel.set_plan(self._display.plan, interrupted=True)
         self._render()
         self.interrupt_requested.emit()
 
@@ -381,8 +476,18 @@ class ConnectionPanel(QWidget):
 
     def _open_login(self) -> None:
         url = QUrl(self.login_url.text())
-        if self._status.phase == "authenticating" and url.scheme() in {"http", "https"}:
-            self._open_url(url)
+        if self._status.phase != "authenticating" or url.scheme() not in {"http", "https"}:
+            return
+        if not self._open_url(url):
+            self.failed.emit(
+                Notice(
+                    "codex",
+                    "ブラウザを開けない",
+                    "ログイン用URLをブラウザで開けませんでした。"
+                    "表示中のURLをコピーして、ブラウザで開いてください。",
+                    "",
+                )
+            )
 
     def _setup_sandbox(self) -> None:
         if not self.sandbox_action.isEnabled():
@@ -447,23 +552,6 @@ class ConnectionPanel(QWidget):
             record.mark_unconfirmed()
             self._request_changed(record)
 
-    def _clear_plan(self) -> None:
-        self._current_plan = None
-        self.plan_panel.set_plan(None)
-
-    def _archive_plan(self) -> None:
-        if (
-            self._current_plan is not None
-            and self._current_plan.turn_id == self._conversation.turn_id
-        ):
-            event = self._current_plan
-            self.transcript.update_plan(
-                f"plan:{event.turn_id}",
-                event.steps,
-                event.explanation,
-                inactive=True,
-            )
-
     @property
     def _answers_available(self) -> bool:
         return (
@@ -471,6 +559,7 @@ class ConnectionPanel(QWidget):
             and self._connected
             and self._status.phase == "ready"
             and not self._conversation.stopping
+            and not self._display.loading
             and not self._pending.intersection({"stop", "disconnect"})
         )
 
@@ -496,7 +585,7 @@ class ConnectionPanel(QWidget):
         elif operation == "setup_windows_sandbox":
             explanation = (
                 "実行環境の準備完了を確認できません。Windowsの確認画面と実行環境の状態を確認してください。"
-                "準備後も利用できない場合は、切断して再接続してください。"
+                "準備後も利用できない場合は、Codex App Serverを切断して再接続してください。"
                 "切断だけではWindowsの準備処理の終了を確認できません。"
             )
         self.failed.emit(Notice("codex", "処理失敗", explanation, detail))
@@ -505,7 +594,7 @@ class ConnectionPanel(QWidget):
         available = self._available and "disconnect" not in self._pending
         phase = self._status.phase
         conversation = self._conversation
-        goal = conversation.goal
+        goal = self._display.goal
         self.connect_action.setEnabled(available and self._settings_ready and not self._connected)
         self.disconnect_action.setEnabled(available and self._connected)
         server_action = self.disconnect_action if self._connected else self.connect_action
@@ -520,7 +609,7 @@ class ConnectionPanel(QWidget):
         self.login_action.setEnabled(
             available and phase == "login_required" and "login" not in self._pending
         )
-        goal_active = goal is not None and goal.status == "active"
+        goal_active = conversation.goal is not None and conversation.goal.status == "active"
         self.sandbox_action.setEnabled(
             available
             and self._connected
@@ -545,10 +634,12 @@ class ConnectionPanel(QWidget):
         stopping = conversation.stopping or "stop" in self._pending
         accepting = (
             available
+            and self._settings_ready
             and self._connected
             and can_submit(self._status, conversation)
             and not submitted
             and not stopping
+            and not self._display.loading
         )
         prepared = (
             self._sandbox.readiness == "ready"
@@ -557,17 +648,22 @@ class ConnectionPanel(QWidget):
         )
         ready = accepting and bool(self._status.model and self._status.effort) and prepared
         self.composer.goal_mode.setEnabled(
-            available and not submitted and not conversation.sending and not stopping
+            available
+            and not submitted
+            and not conversation.sending
+            and not stopping
+            and not self._display.loading
         )
         self.plan_panel.resume_button.setEnabled(
             ready and goal is not None and goal.status not in {"active", "complete"}
         )
-        self.plan_panel.clear_button.setEnabled(ready and goal is not None)
-        self.prompt.setReadOnly(not available)
+        self.plan_panel.clear_button.setEnabled(accepting and goal is not None)
+        self.prompt.setReadOnly(not available or self._display.loading)
         for view in self.request_views.values():
             view.refresh(available=self._answers_available)
         running = (
-            goal_active
+            self._input_busy
+            or goal_active
             or conversation.turn_id is not None
             or conversation.sending
             or submitted
@@ -575,7 +671,9 @@ class ConnectionPanel(QWidget):
         )
         self.composer.render_actions(
             send_enabled=ready and bool(self._message_draft.strip()),
-            interrupt_enabled=(available and self._connected and running and not stopping),
+            interrupt_enabled=(
+                available and (self._connected or self._input_busy) and running and not stopping
+            ),
             running=running,
             has_draft=bool(self._message_draft.strip()),
         )
@@ -604,3 +702,7 @@ class ConnectionPanel(QWidget):
             and self.composer.selection is not None
             and bool(self.composer.selection.choices)
         )
+        availability = self.can_list_conversations, self.can_switch_conversation
+        if availability != self._management_availability:
+            self._management_availability = availability
+            self.state_changed.emit()

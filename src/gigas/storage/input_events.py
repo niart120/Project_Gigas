@@ -9,15 +9,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class OperationStarted:
-    """The accepted complete sequence, recorded before any physical input.
+    """The accepted complete sequence without project or conversation metadata.
 
-    The optional turn_id is an observed runtime ID, never a placeholder.
+    Attributes:
+        operation_id: Identity shared with the final operation outcome.
+        sequence: Accepted input steps, submitted for recording before execution.
     """
 
     operation_id: str
     sequence: "tuple[InputStep, ...]"
-    thread_id: str
-    turn_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,12 +53,7 @@ def input_record(event: InputEvent) -> tuple[str, dict[str, object]]:
     payload: dict[str, object] = {"operation_id": event.operation_id}
     if isinstance(event, OperationStarted):
         kind = "input.operation_started"
-        payload.update(
-            thread_id=event.thread_id,
-            sequence=[step.to_json() for step in event.sequence],
-        )
-        if event.turn_id is not None:
-            payload["turn_id"] = event.turn_id
+        payload["sequence"] = [step.to_json() for step in event.sequence]
     else:
         kind = "input.operation_finished"
         payload.update(

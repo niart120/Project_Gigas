@@ -25,14 +25,17 @@ from gigas.runtime.codex.connection import (
 from gigas.runtime.codex.models import (
     ConnectionOptions,
     ConversationStatus,
+    DialogueEvent,
+    ExecutionSettings,
     GoalEvent,
     HumanRequest,
     SandboxEvent,
+    TextEvent,
 )
 from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from gigas.services.codex import AnswerResult, CodexServiceThread, MessageResult
-from gigas.storage import project
-from gigas.storage.project import ProjectWriter
+from gigas.storage import records
+from gigas.storage.records import GameIoRecordWriter, RecordError
 from tests.integration.test_input_service import Device
 from tests.integration.test_observation_storage import sample_frame
 from tests.unit.test_codex_connection import FakePeer, _question, _terminal
@@ -42,11 +45,14 @@ if TYPE_CHECKING:
     from gigas.game_io.observation import ObservationResolution
     from gigas.services.codex import (
         InputConnectionResult,
+        ProjectResult,
         ServiceEvent,
         ServiceResult,
         _OperationCall,
         _OperationContext,
     )
+    from gigas.services.conversations import ManagementResult
+    from gigas.storage.records import DialogueRecordType
 
 
 class ControlledConnection(CodexConnection):
@@ -86,6 +92,17 @@ def _mcp_endpoint(params: JsonObject) -> tuple[str, dict[str, str]]:
     return url, result
 
 
+def _project_responses(peer: FakePeer, root: Path) -> None:
+    project: JsonObject = {"id": "project-1", "name": root.name, "roots": [{"path": str(root)}]}
+    peer.responses.update(
+        {
+            "project/create": {"project": project},
+            "project/read": {"project": project},
+            "project/list": {"data": [project]},
+        }
+    )
+
+
 def _call_game_tool(
     client: httpx.Client, url: str, name: str, arguments: JsonObject | None = None
 ) -> httpx.Response:
@@ -100,6 +117,357 @@ def _call_game_tool(
     )
     response.raise_for_status()
     return response
+
+
+def test_connection_execution_settings_reach_the_first_thread(qtbot: QtBot, tmp_path: Path) -> None:
+    peer = FakePeer()
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(
+            ConnectionOptions(
+                tmp_path / "runtime", execution_settings=ExecutionSettings(False, False, "user")
+            )
+        )
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("check settings")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        params = next(params for method, params in peer.calls if method == "thread/start")
+        assert params is not None
+        assert params["approvalsReviewer"] == "user"
+        config = params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "disabled"
+        assert config["features.memories"] is False
+        assert config["memories.generate_memories"] is False
+        assert config["memories.use_memories"] is False
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+@pytest.mark.parametrize("before_worker_start", [False, True])
+def test_saved_execution_settings_replace_pending_start_but_not_existing_thread(
+    qtbot: QtBot, tmp_path: Path, *, before_worker_start: bool
+) -> None:
+    peer = FakePeer()
+    options_seen: list[ConnectionOptions] = []
+    results: list[ServiceResult] = []
+
+    def factory(
+        options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
+    ) -> CodexConnection:
+        options_seen.append(options)
+        return CodexConnection(peer, options, emit)
+
+    service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
+    service.completed.connect(results.append)
+    initial = ExecutionSettings(False, False, "user")
+    service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=initial))
+    try:
+        if before_worker_start:
+            service.set_execution_settings(ExecutionSettings())
+        service.start()
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        assert results[-1].error == ""
+        if not before_worker_start:
+            service.set_execution_settings(ExecutionSettings())
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        assert options_seen[0].execution_settings == initial
+        params = next(params for method, params in peer.calls if method == "thread/start")
+        assert params is not None
+        assert params["approvalsReviewer"] == "auto_review"
+        config = params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "live"
+        assert config["memories.generate_memories"] is True
+        assert config["memories.use_memories"] is True
+
+        service.set_execution_settings(initial)
+        peer.auto_turn_started = False
+        service.send("additional")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        methods = [method for method, _params in peer.calls]
+        assert methods.count("thread/start") == 1
+        assert methods.count("turn/start") == 2
+        assert "thread/settings/update" not in methods
+        assert "thread/resume" not in methods
+        assert len(options_seen) == 1
+    finally:
+        if not service.isRunning():
+            service.start()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+@pytest.mark.parametrize("gate_method", ["config/read", "thread/start"])
+def test_execution_settings_changed_during_preparation_wait_for_next_new_thread(
+    qtbot: QtBot, tmp_path: Path, gate_method: str
+) -> None:
+    entered, release, updated = Event(), Event(), Event()
+
+    class PreparingPeer(FakePeer):
+        async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+            result = await super().request(method, params)
+            if method == gate_method:
+                entered.set()
+                assert await asyncio.to_thread(release.wait, 10)
+            return result
+
+    first, second = PreparingPeer(), FakePeer()
+    peers = iter((first, second))
+    results: list[ServiceResult] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(next(peers), options, emit),
+    )
+    service.completed.connect(results.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(entered.is_set)
+        changed = ExecutionSettings(False, False, "user")
+        service.set_execution_settings(changed)
+        service._enqueue(updated.set)
+        qtbot.waitUntil(updated.is_set)
+        release.set()
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].error == ""
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        first_params = next(params for method, params in first.calls if method == "thread/start")
+        assert first_params is not None
+        assert first_params["approvalsReviewer"] == "auto_review"
+        config = first_params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "live"
+        assert config["features.memories"] is True
+        service.disconnect_runtime()
+        qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        assert results[-1].error == ""
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime", execution_settings=changed))
+        qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        with qtbot.waitSignal(service.management_completed) as selected:
+            service.new_conversation()
+        assert not selected.args[0].error
+        service.send("next conversation")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        next_params = next(params for method, params in second.calls if method == "thread/start")
+        assert next_params is not None
+        assert next_params["approvalsReviewer"] == "user"
+        config = next_params["config"]
+        assert isinstance(config, dict)
+        assert config["web_search"] == "disabled"
+        assert config["features.memories"] is False
+    finally:
+        release.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+def test_initial_bind_failure_is_not_sent_and_retry_keeps_the_created_thread(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts: list[Path] = []
+    create = GameIoRecordWriter.create
+
+    def fail_once(_cls: type[GameIoRecordWriter], path: Path) -> GameIoRecordWriter:
+        attempts.append(path)
+        if len(attempts) == 1:
+            message = "initial bind fixture"
+            raise RecordError(message)
+        return create(path)
+
+    monkeypatch.setattr(GameIoRecordWriter, "create", classmethod(fail_once))
+    peer = FakePeer()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("first")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        assert results[-1].message == MessageResult("not_sent")
+        assert any(
+            isinstance(item.event, ConversationStatus) and item.event.thread_id == "thread-1"
+            for item in events
+        )
+        assert not any(method == "turn/start" for method, _params in peer.calls)
+        service.send("retry")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert results[-1].message == MessageResult("accepted", "turn-1")
+        assert sum(method == "thread/start" for method, _params in peer.calls) == 1
+        assert len(attempts) == 2
+        assert attempts[0] == attempts[1]
+        assert attempts[0].parts[-2:] == ("records", "thread-1")
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+    rows = [json.loads(line) for line in (attempts[-1] / "events.jsonl").read_bytes().splitlines()]
+    assert [(row["type"], row["payload"]) for row in rows] == [
+        ("dialogue.submitted", {"text": "retry"})
+    ]
+
+
+@pytest.mark.parametrize("intervening", ["send", "send_completed", "new", "disconnect"])
+def test_late_project_selection_does_not_replace_changed_target_or_closed_connection(
+    qtbot: QtBot, tmp_path: Path, intervening: str
+) -> None:
+    entered, release = Event(), Event()
+    target = tmp_path / "candidate"
+    target.mkdir()
+    results: list[ServiceResult] = []
+    projects: list[ProjectResult] = []
+    events: list[ServiceEvent] = []
+    management: list[ManagementResult] = []
+
+    class DelayedProjectPeer(FakePeer):
+        async def request(self, method: str, params: JsonObject | None) -> JsonValue:
+            if method == "project/list":
+                entered.set()
+                assert await asyncio.to_thread(release.wait, 5)
+            return await super().request(method, params)
+
+    peer = DelayedProjectPeer()
+    _project_responses(peer, target)
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.project_completed.connect(projects.append)
+    service.received.connect(events.append)
+    service.management_completed.connect(management.append)
+    service.start()
+    try:
+        generation = service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.open_project(target)
+        qtbot.waitUntil(entered.is_set)
+        if intervening.startswith("send"):
+            service.send("uses previous selection")
+            qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+            if intervening == "send_completed":
+                service._enqueue(lambda: peer.events.put_nowait(_terminal("completed")))
+                qtbot.waitUntil(
+                    lambda: any(
+                        isinstance(event.event, ConversationStatus)
+                        and event.event.thread_id is not None
+                        and event.event.turn_id is None
+                        and not event.event.sending
+                        for event in events
+                    )
+                )
+        elif intervening == "new":
+            service.new_conversation("later-choice")
+            qtbot.waitUntil(lambda: bool(management))
+            assert not management[-1].error
+        else:
+            service.disconnect_runtime()
+            qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
+        assert not results[-1].error
+        current = service.selected_target
+        release.set()
+        qtbot.waitUntil(lambda: bool(projects))
+        assert projects[-1].error
+        assert projects[-1].generation == generation
+        assert projects[-1].path == target
+        assert projects[-1].project is None
+        assert service.selected_target is current
+        if intervening.startswith("send"):
+            start = next(params for method, params in peer.calls if method == "thread/start")
+            assert start is not None
+            assert start["projectId"] is None
+            assert Path(str(start["cwd"])).parent == tmp_path / "unassigned"
+        assert list(target.iterdir()) == []
+    finally:
+        release.set()
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+
+
+def test_recording_keeps_submitted_and_confirmed_progress_bodies_without_ui_metadata(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    peer = FakePeer()
+    results: list[ServiceResult] = []
+    events: list[ServiceEvent] = []
+    service = CodexServiceThread(
+        tmp_path,
+        CaptureReader(CaptureSnapshot),
+        lambda options, emit: CodexConnection(peer, options, emit),
+    )
+    service.completed.connect(results.append)
+    service.received.connect(events.append)
+    service.start()
+    try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
+        service.send("提出本文")
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        for identifier, text, phase in (
+            ("progress", "探索しています", "commentary"),
+            ("answer", "到着しました", "final_answer"),
+        ):
+            notification = RpcNotification(
+                "item/completed",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": identifier,
+                        "type": "agentMessage",
+                        "text": text,
+                        "phase": phase,
+                    },
+                },
+            )
+            service._enqueue(lambda event=notification: peer.events.put_nowait(event))
+        unfinished = RpcNotification(
+            "item/agentMessage/delta",
+            {"threadId": "thread-1", "turnId": "turn-1", "itemId": "partial", "delta": "未完本文"},
+        )
+        service._enqueue(lambda: peer.events.put_nowait(unfinished))
+        qtbot.waitUntil(
+            lambda: any(
+                isinstance(item.event, TextEvent) and item.event.text == "未完本文"
+                for item in events
+            )
+        )
+    finally:
+        service.shutdown()
+        qtbot.waitUntil(lambda: service.wait(0))
+    assert sum(isinstance(item.event, DialogueEvent) for item in events) == 3
+    archive = next(tmp_path.glob("unassigned/*/records/thread-1"))
+    rows = [json.loads(line) for line in (archive / "events.jsonl").read_bytes().splitlines()]
+    assert [(row["type"], row["payload"]) for row in rows] == [
+        ("dialogue.submitted", {"text": "提出本文"}),
+        ("dialogue.message", {"text": "探索しています"}),
+        ("dialogue.message", {"text": "到着しました"}),
+    ]
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "disconnect"])
@@ -174,7 +542,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
     projects = []
     entered, release = Event(), Event()
     http_closed = Event()
-    publish = project._publish_image
+    publish = records._publish_image
     close = GameIoMcpServer.close
 
     async def fail_after_http_close(server: GameIoMcpServer) -> None:
@@ -194,6 +562,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         emit: Callable[[RuntimeEvent], None],
     ) -> CodexConnection:
         peer = FakePeer()
+        _project_responses(peer, tmp_path / "selected")
         peers.append(peer)
         return CodexConnection(peer, options, emit)
 
@@ -205,32 +574,35 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
     service.project_completed.connect(projects.append)
     service.start()
     try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         if selected:
             service.create_project(tmp_path / "selected")
             qtbot.waitUntil(lambda: bool(projects))
             assert not projects[-1].error
-            # Failed switching preserves the current archive and its OS ownership.
+            # Failed switching preserves the current selected Project identity.
             service.open_project(tmp_path / "missing")
             qtbot.waitUntil(lambda: len(projects) == 2)
             assert projects[-1].error
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
-        assert not (tmp_path / "chats").exists()
+        assert not (tmp_path / "unassigned").exists()
         service.send("observe")
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         assert not results[-1].error
         thread = next(params for method, params in peers[0].calls if method == "thread/start")
         assert thread is not None
-        archive = Path(str(thread["cwd"])).parent
-        assert archive.parent == (tmp_path if selected else tmp_path / "chats")
+        workspace = Path(str(thread["cwd"]))
+        assert workspace.parent == (tmp_path if selected else tmp_path / "unassigned")
         if selected:
-            assert archive.name == "selected"
+            assert workspace.name == "selected"
+        assert thread["projectId"] == ("project-1" if selected else None)
+        archive = workspace / "records" / "thread-1"
+        qtbot.waitUntil(lambda: (archive / "events.jsonl").stat().st_size > 0)
         rows = [
             json.loads(line)
             for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-        assert rows[0]["type"] == "thread.started"
-        assert rows[0]["payload"]["thread_id"] == "thread-1"
+        assert rows[0]["type"] == "dialogue.submitted"
+        assert rows[0]["payload"] == {"text": "observe"}
         config = thread["config"]
         assert isinstance(config, dict)
         url = next(value for key, value in config.items() if key.endswith(".url"))
@@ -242,7 +614,7 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
         setting_applied = Event()
         service._enqueue(setting_applied.set)
         qtbot.waitUntil(setting_applied.is_set)
-        monkeypatch.setattr(project, "_publish_image", hold_image)
+        monkeypatch.setattr(records, "_publish_image", hold_image)
         with httpx.Client(
             headers={
                 **{key: str(value) for key, value in headers.items()},
@@ -281,11 +653,11 @@ def test_chat_archive_mcp_settings_and_shutdown_share_one_lifetime(
             for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         observed = next(row["payload"] for row in rows if row["type"] == "observation.recorded")
-        assert observed["thread_id"] == "thread-1"
+        assert "thread_id" not in observed
         assert observed["observation_id"] == metadata["observation_id"]
         image = archive / observed["image_path"]
         assert image.read_bytes() == base64.b64decode(result["content"][0]["data"])
-        ProjectWriter.open(archive).close()
+        GameIoRecordWriter.open(archive).close()
         assert bool(service.shutdown_error) == close_failure
     finally:
         release.set()
@@ -323,7 +695,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
             result = await super().request(method, params)
             if method == "thread/start":
                 assert isinstance(result, dict)
-                result["thread"] = {"id": self.thread_id}
+                assert params is not None
+                result["thread"] = {"id": self.thread_id, "projectId": params["projectId"]}
             elif method == "turn/start":
                 self.events.put_nowait(
                     RpcNotification(
@@ -337,6 +710,7 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         options: ConnectionOptions, emit: Callable[[RuntimeEvent], None]
     ) -> CodexConnection:
         peer = ArchivePeer(f"thread-{len(peers) + 1}")
+        _project_responses(peer, tmp_path / "selected")
         peers.append(peer)
         return CodexConnection(peer, options, emit)
 
@@ -355,6 +729,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
     service.input_changed.connect(inputs.append)
     service.start()
     try:
+        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
+        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         if selected:
             service.create_project(tmp_path / "selected")
             qtbot.waitUntil(lambda: bool(projects))
@@ -362,13 +738,12 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         service.apply_input(resolve_serial_config("COM3", "ch552", None))
         qtbot.waitUntil(lambda: bool(inputs))
         assert inputs[-1].connected
-        service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
-        qtbot.waitUntil(lambda: any(result.operation == "connect" for result in results))
         service.send("old conversation")
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         old_thread = next(params for method, params in peers[0].calls if method == "thread/start")
         assert old_thread is not None
-        old_archive = Path(str(old_thread["cwd"])).parent
+        old_workspace = Path(str(old_thread["cwd"]))
+        old_archive = old_workspace / "records" / "thread-1"
         old_url, old_headers = _mcp_endpoint(old_thread)
         monkeypatch.setattr(Observation, "from_frame", classmethod(delayed_observation))
         with (
@@ -414,7 +789,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         assert isinstance(old_observation, dict)
         assert isinstance(old_started, dict)
         assert isinstance(old_finished, dict)
-        assert old_observation["thread_id"] == old_started["thread_id"] == "thread-1"
+        assert "thread_id" not in old_observation
+        assert "thread_id" not in old_started
         assert (
             old_finished["operation_id"]
             == old_started["operation_id"]
@@ -428,20 +804,21 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         old_image = old_archive / str(old_observation["image_path"])
         assert old_image.read_bytes() == base64.b64decode(old_result["content"][0]["data"])
         old_log = (old_archive / "events.jsonl").read_bytes()
-        if selected:
-            with pytest.raises(project.ProjectError):
-                ProjectWriter.open(old_archive)
-        else:
-            ProjectWriter.open(old_archive).close()
+        GameIoRecordWriter.open(old_archive).close()
 
         service.connect_runtime(ConnectionOptions(tmp_path / "runtime"))
         qtbot.waitUntil(lambda: sum(result.operation == "connect" for result in results) == 2)
+        with qtbot.waitSignal(service.management_completed) as changed_selection:
+            service.new_conversation("project-1" if selected else None)
+        assert not changed_selection.args[0].error
         service.send("new conversation")
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
         new_thread = next(params for method, params in peers[1].calls if method == "thread/start")
         assert new_thread is not None
-        new_archive = Path(str(new_thread["cwd"])).parent
-        assert (new_archive == old_archive) == selected
+        new_workspace = Path(str(new_thread["cwd"]))
+        new_archive = new_workspace / "records" / "thread-2"
+        assert (new_workspace == old_workspace) == selected
+        assert new_archive != old_archive
         new_url, new_headers = _mcp_endpoint(new_thread)
         with httpx.Client(headers=new_headers, trust_env=False, timeout=5) as client:
             new_result = _call_game_tool(
@@ -455,11 +832,7 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
         new_rows = records(new_archive)
-        if selected:
-            assert new_rows[: len(old_rows)] == old_rows
-            new_rows = new_rows[len(old_rows) :]
-        else:
-            assert (old_archive / "events.jsonl").read_bytes() == old_log
+        assert (old_archive / "events.jsonl").read_bytes() == old_log
         assert old_metadata["operation_id"] not in json.dumps(new_rows)
         assert old_metadata["observation_id"] not in json.dumps(new_rows)
         new_observation = next(
@@ -474,7 +847,8 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         assert isinstance(new_observation, dict)
         assert isinstance(new_started, dict)
         assert isinstance(new_finished, dict)
-        assert new_observation["thread_id"] == new_started["thread_id"] == "thread-2"
+        assert "thread_id" not in new_observation
+        assert "thread_id" not in new_started
         assert (
             new_finished["operation_id"]
             == new_started["operation_id"]
@@ -488,7 +862,7 @@ def test_disconnect_drains_old_results_before_starting_next_conversation(
         assert (new_archive / str(new_observation["image_path"])).read_bytes() == base64.b64decode(
             new_result["content"][0]["data"]
         )
-        ProjectWriter.open(new_archive).close()
+        GameIoRecordWriter.open(new_archive).close()
         assert not service.shutdown_error
     finally:
         release.set()
@@ -502,9 +876,9 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
     entered, release = Event(), Event()
     peers: list[FakePeer] = []
     results: list[ServiceResult] = []
-    create = ProjectWriter.create
+    create = GameIoRecordWriter.create
 
-    def delayed_create(_cls: type[ProjectWriter], path: Path) -> ProjectWriter:
+    def delayed_create(_cls: type[GameIoRecordWriter], path: Path) -> GameIoRecordWriter:
         entered.set()
         if not release.wait(10):
             raise TimeoutError
@@ -518,7 +892,7 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
         peers.append(peer)
         return CodexConnection(peer, options, emit)
 
-    monkeypatch.setattr(ProjectWriter, "create", classmethod(delayed_create))
+    monkeypatch.setattr(GameIoRecordWriter, "create", classmethod(delayed_create))
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot), factory)
     service.completed.connect(results.append)
     service.start()
@@ -531,9 +905,9 @@ def test_disconnect_during_archive_creation_recovers_writer_without_starting_tur
         release.set()
         qtbot.waitUntil(lambda: any(result.operation == "disconnect" for result in results))
         assert not any(method == "turn/start" for method, _ in peers[0].calls)
-        archives = list((tmp_path / "chats").iterdir())
+        archives = list(tmp_path.glob("unassigned/*/records/thread-1"))
         assert len(archives) == 1
-        ProjectWriter.open(archives[0]).close()
+        GameIoRecordWriter.open(archives[0]).close()
     finally:
         release.set()
         service.shutdown()
@@ -744,7 +1118,7 @@ def test_input_settings_apply_without_codex_or_chat_and_close_on_shutdown(
         service.apply_input(config)
         qtbot.waitUntil(lambda: len(applied) == 1)
         assert applied[-1].connected
-        assert not (tmp_path / "chats").exists()
+        assert not (tmp_path / "unassigned").exists()
         service.apply_input(config)
         qtbot.waitUntil(lambda: len(applied) == 2)
         assert len(devices) == 1
@@ -844,13 +1218,17 @@ def test_input_switch_keeps_latest_target_even_after_stop(
     assert service.shutdown_error == ""
 
 
-def test_thread_save_failure_does_not_prevent_send(
+def test_body_save_failure_does_not_prevent_send_or_following_records(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fail(_writer: ProjectWriter, thread_id: str) -> None:
-        raise OSError(thread_id)
+    save = GameIoRecordWriter.record_dialogue
 
-    monkeypatch.setattr(ProjectWriter, "record_thread", fail)
+    def fail_first(writer: GameIoRecordWriter, kind: "DialogueRecordType", text: str) -> None:
+        if text == "input":
+            raise OSError(text)
+        save(writer, kind, text)
+
+    monkeypatch.setattr(GameIoRecordWriter, "record_dialogue", fail_first)
     results: list[ServiceResult] = []
     failures: list[str] = []
 
@@ -871,18 +1249,20 @@ def test_thread_save_failure_does_not_prevent_send(
         qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         assert not results[-1].error
         qtbot.waitUntil(lambda: bool(failures))
+        service.send("following")
+        qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
+        assert not results[-1].error
     finally:
         service.shutdown()
         qtbot.waitUntil(lambda: service.wait(0))
-    archive = next((tmp_path / "chats").iterdir())
+    archive = next(tmp_path.glob("unassigned/*/records/thread-1"))
     rows = [
         json.loads(line)
         for line in (archive / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert any(
-        row["type"] == "dialogue.delivery" and row["payload"]["thread_id"] == "thread-1"
-        for row in rows
-    )
+    assert [(row["type"], row["payload"]) for row in rows] == [
+        ("dialogue.submitted", {"text": "following"})
+    ]
 
 
 def test_service_selects_model_without_interrupting_turn(qtbot: QtBot, tmp_path: Path) -> None:
@@ -927,6 +1307,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
     results: list[ServiceResult] = []
     events: list[ServiceEvent] = []
     inputs: list[InputConnectionResult] = []
+    busy: list[bool] = []
     service = CodexServiceThread(
         tmp_path,
         CaptureReader(lambda: CaptureSnapshot(phase="streaming", frame=frame)),
@@ -936,6 +1317,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
     service.completed.connect(results.append)
     service.received.connect(events.append)
     service.input_changed.connect(inputs.append)
+    service.input_busy_changed.connect(busy.append)
     service.start()
     try:
         service.apply_input(resolve_serial_config("COM3", "ch552", None))
@@ -977,12 +1359,14 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
                 {"sequence": [{"kind": "press", "buttons": ["A"], "duration_ms": 10000}]},
             )
             qtbot.waitUntil(lambda: InputState(buttons=("A",)) in device.calls)
+            qtbot.waitUntil(lambda: busy == [True])
             service.interrupt()
             qtbot.waitUntil(lambda: any(method == "turn/interrupt" for method, _ in peer.calls))
             qtbot.waitUntil(operation.done)
             interrupted = operation.result().json()["result"]
             assert json.loads(interrupted["content"][0]["text"])["code"] == "INTERRUPTED"
             assert device.calls[-1] == InputState()
+            qtbot.waitUntil(lambda: busy == [True, False])
             assert not any(result.operation == "stop" for result in results)
             refused = _call_game_tool(
                 client,
@@ -1001,6 +1385,7 @@ def test_common_stop_reuses_endpoint_after_input_release_and_turn_terminal(
                 {"sequence": [{"kind": "press", "buttons": ["B"], "duration_ms": 1}]},
             ).json()["result"]
             assert not resumed["isError"]
+            qtbot.waitUntil(lambda: busy == [True, False, True, False])
         peer.auto_turn_started = True
         service.send("next")
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 3)

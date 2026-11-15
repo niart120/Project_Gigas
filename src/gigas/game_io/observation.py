@@ -74,7 +74,7 @@ class Observation:
 
     @property
     def image_path(self) -> str:
-        """Return the project-relative PNG path using forward slashes."""
+        """Return the record-directory-relative PNG path using forward slashes."""
         return f"observations/{self.observation_id}.png"
 
     @classmethod

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,7 @@ from gigas.runtime.codex.models import (
     ActivityEvent,
     ConnectionOptions,
     ConversationStatus,
+    ExecutionSettings,
     GoalState,
     HumanRequest,
     LoginEvent,
@@ -41,6 +43,7 @@ from gigas.services.codex import (
     ServiceEvent,
     ServiceResult,
 )
+from gigas.storage.settings import Settings, save_settings
 from gigas.ui.connection_panel import ConnectionPanel
 from gigas.ui.main_window import MainWindow
 from gigas.ui.request_card import AnswerSubmission
@@ -185,6 +188,10 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         panel.prompt.setPlainText("開始 日本語🙂")
         panel.send_button.click()
         panel.send_button.click()
+        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
+        sent = next(result for result in results if result.operation == "send")
+        assert sent.error == ""
+        assert sent.message == MessageResult("accepted", "dialogue-turn")
         qtbot.waitUntil(lambda: len(panel.requests) == 1)
         question = next(iter(panel.requests.values()))
         token = question.request.token
@@ -194,7 +201,6 @@ def test_shell_dialogue_round_trip_uses_service_and_public_stdio(
         assert "fixture/observe" in panel.transcript.toPlainText()
         assert "観測完了" in panel.transcript.toPlainText()
         assert "INTERNAL_CONTENT" not in panel.transcript.toPlainText()
-        qtbot.waitUntil(lambda: any(result.operation == "send" for result in results))
         panel.prompt.setPlainText("質問は保留し、門の前で止まる")
         panel.send_button.click()
         qtbot.waitUntil(lambda: sum(result.operation == "send" for result in results) == 2)
@@ -303,10 +309,12 @@ def test_public_items_and_current_plan_keep_turn_boundaries(qtbot: QtBot) -> Non
         panel.transcript.document().find("停止後の通知").charFormat().fontWeight()
         != QFont.Weight.Bold
     )
+    retained = panel.transcript.toPlainText()
+    plan = panel.plan_panel.view.toPlainText()
     panel.activate(2)
     panel.handle_event(ServiceEvent(1, PlanEvent("new", (PlanStep("旧接続", "pending"),))))
-    assert panel.transcript.toPlainText() == ""
-    assert panel.plan_panel.view.toPlainText() == "—"
+    assert panel.transcript.toPlainText() == retained
+    assert panel.plan_panel.view.toPlainText() == plan
 
 
 def test_current_plan_updates_keep_selection_formatting_and_viewport(qtbot: QtBot) -> None:
@@ -604,12 +612,75 @@ def test_late_turn_notifications_after_stop_do_not_reopen_instruction_delivery(
     assert instructions == ["現在地を確認", "現在地を確認", "次の指示"]
 
 
+@pytest.mark.parametrize("editable", [True, False])
+def test_login_browser_failure_keeps_url_and_authentication_for_manual_retry(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, editable: bool
+) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    panel = window.connection
+    dialog = SettingsDialog(tmp_path / "settings.toml", window)
+    qtbot.addWidget(dialog)
+    dialog.codex_form.insertRow(0, panel.codex_settings)
+    panel.codex_settings.show()
+    dialog.tabs.setCurrentIndex(dialog.codex_tab)
+    dialog.set_editable(editable)
+    opened: list[QUrl] = []
+    logins: list[bool] = []
+
+    def open_url(url: QUrl) -> bool:
+        opened.append(url)
+        return len(opened) > 1
+
+    monkeypatch.setattr(panel, "_open_url", open_url)
+    panel.login_requested.connect(lambda: logins.append(True))
+    panel.activate(1)
+    panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
+    panel.handle_result(ServiceResult(1, "connect"))
+    panel.login_action.trigger()
+    panel.handle_event(ServiceEvent(1, SessionStatus("authenticating")))
+    login_url = "https://example.invalid/auth"
+    panel.handle_event(ServiceEvent(1, LoginEvent(login_url)))
+    status = panel.status.text()
+    window.show()
+    dialog.show()
+    qtbot.waitUntil(panel.open_login_button.isVisible)
+    assert panel.open_login_button.isEnabled()
+    assert not opened
+    qtbot.mouseClick(panel.open_login_button, Qt.MouseButton.LeftButton)
+    assert opened == [QUrl(login_url)]
+    assert "codex" in window.notifications.notices
+    notice = window.notifications.notices["codex"]
+    assert login_url not in "\n".join((notice.title, notice.explanation, notice.details))
+    assert window.notifications.entry_action.isEnabled()
+    assert window.notifications.banner.isVisible()
+    assert panel.login_url.text() == login_url
+    assert panel.login_url.isEnabled()
+    panel.login_url.selectAll()
+    assert panel.login_url.selectedText() == login_url
+    assert panel.status.text() == status
+    assert panel.disconnect_action.isEnabled()
+    assert not panel.login_action.isEnabled()
+    assert panel.open_login_button.isVisible()
+    qtbot.mouseClick(panel.open_login_button, Qt.MouseButton.LeftButton)
+    assert opened == [QUrl(login_url), QUrl(login_url)]
+    assert window.notifications.notices["codex"] is notice
+    assert panel.login_url.text() == login_url
+    assert panel.status.text() == status
+    assert logins == [True]
+
+
 @pytest.mark.parametrize("edited_draft", [False, True])
 def test_panel_login_text_send_failure_interrupt_and_disconnect(
     qtbot: QtBot, *, edited_draft: bool
 ) -> None:
     opened: list[QUrl] = []
-    panel = ConnectionPanel(open_url=lambda url: bool(opened.append(url)))
+
+    def open_url(url: QUrl) -> bool:
+        opened.append(url)
+        return True
+
+    panel = ConnectionPanel(open_url=open_url)
     qtbot.addWidget(panel)
     panel.show()
     sent: list[str] = []
@@ -662,9 +733,12 @@ def test_panel_login_text_send_failure_interrupt_and_disconnect(
 def test_shell_connect_uses_saved_snapshot_without_automatic_start(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    saved = Settings(web_search_enabled=False, memory_enabled=False, approvals_reviewer="user")
+    save_settings(tmp_path / "settings.toml", saved)
     service = CodexServiceThread(tmp_path, CaptureReader(CaptureSnapshot))
     shell = ApplicationShell(tmp_path / "settings.toml", service=service)
     snapshots: list[ConnectionOptions] = []
+    applied: list[ExecutionSettings] = []
 
     def capture(options: ConnectionOptions) -> int:
         snapshots.append(options)
@@ -672,12 +746,22 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
 
     # Replace only the GUI command boundary; no runtime launches in this test.
     monkeypatch.setattr(service, "connect_runtime", capture)
+    monkeypatch.setattr(service, "set_execution_settings", applied.append)
     shell.start()
     try:
         qtbot.waitUntil(lambda: shell.ready)
         assert not snapshots
+        assert applied == [ExecutionSettings(False, False, "user")]
         shell.open_settings()
         assert shell.dialog is not None
+        shell.dialog.set_values(
+            replace(
+                saved,
+                web_search_enabled=True,
+                memory_enabled=True,
+                approvals_reviewer="auto_review",
+            )
+        )
         shell.dialog.model.setText("unsaved")
         assert not snapshots
         shell.dialog.tabs.setCurrentIndex(shell.dialog.codex_tab)
@@ -688,7 +772,10 @@ def test_shell_connect_uses_saved_snapshot_without_automatic_start(
         panel.server_button.setFocus()
         qtbot.keyClick(panel.server_button, Qt.Key.Key_Return)
         assert len(snapshots) == 1
-        assert snapshots[0] == ConnectionOptions(tmp_path / "runtime")
+        assert snapshots[0] == ConnectionOptions(
+            tmp_path / "runtime", execution_settings=ExecutionSettings(False, False, "user")
+        )
+        assert applied == [ExecutionSettings(False, False, "user")]
         panel.handle_event(ServiceEvent(1, SessionStatus("login_required")))
         panel.handle_result(ServiceResult(1, "connect"))
         logins: list[bool] = []
@@ -800,8 +887,10 @@ def test_questions_require_each_answer_and_expire_before_late_gui_actions(qtbot:
     assert not pending_record.is_live
     pending_view.submit_button.click()
     assert len(answers) == 1
+    retained = dict(panel.requests)
     panel.handle_event(ServiceEvent(5, request))
-    assert not panel.requests
+    assert panel.requests == retained
+    assert not any(record.is_live for record in panel.requests.values())
 
 
 @pytest.mark.parametrize("outcome", ["sent", "not_sent", "unknown"])
@@ -1047,7 +1136,7 @@ def test_invalid_defaults_keep_login_and_selection_but_block_send_and_resume(
         ServiceEvent(1, ConversationStatus(goal=GoalState("保持した目標", "paused")))
     )
     assert panel.disconnect_action.isEnabled()
-    assert not panel.plan_panel.clear_button.isEnabled()
+    assert panel.plan_panel.clear_button.isEnabled()
     assert not panel.plan_panel.resume_button.isEnabled()
     assert not panel.send_button.isEnabled()
     panel.composer.goal_mode.click()

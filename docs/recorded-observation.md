@@ -2,26 +2,25 @@
 
 Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](codex-gui.md)に結合し、MCP経由で同じ画像をCodexへ返します。
 
-入口は`gigas.storage.project.ProjectWriter`と`gigas.services.observation.ObservationService`です。共通の非同期保存は`gigas.services.recording.RecordingService`が担当します。元画像には[映像取得API](video-api.md)の不変な`Frame`を使います。
+## 単独のゲームI/O記録
 
-`ProjectWriter`はアプリが原記録を書き込むための所有者です。アプリが現在の記録先に一つ保持し、観測サービスはその参照を借ります。プロジェクト未選択のチャットにもアプリ管理の記録先を用意します。観測ごとに作成・終了するものではなく、MCP接続やCodexの会話自体も管理しません。
+`gigas.storage.records.GameIoRecordWriter`は、呼出し側が指定したフォルダーへゲームI/Oと本文を記録する同期APIです。Project・Codexの会話や接続は不要です。呼出し側が保存先と開始・終了を管理し、writerは`events.jsonl`と`observations/<observation-id>.png`を保存します。`.gigas.lock`は同じ保存先への書込所有権に使います。
 
-観測サービスは加工・符号化した画像を返し、同じ画像・取得時刻・IDを別の非同期処理で保存します。保存開始・完了は応答の前提ではありません。[MCP公開部](observation-mcp.md)は同じObservationを応答へ包装します。会話はCodexの永続threadとして保持し、原記録には実thread IDとの対応を保存します。公開本文・推論要約・活動などの対話記録も共通の`RecordingService`へ非同期投入します。解釈を待って画像保存を遅らせたり、保存済みの原観測を解釈結果で書き換えたりしません。Codexは[接続時に許可された`memory/`](codex.md)を編集できます。
+`GameIoRecordWriter.create(path)`は、親が既にあり、保存先自体は存在しない場合に作成します。`open(path)`は既存の保存先を開き、events.jsonl・observationsがなければ作成します。祖先フォルダーの作成、既存資料の初期化、過去ログの読込・検査は行いません。どちらも成功時はwriterを返し、使用後は`close()`で所有権を解放してください。同期処理なのでGUIスレッドやイベントループ上で直接呼ばないでください。
 
-## 一枚を保存する
-
-`ProjectWriter.create(path)`は、親ディレクトリが存在し、保存先自体は存在しない場合にだけ作成します。既存プロジェクトには`ProjectWriter.open(path)`を使います。どちらも同期処理なので、GUIスレッドやイベントループ上で直接実行しないでください。
-
-次の例は機器を使わず、16×16の青いBGR画像を一時プロジェクトへ保存します。書込可能な作業ディレクトリで`uv run python example.py`を実行してください。一時ディレクトリは例の終了時に削除されます。
+次の例は機器を使わず、一時フォルダーへ提出本文・入力開始・観測・入力結果・確定本文を保存します。入力結果は例示用の値で、物理入力を行っていません。
 
 ```python
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from gigas.game_io.capture.models import Frame
+from gigas.game_io.input.models import InputStep
 from gigas.game_io.observation import Observation
-from gigas.storage.project import ProjectWriter
+from gigas.storage.input_events import OperationFinished, OperationStarted
+from gigas.storage.records import GameIoRecordWriter
 
 frame = Frame(
     bgr=bytes([255, 0, 0]) * (16 * 16),
@@ -32,44 +31,64 @@ frame = Frame(
     captured_at=datetime.now(UTC),
     monotonic_ns=0,
 )
-
 with TemporaryDirectory(dir=Path.cwd()) as temporary:
-    writer = ProjectWriter.create(Path(temporary) / "project")
-    try:
+    with closing(GameIoRecordWriter.create(Path(temporary) / "records")) as writer:
+        writer.record_dialogue("dialogue.submitted", "現在の画面を確認してください")
+        writer.record_input(OperationStarted("operation-1", (InputStep("wait", 100),)))
         observation = Observation.from_frame(frame)
         writer.record(observation)
-        saved_image = writer.path / observation.image_path
-        assert saved_image.read_bytes() == observation.png_bytes
-        assert observation.captured_at == frame.captured_at
-    finally:
-        writer.close()
+        writer.record_input(
+            OperationFinished(
+                "operation-1", "completed", 1, observation_id=observation.observation_id
+            )
+        )
+        writer.record_dialogue("dialogue.message", "画面を確認しました。")
+        assert (writer.path / observation.image_path).read_bytes() == observation.png_bytes
 ```
 
-`Observation.from_frame(frame, resolution="full_hd")`が全画面を比率維持で縮小してPNGへ一度だけ符号化し、観測IDを発行します。`resolution`は`original`（元寸法）、`full_hd`（1920×1080の枠、既定）、`hd`（1280×720の枠）です。小さい画像は拡大しません。`writer.record(observation)`はそのPNGとJSONL一行を保存し、成功時は`None`を返します。保存時の再符号化は行いません。`observation_id`は`obs-`にUUID4を続けた値、`image_path`は`observations/<observation_id>.png`です。同じFrameから再び`Observation`を作れば新しいIDになります。既に保存した同じ観測を再度保存しようとすると、既存画像の上書きを拒否します。
+各メソッドは成功時に`None`を返します。`record_dialogue(kind, text)`のkindは`dialogue.submitted`または`dialogue.message`です。提出の受付結果や最終回答をwriterが判定することはありません。`record_input(event)`の開始と結果はoperation_idで対応付け、画像があればobservation_idを残します。`record(observation)`は元のPNG bytesを再符号化せずに保存し、同じIDの画像が既にあれば上書きを拒否します。
 
-入力画像の対応範囲は幅16〜3840、高さ16〜2160、符号化後32 MiB以下です。切り抜き・拡大を行わず、プレビューの黒帯や表示倍率も持ち込みません。`Observation.from_frame()`は加工・符号化だけを行い、プロジェクトへ保存しません。
+JSONLの共通項目は`schema_version: 1`、行組立時のUTC時刻`recorded_at`、`type`、`payload`です。本文payloadは`{"text": "本文"}`だけです。入力開始payloadはoperation_idと操作配列sequence、結果payloadはoperation_id・result・completed_steps・input_sent・neutral、指定されたobservation_idと空でないphase・reasonです。観測payloadはobservation_id・captured_at・image_path・image・source_frameを持ち、imageとsource_frameはそれぞれwidth・heightだけです。captured_atは元Frameの取得時刻を保持します。イベント連番、Project・thread・turn・eventのID、取得サービスのgeneration・sequence、MIMEは保存しません。
 
-`Observation`は確定した`png_bytes`、`width`・`height`、固定の`mime_type == "image/png"`と、観測ID・元取得時刻`captured_at`・`source_frame`を持ちます。`source_frame`は`FrameSource`型の世代・連番・元幅・元高さだけで、元FrameやBGR画像本体は保持しません。保存と配送には同じPNG bytesを使用できます。
+追記は標準ライブラリでJSON一行と改行を末尾へ書きます。既存の壊れた行や末尾に改行がなくても検査・修復せず、そのまま追記します。その結果、新しい行も読めなくなる可能性があります。復旧は利用者がwriter終了後に行ってください。記録のJSON化・UTF-8変換、画像公開、JSONLのopen・write・closeの失敗や短いwriteは`RecordError`で通知し、次の新しい記録は受け付けます。失敗した記録を自動再送せず、JSONL失敗前に公開した画像も残します。
+
+同じwriterへの同期処理の重複・書込中のcloseは`RecordBusyError`（RecordErrorの派生型）になります。呼出し側で直列化し、処理を回収してからcloseしてください。close後の記録は拒否し、closeの再呼出しは何もしません。OSロックは協調するwriter間の排他であり、画像・ログの閲覧は妨げません。稼働中の原記録の編集とロックファイルの削除は避けてください。保存は通常のwrite/closeで、fsyncや画像・JSONLの一括更新は保証しません。
+
+## アプリの記録先
+
+GIGASはProjectの作業フォルダー、または未所属会話の作業フォルダー配下の`records/<thread-id>/`を記録先にします。実際のthread IDを取得し、writerを結び付けてから通常送信・Goal開始へ進みます。Projectや会話の管理はapp-serverが担当し、writerは管理ファイル・攻略資料の雛形を作りません。
+
+本文の取得元はユーザーの提出イベントと、進捗報告を含むCodexの確定messageです。提出を受付成功と扱わず、最終回答の選別・未完本文の補完もしません。公開推論要約・Plan・activity・質問回答・承認操作・Goal状態はJSONLへ残しません。会話履歴をこの記録から復元する機能はありません。
+
+保持期限・容量上限・自動削除は設けません。利用者はアプリ終了後に会話のrecordsフォルダーを手動削除できます。作業フォルダーが存在する場合だけ、次の明示実行で必要なrecordsを作成します。作業フォルダー自体が欠けた場合は再作成せず、実行前に失敗を通知します。旧形式の検査・移行・互換は行わず、schema_versionだけで旧記録と区別できるとは扱いません。
+
+## 画像と入力結果
+
+`Observation.from_frame(frame, resolution="full_hd")`は全画面を比率維持で縮小し、一度だけPNGへ符号化します。`resolution`は`original`、`full_hd`（1920×1080の枠、既定）、`hd`（1280×720の枠）です。小さい画像は拡大せず、切り抜きやプレビューの黒帯も加えません。入力は幅16〜3840・高さ16〜2160、符号化後は32 MiB以下です。
+
+`Observation`はPNG bytes、出力寸法、`mime_type == "image/png"`、観測ID、元取得時刻`captured_at`、`source_frame`を持ちます。観測IDは`obs-`にUUID4を続けた値で、同じFrameから再び生成すれば新しいIDになります。`image_path`は記録先からの相対パスです。画像の保存先だけはIDを確認して固定し、その他の内容の意味・実在・ゲーム内成否は呼出し側が扱います。
+
+`source_frame`の世代・連番・元寸法は取得サービスの情報で、元FrameやBGR画像本体を保持しません。JSONLには元寸法だけを保存します。[MCP応答](observation-mcp.md)とはメタデータの項目が異なりますが、PNG bytesと観測IDは共通です。`captured_at`は元FrameのPC取得時刻であり、カメラの撮影時刻や入力反映時刻は保証しません。
+
+入力結果の`result`は`completed`・`interrupted`・`failed`、`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`です。後二者の既定値はnone・not_needed。`completed_steps`は解除送信または待機を完了した要素数で、ゲーム内の成功数ではありません。入力完了後の観測失敗では`result: "completed"`と`phase: "observe"`が併存し得ます。
+
+操作はoperation_id、画像はobservation_idで対応付けます。行順は追記順で、観測行が入力結果より先に残る場合もあります。行の隣接関係や時刻から特定のユーザー指示への帰属を推定しません。
 
 ## 最新画像を非同期で観測する
 
-`ObservationService(reader, recording, resolution="full_hd", thread_id=None, on_save_error=...)`には、既存の`CaptureService.reader()`と、組立側が生成した共通の`RecordingService(writer)`を渡します。サービスが機器を開始・再接続したり、writerを開き直したりすることはありません。
+`ObservationService(reader, recording, resolution="full_hd", on_save_error=...)`へ、既存の`CaptureService.reader()`と共通の`RecordingService(writer)`を渡します。サービスは機器を開始・再接続せず、writerも開き直しません。
 
-`await service.observe()`はsnapshotを一度読み、`phase == "streaming"`で画像がある場合に採用します。呼出しより前に取得した最新キャッシュを使い、新しいフレームを待ちません。採用前の取得停止・エラーでは失敗し、採用後に取得が停止しても、その画像の保存を続けます。`captured_at`は元Frameの時刻を保持します。撮像時刻、機器内部の遅延、操作後の画面であることは保証しません。
+`await service.observe()`はsnapshotを一度読み、`phase == "streaming"`で有効な画像がある場合に採用します。要求前の最新キャッシュを使い、新しいFrameを待ちません。採用後に取得が停止しても、その画像の符号化・保存は続けます。
 
-加工・符号化を別スレッドで行い、完成した同じ`Observation`を返却と非同期保存へ渡します。保存中も次の観測を取得・符号化して返せます。`BUSY`になるのは画像の加工・符号化自体が進行中の場合だけです。`resolution`の変更は同じイベントループ上で行い、変更後に開始する観測へ反映します。実行中の画像は変更しません。
+加工・符号化は別スレッドで行い、完成した同じObservationを返却と非同期保存へ渡します。保存中も次の観測を返せます。`BUSY`は加工・符号化が進行中の場合だけです。`resolution`の変更は同じイベントループで行い、以後に開始する観測へ反映します。観測失敗のcodeは`DEVICE_UNAVAILABLE`・`BUSY`・`OBSERVATION_ENCODING_ERROR`です。
 
-`thread_id`を指定すると、その実会話IDを観測記録へ関連付けます。観測開始時にIDを確定し、符号化・保存中に属性を変更しても先行観測のIDを差し替えません。単独Python観測では`None`として会話参照を省略できます。
+`RecordingService`は一つのwriterを借り、画像・入力・本文の保存だけを直列化します。同じwriterに複数の保存サービスを作らないでください。`submit_observation(observation, on_error=...)`、`submit_input(event)`、`submit_dialogue(kind, text)`は保存を待たずに戻ります。観測・入力・停止の経路も保存完了を待ちません。
 
-`recording`は組立側が所有する共通の保存窓口です。観測・会話・入力の記録をこの一つの窓口へ渡し、保存処理だけを`asyncio.Lock`で直列化します。このロックを画像の加工・返却では待ちません。同じwriter用に別の記録サービスを作らないでください。独自キュー、保存見送り、保持上限は設けていません。プロセスロックによってアプリ内の並列書込が禁止されるわけではありません。
-
-保存失敗は`on_save_error(observation, error)`へ通知し、観測成功を取り消しません。コールバックは同じイベントループで呼ばれるため、速やかに戻してください。省略時は観測IDと保存先をログへ記録します。`observe()`の成功直後にファイルが存在する保証はなく、障害時に未保存画像が失われる場合があります。
+保存失敗は`recording.on_failure(error)`へ通知し、観測固有の`on_save_error(observation, error)`にも通知します。観測成功や完了済み入力を取り消しません。コールバックは同じイベントループで速やかに戻してください。省略時の詳細はloggingへ出力します。`observe()`の成功直後に画像ファイルがある保証はありません。
 
 ### 取消しと終了
 
-`observe()`の要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。新規要求を止めた後、`await service.drain()`で符号化を回収し、`await recording.drain()`で保存を回収します。観測サービスは共有保存の寿命を所有しません。最後の符号化が失敗しても保存を回収してからwriterを閉じてください。
-
-保存エラーはcallbackまたはログで別途通知し、`recording.drain()`の完了は保存成功を意味しません。待機自体の取消しでは資源を解放せず、同じ所有者で回収をやり直します。要求取消しによって保存済み画像を削除しません。
+観測要求を取り消しても、投入済みの符号化・保存は完了または失敗まで続きます。新規要求を止め、符号化を`await service.drain()`、保存を`await recording.drain()`で回収してからwriterを閉じます。保存drainの完了は全件の保存成功を意味せず、失敗は通知やログで確認します。
 
 ```python
 import asyncio
@@ -77,11 +96,11 @@ import asyncio
 from gigas.game_io.observation import ObservationError
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage.project import ProjectWriter
+from gigas.storage.records import GameIoRecordWriter
 
 
-async def close_project(
-    service: ObservationService, recording: RecordingService, writer: ProjectWriter
+async def close_records(
+    service: ObservationService, recording: RecordingService, writer: GameIoRecordWriter
 ) -> None:
     encoding_error = None
     try:
@@ -94,67 +113,6 @@ async def close_project(
         raise encoding_error
 ```
 
-プロジェクト未選択のチャットは切断時にwriterを閉じ、記録自体は残します。明示選択したプロジェクトのwriterは切断後も保持し、保存先の切替やアプリ終了で閉じます。
+回収待機自体の取消しでは所有権を捨てず、同じ所有者でdrainをやり直してから閉じます。GIGASは切断・終了でMCP受付を閉じ、開始済み処理と保存を回収してwriterを閉じます。画像・記録自体は残します。
 
-## 操作後の画像
-
-操作列の最後の解除・末尾waitが完了した後に、単独observeと同じ処理で最新キャッシュを一度取得する。新しいFrameを待たず、操作前や前回観測と同じFrameも許容する。画像取得時刻やゲームへの入力反映は保証しない。
-
-`service.observe(thread_id=...)`で操作の会話IDを明示できます。省略時はサービスの会話IDを使います。入力枠は列と解除の終了時に解放するため、画像を選ぶ前や符号化中に次の入力が始まる場合があります。共通停止は入力列の解除・回収を待ち、画像や保存の完成は待ちません。観測要求の取消し・期限は当該応答だけを取り消し、開始済み符号化・保存と別の入力列を維持します。操作結果は応答組立の終了時に一度記録し、取得できた観測IDだけを対応付けます。生成したPNGは応答と非同期保存で共用します。
-
-## 保存形式と読込
-
-プロジェクトには`project.json`、`events.jsonl`、`observations/`、OSロック用の`.gigas.lock`を置きます。管理情報はスキーマ版、プロジェクトID、作成UTC時刻です。ログの共通項目はスキーマ版、イベントID、追記順、記録UTC時刻、イベント種別、プロジェクトID、payloadです。
-
-`observation.recorded`のpayloadには、観測ID、元Frameの取得UTC時刻、画像相対パス、元Frameの世代・連番・幅・高さを記録します。`image`には確定したPNGの`mime_type`・`width`・`height`を記録し、元寸法と区別します。世代・連番は取得サービスの寿命内の補助情報で、観測の永続識別には観測IDを使います。記録時刻と画像取得時刻は別です。
-
-`analysis`欄は生成しません。Codexの解釈を後から原観測へ埋める欄も設けません。過去payloadは共通形式のまま読み、移行・再書込み・新旧の二重書込みは行いません。
-
-`open()`と`reload()`は管理情報とJSONLを検査します。未知のイベント種別や余剰項目は共通形式が正常なら保持し、連番の欠番も許容します。次の記録は最後のsequenceに1を加えて追記します。過去の画像を全件読み込む検査はせず、過去画像の欠損だけでは新規記録を拒否しません。
-
-管理情報のproject IDは非空文字列なら読み込めます。JSONLでは対応schema・同じproject ID・bool以外の正整数で増加するsequence・非空文字列のtype・payloadキーを要求します。管理情報の作成時刻とイベントのID・発生時刻は、欠落や型違いでも読込拒否の条件にしません。新しく生成するID・時刻の形式は変わりません。
-
-未知のスキーマ版、不正なUTF-8・JSON・共通項目・追記順、改行で終わらない末尾行は読込失敗になります。payloadは意味を再検査せず、過去の入力列・画像パス・旧イベントも値のまま保持します。JSONLでは問題行と、その前の正常に読めた行数をエラーに示します。原本の切り詰め、自動修復、不完全なプロジェクトの再初期化は行いません。
-
-## 会話と観測の対応
-
-`writer.record_thread(thread_id)`は実際のCodex会話IDを記録します。アプリは`recording.submit_thread(thread_id)`で非同期投入し、保存を待たずにturnまたはGoalの要求へ進みます。失敗は既存の通知へ残し、入力の受付とは分離します。
-
-`writer.record(observation, thread_id=thread_id)`は同じIDを`observation.recorded`のpayloadへ付けます。会話IDは呼出側で採用した値を渡し、writerは空白や実在・帰属を検査し直しません。writerは現在の会話やID索引を持ちません。単独Python観測では会話がないため省略できます。会話の開始記録も画像と同じJSONLへ採番して追記し、追記結果が不明なら再読込まで次の追記を止めます。
-
-対話・観測・入力の内容は呼出側の責任で組み立てます。writerはID・時刻・寸法などの内容を再検査せず、イベント全体を一度だけJSON化します。任意の不正値を必ず拒否する保証はありません。画像の書込先だけは`obs-UUID4`のIDを確認して`observations/<ID>.png`へ固定し、保存先と記録するパスを一致させます。PNGの再符号化・再デコードは行いません。
-
-## 入力の開始・結果を記録する
-
-`gigas.storage.input_events`の変更不能な値を`writer.record_input(event)`へ渡すと、同じJSONLへ入力イベントを追記します。
-
-| 型 | 保存する内容 |
-|---|---|
-| `OperationStarted(operation_id, sequence, thread_id, turn_id=None)` | 検証済み`InputStep`のタプルを、ボタン・スティック・タッチ・指定時間を持つJSON配列として`input.operation_started`へ記録 |
-| `OperationFinished(operation_id, result, completed_steps, ...)` | 完了要素数、結果、確定した`observation_id`を`input.operation_finished`へ記録 |
-
-`OperationFinished.result`は`completed`・`interrupted`・`failed`です。中断・失敗時は`phase`と`reason`を指定します。`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`で、送出済みと実機反映を区別します。省略値はそれぞれ`none`・`not_needed`です。`observation_id`は確定した場合だけ指定し、画像保存が後から失敗しても消しません。`turn_id`は実値が判明している場合だけ指定します。port・baud・protocolは入力イベントへ含めません。
-
-入力と観測の応答を組み立てる会話側の処理が、共通の`recording`へ記録を提出します。入力サービス自身は記録先や会話IDを持ちません。開始・結果ともに、変更不能なイベントを`recording.submit_input(event)`で投入します。入力開始・停止・解除は保存完了を待ちません。受付済み保存は窓口が所有し、入力要求の取消し後も継続します。保存の成否で入力受付を切り替えません。操作記録はoperation_idで対応付け、特定のユーザー指示やturnへの帰属を推定しません。
-
-`recording.on_failure`へ設定した関数は、会話・入力・画像のすべての保存失敗を`Exception`として受け取ります。アプリは失敗を診断へ残し、保存失敗だけで入力を止めません。観測固有の`on_save_error`も通知されます。コールバックは同じイベントループで速やかに戻してください。`submit_input`は保存を待たないため、後で起きた保存例外を呼出側へ返しません。同期の`writer.record_input`を直接呼ぶ場合は、その呼出しから保存例外が返ります。
-
-通常終了は新しい要求を止め、`await service.drain()`で観測の符号化を回収し、続けて`await recording.drain()`で受付済み保存を回収してからwriterを閉じます。符号化に失敗した場合も保存の回収は必要です。`RecordingService`を単独で使用する場合は保存の回収だけを行います。`recording.drain()`は保存を再試行せず、保存例外を呼出側へ再送出しません。失敗はコールバックとログで確認します。回収完了は全件の保存成功を意味しません。
-
-## 保存失敗と書込所有権
-
-| 結果 | 保存物と次の操作 |
-|---|---|
-| PNG符号化の失敗 | 観測が失敗します。画像とJSONLは書きません |
-| 画像保存の失敗 | 観測成功は変えず、保存失敗を通知します。JSONLへまだ触れていないため、writerは引き続き使用できます |
-| 記録のJSON化・UTF-8変換の失敗 | `ProjectError`を報告し、JSONLと次のsequenceを変えません。writerは引き続き使用でき、公開済み画像は残ります |
-| JSONLのopen・write・closeの失敗、短いwrite | 公開済みPNGと原記録を保持し、次の追記を拒否します。明示的な`reload()`で検査が通るまで再開できません |
-| 保存完了後の要求取消し | 観測記録は保持します。保存成功を応答配送の成功とは扱いません |
-
-観測エラーの`code`は`DEVICE_UNAVAILABLE`、`BUSY`、`OBSERVATION_ENCODING_ERROR`です。作成・読込・保存の失敗は`ProjectError`、同期処理中の二重書込・再読込・終了はその派生型`ProjectBusyError`です。エラー後の自動再試行はありません。
-
-アプリの原記録writerは、現在の記録先に一つです。`.gigas.lock`のWindows OSファイルロックにより、同じ規約を使う別writerの取得を拒否します。`.gigas.lock`が存在するだけでは使用中とは判断せず、プロセス終了後は再度開けます。利用中にロックファイルを削除したり、アプリ管理の`project.json`・`events.jsonl`・`observations/`を別経路から変更したりしないでください。ネットワーク共有と外部編集の競合解決には対応していません。
-
-このロックは、画像・ログの読取や別ファイルの`memory/`編集を禁止するものではありません。対話記録も同じアプリ所有writerを使い、MCPや通知処理がそれぞれ別writerを開く構成にはしません。アプリのCodex接続は`memory/`だけを書込先にしたworkspace-writeで動作します。原記録はアプリが書き込み、Codexへは読取用に渡します。接続条件と確認範囲は[Codex接続API](codex.md)を参照してください。
-
-metadata・画像・JSONLは通常のwrite/closeで保存を終え、明示flush/fsyncによる安定記憶への同期は行いません。画像は同じディレクトリの一時ファイルをcloseしてから既存画像を上書きせず確定し、その後にJSONLへ追記します。異常終了・電源断では直近の画像や記録が欠ける場合があり、画像とログの一括更新も保証しません。
+画像は同じフォルダーの一時ファイルをcloseしてから上書きせず確定し、その後JSONLへ追記します。画像の欠損検査、余剰画像の削除、ネットワーク共有と外部編集の競合解決は扱いません。異常終了では直近の画像・記録が欠ける場合があります。

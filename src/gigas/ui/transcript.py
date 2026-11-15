@@ -1,7 +1,7 @@
 """Item-based conversation text that retains selection and the visible passage."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import (
@@ -14,15 +14,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QTextBrowser, QWidget
 
+from gigas.runtime.codex.history import HistoryKind
+
 if TYPE_CHECKING:
     from PySide6.QtCore import QObject
     from PySide6.QtGui import QResizeEvent
 
+    from gigas.runtime.codex.history import HistoryEntry
     from gigas.runtime.codex.models import PlanStep
-
-type HistoryKind = Literal[
-    "user", "assistant", "reasoning", "activity", "plan", "request", "answer"
-]
 
 _HEADINGS = {
     "user": "あなた",
@@ -223,6 +222,27 @@ class Transcript(QTextBrowser):
         for item in self._items.values():
             if item.kind == "reasoning":
                 self._render_item(item)
+
+    def prepend_items(self, entries: "tuple[HistoryEntry, ...]") -> None:
+        """Insert an older chronological page while retaining the displayed items.
+
+        Already present keys are ignored, preserving newer live text and controls.
+        The existing document is edited in place; selection, its direction and
+        visible passage follow the same rules as update_item. An unselected tail
+        remains at the tail. Hidden reasoning is retained for later display.
+
+        Args:
+            entries: Oldest-first entries from the preceding public history page.
+                Entries contain only text and never create request controls.
+        """
+        added = {
+            entry.key: _Item(entry.kind, 0, text=entry.text)
+            for entry in entries
+            if entry.key not in self._items
+        }
+        self._items = added | self._items
+        for item in added.values():
+            self._render_item(item)
 
     def clear(self) -> None:
         """Discard all received items and delete attached or hidden controls."""

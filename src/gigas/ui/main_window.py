@@ -20,6 +20,7 @@ from gigas.game_io.input.config import PROTOCOLS
 from gigas.game_io.input.serial import SerialPort
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.connection_panel import ConnectionPanel
+from gigas.ui.conversation_sidebar import ConversationSidebar
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.geometry import fit_to_screen
 from gigas.ui.layout import WINDOW_SIZE_PRESETS, fit_window_size_preset
@@ -131,11 +132,22 @@ class MainWindow(QMainWindow):
         self.settings_action.setIcon(QIcon(str(Path(__file__).with_name("settings.svg"))))
         self.settings_button = QToolButton(self)
         self.settings_button.setDefaultAction(self.settings_action)
-        self.settings_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.settings_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.settings_button.setAccessibleName("設定")
         self.settings_button.setToolTip("")
         self.settings_button.setAutoRaise(True)
-        self.menuBar().setCornerWidget(self.settings_button, Qt.Corner.TopLeftCorner)
+        self.sidebar_button = QToolButton(self)
+        self.sidebar_button.setCheckable(True)
+        self.sidebar_button.setChecked(True)
+        self.sidebar_button.setIcon(QIcon(str(Path(__file__).with_name("sidebar.svg"))))
+        self.sidebar_button.setAccessibleName("サイドバー")
+        self.sidebar_button.setAutoRaise(True)
+        corner = QWidget(self)
+        corner_layout = QHBoxLayout(corner)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.addWidget(self.sidebar_button)
+        corner_layout.addWidget(self.settings_button)
+        self.menuBar().setCornerWidget(corner, Qt.Corner.TopLeftCorner)
         self.project_menu = self.menuBar().addMenu("プロジェクト")
         self.new_project_action = self.project_menu.addAction("新規作成")
         self.new_project_action.triggered.connect(self.new_project_requested)
@@ -175,6 +187,7 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
         self.connection = ConnectionPanel(self.splitter)
+        self.conversation_heading = self.connection.heading
         self.connection.setMinimumWidth(320)
         self.right_pane = QWidget(self.splitter)
         right_layout = QVBoxLayout(self.right_pane)
@@ -201,7 +214,13 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.right_pane)
         self.splitter.setStretchFactor(0, 2)
         self.splitter.setStretchFactor(1, 3)
-        layout.addWidget(self.splitter, 1)
+        self.sidebar = ConversationSidebar(central)
+        self.sidebar.setFixedWidth(232)
+        self.sidebar_button.toggled.connect(self.sidebar.setVisible)
+        panes = QHBoxLayout()
+        panes.addWidget(self.sidebar)
+        panes.addWidget(self.splitter, 1)
+        layout.addLayout(panes, 1)
         self.setCentralWidget(central)
         self.statusBar().setSizeGripEnabled(False)
         self._pane_statuses = _PaneStatuses(

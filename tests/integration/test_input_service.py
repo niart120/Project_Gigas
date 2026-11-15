@@ -14,7 +14,7 @@ from gigas.services import input as input_module
 from gigas.services.input import InputService, InputServiceError, OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
-from gigas.storage.project import ProjectWriter
+from gigas.storage.records import GameIoRecordWriter
 from tests.integration.test_observation_storage import sample_frame
 
 if TYPE_CHECKING:
@@ -57,7 +57,7 @@ class Device:
 class Harness:
     """Actual recording and observation services with a controllable input boundary."""
 
-    def __init__(self, writer: ProjectWriter) -> None:
+    def __init__(self, writer: GameIoRecordWriter) -> None:
         """Borrow the test writer and a streaming frame."""
         self.writer = writer
         self.frame = sample_frame()
@@ -92,7 +92,7 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path: Path) -> "Iterator[Harness]":
-    writer = ProjectWriter.create(tmp_path / "game")
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     value = Harness(writer)
 
     try:
@@ -231,6 +231,7 @@ def test_send_or_release_failure_closes_without_retry(harness: Harness, failure:
 def test_repeated_stop_during_release_keeps_busy_until_neutral_finishes() -> None:
     async def scenario() -> None:
         releasing, finish_release = asyncio.Event(), asyncio.Event()
+        changes: list[bool] = []
 
         class ReleasingDevice(Device):
             async def send(self, state: InputState) -> None:
@@ -239,10 +240,11 @@ def test_repeated_stop_during_release_keeps_busy_until_neutral_finishes() -> Non
                     releasing.set()
                     await finish_release.wait()
 
-        service, device = InputService(), ReleasingDevice()
+        service, device = InputService(on_busy_changed=changes.append), ReleasingDevice()
         await service.connect(device)
         started = service.start((press(duration=100000), press("B")))
         assert isinstance(started, tuple)
+        assert changes == [True]
         await device.pressed.wait()
         service.stop()
         await releasing.wait()
@@ -251,12 +253,49 @@ def test_repeated_stop_during_release_keeps_busy_until_neutral_finishes() -> Non
         assert isinstance(busy, OperationResult)
         assert busy.code == "BUSY"
         assert not started[1].done()
+        assert changes == [True]
+        assert service.busy
         finish_release.set()
         result = await service.drain_input()
         assert result is not None
         assert result.neutral == "sent"
+        assert changes == [True, False]
+        assert not service.busy
         assert device.calls == ["open", InputState(buttons=("A",)), InputState()]
         await service.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("outcome", ["complete", "failure", "cancel_before_start"])
+def test_input_busy_notifications_follow_admission_and_actual_completion(outcome: str) -> None:
+    async def scenario() -> None:
+        changes: list[bool] = []
+        service, device = InputService(on_busy_changed=changes.append), Device()
+        assert isinstance(service.start((press(),)), OperationResult)
+        assert changes == []
+        await service.connect(device)
+        assert isinstance(service.start((press("UNKNOWN"),)), OperationResult)
+        assert changes == []
+        device.fail_send = outcome == "failure"
+        started = service.start((press(),))
+        assert isinstance(started, tuple)
+        assert changes == [True]
+        assert service.busy
+        if outcome == "cancel_before_start":
+            service.stop()
+            assert changes == [True]
+        result = await service.drain_input()
+        assert changes == [True, False]
+        assert not service.busy
+        if outcome == "cancel_before_start":
+            assert result is None
+            assert device.calls == ["open"]
+        else:
+            assert result is not None
+            assert result.code == ("DEVICE_UNAVAILABLE" if outcome == "failure" else "OK")
+        await service.close()
+        assert changes == [True, False]
 
     asyncio.run(scenario())
 

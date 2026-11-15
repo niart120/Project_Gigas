@@ -1,13 +1,46 @@
+from dataclasses import replace
+
 import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
+from gigas.runtime.codex.models import ExecutionSettings
 from gigas.storage.settings import load_settings
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_settings_apply_contract import (
     app as app,  # noqa: PLC0414 -- shared isolated application fixture
 )
 from tests.integration.test_settings_apply_contract import open_editor
+
+
+def test_cancel_keeps_last_applied_execution_settings(
+    app: tuple[ApplicationShell, ControlledCapture],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell, capture = app
+    dialog = open_editor(shell, capture)
+    applied: list[ExecutionSettings] = []
+    monkeypatch.setattr(shell.service, "set_execution_settings", applied.append)
+    dialog.set_values(
+        replace(
+            dialog.values(),
+            web_search_enabled=False,
+            memory_enabled=False,
+            approvals_reviewer="user",
+        )
+    )
+    dialog.save_button.click()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    assert applied == [ExecutionSettings(False, False, "user")]
+    saved = shell.baseline
+    dialog.set_values(replace(saved, web_search_enabled=True, approvals_reviewer="auto_review"))
+    dialog.close_button.click()
+    assert not dialog.isVisible()
+    assert load_settings(shell.path) == saved
+    assert applied == [ExecutionSettings(False, False, "user")]
+    shell.open_settings()
+    assert dialog.values() == saved
 
 
 def test_ok_closes_after_save_before_first_frame(

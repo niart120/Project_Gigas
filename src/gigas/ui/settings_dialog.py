@@ -159,12 +159,22 @@ class SettingsDialog(QDialog):
         self.effort = self._text_field()
         self.model.setPlaceholderText("既定")
         self.effort.setPlaceholderText("既定")
-        self.auth_migration_button = QPushButton("APIキーからChatGPTに変更", self)
-        self.auth_migration_button.setAutoDefault(False)
-        self.auth_migration_button.hide()
-        self.auth_migration_button.clicked.connect(self._use_chatgpt)
         agent_form.addRow("モデル", self.model)
         agent_form.addRow("推論レベル", self.effort)
+        execution_form = self._group(self.codex_form, "実行")
+        self.web_search_enabled = QCheckBox("Web検索", self)
+        self.web_search_enabled.setChecked(True)
+        self.web_search_enabled.toggled.connect(self.changed)
+        execution_form.addRow(self.web_search_enabled)
+        self.memory_enabled = QCheckBox("自動記憶", self)
+        self.memory_enabled.setChecked(True)
+        self.memory_enabled.toggled.connect(self.changed)
+        execution_form.addRow(self.memory_enabled)
+        self.approvals_reviewer = QComboBox(self)
+        self.approvals_reviewer.addItem("代わりに承認", "auto_review")
+        self.approvals_reviewer.addItem("自分で承認", "user")
+        self.approvals_reviewer.currentIndexChanged.connect(self.changed)
+        execution_form.addRow("承認方法", self.approvals_reviewer)
         self.status = QLabel(self)
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
@@ -228,10 +238,6 @@ class SettingsDialog(QDialog):
         self._set_rate(field, default)
         field.currentIndexChanged.connect(self.changed)
         return field
-
-    def _use_chatgpt(self) -> None:
-        self._snapshot = replace(self._snapshot, auth_method="chatgpt")
-        self.changed.emit()
 
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
@@ -348,6 +354,9 @@ class SettingsDialog(QDialog):
             preview_letterbox=bool(self.preview_mode.currentData()),
             observation_resolution=self.observation_resolution.currentData(),
             show_reasoning=self.show_reasoning.isChecked(),
+            web_search_enabled=self.web_search_enabled.isChecked(),
+            memory_enabled=self.memory_enabled.isChecked(),
+            approvals_reviewer=self.approvals_reviewer.currentData(),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -380,6 +389,11 @@ class SettingsDialog(QDialog):
             )
             self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
             self.show_reasoning.setChecked(values.show_reasoning)
+            self.web_search_enabled.setChecked(values.web_search_enabled)
+            self.memory_enabled.setChecked(values.memory_enabled)
+            self.approvals_reviewer.setCurrentIndex(
+                self.approvals_reviewer.findData(values.approvals_reviewer)
+            )
             self.observation_resolution.setCurrentIndex(
                 self.observation_resolution.findData(values.observation_resolution)
             )
@@ -393,7 +407,6 @@ class SettingsDialog(QDialog):
         """Control editing during I/O while retaining copying and dialog closure."""
         for field in (self.model, self.effort):
             field.setReadOnly(not enabled)
-        self.auth_migration_button.setEnabled(enabled)
         for field in (
             self.serial_port,
             self.serial_protocol,
@@ -408,5 +421,8 @@ class SettingsDialog(QDialog):
             self.observation_resolution,
             self.preview_mode,
             self.show_reasoning,
+            self.web_search_enabled,
+            self.memory_enabled,
+            self.approvals_reviewer,
         ):
             field.setEnabled(enabled)

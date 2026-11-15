@@ -3,11 +3,12 @@
 import json
 from typing import TYPE_CHECKING, Literal
 
+from gigas.runtime.codex._execution_settings import config_overrides
 from gigas.runtime.codex.connection import CodexConnectionError, read_play_instructions
 from gigas.runtime.codex.models import GoalState
 
 if TYPE_CHECKING:
-    from gigas.runtime.codex.models import ModelSelection, ThreadConfiguration
+    from gigas.runtime.codex.models import ExecutionSettings, ModelSelection, ThreadConfiguration
     from gigas.runtime.codex.transport import JsonObject, JsonValue
 
 
@@ -24,74 +25,117 @@ def _text(value: "JsonValue") -> str:
 
 
 def thread_start_params(
-    configuration: "ThreadConfiguration", selection: "ModelSelection", server_config: "JsonValue"
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    *,
+    settings: "ExecutionSettings",
 ) -> "JsonObject":
-    """Build one thread request using the prepared archive and runtime configuration.
+    """Build one thread request using the prepared workspace and runtime configuration.
 
     Args:
-        configuration: Prepared archive directory and Gigas-owned MCP overrides.
+        configuration: Prepared workspace, Project assignment, and Gigas-owned MCP overrides.
         selection: Confirmed model selection from the connection's catalog.
-        server_config: Complete config/read response for the archive directory.
+        server_config: Complete config/read response for the workspace.
+        settings: Execution options captured before preparation began.
 
     Returns:
-        Parameters for thread/start. Only memory is writable; inherited MCP servers
-        are disabled before applying the application's endpoint overrides.
+        Parameters for thread/start with an explicit Project assignment. The workspace
+        is writable; inherited MCP servers are disabled before applying the application's
+        endpoint overrides. Packaged instructions contain no conversation-specific path.
 
     Raises:
         CodexConnectionError: Runtime configuration or packaged instructions are invalid.
         OSError: Packaged play instructions cannot be read.
         UnicodeError: Packaged play instructions are not UTF-8.
     """
+    return {
+        **_thread_params(configuration, selection, server_config, settings),
+        "projectId": configuration.project_id,
+        "ephemeral": False,
+    }
+
+
+def thread_resume_params(
+    thread_id: str,
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    *,
+    settings: "ExecutionSettings",
+) -> "JsonObject":
+    """Build an ID-based resume request with current settings and no history hydration.
+
+    Args:
+        thread_id: Saved server identity; no rollout path or reconstructed history is used.
+        configuration: Existing workspace and current application-owned MCP endpoint.
+            Project assignment is checked in the response, not changed by this request.
+        selection: Confirmed model and effort captured for this preparation.
+        server_config: Complete config/read response for the existing workspace.
+        settings: Execution options captured before preparation began.
+
+    Returns:
+        Parameters for thread/resume with excludeTurns enabled. The caller owns
+        prior subscription cleanup, resource binding and response validation.
+
+    Raises:
+        CodexConnectionError: The identity, runtime config or packaged instructions are invalid.
+        OSError: Packaged play instructions cannot be read.
+        UnicodeError: Packaged play instructions are not UTF-8.
+    """
+    return {
+        **_thread_params(configuration, selection, server_config, settings),
+        "threadId": _text(thread_id),
+        "excludeTurns": True,
+    }
+
+
+def _thread_params(
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    server_config: "JsonValue",
+    settings: "ExecutionSettings",
+) -> "JsonObject":
     servers = _object(_object(_object(server_config).get("config")).get("mcp_servers", {}))
     config: JsonObject = {}
     for name in servers:
         key = name if name.replace("_", "").isalnum() else json.dumps(name)
         config[f"mcp_servers.{key}.enabled"] = False
     config.update(configuration.mcp_config)
-    config.update(
-        {
-            "sandbox_workspace_write.writable_roots": [],
-            "sandbox_workspace_write.network_access": False,
-            "sandbox_workspace_write.exclude_tmpdir_env_var": True,
-            "sandbox_workspace_write.exclude_slash_tmp": True,
-        }
-    )
+    config.update(config_overrides(settings))
+    config["model_reasoning_effort"] = selection.effort
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")
-    instructions += (
-        f"\n\n観測の記録先: {configuration.cwd}\n"
-        "observeが返す観測IDの画像はobservations/<観測ID>.png、"
-        "取得時刻・元寸法・出力寸法はevents.jsonlに記録されます。"
-        "返された画像と保存画像は同じPNGです。保存は非同期なので、"
-        "応答直後にはファイルがなく、保存失敗や終了時の障害で残らない場合があります。"
-        "必要な過去画像は保存されている場合に参照してください。"
-        "\n案内は ../guide.md、現状メモは current.md、知識は notes/。"
-        "書込はこのmemory内だけに限定し、親の原記録は編集しない。"
-    )
-    memory = str(configuration.cwd / "memory")
+    cwd = str(configuration.cwd)
     return {
-        "cwd": memory,
+        "cwd": cwd,
         "model": selection.model,
         "developerInstructions": instructions,
         "sandbox": "workspace-write",
         "approvalPolicy": "on-request",
-        "approvalsReviewer": "user",
+        "approvalsReviewer": settings.approvals_reviewer,
         "config": config,
-        "runtimeWorkspaceRoots": [memory],
-        "ephemeral": False,
+        "runtimeWorkspaceRoots": [cwd],
     }
 
 
 def validate_thread(
-    result: "JsonValue", configuration: "ThreadConfiguration", selection: "ModelSelection"
+    result: "JsonValue",
+    configuration: "ThreadConfiguration",
+    selection: "ModelSelection",
+    *,
+    settings: "ExecutionSettings",
+    expected_thread_id: str | None = None,
 ) -> str:
     """Return the thread ID after confirming the requested execution boundaries.
 
     Args:
-        result: Complete thread/start response.
-        configuration: Archive used to construct the request.
+        result: Complete thread/start or thread/resume response.
+        configuration: Workspace and Project assignment used to construct the request.
         selection: Model selection submitted with the request.
+        settings: The same immutable options used to construct the request.
+        expected_thread_id: Required identity for resume; None accepts the new ID from start.
 
     Returns:
         Confirmed thread identity, without adopting execution state.
@@ -100,6 +144,7 @@ def validate_thread(
         CodexConnectionError: The response omits or changes the requested settings.
     """
     response = _object(result)
+    thread = _object(response.get("thread"))
     sandbox = _object(response.get("sandbox"))
     expected_sandbox: JsonObject = {
         "type": "workspaceWrite",
@@ -109,14 +154,19 @@ def validate_thread(
         "excludeSlashTmp": True,
     }
     if (
-        response.get("approvalPolicy") != "on-request"
-        or response.get("approvalsReviewer") != "user"
+        "projectId" not in thread
+        or thread.get("projectId") != configuration.project_id
+        or (expected_thread_id is not None and thread.get("id") != expected_thread_id)
+        or response.get("approvalPolicy") != "on-request"
+        or response.get("approvalsReviewer") != settings.approvals_reviewer
         or response.get("model") != selection.model
-        or response.get("cwd") != str(configuration.cwd / "memory")
+        or response.get("reasoningEffort") != selection.effort
+        or response.get("cwd") != str(configuration.cwd)
+        or response.get("runtimeWorkspaceRoots") != [str(configuration.cwd)]
         or any(sandbox.get(key) != value for key, value in expected_sandbox.items())
     ):
         raise CodexConnectionError("Codexの実行設定が要求と不一致")
-    return _text(_object(response.get("thread")).get("id"))
+    return _text(thread.get("id"))
 
 
 def turn_start_params(thread_id: str, prompt: str, selection: "ModelSelection") -> "JsonObject":

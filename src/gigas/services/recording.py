@@ -2,19 +2,15 @@
 
 import asyncio
 import logging
-from copy import deepcopy
-from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from gigas.game_io.observation import Observation
-    from gigas.runtime.codex.transport import JsonObject
     from gigas.storage.input_events import InputEvent
-    from gigas.storage.project import ProjectWriter
+    from gigas.storage.records import DialogueRecordType, GameIoRecordWriter
 
 logger = logging.getLogger(__name__)
 
@@ -28,56 +24,24 @@ class RecordingService:
     Attributes:
         on_failure: Optional callback for every save failure, called on this loop.
             Used for persistent diagnostics, independently of input permission.
-            The callback must return promptly; awaited writes still raise errors.
+            The callback must return promptly; drain does not re-raise save errors.
     """
 
-    def __init__(self, writer: "ProjectWriter") -> None:
+    def __init__(self, writer: "GameIoRecordWriter") -> None:
         """Borrow a writer without performing I/O."""
         self.on_failure: Callable[[Exception], None] | None = None
         self._writer = writer
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
 
-    def submit_thread(self, thread_id: str) -> None:
-        """Queue the thread record without delaying execution; report save failures."""
-        self._submit(partial(self._writer.record_thread, thread_id), thread_id)
-
-    async def ensure_memory(self) -> "Path":
-        """Prepare missing memory entries under the same lock as accepted saves.
-
-        Call during explicit thread preparation, never from observation delivery.
-        Filesystem failures propagate to the preparation caller.
-        """
-        await asyncio.shield(self._submit(self._writer.ensure_memory, "memory"))
-        return self._writer.path / "memory"
-
-    def submit_dialogue(
-        self,
-        kind: str,
-        content: "JsonObject",
-        *,
-        thread_id: str,
-        turn_id: str | None = None,
-    ) -> None:
-        """Snapshot public content and queue it without delaying execution.
+    def submit_dialogue(self, kind: "DialogueRecordType", text: str) -> None:
+        """Queue a submitted or confirmed body without delaying execution.
 
         Args:
-            kind: Application-selected dialogue.* event name.
-            content: Public fields only; caller excludes secrets, raw RPCs, and drafts.
-            thread_id: Owning conversation.
-            turn_id: Owning turn when known.
+            kind: dialogue.submitted or dialogue.message, selected by the caller.
+            text: User-submitted or confirmed Codex body without metadata.
         """
-        self._submit(
-            partial(
-                self._writer.record_dialogue,
-                kind,
-                deepcopy(content),
-                thread_id=thread_id,
-                turn_id=turn_id,
-                received_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            ),
-            turn_id or thread_id,
-        )
+        self._submit(partial(self._writer.record_dialogue, kind, text), kind)
 
     def submit_input(self, event: "InputEvent") -> None:
         """Submit an input event without waiting; report failures through callbacks/logging."""
@@ -87,7 +51,6 @@ class RecordingService:
         self,
         observation: "Observation",
         *,
-        thread_id: str | None = None,
         on_error: "Callable[[Observation, Exception], None] | None" = None,
     ) -> None:
         """Submit final PNG bytes and metadata without delaying observation delivery.
@@ -96,7 +59,7 @@ class RecordingService:
         on_failure. Callbacks run on this loop and must return promptly.
         """
         self._submit(
-            partial(self._writer.record, observation, thread_id=thread_id),
+            partial(self._writer.record, observation),
             observation.observation_id,
             partial(on_error, observation) if on_error is not None else None,
         )
@@ -106,11 +69,10 @@ class RecordingService:
         operation: "Callable[[], object]",
         reference: str,
         on_error: "Callable[[Exception], None] | None" = None,
-    ) -> asyncio.Task[None]:
+    ) -> None:
         task = asyncio.create_task(self._save(operation, reference, on_error))
         self._tasks.add(task)
         task.add_done_callback(self._finished)
-        return task
 
     async def _save(
         self,
