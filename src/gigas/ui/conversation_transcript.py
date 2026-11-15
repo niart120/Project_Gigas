@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
     from gigas.runtime.codex.history import HistoryEntry, HistoryKind
+    from gigas.runtime.codex.models import ActivityEvent
 
 
 @dataclass(slots=True)
@@ -48,6 +49,22 @@ class _Rendered:
     blocks: Blocks
     complex: bool
     color: QColor | None
+
+
+def _activity_label(activity: "ActivityEvent") -> tuple[str, str]:
+    names = {
+        "commandExecution": "シェル",
+        "fileChange": "ファイル変更",
+        "mcpToolCall": "ツール",
+        "webSearch": "Web検索",
+    }
+    name = names[activity.kind]
+    target = activity.title.splitlines()[0] if activity.title else ""
+    if activity.kind == "mcpToolCall" and "/" in target:
+        server, target = target.rsplit("/", 1)
+        if server.startswith("gigas_") and target in {"observe", "act_and_observe"}:
+            return ("画面取得" if target == "observe" else "入力・画面取得"), ""
+    return name, target
 
 
 def _mapped_offset(old: str, new: str, offset: int) -> int:
@@ -85,6 +102,7 @@ class ConversationTranscript(Transcript):
         self._rendered: dict[int, _Rendered] = {}
         self._revisions: dict[int, int] = {}
         self._expanded: set[str] = set()
+        self._expanded_groups: set[str] = set()
         super().__init__(parent)
         self._parser = MarkdownQueue(self)
         self._parser.ready.connect(self._parsed)
@@ -115,6 +133,7 @@ class ConversationTranscript(Transcript):
         self._rendered.clear()
         self._revisions.clear()
         self._expanded.clear()
+        self._expanded_groups.clear()
         super().clear()
 
     def update_entry(self, entry: "HistoryEntry", *, append: bool = False) -> None:
@@ -144,9 +163,9 @@ class ConversationTranscript(Transcript):
         self.reasoning_visibility_changed.emit(visible)
 
     def toggle_details(self, key: str) -> None:
-        """Toggle a retained activity or summary without discarding its full text."""
+        """Toggle a retained activity without discarding its full text."""
         item = self._items.get(key)
-        if item is None or item.kind not in {"activity", "reasoning"}:
+        if item is None or item.kind != "activity":
             return
         if key in self._expanded:
             self._expanded.remove(key)
@@ -155,7 +174,12 @@ class ConversationTranscript(Transcript):
         self._render_item(item)
 
     def _link(self, url: QUrl) -> None:
-        if url.scheme() == "gigas-detail":
+        if url.scheme() == "gigas-group":
+            key = unquote(url.path())
+            if (item := self._items.get(key)) is not None and item.kind == "activity":
+                self._expanded_groups.symmetric_difference_update({key})
+                self._render_item(item)
+        elif url.scheme() == "gigas-detail":
             self.toggle_details(unquote(url.path()))
         elif url.scheme() in {"http", "https"}:
             self.external_link.emit(url)
@@ -180,54 +204,135 @@ class ConversationTranscript(Transcript):
         if item.kind == "assistant":
             phase = item.entry.phase if item.entry else None
             return item.text, LABELS.get(phase or "", "Codex")
-        if item.kind in {"activity", "reasoning"}:
+        if item.kind == "reasoning":
+            return item.text, "推論要約"
+        if item.kind == "activity":
             key = self._key(item)
-            if item.kind == "reasoning":
-                title, details = "推論要約", item.text
+            activity = item.entry.activity if item.entry else None
+            if activity is None:
+                title = item.text.splitlines()[0] if item.text else "活動"
+                details = item.text
             else:
-                activity = item.entry.activity if item.entry else None
-                if activity is None:
-                    title = item.text.splitlines()[0] if item.text else "活動"
-                    details = item.text
-                else:
-                    names = {
-                        "commandExecution": "シェル",
-                        "fileChange": "ファイル変更",
-                        "mcpToolCall": "ツール",
-                        "webSearch": "Web検索",
-                    }
-                    name = names[activity.kind]
-                    target = activity.title.splitlines()[0] if activity.title else ""
-                    if activity.kind == "mcpToolCall" and "/" in target:
-                        server, target = target.rsplit("/", 1)
-                        if server.startswith("gigas_") and target in {"observe", "act_and_observe"}:
-                            name = "画面取得" if target == "observe" else "入力・画面取得"
-                            target = ""
-                    status = {
-                        "inProgress": "実行中",
-                        "completed": "完了",
-                        "failed": "失敗",
-                        "declined": "拒否",
-                    }.get(activity.status or "", "")
-                    target = self.fontMetrics().elidedText(
-                        target, Qt.TextElideMode.ElideRight, max(60, self.viewport().width() - 200)
+                name, target = _activity_label(activity)
+                status = {
+                    "inProgress": "実行中",
+                    "completed": "完了",
+                    "failed": "失敗",
+                    "declined": "拒否",
+                }.get(activity.status or "", "")
+                target = self.fontMetrics().elidedText(
+                    target, Qt.TextElideMode.ElideRight, max(60, self.viewport().width() - 200)
+                )
+                title = " · ".join(part for part in (name, target, status) if part)
+                details = item.text
+                if activity.arguments is not None:
+                    details += "\n\n引数\n" + json.dumps(
+                        activity.arguments, ensure_ascii=False, indent=2
                     )
-                    title = " · ".join(part for part in (name, target, status) if part)
-                    details = item.text
-                    if activity.arguments is not None:
-                        details += "\n\n引数\n" + json.dumps(
-                            activity.arguments, ensure_ascii=False, indent=2
-                        )
             marker = "▾" if key in self._expanded else "▸"
             return (f"{marker} {title}" + (f"\n\n{details}" if key in self._expanded else ""), "")
         return item.text, {"user": "あなた", "plan": "Plan", "answer": "回答"}.get(item.kind, "")
 
     def _render_item(self, item: _Item) -> None:
-        hidden = item.kind == "reasoning" and not self._reasoning_visible
+        if item.kind != "activity":
+            self._render_one(item)
+            return
+        # Only the adjacent activity segment can change grouping after an update.
+        items = list(self._items.values())
+        index = next(i for i, value in enumerate(items) if value is item)
+        left = right = index
+        while left and items[left - 1].kind == "activity":
+            left -= 1
+        while right + 1 < len(items) and items[right + 1].kind == "activity":
+            right += 1
+        segment = items[left : right + 1]
+        index = 0
+        while index < len(segment):
+            first = segment[index]
+            end = index + 1
+            activity = first.entry.activity if first.entry else None
+            if activity is not None and activity.status == "completed":
+                while end < len(segment):
+                    other = segment[end].entry
+                    if (
+                        other is None
+                        or other.activity is None
+                        or other.activity.status != "completed"
+                        or other.activity.turn_id != activity.turn_id
+                    ):
+                        break
+                    end += 1
+            group = segment[index:end]
+            for member in group[1:]:
+                if id(member) in self._rendered:
+                    self._edit(member, None, [])
+            self._render_one(first, group=group if len(group) > 1 else None)
+            index = end
+
+    def _group_document(self, group: list[_Item]) -> "QTextDocument":
+        key = self._key(group[0])
+        opened = key in self._expanded_groups
+        names = {
+            _activity_label(item.entry.activity)[0]
+            for item in group
+            if item.entry is not None and item.entry.activity is not None
+        }
+        name = next(iter(names)) if len(names) == 1 else "活動"
+        text = f"{'▾' if opened else '▸'} {name}を{len(group)}件実行しました"
+        links = [(0, _utf16_length(text), "gigas-group:" + quote(key, safe=""))]
+        children: list[tuple[int, int]] = []
+        if opened:
+            for member in group:
+                body, _ = self._presentation(member)
+                start = _utf16_length(text) + 1
+                text += "\n" + body
+                links.append(
+                    (
+                        start,
+                        _utf16_length(body.splitlines()[0]),
+                        "gigas-detail:" + quote(self._key(member), safe=""),
+                    )
+                )
+                children.append((start, _utf16_length(body)))
+        doc = formatted_document(
+            text,
+            "",
+            self.font(),
+            self.palette().color(QPalette.ColorRole.Text),
+            self.palette().color(QPalette.ColorRole.AlternateBase),
+            markdown=False,
+        )
+        for start, length in children:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            cursor.setPosition(start + length, QTextCursor.MoveMode.KeepAnchor)
+            fmt = QTextBlockFormat()
+            fmt.setLeftMargin(20)
+            cursor.mergeBlockFormat(fmt)
+        for start, length, url in links:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(start)
+            cursor.setPosition(start + length, QTextCursor.MoveMode.KeepAnchor)
+            fmt = QTextCharFormat()
+            fmt.setAnchor(True)
+            fmt.setAnchorHref(url)
+            cursor.mergeCharFormat(fmt)
+        return doc
+
+    def _render_one(self, item: _Item, *, group: list[_Item] | None = None) -> None:
+        hidden = item.kind == "reasoning" and (
+            not self._reasoning_visible
+            or (item.entry is not None and item.entry.completed is False)
+        )
         if not item.text or hidden:
             if id(item) in self._rendered:
                 self._edit(item, None, [])
             item.displayed = ""
+            return
+        if group is not None:
+            doc = self._group_document(group)
+            self._edit(item, doc, block_snapshot(doc))
+            doc.deleteLater()
             return
         source, heading = self._presentation(item)
         color = self._phase_color(item) or self.palette().color(QPalette.ColorRole.Text)
@@ -246,7 +351,7 @@ class ConversationTranscript(Transcript):
             )
             return
         doc = formatted_document(source, heading, self.font(), color, background, markdown=False)
-        if item.kind in {"activity", "reasoning"}:
+        if item.kind == "activity":
             cursor = QTextCursor(doc)
             cursor.movePosition(
                 QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
