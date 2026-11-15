@@ -40,8 +40,8 @@
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | 入力サービス単独で設定適用・同一設定・切断・再接続ができる | new | integration | item 1、c247633。factory引数未定義のred→green。設定所有を移し既存Qt配送を回帰 |
-| green | 接続変更はCodex停止完了後に最新設定を適用し、同一設定・停止失敗・終了を区別する | new / edge | integration | item 2。停止終端前にCOM2/3を生成するred→成功/失敗/終了の全ケースgreen。コミット後に完了記録 |
-| todo | 旧入力の解除失敗では新接続を開かず、後続の明示適用で回復できる | edge | integration | item 3。捕捉taskの完了callback後も結果を失わない |
+| refactor-done | 接続変更はCodex停止完了後に最新設定を適用し、同一設定・停止失敗・終了を区別する | new / edge | integration | item 2、362ad44。停止終端前にCOM2/3を生成するred→成功/失敗/終了の全ケースgreen |
+| green | 旧入力の解除失敗では新接続を開かず、後続の明示適用で回復できる | edge | integration | item 3。解除失敗後に新機器がopenするred→捕捉taskの結果を確認してgreen。コミット後に完了記録 |
 
 ## 7. 設計メモ
 
@@ -63,6 +63,7 @@ services/input.py、application.py、codex.py、codex_models.py、関連integrat
 | uv run pytest tests/integration/test_input_configuration.py -q | pass | 最新設定の再判定・同一設定を含む一括配送へ変更後4 passed（1.46秒） |
 | 独立レビュー→イベント同期テスト | 修正 | open待ち中の新turn→次の設定変更で停止境界が抜ける指摘を採用。turn/interrupt未到達のredを確認し、入力側の一回適用とアプリ側の各回停止連携へ整理 |
 | uv run pytest tests/integration/test_input_configuration.py tests/integration/test_codex_service.py -q | pass | 上記修正後50 passed（10.14秒）。ruff check/format・tyもpass |
+| uv run pytest tests/integration/test_input_configuration.py tests/integration/test_input_service.py tests/integration/test_codex_service.py -q | pass | item 3、68 passed（10.39秒）。解除失敗での新機器抑止・明示再適用、既存入力回帰。ruff・ty・diffもpass |
 | 実接続・Windows画面 | not run | 段階2変更後に確認 |
 
 ## 10. 先送り事項

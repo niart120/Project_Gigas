@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import resolve_serial_config
+from gigas.game_io.input.models import InputState, InputStep
 from gigas.runtime.codex.connection import CodexConnection
 from gigas.runtime.codex.models import ConnectionOptions
 from gigas.services.application import ApplicationServiceThread
@@ -42,6 +43,43 @@ def test_input_settings_lifecycle_without_codex() -> None:
         finally:
             await service.close()
         assert devices[1].calls == ["open", "close"]
+
+    asyncio.run(scenario())
+
+
+def test_failed_release_prevents_switch_but_explicit_retry_recovers() -> None:
+    async def scenario() -> None:
+        old, new = Device(), Device()
+        created: list[Device] = []
+        results = []
+
+        def factory(_config: "SerialConfig") -> Device:
+            device = old if not created else new
+            created.append(device)
+            return device
+
+        service = InputService(factory=factory, on_connection_changed=results.append)
+        target = resolve_serial_config("COM2", "ch552", None)
+        try:
+            service.request_config(resolve_serial_config("COM1", "ch552", None))
+            await service.apply_config()
+            old.fail_neutral = True
+            started = service.start((InputStep("press", 10000, InputState(buttons=("A",))),))
+            assert isinstance(started, tuple)
+            await old.pressed.wait()
+            service.request_config(target)
+            await service.apply_config()
+            assert results[-1].error
+            assert not results[-1].connected
+            assert "open" not in new.calls
+            assert (await started[1]).code == "DEVICE_UNAVAILABLE"
+            service.request_config(target)
+            await service.apply_config()
+            assert results[-1].connected
+            assert not results[-1].error
+            assert new.calls == ["open"]
+        finally:
+            await service.close()
 
     asyncio.run(scenario())
 

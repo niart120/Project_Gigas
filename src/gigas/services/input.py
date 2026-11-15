@@ -211,10 +211,10 @@ class InputService:
         if self._connection_task is not None and not self._connection_task.done():
             message = "入力接続の切替中です"
             raise InputServiceError("BUSY", message)
-        self.stop()
+        operation = self.stop()
         self._available = False
         self._connect_cancelled = False
-        task = asyncio.create_task(self._connect(device))
+        task = asyncio.create_task(self._connect(device, operation))
         self._connection_task = task
         task.add_done_callback(_retrieve_exception)
         try:
@@ -224,9 +224,17 @@ class InputService:
             self.stop()
             raise
 
-    async def _connect(self, device: InputDevice | None) -> None:
+    async def _connect(
+        self, device: InputDevice | None, operation: asyncio.Task[OperationResult] | None
+    ) -> None:
         try:
-            await self.drain_input()
+            if operation is not None:
+                (outcome,) = await asyncio.gather(operation, return_exceptions=True)
+                if isinstance(outcome, OperationResult) and outcome.code not in {
+                    "OK",
+                    "INTERRUPTED",
+                }:
+                    raise InputServiceError(outcome.code, outcome.message)
             await self._close_device()
             if device is None or self._connect_cancelled:
                 return
