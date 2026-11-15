@@ -170,6 +170,7 @@ def test_ordinary_message_uses_thread_input_and_selected_model_without_a_target_
         "input": [{"type": "text", "text": "右へ進んで\n次は左へ"}],
         "model": "selected-model",
         "effort": "high",
+        "summary": "auto",
     }
 
 
