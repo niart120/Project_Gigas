@@ -140,6 +140,7 @@ class ConnectionPanel(QWidget):
         self.plan_panel = self._display.plan_panel
         self.heading = self._display.heading
         self.transcript = self._display.transcript
+        self.transcript.external_link.connect(self._open_url)
         self.history_button = self._display.history_button
         layout.addWidget(self._display, 1)
         self.composer = MessageComposer(self)
@@ -311,6 +312,7 @@ class ConnectionPanel(QWidget):
         self._display.archive_plan(self._conversation.turn_id)
         if self._conversation.turn_id is not None:
             self.plan_panel.set_plan(self._display.plan, interrupted=True)
+            self.plan_panel.reasoning.finish(interrupted=True)
         self._render()
 
     @Slot(object)
@@ -356,6 +358,7 @@ class ConnectionPanel(QWidget):
                 self._display.archive_plan(self._conversation.turn_id)
                 if self._conversation.turn_id is not None:
                     self.plan_panel.set_plan(self._display.plan, interrupted=True)
+                    self.plan_panel.reasoning.finish(interrupted=True)
             if event.phase != "authenticating":
                 self.login_url.clear()
         elif isinstance(event, LoginEvent):
@@ -374,6 +377,7 @@ class ConnectionPanel(QWidget):
             )
         elif isinstance(event, ReasoningEvent):
             self.transcript.update_entry(reasoning_entry(self._display.thread_id or "", event))
+            self.plan_panel.reasoning.receive(event)
         elif isinstance(event, ActivityEvent):
             entry = activity_entry(self._display.thread_id or "", event)
             self.transcript.update_entry(entry)

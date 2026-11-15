@@ -37,6 +37,7 @@ def _browse(session: ConversationGui) -> None:
         lambda: (
             session.panel.heading.title.text() == "保存会話"
             and not session.panel.heading.loading.isVisible()
+            and session.panel.transcript.rendering_idle
         )
     )
 

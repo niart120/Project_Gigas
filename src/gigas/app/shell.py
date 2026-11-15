@@ -814,6 +814,7 @@ class ApplicationShell(QObject):
         self.wait_timer.start()
         self.service.shutdown()
         self.video.shutdown()
+        self.window.connection.transcript.shutdown()
         if self.io_thread.isRunning():
             self.io_thread.quit()
         else:
@@ -868,6 +869,9 @@ class ApplicationShell(QObject):
                 self.window.refresh_close_progress()
             else:
                 QTimer.singleShot(10, self._finish_shutdown)
+            return
+        if not self.window.connection.transcript.shutdown_complete:
+            QTimer.singleShot(10, self._finish_shutdown)
             return
         if self.service.shutdown_error:
             self.window.status.setText("終了未確認")

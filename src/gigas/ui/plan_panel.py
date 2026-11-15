@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
+from gigas.ui.reasoning_panel import ReasoningPanel
 from gigas.ui.transcript import Transcript
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class PlanPanel(QFrame):
         self.goal_value = Transcript(self, show_headings=False)
         self.goal_value.setAccessibleName("目標")
         self.goal_value.setFrameShape(QFrame.Shape.NoFrame)
-        self.goal_value.setMaximumHeight(100)
+        self.goal_value.setMaximumHeight(62)
         self.goal_value.setMinimumHeight(35)
         layout.addWidget(self.goal_value)
         self.set_goal(None)
@@ -66,6 +67,9 @@ class PlanPanel(QFrame):
         self.goal_value.setPalette(palette)
         layout.addWidget(self.view, 1)
         self.set_plan(None)
+        self.reasoning = ReasoningPanel(self)
+        self.reasoning.text.setPalette(palette)
+        layout.addWidget(self.reasoning)
 
     def set_goal(self, goal: "GoalState | None") -> None:
         """Render the confirmed public objective without changing the turn plan.

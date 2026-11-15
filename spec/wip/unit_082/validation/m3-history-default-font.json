@@ -1,0 +1,23 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "renderer": "product ConversationTranscript",
+  "font": "Yu Gothic UI,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0",
+  "dpr": 1.5,
+  "history_load": [
+    {
+      "history_items": 100,
+      "load_ms": 626.886,
+      "max_gui_gap_ms": 260.668,
+      "first_item_paint_ms": 250.486,
+      "max_item_paint_ms": 250.486
+    },
+    {
+      "history_items": 1000,
+      "load_ms": 4133.807,
+      "max_gui_gap_ms": 22.502,
+      "first_item_paint_ms": 2.615,
+      "max_item_paint_ms": 5.233
+    }
+  ],
+  "rows": []
+}

@@ -156,6 +156,7 @@ def test_apply_effect_depends_on_changed_settings(
     codex_connects: list[object] = []
     history = shell.window.connection.transcript
     history.update_item("summary", "取得と独立した公開要約", kind="reasoning")
+    history.toggle_details("summary")
     applied_resolutions: list[str] = []
     input_configs: list[SerialConfig | None] = []
     monkeypatch.setattr(shell.service, "connect_runtime", codex_connects.append)

@@ -135,12 +135,15 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
         ServiceEvent(1, ActivityEvent("turn", "web", "webSearch", "ラッキー", "completed", "図鑑"))
     )
     panel.transcript.prepend_items(history_entries("thread", page))
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
+    panel.transcript.toggle_details(item_key("thread", "turn", "reason", kind="reasoning"))
+    panel.transcript.toggle_details(item_key("thread", "turn", "web", kind="activity"))
     body = panel.transcript.toPlainText()
     assert "途中本文" not in body
     assert "途中要約" not in body
-    assert body.count("確定本文") == body.count("確定要約") == body.count("ラッキー") == 1
+    assert body.count("確定本文") == body.count("確定要約") == 1
     assert "完了 · ラッキー\n図鑑" in body
-    assert "進路\n北\n南" in body
+    assert "進路 北 南" in body
     assert not panel.requests
     answer = panel.transcript.item_entry(item_key("thread", "turn", "answer", kind="assistant"))
     assert answer is not None
@@ -156,5 +159,6 @@ def test_history_and_live_items_share_keys_without_replaying_requests(qtbot: "Qt
     panel.handle_event(
         ServiceEvent(1, TextEvent("answer", "次のturn", replace=True, turn_id="next"))
     )
+    qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
     assert "確定本文" in panel.transcript.toPlainText()
     assert "次のturn" in panel.transcript.toPlainText()

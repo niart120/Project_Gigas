@@ -1,0 +1,66 @@
+[
+  {
+    "state": "short",
+    "window": [
+      1100,
+      760
+    ],
+    "dpr": 1.5,
+    "video": [
+      347,
+      195
+    ],
+    "subtitle": [
+      325,
+      70
+    ]
+  },
+  {
+    "state": "long",
+    "window": [
+      1100,
+      760
+    ],
+    "dpr": 1.5,
+    "video": [
+      347,
+      195
+    ],
+    "subtitle": [
+      325,
+      70
+    ]
+  },
+  {
+    "state": "sidebar-closed",
+    "window": [
+      1100,
+      760
+    ],
+    "dpr": 1.5,
+    "video": [
+      446,
+      251
+    ],
+    "subtitle": [
+      424,
+      70
+    ]
+  },
+  {
+    "state": "expanded",
+    "window": [
+      1100,
+      760
+    ],
+    "dpr": 1.5,
+    "video": [
+      446,
+      251
+    ],
+    "subtitle": [
+      424,
+      70
+    ]
+  }
+]

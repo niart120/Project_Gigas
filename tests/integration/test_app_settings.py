@@ -188,6 +188,7 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     history = shell.window.connection.transcript
     history.update_item("summary", "取消し前の公開要約", kind="reasoning")
+    history.toggle_details("summary")
     dialog.show_reasoning.setChecked(False)
     if target == "button":
         dialog.close_button.click()
@@ -235,6 +236,7 @@ def test_save_failure_preserves_edits_and_reports_cleanup(
     shell.dialog.preview_fps.setCurrentIndex(shell.dialog.preview_fps.findData(60))
     history = shell.window.connection.transcript
     history.update_item("summary", "保存前の公開要約", kind="reasoning")
+    history.toggle_details("summary")
     shell.dialog.show_reasoning.setChecked(False)
     assert "保存前の公開要約" in history.toPlainText()
 
