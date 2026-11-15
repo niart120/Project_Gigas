@@ -1,5 +1,7 @@
 # U02・U03後の実装整理 親仕様
 
+> 2026-11-15追記: 本書のU07への割当ては当時の計画。独立工程は[廃止](../../initial/05-implementation.md#u07-retired)し、通常指示・共通停止・Goal操作はunit_061・062を正本とする。
+
 ## 1. 概要・起点
 
 状態: **complete（M0〜M2完了）**。M1の実装・検証は[unit_028](../unit_028/SETTINGS_DEVICE_SIMPLIFICATION.md)、M2は[unit_029](../unit_029/DISPLAY_AND_REMAINDER_SIMPLIFICATION.md)に記録した。
@@ -34,7 +36,7 @@ M1・M2はユーザー指示により実装した。全体UI/UXの比較・採�
 
 ### 4.2 後続工程との境界
 
-[U05](../../complete/unit_010/INPUT_AND_STOP.md)で即時停止と設定モーダルの関係を実機入力へ結合する。全体UI/UXは今回の整理後に別の場で検討し、[U06](../../complete/unit_011/GOAL_EXECUTION.md)の冒頭で検討結果・未決事項を確認して、Goal・追加指示・回答・認証設定を具体化する。[U07](../../planned/unit_012/PLANNED_STOP.md)では計画的終了中の操作へ拡張する。今回の整理だけで全体UI/UXを設計済みとは扱わない。
+[U05](../../complete/unit_010/INPUT_AND_STOP.md)で即時停止と設定モーダルの関係を実機入力へ結合する。全体UI/UXは今回の整理後に別の場で検討し、[U06](../../complete/unit_011/GOAL_EXECUTION.md)の冒頭で検討結果・未決事項を確認して、Goal・追加指示・回答・認証設定を具体化する。[U07](../../initial/05-implementation.md#u07-retired)では計画的終了中の操作へ拡張する。今回の整理だけで全体UI/UXを設計済みとは扱わない。
 
 ### 4.3 作業の順序
 

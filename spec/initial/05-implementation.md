@@ -2,7 +2,7 @@
 
 [文書一覧](README.md)
 
-初期版の製品範囲は[01](01-overview.md)に従います。U07・U09は初期版対象外です。本書は工程の入口、依存関係、実施順を所有します。各工程の到達点・分割・受入条件は親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
+初期版の製品範囲は[01](01-overview.md)に従います。U07は独立工程を廃止し、U09は初期版対象外として保持します。本書は工程の入口、依存関係、実施順を所有します。各工程の到達点・分割・受入条件は親仕様、具体的なAPI・TDD・検証結果は着手時に作る子仕様へ置きます。文書の役割と移動規則は[06](06-repository.md)に従います。
 
 U08はM0の設計から[M7の製品全体の受入](../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。各段階の検証範囲は[親仕様](../complete/unit_013/RESUME.md)に集約します。次の工程候補はU10の連続運転です。
 
@@ -26,12 +26,26 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 | [U04 記録付き観測](../complete/unit_009/RECORDED_OBSERVATION.md) | complete。U02・U03に依存 | 観測・PNG保存とMCPへの画像返却 |
 | [U05 入力と即時停止](../complete/unit_010/INPUT_AND_STOP.md) | complete。U04に依存 | 有限の入力列、事後観測、停止・解除 |
 | [U06 Goalによる継続](../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
-| [U07 計画的終了](../planned/unit_012/PLANNED_STOP.md) | 初期版対象外 | 具体的な要求が生じた時点で再検討 |
+| [U07 計画的終了](#u07-retired) | 廃止（2026-11-15） | 通常指示・共通停止・Goal操作へ責務を分け、独立した作業仕様は削除 |
 | [U08 Project・会話管理と再接続](../complete/unit_013/RESUME.md) | complete。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
 | [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
 | [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
 
 会話実行・共通停止は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)、契約整理は[unit_054](../complete/unit_054/KISS_SIMPLIFICATION.md)を前提とします。U08・U10の着手にU07・U09の完了は要求しません。
+
+<a id="u07-retired"></a>
+
+## U07の廃止と残す責務
+
+2026-11-15のplanned整理で、U07の独立工程とunit_012の作業仕様を削除しました。通常指示・共通停止は[unit_061](../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../complete/unit_062/GOAL_EXECUTION_MODEL.md)、保存参照・再起動後の再接続は[U08](../complete/unit_013/RESUME.md)が所有します。U07として追加実装・専用受入を行う要求は残っていません。
+
+「保存して終えて」は通常指示として送り、作業順序とゲーム内の区切りはモデルに任せます。終了専用の状態・UI、自然文の停止意図判定、Goal休止からの自動機器停止、ゲーム内セーブ成功・全活動終了の保証は設けません。これは専用機能を実装・検証して完了したという意味ではありません。通常指示や共通停止の検証結果は各所有仕様を参照します。
+
+過去の完了仕様・ジャーナルにあるU07への割当ては当時の計画です。後続作業の予約には使わず、この廃止判断と現在の所有仕様を優先します。将来、共通機能では満たせない具体的な要求が確認された場合は、新しいunitで追加保証を定義します。欠番となるunit_012は再利用しません。
+
+U09は[契約整理M0](../complete/unit_054/KISS_SIMPLIFICATION.md)で再検討先として保持すると決めたため、今回もplannedに残します。U10は次の初期版工程候補、Bluetooth入力は初期版とは別の拡張候補として保持します。
+
+検証結果: `uv run --no-sync python -X utf8 -`で変更文書のローカルMarkdown参照先255件、廃止判断の明示anchor、74個のunit配置の重複なし、tmpが`.gitkeep`のみであることを確認しました。差分の読取で責務・過去計画との区別・仮テキスト残りを確認し、`git diff --check`はpassでした。外部URLと既存anchor全体は未検証です。製品コードは変更せず、製品テスト・型検査・ビルドは対象外、実接続・実機検証は未実行です。
 
 ## U08の到達点と作業順
 
