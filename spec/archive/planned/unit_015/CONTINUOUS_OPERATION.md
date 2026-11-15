@@ -8,20 +8,20 @@
 
 | 起点 | 内容 | 参照 |
 |---|---|---|
-| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../archive/initial/05-implementation.md) |
-| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../AGENTS.md)・[配置と運用](../../archive/initial/06-repository.md) |
+| 要求 | 2026-11-11の工程再編方針。U01の成果と未実装機能を分け、調査・設計から各工程を始める | [実装計画](../../initial/05-implementation.md) |
+| 規約 | plannedから着手する仕様を選び、製品実装と接続検証を区別する | [AGENTS.md](../../../../AGENTS.md)・[配置と運用](../../initial/06-repository.md) |
 
 利用場面: 利用者が継続攻略中に介入・停止し、手動操作やアプリ再起動を挟んで再開する。依頼完了後に次の明示依頼へ進み、同じ構成で連続運転できることを確認する。
 
 ## 2. 前提と着手条件
 
-2026-11-13の[契約整理](../../complete/unit_054/KISS_SIMPLIFICATION.md)M1の受入結果は過去の実装根拠として保持する。本工程の停止・Goal操作は、その後の[unit_061](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)の実装・検証結果を引き継ぐ。停止操作結果は停止taskの完了を表し、Goal削除は現在の動作を止めない。端末列挙による全書込みの終了や旧run・Grantを受入条件に戻さない。保存・入力・境界整理はunit_063〜067で検証済みの契約を引き継ぐ。
+2026-11-13の[契約整理](../../../complete/unit_054/KISS_SIMPLIFICATION.md)M1の受入結果は過去の実装根拠として保持する。本工程の停止・Goal操作は、その後の[unit_061](../../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)・[unit_062](../../../complete/unit_062/GOAL_EXECUTION_MODEL.md)の実装・検証結果を引き継ぐ。停止操作結果は停止taskの完了を表し、Goal削除は現在の動作を止めない。端末列挙による全書込みの終了や旧run・Grantを受入条件に戻さない。保存・入力・境界整理はunit_063〜067で検証済みの契約を引き継ぐ。
 
-[U02](../../complete/unit_007/CODEX_CONNECTION.md)〜U06と[U08](../../complete/unit_013/RESUME.md)の必要な単体・結合・実接続確認が済んでいること。映像はU03、画像付きMCPはU04、物理入力と解除はU05、GoalはU06で確認済みでなければ、その不足を該当工程へ戻す。U10を最初の実機確認工程にはしない。U07は独立工程を廃止し、U09は初期版対象外であり、いずれの完了も待たない。unit_054 M2では保存のwrite/closeと意味検査縮小、入力の生成時保証と開始前の全列能力検査を実装・検証した。電源断耐性や性能改善の実測は行っておらず、本工程の長時間の資源・記録量評価とは区別する。
+[U02](../../../complete/unit_007/CODEX_CONNECTION.md)〜U06と[U08](../../../complete/unit_013/RESUME.md)の必要な単体・結合・実接続確認が済んでいること。映像はU03、画像付きMCPはU04、物理入力と解除はU05、GoalはU06で確認済みでなければ、その不足を該当工程へ戻す。U10を最初の実機確認工程にはしない。U07は独立工程を廃止し、U09は初期版対象外であり、いずれの完了も待たない。unit_054 M2では保存のwrite/closeと意味検査縮小、入力の生成時保証と開始前の全列能力検査を実装・検証した。電源断耐性や性能改善の実測は行っておらず、本工程の長時間の資源・記録量評価とは区別する。
 
 親仕様は工程の受入条件を所有する。着手時に本ディレクトリを`spec/wip`へ移し、最初の子仕様を具体化する。子の番号を先行予約せず、作業仕様を複製しない。必要な公開経路・機器条件が成立しなければ、その条件へ依存する実装は進めず設計判断を更新する。
 
-U06の[親仕様の引継ぎ表](../../complete/unit_011/GOAL_EXECUTION.md#10-制約後続への引継ぎ)は、過去の受入条件と未検証範囲の根拠として使う。現在の停止・Goalの契約はunit_061・062を優先し、旧Grantや全書込み回収を復活させない。M0で未提供の公開応答・実利用制限・機器の解除観測・300秒実待機・長時間の記録量と資源を検証条件へ割り当て、未提供・未実行・確認済みを分ける。
+U06の[親仕様の引継ぎ表](../../../complete/unit_011/GOAL_EXECUTION.md#10-制約後続への引継ぎ)は、過去の受入条件と未検証範囲の根拠として使う。現在の停止・Goalの契約はunit_061・062を優先し、旧Grantや全書込み回収を復活させない。M0で未提供の公開応答・実利用制限・機器の解除観測・300秒実待機・長時間の記録量と資源を検証条件へ割り当て、未提供・未実行・確認済みを分ける。
 
 ## 3. 対象範囲・対象外
 
@@ -31,12 +31,12 @@ U06の[親仕様の引継ぎ表](../../complete/unit_011/GOAL_EXECUTION.md#10-�
 
 ## 4. 関連文書
 
-- [01-overview.md](../../archive/initial/01-overview.md)
-- [02-runtime.md](../../archive/initial/02-runtime.md)
-- [03-game-io.md](../../archive/initial/03-game-io.md)
-- [04-agent-memory.md](../../archive/initial/04-agent-memory.md)
-- [08-sdk-compatibility.md](../../archive/initial/08-sdk-compatibility.md)
-- [検証観点](../../archive/initial/07-verification.md)
+- [01-overview.md](../../initial/01-overview.md)
+- [02-runtime.md](../../initial/02-runtime.md)
+- [03-game-io.md](../../initial/03-game-io.md)
+- [04-agent-memory.md](../../initial/04-agent-memory.md)
+- [08-sdk-compatibility.md](../../initial/08-sdk-compatibility.md)
+- [検証観点](../../initial/07-verification.md)
 
 ## 5. 冒頭の調査・設計
 

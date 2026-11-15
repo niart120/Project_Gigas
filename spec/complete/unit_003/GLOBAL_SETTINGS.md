@@ -132,7 +132,7 @@ NyXから参考にするのは項目の分類と実際の利用箇所であり�
 
 ## 8. 対象ファイル
 
-`src/gigas/storage/settings.py` とパッケージ入口、`tests/unit/test_settings.py`、`tests/integration/test_settings_io.py` を追加した。`pyproject.toml` と `uv.lock` に `tomlkit==0.15.2` を追加した。Windows CIの試験対象に `tests/integration` を加えた。READMEを入口とし、設定例とPythonからの利用手順は[グローバル設定](../../../docs/settings.md)に記載した。
+`src/gigas/storage/settings.py` とパッケージ入口、`tests/unit/test_settings.py`、`tests/integration/test_settings_io.py` を追加した。`pyproject.toml` と `uv.lock` に `tomlkit==0.15.2` を追加した。Windows CIの試験対象に `tests/integration` を加えた。READMEを入口とし、設定例とPythonからの利用手順は[グローバル設定](../../../docs/guides/settings.md)に記載した。
 
 ## 9. 検証
 

@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・前提
 
-[UI仕様](../../archive/initial/10-ui-interaction.md)、[設定手順](../../../docs/settings.md)、[Codex操作](../../../docs/codex-gui.md)。unit_076の未コミット変更を保持して同じ作業ブランチ上で継続する。既存のSettingsスナップショットでGUIに出さない項目も保持できる。
+[UI仕様](../../archive/initial/10-ui-interaction.md)、[設定手順](../../../docs/guides/settings.md)、[Codex操作](../../../docs/guides/codex.md)。unit_076の未コミット変更を保持して同じ作業ブランチ上で継続する。既存のSettingsスナップショットでGUIに出さない項目も保持できる。
 
 ## 5. 振る舞い仕様
 

@@ -325,7 +325,7 @@ InputConnectionResultは入力側へ、Codexの送信・回答・会話管理結
 
 キーボード対応は本工程完了後の独立候補。GUI手動入力モデルへ追加する方向だけ残し、キー割当・自動リピート・同時保持・競合規則は採用時に別仕様で決める。タッチ入力・常時最前面・終了後の窓位置保存も必要性が確認された時点で扱う。
 
-Bluetoothは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)、長時間運転とドライバー待機等の観測は[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)を参照する。本工程の疎通確認だけでそれらの受入を完了にしない。
+Bluetoothは[unit_037](../../archive/planned/unit_037/BLUETOOTH_INPUT.md)、長時間運転とドライバー待機等の観測は[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)を参照する。本工程の疎通確認だけでそれらの受入を完了にしない。
 
 ## 11. チェックリスト
 

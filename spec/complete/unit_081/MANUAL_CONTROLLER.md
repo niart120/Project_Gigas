@@ -22,7 +22,7 @@ InputServiceの手動更新・手動限定解除、開始要求内の解除待�
 
 ## 4. 関連文書・着手条件
 
-[02](../../archive/initial/02-runtime.md)、[03](../../archive/initial/03-game-io.md)、[09](../../archive/initial/09-control-flows.md)、[10](../../archive/initial/10-ui-interaction.md)、[入力API](../../../docs/input-api.md)。段階1はc991671、段階2はc247633・362ad44・9713b8d。公開型・docstringをレビューし、Product Designの採用画像とnative Qt画面を比較する。
+[02](../../archive/initial/02-runtime.md)、[03](../../archive/initial/03-game-io.md)、[09](../../archive/initial/09-control-flows.md)、[10](../../archive/initial/10-ui-interaction.md)、[入力API](../../../docs/design/interfaces/input-api.md)。段階1はc991671、段階2はc247633・362ad44・9713b8d。公開型・docstringをレビューし、Product Designの採用画像とnative Qt画面を比較する。
 
 ## 5. 振る舞い仕様
 

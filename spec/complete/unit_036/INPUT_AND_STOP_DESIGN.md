@@ -359,7 +359,7 @@ M1完了には採用した内部実装の試験と未検証範囲の明記を必
 | GUI・質問・承認・終了 | 実GUIの設定モーダル停止と通常終了を確認。外部の要求解消後の保留解除、回答送信中の保留、準備中の接続変更後に旧runが復活しないことを自動試験で確認 |
 | 対象機器と映像 | USB Video DeviceとCOM8・CH552・9600 baud、実モデルで3runを確認。B長押しをGUI停止しneutral sent、別runの左移動後の停止映像と保存を確認。B解除ACK、write最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間連続は未検証 |
 
-実機条件・長時間要求の残る確認は[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)、Goal再開はU06、再起動復帰はU08へ引き継ぐ。[Bluetooth事前調査・導入計画](../../planned/unit_037/BLUETOOTH_INPUT.md)は独立したplanned仕様とし、U05の完了条件へ加えない。
+実機条件・長時間要求の残る確認は[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)、Goal再開はU06、再起動復帰はU08へ引き継ぐ。[Bluetooth事前調査・導入計画](../../archive/planned/unit_037/BLUETOOTH_INPUT.md)は独立したplanned仕様とし、U05の完了条件へ加えない。
 
 ## 11. 完了チェックリスト
 

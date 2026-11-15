@@ -1,6 +1,6 @@
 # 記録付き観測API
 
-Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](codex-gui.md)に結合し、MCP経由で同じ画像をCodexへ返します。
+Windowsで、取得済み画像をPNGとJSONLへ記録するPython APIです。アプリでは[プロジェクト操作とチャット](../../guides/codex.md)に結合し、MCP経由で同じ画像をCodexへ返します。
 
 ## 単独のゲームI/O記録
 
@@ -56,11 +56,7 @@ JSONLの共通項目は`schema_version: 1`、行組立時のUTC時刻`recorded_a
 
 ## アプリの記録先
 
-GIGASはProjectの作業フォルダー、または未所属会話の作業フォルダー配下の`records/<thread-id>/`を記録先にします。実際のthread IDを取得し、writerを結び付けてから通常送信・Goal開始へ進みます。Projectや会話の管理はapp-serverが担当し、writerは管理ファイル・攻略資料の雛形を作りません。
-
-本文の取得元はユーザーの提出イベントと、進捗報告を含むCodexの確定messageです。提出を受付成功と扱わず、最終回答の選別・未完本文の補完もしません。公開推論要約・Plan・activity・質問回答・承認操作・Goal状態はJSONLへ残しません。会話履歴をこの記録から復元する機能はありません。
-
-保持期限・容量上限・自動削除は設けません。利用者はアプリ終了後に会話のrecordsフォルダーを手動削除できます。作業フォルダーが存在する場合だけ、次の明示実行で必要なrecordsを作成します。作業フォルダー自体が欠けた場合は再作成せず、実行前に失敗を通知します。旧形式の検査・移行・互換は行わず、schema_versionだけで旧記録と区別できるとは扱いません。
+GIGASは作業フォルダー配下の`records/<thread-id>/`を記録先にします。作業場所の選択、会話との対応、本文の保存対象は[保存仕様](storage.md)を参照してください。writer自身はProjectや会話を管理せず、呼出し側が保存先と記録する値を決めます。
 
 ## 画像と入力結果
 
@@ -68,7 +64,7 @@ GIGASはProjectの作業フォルダー、または未所属会話の作業フ�
 
 `Observation`はPNG bytes、出力寸法、`mime_type == "image/png"`、観測ID、元取得時刻`captured_at`、`source_frame`を持ちます。観測IDは`obs-`にUUID4を続けた値で、同じFrameから再び生成すれば新しいIDになります。`image_path`は記録先からの相対パスです。画像の保存先だけはIDを確認して固定し、その他の内容の意味・実在・ゲーム内成否は呼出し側が扱います。
 
-`source_frame`の世代・連番・元寸法は取得サービスの情報で、元FrameやBGR画像本体を保持しません。JSONLには元寸法だけを保存します。[MCP応答](observation-mcp.md)とはメタデータの項目が異なりますが、PNG bytesと観測IDは共通です。`captured_at`は元FrameのPC取得時刻であり、カメラの撮影時刻や入力反映時刻は保証しません。
+`source_frame`の世代・連番・元寸法は取得サービスの情報で、元FrameやBGR画像本体を保持しません。JSONLには元寸法だけを保存します。[MCP応答](../interfaces/observation-mcp.md)とはメタデータの項目が異なりますが、PNG bytesと観測IDは共通です。`captured_at`は元FrameのPC取得時刻であり、カメラの撮影時刻や入力反映時刻は保証しません。
 
 入力結果の`result`は`completed`・`interrupted`・`failed`、`input_sent`は`none`・`sent`・`unknown`、`neutral`は`not_needed`・`sent`・`unconfirmed`です。後二者の既定値はnone・not_needed。`completed_steps`は解除送信または待機を完了した要素数で、ゲーム内の成功数ではありません。入力完了後の観測失敗では`result: "completed"`と`phase: "observe"`が併存し得ます。
 

@@ -152,7 +152,7 @@ M2の`tmp/u06-m2-runtime/memory-product-20261113-170826/report.json`には、tur
 
 ### 5.5 製品専用の組立へ統一する
 
-[CodexServiceThread](../../../src/gigas/services/codex.py)はM0時点でもprepare/on_thread_startedを渡し、記録先配下のmemoryを準備していた。[公開API](../../../docs/codex.md)の単独read-only経路は製品経路ではなかったが、公開済み契約である。以下は承認済みの破壊的変更として扱う。
+[CodexServiceThread](../../../src/gigas/services/codex.py)はM0時点でもprepare/on_thread_startedを渡し、記録先配下のmemoryを準備していた。[公開API](../../../docs/design/interfaces/codex-api.md)の単独read-only経路は製品経路ではなかったが、公開済み契約である。以下は承認済みの破壊的変更として扱う。
 
 `CodexConnection`/`create_connection`の`prepare_turn`・`on_thread_started`を必須にする。`ThreadConfiguration.memory_dir`を削除し、書込先は準備済みの`cwd / "memory"`に固定する。起動用cwdへのfallback、memoryなしのread-only分岐、二つのpathの一致検査を削る。
 
@@ -191,7 +191,7 @@ parserの`protocol`引数と重複する値域検査、`encode_state`の能力�
 
 **U09の確定方針:** 専用の記憶整理機能を初期版から外す。自動整理、別整理スレッド、全memory退避、差分復元、未完整理の永続状態、全開始経路での復旧待ちを作らない。候補生成用API・採用操作も先行追加しない。通常Goalのmemory更新と停止中の利用者編集は残すが、自動backup/rollbackは保証しない。
 
-[U09親仕様](../../planned/unit_014/MEMORY_MAINTENANCE.md)は削除・complete扱いにせず、「初期版対象外・必要時に再設計」として範囲と着手条件を改訂する。[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)はU02〜U08の必要な確認を前提にし、整理の成功・復元を受入から外す。U08の通常の記録参照・再開は残す。将来、整理の実需が出たときは明示生成だけの方式から再検討し、本工程で実装を予約しない。
+[U09親仕様](../../archive/planned/unit_014/MEMORY_MAINTENANCE.md)は削除・complete扱いにせず、「初期版対象外・必要時に再設計」として範囲と着手条件を改訂する。[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)はU02〜U08の必要な確認を前提にし、整理の成功・復元を受入から外す。U08の通常の記録参照・再開は残す。将来、整理の実需が出たときは明示生成だけの方式から再検討し、本工程で実装を予約しない。
 
 | 正本・文書 | 採用設計の反映箇所 |
 |---|---|
@@ -351,7 +351,7 @@ M0の採用内容をinitial・後続親仕様・READMEへ反映した。専用�
 
 ## 10. 先送り事項
 
-長時間の資源・記録量評価は[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)、アプリ再起動後の通常復帰は[U08](../../complete/unit_013/RESUME.md)が所有する。保存の通常write/close、過去payloadの不透明な保持、入力の生成時保証と開始前の機器適合を引き継いだ。U07・U09は初期版対象外であり、専用終了や退避・復元エンジンを後で必ず作る約束にはしない。ApplicationShellの分割は、別のUI変更で必要になった時点で再評価する。公開一覧に属さない任意の子孫プロセスの終了保証は追加しない。
+長時間の資源・記録量評価は[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)、アプリ再起動後の通常復帰は[U08](../../complete/unit_013/RESUME.md)が所有する。保存の通常write/close、過去payloadの不透明な保持、入力の生成時保証と開始前の機器適合を引き継いだ。U07・U09は初期版対象外であり、専用終了や退避・復元エンジンを後で必ず作る約束にはしない。ApplicationShellの分割は、別のUI変更で必要になった時点で再評価する。公開一覧に属さない任意の子孫プロセスの終了保証は追加しない。
 
 ## 11. 完了チェックリスト
 

@@ -40,7 +40,7 @@
 - [runtime正本](../../archive/initial/02-runtime.md)
 - [SDK境界](../../archive/initial/08-sdk-compatibility.md)
 - [制御フロー](../../archive/initial/09-control-flows.md)
-- [公開Codex API](../../../docs/codex.md)
+- [公開Codex API](../../../docs/design/interfaces/codex-api.md)
 
 ### 4.1 前提・着手条件
 

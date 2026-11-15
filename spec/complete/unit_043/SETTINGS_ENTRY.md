@@ -17,7 +17,7 @@ U06の対話UI・Goal制御、設定ダイアログ内部の変更、新しい�
 ## 4. 関連文書・着手条件
 
 - [初期UI仕様](../../archive/initial/10-ui-interaction.md)
-- [設定の利用手順](../../../docs/settings.md)
+- [設定の利用手順](../../../docs/guides/settings.md)
 - [U05 M2](../../complete/unit_042/INPUT_APPLICATION_INTEGRATION.md)
 - [U06親仕様](../../complete/unit_011/GOAL_EXECUTION.md)
 

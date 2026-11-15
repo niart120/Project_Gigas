@@ -100,7 +100,7 @@ M1の内部APIはこの期限に依存しない。M2では公開前に、時間�
 
 M2は本子の内部APIとU02/U04を使う。公開境界の実装前に、7節のruntime期限を踏まえて長い有限列の公開方式を確定する。OK／適用からの接続・切替、停止と質問/承認待ち、取得終了・障害、MCP公開能力と次送信時の再読込を配線し、旧Grantの呼出し拒否とGUI即時停止を確認する。
 
-実機受入前に対象機器・ファーム・baudを特定し、open時reset、write中停止、実neutral、通信断時の保持、操作後映像の反映を確認する。シリアルは各OSとも実機未検証であり、Linux/macOSのアプリ全体への対応は本子の完了に含めない。BTは[unit_037](../../planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
+実機受入前に対象機器・ファーム・baudを特定し、open時reset、write中停止、実neutral、通信断時の保持、操作後映像の反映を確認する。シリアルは各OSとも実機未検証であり、Linux/macOSのアプリ全体への対応は本子の完了に含めない。BTは[unit_037](../../archive/planned/unit_037/BLUETOOTH_INPUT.md)で扱う。
 
 ## 11. チェックリスト
 

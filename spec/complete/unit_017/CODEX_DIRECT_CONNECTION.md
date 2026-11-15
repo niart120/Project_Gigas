@@ -143,7 +143,7 @@ TDD対象pytest、ruff format/check、ty、依存lock、build、既存unit/integ
 
 通常モードの質問は`isBlocking=false`でもcoreが回答をawaitする（[固定実装](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/session/mod.rs#L3458)）。実際の2秒保留中もターンが終了せず、上記の回答・中断に成功した。
 
-実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateは[M2](../unit_018/CODEX_GUI.md)を含む[U02最終確認](../unit_007/CODEX_CONNECTION.md)で成功した。全145 tests、ruff/ty/lock、wheel/sdistと新規install後の資材・起動確認を含む。継続利用する実接続手順は[docs](../../../docs/codex-verification.md)に置く。
+実ログインのブラウザ認証手順、新しいアカウント、APIキー、実承認のaccept後のコマンド実行・ファイル書込、拡張権限、任意のツール子孫の終了は未検証。ブラウザURL配送・認証完了競合・file承認の変更種別や移動先は模擬peerで確認した。GUIと全体配布・回帰gateは[M2](../unit_018/CODEX_GUI.md)を含む[U02最終確認](../unit_007/CODEX_CONNECTION.md)で成功した。全145 tests、ruff/ty/lock、wheel/sdistと新規install後の資材・起動確認を含む。継続利用する実接続手順は[docs](../../archive/verification/codex-2026-11-15.md)に置く。
 
 ## 8. 先送り事項
 

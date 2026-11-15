@@ -14,7 +14,7 @@
 
 ## 4. 関連文書・着手条件
 
-[UI](../../archive/initial/10-ui-interaction.md)、[実行](../../archive/initial/02-runtime.md)、[機器](../../archive/initial/03-game-io.md)、[保存](../../archive/initial/04-agent-memory.md)、[設定](../../../docs/settings.md)。既存の設定保存・接続・Project登録を利用する。mainは作業開始時clean、専用ブランチで作業する。
+[UI](../../archive/initial/10-ui-interaction.md)、[実行](../../archive/initial/02-runtime.md)、[機器](../../archive/initial/03-game-io.md)、[保存](../../archive/initial/04-agent-memory.md)、[設定](../../../docs/guides/settings.md)。既存の設定保存・接続・Project登録を利用する。mainは作業開始時clean、専用ブランチで作業する。
 
 ## 5. 振る舞い仕様・設計
 

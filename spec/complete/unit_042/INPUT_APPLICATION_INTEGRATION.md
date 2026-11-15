@@ -108,7 +108,7 @@ ui/settings_dialog.py、app/shell.py、services/codex.py、runtime/codex/、mcp/
 
 ## 9. 未確認事項
 
-B解除ACK、writeの最悪所要時間、DTR/RTSによるreset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過の実待機は未検証。[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)の機器条件・継続運転の確認へ引き継ぐ。65秒の成功、短縮期限、CH552の短い実操作という確認範囲を越えた保証はしない。
+B解除ACK、writeの最悪所要時間、DTR/RTSによるreset、PokeCon・3DS実機、他OS、長時間連続運転、300秒経過の実待機は未検証。[U10](../../archive/planned/unit_015/CONTINUOUS_OPERATION.md)の機器条件・継続運転の確認へ引き継ぐ。65秒の成功、短縮期限、CH552の短い実操作という確認範囲を越えた保証はしない。
 
 ## 10. 完了条件
 

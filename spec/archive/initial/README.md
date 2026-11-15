@@ -1,6 +1,6 @@
 # Project GIGAS — 設計文書
 
-> 2026-11-15に`spec/initial/`から移した旧資料です。このディレクトリの要求・設計・開発計画・運用規則は当時の記録として保持し、現行の正本として更新しません。現在の製品要求は[requirements.md](../../../docs/requirements.md)、開発運用は[AGENTS.md](../../../AGENTS.md)を参照してください。現行仕様とアーキテクチャは別途整理します。
+> 2026-11-15に`spec/initial/`から移した旧資料です。このディレクトリの要求・設計・開発計画・運用規則は当時の記録として保持し、現行の正本として更新しません。現在の要求・仕様・アーキテクチャは[docsの索引](../../../docs/README.md)、開発運用は[AGENTS.md](../../../AGENTS.md)を参照してください。
 
 **GIGAS — General-purpose Interactive Gaming Agent System（Project GIGAS）** の製品要求・構成・機能契約・実装計画です。WindowsネイティブのPythonアプリから、Codexに実機ゲームの継続攻略を任せます。初期の動作確認対象はSwitch版FRLGですが、ゲーム固有の攻略判断・記憶をアプリ本体へ固定しません。
 
@@ -27,7 +27,7 @@
 
 # 現在地と次の作業
 
-[U08](../../complete/unit_013/RESUME.md)はM0の設計、M1〜M6の製品実装・結合検証、[M7のGUI・実機受入](../../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。次の工程候補は[U10の連続運転](../../planned/unit_015/CONTINUOUS_OPERATION.md)です。U07の独立工程は廃止し、U09は初期版対象外です。依存と実施順は[05](05-implementation.md)を正本とします。
+[U08](../../complete/unit_013/RESUME.md)はM0の設計、M1〜M6の製品実装・結合検証、[M7のGUI・実機受入](../../complete/unit_075/PRODUCT_ACCEPTANCE.md)まで完了しました。次の工程候補は[U10の連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md)です。U07の独立工程は廃止し、U09は初期版対象外です。依存と実施順は[05](05-implementation.md)を正本とします。
 
 追加工程の[仮想コントローラとアプリサービスの責務分離](../../complete/unit_078/VIRTUAL_CONTROLLER.md)は完了しています。Codex固有処理の抽出、入力所有・接続管理の独立、別ウィンドウの手動操作の3段階を実装し、採用GUI・実接続・短時間の実機受入を記録しています。U10の長時間運転は別工程です。
 

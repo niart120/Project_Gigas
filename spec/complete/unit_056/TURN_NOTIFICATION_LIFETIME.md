@@ -20,7 +20,7 @@ Intent Delta: 完了済みturnへの表示・記録更新と、任意のitem・�
 
 - [親の採用設計 5.3・5.4](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [実行管理](../../archive/initial/02-runtime.md)、[記録](../../archive/initial/04-agent-memory.md)、[UI](../../archive/initial/10-ui-interaction.md)
-- [接続API](../../../docs/codex.md)
+- [接続API](../../../docs/design/interfaces/codex-api.md)
 - [前提となる製品専用組立](../../complete/unit_055/PRODUCT_CONNECTION_ASSEMBLY.md)
 
 unit_055の実装commit `6d10407`、完了移動commit `d950569`とclean treeを確認した。採用順序の根拠と、終端後に活動完了が届く過去実測の限界は親5.4へ記録済み。終端payloadからの再構成・再照会・猶予待ちを追加しない。

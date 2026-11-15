@@ -21,7 +21,7 @@ Intent Delta: `prepare_turn`・`on_thread_started`を必須にし、準備した
 - [親の採用設計](../../complete/unit_054/KISS_SIMPLIFICATION.md)
 - [実行管理](../../archive/initial/02-runtime.md)
 - [記録とmemory](../../archive/initial/04-agent-memory.md)
-- [接続API](../../../docs/codex.md)
+- [接続API](../../../docs/design/interfaces/codex-api.md)
 - [開発規約](../../../AGENTS.md)
 
 親担当による関連正本仕様への採用内容の反映と実装開始通知を、製品・test変更の開始条件とする。子仕様と既存コード・試験の調査は先行できる。新しい外部APIへ依存せず、採用済みのworkspace-writeとreadiness経路へ統一する。

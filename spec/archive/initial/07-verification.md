@@ -151,4 +151,4 @@ CIはWindowsを主対象にし、認証情報・実機を必要としない単�
 
 ## 検証の限界と後続の担当
 
-U08の製品経路・GUIから実機までの通し操作はM1〜M7の受入対象です。設計やAPI境界の確認だけで受入済みとしません。300秒経過、機器ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間運転は[U10](../../planned/unit_015/CONTINUOUS_OPERATION.md)へ引き継ぎ、確認できるまで保証に含めません。実モデルからsummaryを受信できなければ表示成功とせず、固定通知による表示試験と分けます。
+U08の製品経路・GUIから実機までの通し操作はM1〜M7の受入対象です。設計やAPI境界の確認だけで受入済みとしません。300秒経過、機器ACK、writeの最悪時間、DTR/RTS reset、PokeCon・3DS実機、他OS、長時間運転は[U10](../planned/unit_015/CONTINUOUS_OPERATION.md)へ引き継ぎ、確認できるまで保証に含めません。実モデルからsummaryを受信できなければ表示成功とせず、固定通知による表示試験と分けます。

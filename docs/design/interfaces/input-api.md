@@ -30,7 +30,7 @@ steps = parse_sequence(
 
 `resolve_serial_config(port, protocol, baudrate)`は設定を接続用の値へ解決します。空portなら`None`、baudrateが`None`ならプロトコルの既定値になります。候補と検証は`PROTOCOLS`を共用し、対応しない値は`ValueError`になります。
 
-`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。WindowsのCH552・9600 baudで短い操作・解除送出・画面変化を確認済みです。PokeCon・3DSの実機、他OS、通信断・長時間運転は未検証です。
+`gigas.game_io.input.serial.list_serial_ports()`はpySerialが列挙する各OSのネイティブポートの識別子と説明を返します。機器は開きません。GUI・イベントループ外から呼んでください。OS別の列挙・送信はpySerialに委ねます。
 
 `SerialInput(config)`には`resolve_serial_config()`で解決した設定を渡します。接続側は設定を再解決せず、単一workerで`await open()`を実行し、現在の一覧からport識別子が一意に一致する機器を開いてneutralを送出します。`await send(state)`にはその機器に適合する生成済みInputStateを渡し、完全状態を一度送信します。8N1、フロー制御なし、read timeout 0、write timeoutなし、DTR/RTS有効です。URL・ネットワークシリアルは対応しません。
 
@@ -99,4 +99,4 @@ finally:
 
 観測応答の取消しでは、開始済み符号化・保存はそれぞれの所有者が保持します。資源終了時は、入力を止めて要求を回収し、`observations.drain()`と`recording.drain()`を終えてからwriterとイベントループを閉じます。観測の失敗があっても保存の回収は必要です。
 
-会話とGUIの配線は模擬app-server・機器、Qt、実HTTPで検証しています。GUIから実モデル・CH552へ通したMCP入力と、同じ入力サービスへのモデル外入力で画面上の移動を確認しています。押下中の共通停止では操作の中断と中立入力の送信を確認しました。送信結果だけでゲームへの反映や機器側の解除を保証しません。他の入力機器・OS、長時間運転を含む確認範囲と制約は[実接続の確認](codex-verification.md)を参照してください。
+実機で確認した構成と範囲は[実接続の記録](../../../spec/archive/verification/codex-2026-11-15.md)を参照してください。接続・送信・解除の成功と、ゲーム画面への反映は分けて確認します。

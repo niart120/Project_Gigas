@@ -1,6 +1,6 @@
 # 映像取得API
 
-取得サービスの入口は`gigas.game_io.capture`です。`CaptureService`、`CaptureReader`、`CaptureSnapshot`、`CaptureTimeouts`を公開しています。設定・画像の型は`gigas.game_io.capture.models`、最新画像の保持は`gigas.game_io.capture.frames`に置いています。
+取得サービスの入口は`gigas.game_io.capture`です。`CaptureService`、`CaptureReader`、`CaptureSnapshot`、`CaptureTimeouts`を公開しています。接続設定は`gigas.game_io.capture.config`、画像・機器の型は`gigas.game_io.capture.models`、最新画像の保持は`gigas.game_io.capture.frames`に置いています。
 
 ## 取得設定と画像
 
@@ -12,7 +12,7 @@
 
 `Frame`はBGR uint8・3チャンネルの連続した`bytes`、幅・高さ、接続世代、世代内連番、UTC取得時刻、`monotonic_ns`を持つ変更不能な値です。画素データのバイト数は`width * height * 3`と一致します。`captured_at`と`monotonic_ns`はホストで取得が完了した時点を示します。単調時計はナノ秒で、`0 <= monotonic_ns`が必要です。機器内部の遅延や撮像時刻を保証しません。プレビュー用の拡縮・黒帯はこの画像へ書き込みません。
 
-接続世代は、同じサービスの寿命内で接続要求を受け付けるごとに増加します。一つの接続要求に含まれる代替方式の試行は同じ世代です。複数サービスやプロセス再起動をまたぐ永続的な観測IDではありません。[記録付き観測API](recorded-observation.md)は独立した観測IDを発行します。返却する`Observation.source_frame`には元Frameの世代・連番・寸法を保持し、JSONLには元寸法だけを保存します。
+接続世代は、同じサービスの寿命内で接続要求を受け付けるごとに増加します。一つの接続要求に含まれる代替方式の試行は同じ世代です。複数サービスやプロセス再起動をまたぐ永続的な観測IDではありません。[記録付き観測API](../data/recorded-observation.md)は独立した観測IDを発行します。返却する`Observation.source_frame`には元Frameの世代・連番・寸法を保持し、JSONLには元寸法だけを保存します。
 
 ## サービスの操作と状態
 
@@ -42,7 +42,7 @@
 
 ## 取得方式の選択と代替
 
-依存はOpenCV-headless 4.14.0.94、NumPy 2.5.4、cv2-enumerate-cameras 1.4.0です。FourCCは機器の既定を使い、FPSプロパティは要求値として設定します。
+OpenCV-headless、NumPy、cv2-enumerate-camerasを使います。採用バージョンは[パッケージ定義](../../../pyproject.toml)を参照してください。FourCCは機器の既定を使い、FPSプロパティは要求値として設定します。
 
 | OS | 候補の優先順 |
 |---|---|
@@ -64,7 +64,7 @@ OS別の方式選択はカメラ取得層の契約です。アプリの既定設
 
 プレビューと観測処理にはそれぞれ別のreaderを渡します。`snapshot()`が返った時点で取得側のロックは解放されています。読み手が古い`Frame`を保持していても、取得と他の読み手は新しい画像へ進み、保持した画素は変わりません。プレビュー変換は取得ロックの外で行い、観測側の変換・保存・送信はGUIスレッドの外で行ってください。
 
-切断後の`snapshot().frame`は`None`ですが、すでに保持している値は書き換わりません。記録付き観測は`streaming`かつFrameがあるsnapshotを一度採用し、その後の取得停止でも採用画像を保存できます。要求後の新フレーム待ちや鮮度の再検査は行いません。画像保存は[記録付き観測API](recorded-observation.md)が担当し、MCP接続はこの取得APIに含みません。
+切断後の`snapshot().frame`は`None`ですが、すでに保持している値は書き換わりません。記録付き観測は`streaming`かつFrameがあるsnapshotを一度採用し、その後の取得停止でも採用画像を保存できます。要求後の新フレーム待ちや鮮度の再検査は行いません。画像保存は[記録付き観測API](../data/recorded-observation.md)が担当し、MCP接続はこの取得APIに含みません。
 
 `FrameStore`はホスト側で最新1枚だけを保持します。`begin(generation)`で旧画像を消し、その世代の新しい連番だけを`publish(frame)`で受け付けます。受付結果は`bool`です。`latest()`は`Frame | None`を返し、`invalidate()`後は次の`begin()`まで画像を返しません。
 

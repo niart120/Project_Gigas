@@ -28,8 +28,8 @@ U番号は製品の到達点、unit_XXXは作業仕様の識別子です。完�
 | [U06 Goalによる継続](../../complete/unit_011/GOAL_EXECUTION.md) | complete。U02・U05に依存 | 共通対話UI、Goalと同一セッション内の継続・再開 |
 | [U07 計画的終了](#u07-retired) | 廃止（2026-11-15） | 通常指示・共通停止・Goal操作へ責務を分け、独立した作業仕様は削除 |
 | [U08 Project・会話管理と再接続](../../complete/unit_013/RESUME.md) | complete。U06と会話実行・契約整理に依存 | 管理の委譲、記録形式、新規開始・履歴・既存会話の再接続 |
-| [U09 記憶整理](../../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
-| [U10 連続運転](../../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
+| [U09 記憶整理](../planned/unit_014/MEMORY_MAINTENANCE.md) | 初期版対象外 | 実需と再採用の判断後に再設計 |
+| [U10 連続運転](../planned/unit_015/CONTINUOUS_OPERATION.md) | planned。U02〜U06・U08の必要な受入完了後 | Windows実機の数時間運転、遅延・資源・記録量 |
 
 会話実行・共通停止は[unit_061](../../complete/unit_061/CONVERSATION_EXECUTION_MODEL.md)、Goal操作は[unit_062](../../complete/unit_062/GOAL_EXECUTION_MODEL.md)、契約整理は[unit_054](../../complete/unit_054/KISS_SIMPLIFICATION.md)を前提とします。U08・U10の着手にU07・U09の完了は要求しません。
 

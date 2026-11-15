@@ -203,7 +203,7 @@ clearの`cleared=true`は削除通知を回収する。`cleared=false`は削除�
 
 ### 7.3 正本仕様とテスト
 
-[実行管理](../../archive/initial/02-runtime.md)のGoal操作と終了規則、[制御フロー](../../archive/initial/09-control-flows.md)のS04/S05と複合状態図、[UI](../../archive/initial/10-ui-interaction.md)と[操作説明](../../../docs/codex-gui.md)を本書へ合わせる。入力・記録の共通改訂はunit_061が所有する。complete仕様は過去の実装記録として保持する。
+[実行管理](../../archive/initial/02-runtime.md)のGoal操作と終了規則、[制御フロー](../../archive/initial/09-control-flows.md)のS04/S05と複合状態図、[UI](../../archive/initial/10-ui-interaction.md)と[操作説明](../../../docs/guides/codex.md)を本書へ合わせる。入力・記録の共通改訂はunit_061が所有する。complete仕様は過去の実装記録として保持する。
 
 `test_codex_connection.py`のGoal lock、利用制限による自動停止・再開拒否、Goal clearによるinterrupt、completeによる全質問失効の期待を第8節へ置換する。`test_codex_service.py`の一括Goal試験は、目的編集・再開・削除と通常指示によるゲーム操作へ分ける。`test_codex_gui.py`は既存ボタンを操作して要求内容、状態表示、再開の再操作を確認する。
 

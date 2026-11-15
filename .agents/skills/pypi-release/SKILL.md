@@ -9,7 +9,7 @@ description: "GIGASのPyPI・TestPyPI公開の準備、バージョン更新、�
 
 リポジトリの公開手順、`pyproject.toml`、lockファイル、公開用workflowを確認します。配布名、公開先、バージョン、認証方式が未設定なら、まず公開準備として扱い、動作する公開経路が既にあると仮定しません。
 
-公開手順の詳細は `docs/guides/` の公開ガイドにまとめます。配置変更前なら `spec/publishing.md` から現在の準備状況を確認できます。
+公開手順と現在の準備状況は `docs/guides/publishing.md` で確認できます。
 
 | 確認対象 | 見る内容 |
 |---|---|

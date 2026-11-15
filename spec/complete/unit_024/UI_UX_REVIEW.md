@@ -25,7 +25,7 @@
 - [工程と現在の実装範囲](../../archive/initial/05-implementation.md)
 - [U03 人間レビュー後の実装仕様](../../complete/unit_023/VIDEO_REVIEW_REFINEMENT.md)
 - [U03 実機受入記録](../../complete/unit_023/HARDWARE_ACCEPTANCE.md)
-- [設定ファイルの現仕様](../../../docs/settings.md)
+- [設定ファイルの現仕様](../../../docs/guides/settings.md)
 
 U03の既存検証を、今回見つけたUI問題の検証済み根拠にはしない。特に小画面での操作可否は、待機中の画面だけでは判断できない。長い診断、応答生成中、回答待ち、保存待ちを確認対象へ加えた。
 

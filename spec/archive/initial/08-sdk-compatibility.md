@@ -47,7 +47,7 @@ MCPは共通の入力形式を検査し、現在の機器能力は`InputService.
 
 要求期限の根拠は[採用版の期限解決](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/codex-mcp/src/connection_manager.rs)と[要求の時間制限](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/rmcp-client/src/rmcp_client.rs)です。300秒は製品の待機期限で、MCP共通の最大値や解除完了の期限ではありません。progressで延長せず、クライアントとサーバーは別に計時します。内部入力時間の固定上限・暗黙分割・非同期ポーリングは設けません。
 
-画像は同じPNG bytesをMCPのimage contentと保存へ使い、観測ID等をJSON textで返します。保存は非同期で、モデル内部の前処理まで同一性を保証しません。stdio受信は2 MiB、送信は1 MiBの一行上限です。切詰め通知から元画像を復元せず、保存元は元のObservationとします。部品APIと取消し・失敗の詳細は[ゲームI/O MCP](../../../docs/observation-mcp.md)を参照します。
+画像は同じPNG bytesをMCPのimage contentと保存へ使い、観測ID等をJSON textで返します。保存は非同期で、モデル内部の前処理まで同一性を保証しません。stdio受信は2 MiB、送信は1 MiBの一行上限です。切詰め通知から元画像を復元せず、保存元は元のObservationとします。部品APIと取消し・失敗の詳細は[ゲームI/O MCP](../../../docs/design/interfaces/observation-mcp.md)を参照します。
 
 ## 認証・モデル・実行環境
 

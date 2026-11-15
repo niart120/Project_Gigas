@@ -1,6 +1,6 @@
 # ゲームI/O MCP API
 
-`gigas.mcp.game_io.GameIoMcpServer`は、観測と入力の呼出し先をstateless Streamable HTTPで公開するPython APIです。[観測サービス](recorded-observation.md)と[入力サービス](input-api.md)は組立側が所有します。会話・GUIを含む模擬統合試験と、実モデルからCH552への短いゲーム操作・中断を確認しています。製品経路の確認範囲は[実接続の確認](codex-verification.md)を参照してください。
+`gigas.mcp.game_io.GameIoMcpServer`は、観測と入力の呼出し先をstateless Streamable HTTPで公開するPython APIです。[観測サービス](../data/recorded-observation.md)と[入力サービス](input-api.md)は組立側が所有します。
 
 ## 所有と利用順
 
@@ -41,8 +41,8 @@
 
 HTTP切断やMCP取消し通知が入力停止へ届くことは保証しません。ユーザーの共通停止はHTTP応答を待たず入力所有者へ届けます。MCPサーバーの終了だけを入力停止として扱いません。
 
-## 接続上の制約と検証範囲
+## 接続上の制約
 
 Bearer欠落・不一致は401です。終了開始後にHTTP受付処理へ到達した要求は503を返します。待受終了後は接続自体が成立せず、接続済みでもHTTP応答前に切断される場合があります。Hostと、存在する場合のOriginは当該loopbackアドレスに限定します。MCPセッションの履歴・再配送用ストアは保持しません。
 
-模擬機器と実HTTPで、認証、全列検査、同一入口での停止後受付、短縮期限の取消しと解除回収を確認しています。GUIから実モデル・実機へ通し、`observe`・`act_and_observe`の画像と記録の対応、短い入力による画面変化、押下中の共通停止と中立入力送信を確認しました。映像未接続時は画像なしの`DEVICE_UNAVAILABLE`を返し、成功観測・PNGを追加せず、明示的な映像再接続後は同じ会話で観測・入力を再開できました。機器側の解除保証や300秒の待機期限を含む確認範囲と制約は[実接続の確認](codex-verification.md)を参照してください。
+実機を含む確認範囲は[実接続の記録](../../../spec/archive/verification/codex-2026-11-15.md)を参照してください。

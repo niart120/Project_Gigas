@@ -37,9 +37,9 @@
 ## 4. 関連 docs
 
 - [親仕様](../../complete/unit_054/KISS_SIMPLIFICATION.md)
-- [Codex 利用手順](../../../docs/codex.md)
-- [会話と機器の GUI](../../../docs/codex-gui.md)
-- [保存 API](../../../docs/recorded-observation.md)
+- [Codex 利用手順](../../../docs/design/interfaces/codex-api.md)
+- [会話と機器の GUI](../../../docs/guides/codex.md)
+- [保存 API](../../../docs/design/data/recorded-observation.md)
 
 ### 4.1 前提・着手条件
 

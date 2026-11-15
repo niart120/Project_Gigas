@@ -10,7 +10,7 @@
 
 ## 3. 関連文書と前提
 
-[入力の正本](../../archive/initial/03-game-io.md)、[実行管理](../../archive/initial/02-runtime.md)、[入力API](../../../docs/input-api.md)。保存・入力から独立した小さい構造変更として実施し、各itemを別commitにする。
+[入力の正本](../../archive/initial/03-game-io.md)、[実行管理](../../archive/initial/02-runtime.md)、[入力API](../../../docs/design/interfaces/input-api.md)。保存・入力から独立した小さい構造変更として実施し、各itemを別commitにする。
 
 ## 4. 振る舞い・実装方針
 

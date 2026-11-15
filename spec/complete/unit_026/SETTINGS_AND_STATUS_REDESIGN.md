@@ -182,11 +182,11 @@ NyXの[機器列挙](https://github.com/niart120/Project_NyX/blob/648f860e5afd58
 
 ## 7. 関連文書・着手記録・対象ファイル
 
-[AGENTS.md](../../../AGENTS.md)、[初期GUI方針](../../archive/initial/01-overview.md)、[工程計画](../../archive/initial/05-implementation.md)、[現行設定仕様](../../../docs/settings.md)を参照する。設計方針の承認後、本unitをwipへ移して製品実装に着手した。本仕様の契約変更とunit_025の既存回帰試験を照合し、変更する期待と維持する安全境界を区別する。
+[AGENTS.md](../../../AGENTS.md)、[初期GUI方針](../../archive/initial/01-overview.md)、[工程計画](../../archive/initial/05-implementation.md)、[現行設定仕様](../../../docs/guides/settings.md)を参照する。設計方針の承認後、本unitをwipへ移して製品実装に着手した。本仕様の契約変更とunit_025の既存回帰試験を照合し、変更する期待と維持する安全境界を区別する。
 
 対象は`ui/settings_dialog.py`、`ui/main_window.py`、`ui/notifications.py`、`ui/connection_panel.py`、`ui/video_panel.py`、`ui/video_info.py`、`app/shell.py`、`app/video.py`、`storage/settings.py`、`game_io/capture/`と対応する試験・利用者docs。取得サービスの所有方式、入力機器接続は変更しない。
 
-[初期I/O仕様](../../archive/initial/03-game-io.md)、[設定](../../../docs/settings.md)、[映像API](../../../docs/video-api.md)の「1920×1080固定」「要求寸法との不一致を拒否」「DirectShow固定」を本仕様の契約へ更新する。過去の完了unitにある実績は書き換えず、本仕様による変更を示す。公開docs・型・docstringも現在の製品契約へ揃える。
+[初期I/O仕様](../../archive/initial/03-game-io.md)、[設定](../../../docs/guides/settings.md)、[映像API](../../../docs/design/interfaces/video-api.md)の「1920×1080固定」「要求寸法との不一致を拒否」「DirectShow固定」を本仕様の契約へ更新する。過去の完了unitにある実績は書き換えず、本仕様による変更を示す。公開docs・型・docstringも現在の製品契約へ揃える。
 
 ## 8. TDD Test List
 
