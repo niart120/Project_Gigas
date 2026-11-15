@@ -8,7 +8,7 @@ from pytestqt.qtbot import QtBot
 from gigas.game_io.capture import CaptureReader, CaptureSnapshot
 from gigas.game_io.input.config import resolve_serial_config
 from gigas.game_io.input.models import InputState, InputStep
-from gigas.runtime.codex.connection import CodexConnection
+from gigas.runtime.codex.connection import CodexConnection, CodexConnectionError
 from gigas.runtime.codex.models import ConnectionOptions
 from gigas.services.application import ApplicationServiceThread
 from gigas.services.codex import CodexService
@@ -18,9 +18,9 @@ from tests.integration.test_input_service import Device
 from tests.unit.test_codex_connection import FakePeer, _run, _until
 
 
-@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize(("held", "fail_release"), [(False, False), (True, False), (False, True)])
 def test_codex_disconnect_only_joins_its_captured_finite_operation(
-    tmp_path: Path, *, held: bool
+    tmp_path: Path, *, held: bool, fail_release: bool
 ) -> None:
     async def scenario() -> None:
         entered, finish = asyncio.Event(), asyncio.Event()
@@ -33,7 +33,8 @@ def test_codex_disconnect_only_joins_its_captured_finite_operation(
 
         peer = SlowClose()
         device = Device()
-        inputs = InputService()
+        released = asyncio.Event()
+        inputs = InputService(on_busy_changed=lambda busy: None if busy else released.set())
         results = asyncio.Queue()
         service = CodexService(
             tmp_path,
@@ -58,10 +59,18 @@ def test_codex_disconnect_only_joins_its_captured_finite_operation(
                 finite = inputs.start((InputStep("press", 10000, InputState(buttons=("A",))),))
                 assert isinstance(finite, tuple)
             await device.pressed.wait()
+            device.fail_neutral = fail_release
             service.disconnect_runtime()
             await entered.wait()
             if finite is not None:
-                assert (await finite[1]).code == "INTERRUPTED"
+                assert (await finite[1]).code == (
+                    "DEVICE_UNAVAILABLE" if fail_release else "INTERRUPTED"
+                )
+                if fail_release:
+                    assert not inputs.connected
+                    await released.wait()
+                    device.fail_neutral = False
+                    await inputs.connect(device)
             else:
                 assert device.calls == ["open", InputState(buttons=("A",))]
             assert inputs.update_manual(InputState(buttons=("B",))).code == "OK"
@@ -69,14 +78,19 @@ def test_codex_disconnect_only_joins_its_captured_finite_operation(
             finish.set()
             disconnected = await results.get()
             assert disconnected.operation == "disconnect"
-            assert not disconnected.error
-            await service.close()
+            if fail_release:
+                assert "injected send failure" in disconnected.error
+                with pytest.raises(CodexConnectionError, match="injected send failure"):
+                    await service.close()
+            else:
+                assert not disconnected.error
+                await service.close()
             assert inputs.connected
             assert device.calls[-1] == InputState(buttons=("B",))
         finally:
             finish.set()
             await inputs.release_manual()
-            await service.close()
+            await asyncio.gather(service.close(), return_exceptions=True)
             await inputs.close()
 
     _run(scenario())

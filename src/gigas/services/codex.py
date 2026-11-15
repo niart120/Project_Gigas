@@ -30,7 +30,7 @@ from gigas.services.codex_models import (
     ServiceResult,
 )
 from gigas.services.conversations import ManagementResult
-from gigas.services.input import InputService
+from gigas.services.input import InputService, OperationResult
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -50,7 +50,6 @@ if TYPE_CHECKING:
         ManagementOperation,
         ManagementValue,
     )
-    from gigas.services.input import OperationResult
 
 __all__ = [
     "AnswerOutcome",
@@ -718,6 +717,9 @@ class CodexService:
         for outcome in (*outcomes, *drained):
             if isinstance(outcome, BaseException):
                 raise outcome
+            if isinstance(outcome, OperationResult) and outcome.code not in {"OK", "INTERRUPTED"}:
+                message = f"Codex切断時の入力解除に失敗しました: {outcome.message}"
+                raise CodexConnectionError(message)
 
     def _reject_submission(self, command: _OperationContext) -> None:
         result = rejected_result(command)

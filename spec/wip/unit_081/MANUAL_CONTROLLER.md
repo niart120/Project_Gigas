@@ -56,7 +56,8 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 | refactor-skipped | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2、8e32662。解除せず送信するred→11件green。追加構造変更不要 |
 | refactor-skipped | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3、c2e31b7。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。追加構造変更不要 |
 | refactor-skipped | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4、712e058。未定義moduleのred→モデル11件・GUI11件green。追加の抽象化不要 |
-| green | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。メニュー未定義の5件red→サービス終了も追加し6件green。終了要求時に古いGUI受付キャッシュを空にする。コミット後に完了記録 |
+| refactor-skipped | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5、e0b17af。メニュー未定義の5件red→サービス終了も追加し6件green。終了要求時に古いGUI受付キャッシュを空にする。追加構造変更不要 |
+| green | Codex切断で捕捉した有限操作の解除失敗を結果へ返し、後から受理した手動入力へ作用しない | edge | integration | item 6。切断結果が空errorになるred→捕捉済み結果だけを確認してgreen。結果解釈だけで足り、追加構造変更不要。コミット後に完了記録 |
 
 ## 7. 設計メモ
 
@@ -92,6 +93,8 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | uv run pytest tests/unit tests/integration -q | pass | 1087 passed（95.76秒）。段階1〜3の全製品回帰 |
 | uv lock --check / uv build | pass | 83 packages、wheel・sdist生成成功 |
 | uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | pass | 307ファイル。診断文の行長・format調整後に確認 |
+| 最終独立レビュー・再現テスト | 修正 | 従来からのCodex切断経路が有限操作の解除失敗を結果へ反映しない点を採用。callback完了を待つfixtureへ修正後、空errorのredを確認。切断完了前に再接続した手動入力を止めず、旧有限入力の失敗だけを返す |
+| uv run pytest tests/integration/test_manual_application.py tests/integration/test_codex_service.py tests/integration/test_codex_shutdown.py -q | pass | item 6、59 passed（11.04秒）。ruff format/check・tyもpass。ほかに最終レビューのP1/P2なし |
 
 ## 10. 先送り事項
 
