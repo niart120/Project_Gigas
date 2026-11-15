@@ -55,8 +55,8 @@ Shellの既存_exit_requested/committedに従って、設定保存・終了確�
 | refactor-skipped | 手動保持の更新・短い押下・解除を順序どおり送り、有限列との排他・protocol・失敗・終了回収を守る | new / edge | integration | item 1、677a425。API未定義のred→7件green。軸集約・中央通過・取消された解除待ち・task完了直後の再受付も確認。追加構造変更不要 |
 | refactor-skipped | 開始対象だけが解除後に準備・送信へ進み、失敗は未送信、取消しでは復活せず、編集・追加送信は有限列を止めない | new / edge | integration | item 2、8e32662。解除せず送信するred→11件green。追加構造変更不要 |
 | refactor-skipped | 実行中・Goalのターン間は手動拒否し、Codex切断が新旧の手動入力へ干渉しない | new / edge | integration | item 3、c2e31b7。アプリ配送と捕捉対象、終了要求取消しの順序。8件green。追加構造変更不要 |
-| green | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4。未定義moduleのred→モデル11件・GUI11件green。コミット後に完了記録 |
-| todo | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。Shell結合と既存終了経路 |
+| refactor-skipped | マウスのボタン・stick・padが状態と押下表示へ変換され、解放・無効化・窓イベントで復元しない | new | unit / integration | item 4、712e058。未定義moduleのred→モデル11件・GUI11件green。追加の抽象化不要 |
+| green | 小窓を一つだけ開き、実行中の開閉・終了取消し・保存失敗を経ても入力・接続を誤操作しない | new / edge | integration | item 5。メニュー未定義の5件red→サービス終了も追加し6件green。終了要求時に古いGUI受付キャッシュを空にする。コミット後に完了記録 |
 
 ## 7. 設計メモ
 
@@ -87,6 +87,11 @@ services/input.py・codex.py・application.py・_conversation_execution.py、app
 | 独立GUIレビュー | 修正 | 縦長時の描画fontが横幅を超えるP2を採用し、幅・高さへ収めた。調整役・世代管理なし。その他の修正必須指摘なし |
 | native画面・画像比較 | pass | [design-qa](../../../design-qa.md)。DPR 1.5、標準/最小/無効/3DS/18pt/縦長。初回P2を修正し同寸法再比較。Windowsで操作部外のreleaseを観測。窓境界外releaseはCUA API制約で未検証 |
 | 実機の手動操作 | not run | Shell結合後に記録 |
+| uv run pytest tests/integration/test_controller_shell.py tests/integration/test_codex_shutdown.py tests/integration/test_app_settings.py tests/integration/test_virtual_controller.py -q | pass | 42 passed（3.72秒）。Shell6件、既存終了・設定・小窓の回帰 |
+| 独立Shellレビュー | 採用 | 新たな競合・責務膨張の指摘なし。INVALID_SEQUENCEを送信前拒否と説明するP3を採用。固定文言テストは追加せずコードと画面文言を確認 |
+| uv run pytest tests/unit tests/integration -q | pass | 1087 passed（95.76秒）。段階1〜3の全製品回帰 |
+| uv lock --check / uv build | pass | 83 packages、wheel・sdist生成成功 |
+| uv run ruff format --check . / uv run ruff check . / uv run ty check --no-progress | pass | 307ファイル。診断文の行長・format調整後に確認 |
 
 ## 10. 先送り事項
 
