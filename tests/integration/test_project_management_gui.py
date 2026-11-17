@@ -39,8 +39,11 @@ def test_edit_updates_members_and_keeps_displayed_history_and_draft(
     root = tmp_path / "new"
     root.mkdir()
     peer = ProjectPeer(tmp_path)
+    peer.responses["thread/items/list"] = {
+        "data": [{"turnId": "turn-1", "item": item} for item in reversed(_items())]
+    }
     peer.responses["thread/turns/list"] = {
-        "data": [{"id": "turn-1", "status": "completed", "items": _items(), "itemsView": "full"}]
+        "data": [{"id": "turn-1", "status": "completed", "itemsView": "notLoaded", "items": []}],
     }
     shell = managed_shell(path, peer)
     shell.start()

@@ -34,14 +34,20 @@ class ConversationGuiPeer(ResumePeer):
                         {
                             "id": "old-turn",
                             "status": "completed",
-                            "itemsView": "full",
-                            "items": [
-                                {
-                                    "id": "old-message",
-                                    "type": "agentMessage",
-                                    "text": "保存された本文",
-                                }
-                            ],
+                            "items": [],
+                            "itemsView": "notLoaded",
+                        }
+                    ],
+                },
+                "thread/items/list": {
+                    "data": [
+                        {
+                            "turnId": "old-turn",
+                            "item": {
+                                "id": "old-message",
+                                "type": "agentMessage",
+                                "text": "保存された本文",
+                            },
                         }
                     ],
                     "nextCursor": None,

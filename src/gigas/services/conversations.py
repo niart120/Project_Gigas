@@ -8,7 +8,13 @@ from gigas.services.projects import ProjectDeleted, ProjectDetails, ProjectFolde
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gigas.runtime.codex.management import ProjectPage, ThreadInfo, ThreadPage, TurnPage
+    from gigas.runtime.codex.management import (
+        ProjectPage,
+        ThreadInfo,
+        ThreadPage,
+        TurnInfo,
+        TurnPage,
+    )
     from gigas.runtime.codex.models import GoalState
 
 
@@ -43,18 +49,48 @@ type ConversationTarget = NewConversationTarget | StoredConversationTarget
 
 
 @dataclass(frozen=True, slots=True)
+class HistoryCursor:
+    """Continuation for independently paged item bodies and turn metadata.
+
+    Attributes:
+        thread_id: Conversation owning both server cursors.
+        item_cursor: Next item page; None means item history is exhausted.
+        turns: Retained metadata starting at the last displayed boundary turn.
+        turn_cursor: Next metadata page; None means no older metadata remains.
+    """
+
+    thread_id: str
+    item_cursor: str | None
+    turns: "tuple[TurnInfo, ...]"
+    turn_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryPage:
+    """Bounded item bodies combined with their ordered turn statuses.
+
+    Attributes:
+        content: Descending turns containing only this page's item bodies.
+        next_cursor: Continuation, including undisplayed metadata-only turns.
+    """
+
+    content: "TurnPage"
+    next_cursor: HistoryCursor | None
+
+
+@dataclass(frozen=True, slots=True)
 class BrowseResult:
     """Saved metadata, Goal and first history page returned by one selection.
 
     Attributes:
         thread: Public metadata for the selected thread.
         goal: Saved Goal, or None. An active Goal does not mean local execution started.
-        history: One complete public turn page, without fetching subsequent pages.
+        history: Bounded item bodies and associated turn metadata.
     """
 
     thread: "ThreadInfo"
     goal: "GoalState | None"
-    history: "TurnPage"
+    history: HistoryPage
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,11 +100,11 @@ class HistoryResult:
     Attributes:
         target: Target instance captured for the request. Compare identity with the
             current selection; equal fields after reselection do not make a page current.
-        page: Public turn page and its opaque pagination cursors.
+        page: Bounded item bodies, turn metadata and a combined continuation.
     """
 
     target: StoredConversationTarget
-    page: "TurnPage"
+    page: HistoryPage
 
 
 type ManagementOperation = Literal[

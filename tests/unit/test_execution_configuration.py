@@ -82,7 +82,7 @@ def test_launch_and_thread_use_execution_settings_without_suppressing_standard_i
     assert params["config"] == {
         **expected,
         "model_reasoning_effort": "high",
-        "model_reasoning_summary": "auto",
+        "model_reasoning_summary": "detailed",
     }
     assert params["approvalPolicy"] == "on-request"
     assert params["approvalsReviewer"] == reviewer

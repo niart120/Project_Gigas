@@ -37,7 +37,7 @@ class Settings:
         window_size_preset: Display size key: hd, full_hd, wqhd, or four_k.
         capture_resolution: Capture size request: auto, hd, full_hd, wqhd, or four_k.
             The auto value leaves the device dimensions unchanged.
-        observation_resolution: Agent image size: original, full_hd, hd, or sd.
+        observation_resolution: Agent image size: original, full_hd, hd, 960x540, or 640x360.
             Independent of capture resolution and preview display.
         preview_letterbox: Preserve the preview aspect ratio with black padding when
             true; stretch to the preview area when false. Capture pixels are unchanged.
@@ -333,10 +333,14 @@ def _observation_resolution(value: object, path: Path) -> "ObservationResolution
             return "full_hd"
         case "hd":
             return "hd"
-        case "sd":
-            return "sd"
+        case "960x540" | "sd":
+            return "960x540"
+        case "640x360":
+            return "640x360"
         case _:
-            msg = f"{path}: observation.resolution must be original, full_hd, hd or sd"
+            msg = (
+                f"{path}: observation.resolution must be original, full_hd, hd, 960x540 or 640x360"
+            )
             raise SettingsError(msg)
 
 

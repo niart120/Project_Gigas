@@ -104,7 +104,9 @@ def test_additional_message_uses_same_start_and_prepared_endpoint(tmp_path: Path
             assert methods.count("thread/start") == 1
             assert methods.count("turn/start") == 2
             turns = [params for method, params in c.peer.calls if method == "turn/start"]
-            assert all(params is not None and params.get("summary") == "auto" for params in turns)
+            assert all(
+                params is not None and params.get("summary") == "detailed" for params in turns
+            )
             assert "turn/steer" not in methods
             assert "thread/resume" not in methods
             assert "thread/unsubscribe" not in methods
@@ -145,7 +147,7 @@ def test_summary_is_enabled_before_normal_or_goal_execution(
             assert params is not None
             config = params["config"]
             assert isinstance(config, dict)
-            assert config["model_reasoning_summary"] == "auto"
+            assert config["model_reasoning_summary"] == "detailed"
             trigger = "thread/goal/set" if use_goal else "turn/start"
             assert methods.index(preparation) < methods.index(trigger)
             if use_goal:
@@ -153,7 +155,7 @@ def test_summary_is_enabled_before_normal_or_goal_execution(
             else:
                 turn = next(params for method, params in c.peer.calls if method == trigger)
                 assert turn is not None
-                assert turn["summary"] == "auto"
+                assert turn["summary"] == "detailed"
         finally:
             await c.close()
 

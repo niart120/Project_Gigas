@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from gigas.runtime.codex.management_models import ProjectInfo, ThreadInfo
     from gigas.services.application import ApplicationServiceThread
+    from gigas.services.conversations import HistoryCursor
     from gigas.ui.main_window import MainWindow
 
 
@@ -64,7 +65,7 @@ class ConversationController(QObject):
         self._refresh_threads: set[str | None] = set()
         self._selection_pending: str | None = None
         self._history_pending: StoredConversationTarget | None = None
-        self._history_cursor: str | None = None
+        self._history_cursor: HistoryCursor | None = None
         self._unlisted_target: StoredConversationTarget | None = None
         self.sidebar.group_opened.connect(self._open_group)
         self.sidebar.new_requested.connect(self.new_conversation)
@@ -248,7 +249,7 @@ class ConversationController(QObject):
             self._project_name(result.thread.project_id),
             thread_title(result.thread),
             thread_id=result.thread.id,
-            entries=history_entries(result.thread.id, result.history),
+            entries=history_entries(result.thread.id, result.history.content),
             goal=result.goal,
         )
         self.sidebar.set_selection(target.project_id, target.thread_id)
@@ -315,7 +316,7 @@ class ConversationController(QObject):
             self._history_pending = None
             if isinstance(value, HistoryResult):
                 self.panel.transcript.prepend_items(
-                    history_entries(value.target.thread_id, value.page)
+                    history_entries(value.target.thread_id, value.page.content)
                 )
                 self._history_cursor = value.page.next_cursor
         if result.error and self._available:

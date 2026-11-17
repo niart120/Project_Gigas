@@ -40,7 +40,7 @@ approvals_reviewer = "auto_review"
 | `capture.fps` | 要求取得頻度。1〜120の整数。実際の到着頻度を保証する値ではない |
 | `capture.preview_fps` | 表示更新の上限。1〜60の整数 |
 | `capture.resolution` | 取得解像度の要求。`auto`・`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
-| `observation.resolution` | agent向け画像のサイズ。`original`（元寸法）・`full_hd`（1920×1080の枠、既定）・`hd`（1280×720の枠）・`sd`（720×480の枠）。全画面を比率維持で縮小し、小画像は拡大しない |
+| `observation.resolution` | agent向け画像のサイズ。`original`（元寸法）・`full_hd`（1920×1080の枠、既定）・`hd`（1280×720の枠）・`960x540`（960×540の枠）・`640x360`（640×360の枠）。全画面を比率維持で縮小し、小画像は拡大しない |
 | `project.last_path` | 最後に選択したProjectの絶対パス。フォルダー選択の初期位置の補助。起動時にProjectを自動選択しない |
 | `gui.window_size_preset` | 表示サイズ。`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
 | `gui.preview_letterbox` | `true`は比率を保ち黒い余白を付ける「レターボックス」、`false`は表示枠へ合わせる「ストレッチ」。取得画像は変更しない |
@@ -55,6 +55,8 @@ approvals_reviewer = "auto_review"
 | `agent.auto_connect` | Codex接続成功時に`true`、明示切断の成功時に`false`を保存。既定は`false`。`true`なら起動時に一度接続し、通常終了・通信障害では値を保持する |
 | `agent.memory_enabled` | Codex自動記憶の生成・参照をまとめた設定の保存値。真偽値、既定は`true`。`false`を保存しても既存記憶は削除しない |
 | `agent.approvals_reviewer` | 承認方法の保存値。`auto_review`（代わりに承認、既定）または`user`（自分で承認） |
+
+旧設定の `observation.resolution = "sd"` は読込み時に `960x540` として扱い、次の設定保存で新しい値へ置き換えます。
 
 Web検索・自動記憶・承認方法は、最後に読み込みまたは保存に成功した値を次の接続・新規会話の開始・保存済み会話のresumeへ使います。準備開始時に値を固定し、準備中やロード済みの会話は切り替えません。設定反映だけのためにCodexや映像・入力を再接続せず、保存失敗・キャンセルでは以前の値を維持します。
 

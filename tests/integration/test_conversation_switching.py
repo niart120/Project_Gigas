@@ -572,7 +572,7 @@ def test_old_history_success_and_failure_are_discarded_after_same_id_is_reselect
 
     class HistoryPeer(FakePeer):
         async def request(self, method: str, params: JsonObject | None) -> JsonValue:
-            if method == "thread/turns/list" and params and "cursor" in params:
+            if method == "thread/items/list" and params and "cursor" in params:
                 entered.set()
                 assert await asyncio.to_thread(release.wait, 10)
                 if fails:
@@ -588,9 +588,11 @@ def test_old_history_success_and_failure_are_discarded_after_same_id_is_reselect
     _saved(peer, tmp_path / "missing")
     try:
         with _session(qtbot, tmp_path, peer) as s, _release_after(release):
-            assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error
+            first = s.manage("select", lambda: s.service.select_conversation("stored-1"))
+            assert not first.error
+            assert isinstance(first.value, BrowseResult)
             old_target = s.service.codex._selection.target
-            s.service.load_history(cursor="opaque:/+?")
+            s.service.load_history(cursor=first.value.history.next_cursor)
             qtbot.waitUntil(entered.is_set)
             assert not s.manage("new", s.service.new_conversation).error
             assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error

@@ -12,10 +12,8 @@ def _page(identifier: str, text: str, cursor: str | None = None) -> JsonObject:
     return {
         "data": [
             {
-                "id": identifier,
-                "status": "completed",
-                "itemsView": "full",
-                "items": [{"id": identifier, "type": "agentMessage", "text": text}],
+                "turnId": identifier,
+                "item": {"id": identifier, "type": "agentMessage", "text": text},
             }
         ],
         "nextCursor": cursor,
@@ -56,9 +54,15 @@ def test_history_failure_keeps_document_position_and_cursor_for_explicit_retry(
 ) -> None:
     with conversation_gui(qtbot, tmp_path) as session:
         peer, panel = session.peer, session.panel
-        peer.responses["thread/turns/list"] = _page(
+        peer.responses["thread/items/list"] = _page(
             "recent", "\n".join(f"保存行 {index}" for index in range(150)), "opaque:/+?"
         )
+        peer.responses["thread/turns/list"] = {
+            "data": [
+                {"id": name, "status": "completed", "itemsView": "notLoaded", "items": []}
+                for name in ("recent", "older")
+            ],
+        }
         _browse(session)
         document = panel.transcript.document()
         original = panel.transcript.toPlainText()
@@ -70,7 +74,7 @@ def test_history_failure_keeps_document_position_and_cursor_for_explicit_retry(
         panel.transcript.setTextCursor(cursor)
         scroll.setValue(scroll.maximum() // 2)
         position = scroll.value()
-        peer.rpc_errors["thread/turns/list"] = -32603
+        peer.rpc_errors["thread/items/list"] = -32603
         panel.history_button.click()
         qtbot.waitUntil(
             lambda: (
@@ -82,17 +86,81 @@ def test_history_failure_keeps_document_position_and_cursor_for_explicit_retry(
         assert panel.transcript.toPlainText() == original
         assert panel.transcript.textCursor().selectedText() == cursor.selectedText()
         assert scroll.value() == position
-        assert len(session.params("thread/turns/list")) == 2
+        assert len(session.params("thread/items/list")) == 2
         assert session.shell.window.notifications.notices["codex"].details
-        del peer.rpc_errors["thread/turns/list"]
-        peer.responses["thread/turns/list"] = _page("older", "さらに以前の本文")
+        del peer.rpc_errors["thread/items/list"]
+        peer.responses["thread/items/list"] = _page("older", "さらに以前の本文")
         panel.history_button.click()
         qtbot.waitUntil(lambda: "さらに以前の本文" in panel.transcript.toPlainText())
-        requests = session.params("thread/turns/list")
+        requests = session.params("thread/items/list")
         assert requests[-2] == requests[-1]
         assert requests[-1]["cursor"] == "opaque:/+?"
         assert panel.transcript.document() is document
         assert original in panel.transcript.toPlainText()
+        assert not panel.history_button.isVisible()
+        _assert_not_executed(session)
+
+
+def test_split_body_pages_keep_turn_failures_in_order_without_duplicate_status_lines(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    with conversation_gui(qtbot, tmp_path) as session:
+        peer, panel = session.peer, session.panel
+        peer.responses["thread/items/list"] = _page("new", "新しい本文", "older-body")
+        peer.responses["thread/turns/list"] = {
+            "data": [
+                {
+                    "id": name,
+                    "status": status,
+                    "itemsView": "notLoaded",
+                    "items": [],
+                    "error": {"message": reason} if reason else None,
+                }
+                for name, status, reason in (
+                    ("new", "failed", "新しいturnの失敗理由"),
+                    ("empty", "interrupted", ""),
+                    ("old", "failed", "古いturnの失敗理由"),
+                )
+            ],
+        }
+        _browse(session)
+        panel.transcript.toggle_details(f"turn-status:{('saved', 'new')!r}")
+        assert panel.transcript.toPlainText().count("新しいturnの失敗理由") == 1
+        assert "古いturnの失敗理由" not in panel.transcript.toPlainText()
+        peer.responses["thread/items/list"] = {
+            "data": [
+                {
+                    "turnId": "new",
+                    "item": {"id": "early", "type": "agentMessage", "text": "同じturnの先頭"},
+                },
+                {
+                    "turnId": "old",
+                    "item": {"id": "old", "type": "agentMessage", "text": "古い本文"},
+                },
+            ],
+        }
+        panel.history_button.click()
+        old_key = f"turn-status:{('saved', 'old')!r}"
+        qtbot.waitUntil(lambda: panel.transcript.item_entry(old_key) is not None)
+        qtbot.waitUntil(lambda: panel.transcript.rendering_idle)
+        panel.transcript.toggle_details(old_key)
+        text = panel.transcript.toPlainText()
+        assert text.count("新しいturnの失敗理由") == 1
+        assert text.count("古いturnの失敗理由") == 1
+        assert text.count("中断") == 1
+        positions = [
+            text.index(value)
+            for value in (
+                "古い本文",
+                "古いturnの失敗理由",
+                "中断",
+                "同じturnの先頭",
+                "新しい本文",
+                "新しいturnの失敗理由",
+            )
+        ]
+        assert positions == sorted(positions)
+        assert len(session.params("thread/turns/list")) == 1
         assert not panel.history_button.isVisible()
         _assert_not_executed(session)
 

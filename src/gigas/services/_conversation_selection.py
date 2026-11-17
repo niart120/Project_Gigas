@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 from gigas.runtime.codex import _conversation_protocol as protocol
 from gigas.runtime.codex.connection import CodexConnectionError
 from gigas.services._conversation_goals import GoalTracker
+from gigas.services._conversation_history import read_history
 from gigas.services.conversations import (
     BrowseGoalEvent,
     BrowseResult,
     ConversationTarget,
+    HistoryCursor,
     HistoryResult,
     NewConversationTarget,
     StoredConversationTarget,
@@ -94,7 +96,7 @@ class ConversationSelection:
         async with self._selecting():
             thread = await management.read_thread(thread_id)
             goal = await management.get_goal(thread_id)
-            history = await management.list_turns(thread_id)
+            history = await read_history(management, thread_id)
             await release()
             self._target = StoredConversationTarget(thread.id, thread.cwd, thread.project_id)
             self._thread = thread
@@ -102,7 +104,7 @@ class ConversationSelection:
             return BrowseResult(thread, goal, history)
 
     async def history(
-        self, management: "CodexManagement", *, cursor: str | None = None
+        self, management: "CodexManagement", *, cursor: HistoryCursor | None = None
     ) -> HistoryResult:
         """Return one page for the captured target without blocking selection.
 
@@ -112,7 +114,7 @@ class ConversationSelection:
         target = self._target
         if not isinstance(target, StoredConversationTarget):
             raise CodexConnectionError("新規会話には保存済みの履歴がありません")
-        page = await management.list_turns(target.thread_id, cursor=cursor)
+        page = await read_history(management, target.thread_id, cursor)
         return HistoryResult(target, page)
 
     def adopt_started(self, thread_id: str, cwd: "Path", project_id: str | None) -> None:
