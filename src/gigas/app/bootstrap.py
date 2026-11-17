@@ -17,6 +17,7 @@ def run() -> int:
     application = QApplication(sys.argv)
     application.setQuitOnLastWindowClosed(False)
     diagnostics = ApplicationDiagnostics(path)
+    diagnostics.install_exception_hooks()
     try:
         shell = ApplicationShell(path)
     except Exception:
