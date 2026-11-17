@@ -1,5 +1,6 @@
 """UI-independent capture requests, supervision, and immutable state snapshots."""
 
+import logging
 import math
 import multiprocessing
 import time
@@ -12,6 +13,8 @@ from gigas.game_io.capture._process import SharedSlot, receive_message, worker_m
 from gigas.game_io.capture.backend import OpenCVBackend
 from gigas.game_io.capture.frames import FrameStore
 from gigas.game_io.capture.models import CaptureError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -260,13 +263,26 @@ class CaptureService(Thread):
                     if preference is None
                     else self._spawn(options, generation, preference)
                 )
-            except Exception:  # noqa: BLE001 -- thread boundary reports startup failures
+            except Exception:
+                logger.exception(
+                    "Capture supervision failed",
+                    extra={"event": "capture.failed", "operation": "_run_request"},
+                )
                 with self._condition:
                     self._frames.invalidate()
                     self._state = replace(
                         self._state, phase="error", error="映像取得プロセスの起動失敗"
                     )
                 return
+            logger.info(
+                "Capture worker started",
+                extra={
+                    "event": "capture.worker_started",
+                    "generation": generation,
+                    "child_pid": session.process.pid,
+                    "operation": "enumerate" if options is None else "connect",
+                },
+            )
             self._monitor(session, generation, started)
             last_cleanup = session.cleanup
             with self._condition:
@@ -354,7 +370,11 @@ class CaptureService(Thread):
     def _rollback(self, resource: object, close: "Callable[[], None]") -> None:
         try:
             close()
-        except Exception:  # noqa: BLE001 -- keep ownership when partial startup cleanup fails
+        except Exception:
+            logger.exception(
+                "Capture supervision failed",
+                extra={"event": "capture.failed", "operation": "_rollback"},
+            )
             self._retained.append(resource)
             with self._condition:
                 self._state = replace(self._state, cleanup="unconfirmed")
@@ -386,6 +406,10 @@ class CaptureService(Thread):
                         session.error = "映像取得プロセスの通信終了"
                 break
             except (CaptureError, ValueError):
+                logger.exception(
+                    "Capture supervision failed",
+                    extra={"event": "capture.failed", "operation": "_messages"},
+                )
                 session.error = "映像取得プロセスの通知が不正"
                 session.status_closed = True
                 break
@@ -405,9 +429,22 @@ class CaptureService(Thread):
                     self._state = replace(self._state, backend=message.backend)
                 elif message.kind == "started":
                     session.started = True
+                    logger.info(
+                        "Capture connected",
+                        extra={"event": "capture.connected", "child_pid": session.process.pid},
+                    )
                 elif message.kind == "released":
                     session.released = True
                 elif message.kind == "error":
+                    logger.error(
+                        "Capture worker reported failure",
+                        extra={
+                            "event": "capture.worker_failed",
+                            "child_pid": session.process.pid,
+                            "error": message.error,
+                            "details": message.details,
+                        },
+                    )
                     session.error = session.error or message.error
                     self._frames.invalidate()
 
@@ -430,7 +467,11 @@ class CaptureService(Thread):
                             session.started = True
                             progress = now
                             self._publish(frame)
-            except Exception:  # noqa: BLE001 -- monitor failures must still stop/reap the worker
+            except Exception:
+                logger.exception(
+                    "Capture supervision failed",
+                    extra={"event": "capture.failed", "operation": "_monitor"},
+                )
                 session.error = "映像監視処理が失敗"
             self._deadlines(session, started, progress, sequence)
             with self._condition:
@@ -482,12 +523,20 @@ class CaptureService(Thread):
     def _finalize(self, session: _Session) -> None:
         try:
             self._messages(session)
-        except Exception:  # noqa: BLE001 -- final notification cannot skip resource cleanup
+        except Exception:
+            logger.exception(
+                "Capture supervision failed",
+                extra={"event": "capture.failed", "operation": "_finalize"},
+            )
             session.error = "映像監視処理が失敗"
         join_failed = False
         try:
             session.process.join(0)
-        except Exception:  # noqa: BLE001 -- continue releasing handles after a join failure
+        except Exception:
+            logger.exception(
+                "Capture supervision failed",
+                extra={"event": "capture.failed", "operation": "_finalize"},
+            )
             join_failed = True
             session.error = "映像取得プロセスの終了確認失敗"
         with self._condition:
@@ -504,6 +553,7 @@ class CaptureService(Thread):
             cleanup = "forced"
         elif session.released or session.listed:
             cleanup = "graceful"
+        child_pid, exit_code = session.process.pid, session.process.exitcode
         closers: list[Callable[[], None]] = [
             session.stop.close,
             session.status.close,
@@ -515,7 +565,11 @@ class CaptureService(Thread):
         for close in closers:
             try:
                 close()
-            except Exception:  # noqa: BLE001 -- report unreleased host resources
+            except Exception:
+                logger.exception(
+                    "Capture supervision failed",
+                    extra={"event": "capture.failed", "operation": "_finalize"},
+                )
                 cleanup = "unconfirmed"
                 session.error = "映像取得資源の解放未確認"
         if join_failed:
@@ -523,3 +577,14 @@ class CaptureService(Thread):
         if cleanup == "unconfirmed":
             self._retained.append(session)
         session.cleanup = cleanup
+        logger.log(
+            logging.ERROR if session.error else logging.INFO,
+            "Capture worker stopped",
+            extra={
+                "event": "capture.worker_stopped",
+                "child_pid": child_pid,
+                "exit_code": exit_code,
+                "cleanup": cleanup,
+                "error": session.error,
+            },
+        )

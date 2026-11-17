@@ -1,6 +1,7 @@
 """Private spawn entry and bounded shared-memory frame transport."""
 
 import json
+import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -53,6 +54,7 @@ class WorkerMessage:
     error: str = ""
     candidates: tuple[int, ...] = ()
     backend: int | None = None
+    details: str = ""
 
 
 def send_message(channel: Channel, message: WorkerMessage) -> None:
@@ -64,6 +66,7 @@ def send_message(channel: Channel, message: WorkerMessage) -> None:
             "error": message.error,
             "candidates": message.candidates,
             "backend": message.backend,
+            "details": message.details,
         },
         ensure_ascii=False,
         allow_nan=False,
@@ -95,7 +98,8 @@ def receive_message(channel: Channel) -> WorkerMessage:
             raise CaptureError(error)
         devices.append(DeviceInfo(name, path))
     message = value.get("error")
-    if not isinstance(message, str):
+    details = value.get("details", "")
+    if not isinstance(message, str) or not isinstance(details, str):
         raise CaptureError(error)
     match kind:
         case "devices":
@@ -117,7 +121,7 @@ def receive_message(channel: Channel) -> WorkerMessage:
         case "released":
             return WorkerMessage("released")
         case _:
-            return WorkerMessage("error", error=message)
+            return WorkerMessage("error", error=message, details=details)
 
 
 class SharedSlot:
@@ -256,8 +260,12 @@ def worker_main(
             )
     except Exception as failure:  # noqa: BLE001 -- sanitize the native driver boundary
         error = str(failure) if isinstance(failure, CaptureError) else "映像取得処理が失敗"
+        details = traceback.format_exc()
+        # Keep the existing 64 KiB control-message bound, including JSON escaping.
+        if len(details) > 6000:
+            details = "[traceback prefix truncated]\n" + details[-6000:]
         with suppress(BrokenPipeError, EOFError, OSError):
-            send_message(status, WorkerMessage("error", error=error))
+            send_message(status, WorkerMessage("error", error=error, details=details))
     finally:
         if slot is not None:
             slot.close(owner=False)
