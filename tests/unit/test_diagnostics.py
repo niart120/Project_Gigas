@@ -3,6 +3,9 @@
 import json
 import logging
 import sys
+from dataclasses import make_dataclass
+from pathlib import Path
+from unittest.mock import Mock
 
 from gigas.diagnostics import DiagnosticFormatter, Redactor, redactor
 
@@ -42,3 +45,34 @@ def test_json_exception_and_nested_details_are_sanitized() -> None:
     for secret in ("nested-secret", "exception-secret", "test-issued-secret"):
         assert secret not in rendered
     assert details["refresh_token"] == "nested-secret"  # noqa: S105 -- synthetic credential
+
+
+def test_encoder_conversions_are_redacted_before_single_json_serialization() -> None:
+    class Detail:
+        def __str__(self) -> str:
+            return "Bearer object-secret"
+
+    record = logging.LogRecord("gigas.test", logging.ERROR, __file__, 1, "failure", (), None)
+    record.password = "top-secret"  # noqa: S105 -- synthetic credential
+    record.details = [
+        Path("Bearer path-secret"),
+        ("Bearer tuple-secret",),
+        Detail(),
+        ValueError("Bearer exception-secret"),
+        make_dataclass("Credential", ["password"])("dataclass-secret"),
+    ]
+    formatter = DiagnosticFormatter()
+    serialize = Mock(wraps=formatter.json_serializer)
+    formatter.json_serializer = serialize
+    result = formatter.format(record)
+    assert serialize.call_count == 1
+    assert json.loads(result)["password"] == "[REDACTED]"  # noqa: S105 -- redacted marker
+    for secret in (
+        "top-secret",
+        "path-secret",
+        "tuple-secret",
+        "object-secret",
+        "exception-secret",
+        "dataclass-secret",
+    ):
+        assert secret not in result

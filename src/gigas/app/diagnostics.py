@@ -4,8 +4,6 @@ import logging
 import platform
 import sys
 import threading
-import traceback
-from contextlib import suppress
 from pathlib import Path
 from threading import Thread
 from types import TracebackType
@@ -14,7 +12,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 from gigas import __version__
-from gigas.diagnostics import redactor
 from gigas.storage.diagnostics import DiagnosticSession
 from gigas.ui.notifications import Notice
 
@@ -67,11 +64,6 @@ class ApplicationDiagnostics(QObject):
             exc_info=(kind, error, trace),
             extra={"event": "app.uncaught_exception"},
         )
-        if sys.stderr is not None:
-            with suppress(OSError):
-                sys.stderr.write(
-                    redactor.clean("".join(traceback.format_exception(kind, error, trace)))
-                )
 
     def _thread_uncaught(self, args: threading.ExceptHookArgs) -> None:
         if args.exc_type is not SystemExit and args.exc_value is not None:

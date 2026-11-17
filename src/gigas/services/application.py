@@ -266,9 +266,9 @@ class ApplicationServiceThread(QThread):
                     return
                 await self.inputs.apply_config()
         except CodexConnectionError as error:
-            logger.exception(
+            logger.warning(
                 "Application service operation failed",
-                extra={"event": "service.failed", "operation": "_apply_input"},
+                extra={"event": "service.failed", "operation": "_apply_input", "error": str(error)},
             )
             self.inputs.reject_config(str(error))
         except Exception:
@@ -438,10 +438,6 @@ class ApplicationServiceThread(QThread):
                     }:
                         raise InputServiceError(outcome.code, outcome.message)
         except (CodexConnectionError, InputServiceError) as failure:
-            logger.exception(
-                "Application service operation failed",
-                extra={"event": "service.failed", "operation": "_stop"},
-            )
             error = str(failure)
         except Exception:
             logger.exception(

@@ -1,6 +1,5 @@
 """Bounded recent-failure history independent of service and shutdown state."""
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -139,15 +138,6 @@ class NotificationCenter(QObject):
         """Retain a typed failure and show its banner without interrupting copying."""
         if not isinstance(notice, Notice):
             return
-        if notice.source != "logging":
-            logging.getLogger(__name__).error(
-                notice.title,
-                extra={
-                    "event": "app.failure_notice",
-                    "category": notice.source,
-                    "details": notice.details,
-                },
-            )
         self._notices[notice.source] = notice
         self._latest = notice.source
         self._title.setText(f"{_SOURCES[notice.source]} · {notice.title}")

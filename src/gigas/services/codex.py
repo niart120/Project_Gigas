@@ -36,7 +36,7 @@ from gigas.services.codex_models import (
     ServiceResult,
 )
 from gigas.services.conversations import ManagementResult, StoredConversationTarget
-from gigas.services.input import InputService, OperationResult
+from gigas.services.input import InputService, InputServiceError, OperationResult
 from gigas.services.projects import ProjectFolderStatus
 
 logger = logging.getLogger(__name__)
@@ -429,7 +429,13 @@ class CodexService:
                 await asyncio.gather(task, return_exceptions=True)
             if self._conversation is not None:
                 await self._conversation.stop()
-        except BaseException:
+        except (CodexConnectionError, InputServiceError) as error:
+            logger.error(  # noqa: TRY400 -- the owning boundary already logged the cause
+                "Codex execution stop failed",
+                extra={**fields, "event": "codex.operation_failed", "error": str(error)},
+            )
+            raise
+        except Exception:
             logger.exception(
                 "Codex execution stop did not complete",
                 extra={**fields, "event": "codex.operation_failed"},
@@ -508,18 +514,10 @@ class CodexService:
                 self._complete(command, "送信結果を確認できない", "unknown")
             return
         except (AnswerDeliveryError, MessageDeliveryError) as failure:
-            logger.exception(
-                "Codex delivery result unknown",
-                extra=self._operation_fields(command, "codex.operation_failed"),
-            )
             error = str(failure)
             outcome = "unknown"
             failure_id = failure.failure_id
         except CodexConnectionError as failure:
-            logger.exception(
-                "Codex operation rejected",
-                extra=self._operation_fields(command, "codex.operation_failed"),
-            )
             error = str(failure)
             outcome = "not_sent"
             failure_id = failure.failure_id
@@ -706,7 +704,11 @@ class CodexService:
                 await self._close_connection()
         except CodexConnectionError as failure:
             error = str(failure)
-        except Exception:  # noqa: BLE001 -- public boundary must not expose upstream text.
+        except Exception:
+            logger.exception(
+                "Conversation management failed",
+                extra={"event": "codex.management_failed", "operation": operation},
+            )
             error = "会話管理の操作に失敗しました"
         finally:
             if self._project_task is owner:
@@ -715,6 +717,16 @@ class CodexService:
             target is not self._selection.target or generation != self._active_generation
         ):
             return
+        if error:
+            logger.warning(
+                "Conversation management rejected",
+                extra={
+                    "event": "codex.management_result",
+                    "operation": operation,
+                    "connection_id": generation,
+                    "error": error,
+                },
+            )
         self.management_completed(ManagementResult(generation, operation, value, error, project_id))
 
     def _require_management(self, generation: int) -> CodexConnection:
@@ -820,8 +832,19 @@ class CodexService:
             path = project.root
         except CodexConnectionError as failure:
             error = str(failure)
-        except Exception as failure:  # noqa: BLE001 -- sanitize unexpected failures at GUI boundary
+        except Exception as failure:
+            logger.exception("Project selection failed", extra={"event": "codex.project_failed"})
             error = recording_reason(failure)
+        if error:
+            logger.warning(
+                "Project selection rejected",
+                extra={
+                    "event": "codex.project_result",
+                    "connection_id": generation,
+                    "path": str(path),
+                    "error": error,
+                },
+            )
         self.project_completed(ProjectResult(generation, path, project, error))
 
     async def _select_project(

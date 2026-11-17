@@ -448,3 +448,21 @@ def test_stop_during_completed_write_preserves_delivery_and_connection(
         await harness.close()
 
     asyncio.run(scenario())
+
+
+def test_connection_failure_records_cause_once(caplog: pytest.LogCaptureFixture) -> None:
+    class UnavailableDevice(Device):
+        async def open(self) -> None:
+            message = "port unavailable"
+            raise OSError(message)
+
+    async def scenario() -> None:
+        service = InputService(factory=lambda _: UnavailableDevice())
+        service.request_config(resolve_serial_config("COM7", "ch552", None))
+        await service.apply_config()
+        await service.close()
+
+    asyncio.run(scenario())
+    failures = [r for r in caplog.records if r.__dict__.get("event") == "input.failed"]
+    assert len(failures) == 1
+    assert failures[0].exc_info is not None

@@ -360,9 +360,6 @@ class InputService:
                 self._available = True
                 logger.info("Input device connected", extra={"event": "input.connected"})
         except OSError as error:
-            logger.exception(
-                "Input operation failed", extra={"event": "input.failed", "operation": "_connect"}
-            )
             raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
 
     def stop(self) -> asyncio.Task[OperationResult] | None:

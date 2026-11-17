@@ -46,7 +46,7 @@ def test_uncaught_exception_hooks_save_details_and_redact_stderr(
     assert threading.excepthook is original_thread
     contents = diagnostics.session.path.read_text(encoding="utf-8")
     assert "private-hook-token" not in contents
-    assert "private-hook-token" not in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
     assert "ValueError" in contents
     assert "app.uncaught_exception" in contents
     assert "service.uncaught_exception" in contents

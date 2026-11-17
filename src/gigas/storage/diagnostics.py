@@ -140,12 +140,8 @@ class DiagnosticSession:
             if self._lock_file is not None:
                 self._lock_file.close()
                 self._lock_file = None
-            self._entry_handler = (
-                logging.StreamHandler(sys.stderr)
-                if sys.stderr is not None
-                else logging.NullHandler()
-            )
-            self._entry_handler.setFormatter(DiagnosticFormatter())
+            # Suppress logging.lastResort when file logging is unavailable.
+            self._entry_handler = logging.NullHandler()
         self._entry_handler.setLevel(logging.INFO)
         self._entry_handler.addFilter(
             lambda record: (

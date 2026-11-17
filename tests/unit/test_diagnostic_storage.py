@@ -64,7 +64,7 @@ def test_initialization_failure_is_reported(tmp_path: Path) -> None:
     assert failures[0][0] == session.path
 
 
-def test_initialization_failure_redacts_fallback_output(
+def test_initialization_failure_does_not_write_to_stderr(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "logs").write_text("blocked")
@@ -75,8 +75,7 @@ def test_initialization_failure_redacts_fallback_output(
     finally:
         session.close()
     output = capsys.readouterr().err
-    assert "fallback" in output
-    assert "hidden-credential" not in output
+    assert output == ""
 
 
 def test_library_success_traffic_is_not_recorded_but_warnings_are(tmp_path: Path) -> None:

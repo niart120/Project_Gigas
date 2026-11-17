@@ -1,13 +1,13 @@
 """Shared formatting and credential removal for diagnostic records."""
 
-import json
 import logging
 import re
 import threading
 from datetime import UTC, datetime
-from typing import override
+from typing import cast, override
 
-from pythonjsonlogger.json import JsonFormatter
+from pythonjsonlogger.core import LogData
+from pythonjsonlogger.json import JsonEncoder, JsonFormatter
 
 _CREDENTIAL = re.compile(
     r"""(?i)(["']?(?:authorization|access_token|refresh_token|id_token|api_key|apikey|password|client_secret)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)"""
@@ -67,6 +67,7 @@ class DiagnosticFormatter(JsonFormatter):
                 "process": "pid",
             },
             json_ensure_ascii=False,
+            json_default=_encode_clean,
         )
 
     @override
@@ -84,16 +85,21 @@ class DiagnosticFormatter(JsonFormatter):
         return timestamp.replace("+00:00", "Z")
 
     @override
-    def format(self, record: logging.LogRecord) -> str:
-        """Render sanitized JSON without mutating the producer's record.
+    def process_log_record(self, log_data: LogData) -> LogData:
+        """Remove credentials before JSON serialization.
 
         Args:
-            record: Source record including exception information and extra fields.
+            log_data: Fields assembled by the logging formatter.
 
         Returns:
-            One JSON object suitable for a JSONL file.
+            A sanitized copy of the fields.
         """
-        return json.dumps(_clean_value(json.loads(super().format(record))), ensure_ascii=False)
+        return cast("LogData", _clean_value(log_data))
+
+
+def _encode_clean(value: object) -> object:
+    # Non-JSON objects become strings or containers only during encoding.
+    return _clean_value(JsonEncoder().default(value))
 
 
 def _clean_value(value: object) -> object:
@@ -106,6 +112,6 @@ def _clean_value(value: object) -> object:
             else _clean_value(item)
             for key, item in value.items()
         }
-    if isinstance(value, list):
+    if isinstance(value, list | tuple):
         return [_clean_value(item) for item in value]
     return value
