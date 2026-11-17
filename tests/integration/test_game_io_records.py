@@ -273,7 +273,16 @@ def test_jsonl_failure_after_image_publication_keeps_the_image(
         writer.record_dialogue("dialogue.message", "next")
 
 
-@pytest.mark.parametrize("identifier", ["../escaped", "obs-../../escaped"])
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "../escaped",
+        "obs-../../escaped",
+        "obs-019aa000-0000-7000-8000-000000000000",
+        "019AA000-0000-7000-8000-000000000000",
+        "019aa000-0000-4000-8000-000000000000",
+    ],
+)
 def test_image_id_cannot_escape_the_record_destination(tmp_path: Path, identifier: str) -> None:
     with closing(GameIoRecordWriter.create(tmp_path / "records")) as writer:
         with pytest.raises(RecordError):

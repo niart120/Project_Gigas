@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
-from uuid import uuid4
 
 import cv2
 import numpy as np
+from uuid6 import uuid7
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -52,7 +52,7 @@ class Observation:
     """One encoded agent image and its source metadata, not yet necessarily saved.
 
     Attributes:
-        observation_id: UUID4 identifier prefixed with obs-.
+        observation_id: Canonical UUID7 identifier without a prefix.
         captured_at: Original host acquisition time, not encoding or saving time.
         source_frame: Source identifiers and dimensions without source pixels.
         png_bytes: Final PNG bytes shared by storage and MCP image encoding.
@@ -130,7 +130,7 @@ class Observation:
             message = "観測画像を32 MiB以内のPNGに符号化できません"
             raise ObservationError("OBSERVATION_ENCODING_ERROR", message)
         return cls(
-            f"obs-{uuid4()}",
+            str(uuid7()),
             frame.captured_at,
             FrameSource(frame.generation, frame.sequence, frame.width, frame.height),
             encoded.tobytes(),

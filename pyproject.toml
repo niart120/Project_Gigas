@@ -28,6 +28,7 @@ dependencies = [
     "pyserial==3.5",
     "pyside6-essentials==6.12.0",
     "tomlkit==0.15.2",
+    "uuid6==2025.0.1",
     "uvicorn==0.54.0",
 ]
 
