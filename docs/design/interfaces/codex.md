@@ -28,7 +28,7 @@ GIGASアプリは専用のCodex homeを使う。認証情報・会話・Project�
 
 通常依頼、Goal、停止・再開の利用上の意味は[会話機能](../functions/conversations.md)、公開Python APIは[Codex API](codex-api.md)にまとめる。
 
-`thread/start`と`thread/resume`の共通設定に`model_reasoning_summary: "auto"`を指定し、Goal開始・再開を含む自律turnでも公開推論要約を要求する。通常依頼・追加指示の`turn/start`にも`summary: "auto"`を指定する。表示設定OFFは受信を止めず、要約の要求方法も変えない。要約本文が返るかはモデルと応答に依存し、空の場合は本文を補わない。
+`thread/start`と`thread/resume`の共通設定に`model_reasoning_summary: "detailed"`を指定し、Goal開始・再開を含む自律turnでも詳細な公開推論要約を要求する。通常依頼・追加指示の`turn/start`にも`summary: "detailed"`を指定する。表示設定OFFは受信を止めず、要約の要求方法も変えない。要約本文が返るかはモデルと応答に依存し、空の場合は本文を補わない。
 
 ## threadの実行設定
 

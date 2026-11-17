@@ -104,7 +104,7 @@ def _thread_params(
     config.update(configuration.mcp_config)
     config.update(config_overrides(settings))
     config["model_reasoning_effort"] = selection.effort
-    config["model_reasoning_summary"] = "auto"
+    config["model_reasoning_summary"] = "detailed"
     instructions = read_play_instructions()
     if not instructions.strip():
         raise CodexConnectionError("共通指示が空")
@@ -181,7 +181,7 @@ def turn_start_params(thread_id: str, prompt: str, selection: "ModelSelection") 
         "input": [{"type": "text", "text": prompt}],
         "model": selection.model,
         "effort": selection.effort,
-        "summary": "auto",
+        "summary": "detailed",
     }
 
 
