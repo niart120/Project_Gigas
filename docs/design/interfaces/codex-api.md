@@ -47,7 +47,7 @@ GIGASが使用する通信・実行設定は[Codex接続仕様](codex.md)、通�
 | --- | --- |
 | `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None, archived=None)` | 指定Projectの会話を`ThreadPage`で取得する。project_idの`None`は未所属。全モデルプロバイダーを対象にし、archivedはTrueでアーカイブ済み、Falseで通常、Noneでサーバーの既定条件を使う |
 | `read_thread(thread_id)` | `includeTurns=false`で`ThreadInfo`を取得する。本文の一括取得は行わない |
-| `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None)` | `itemsView=full`を明示し、1ページのturnと各turnに含まれる公開itemを`TurnPage`で取得する |
+| `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None, items_view="full")` | 1ページのturnを`TurnPage`で取得する。`items_view`は`full`・`summary`・`notLoaded`。`notLoaded`は本文を取得せず状態・エラーなどのturn情報を返す |
 | `list_items(thread_id, *, turn_id=None, cursor=None, limit=None, sort_direction=None)` | 1ページの公開itemを`ItemPage`で取得する。`turn_id`指定時はそのturnに絞る |
 
 `ThreadInfo`は`id`、`name`、`preview`、`cwd`、`project_id`、`created_at`・`updated_at`、`model`・`reasoning_effort`、公開`status`を持ちます。タイトルやモデル情報が未提供の場合は`None`のまま返し、代替値を補いません。

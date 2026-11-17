@@ -30,6 +30,7 @@ class ProjectPeer(FakePeer):
         self.deleted = False
         self.drop_delete_response = False
         self.fail_second_page = False
+        self.responses["thread/items/list"] = {"data": []}
         self.responses["thread/turns/list"] = {"data": []}
 
     def metadata(self) -> JsonObject:

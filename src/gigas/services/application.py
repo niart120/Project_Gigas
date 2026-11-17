@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from gigas.game_io.observation import ObservationResolution
     from gigas.runtime.codex.management import ProjectInfo
     from gigas.runtime.codex.models import ConnectionOptions
-    from gigas.services.conversations import ConversationTarget
+    from gigas.services.conversations import ConversationTarget, HistoryCursor
     from gigas.services.input import InputDevice
 
 __all__ = [
@@ -305,7 +305,7 @@ class ApplicationServiceThread(QThread):
         """Read saved history without resuming; a running conversation must stop first."""
         self._enqueue(lambda: self.codex.select_conversation(thread_id))
 
-    def load_history(self, *, cursor: str | None = None) -> None:
+    def load_history(self, *, cursor: "HistoryCursor | None" = None) -> None:
         """Read one extra page without reserving submission or selection admission.
 
         Results, including failures, are discarded when their selection instance

@@ -221,25 +221,28 @@ class CodexManagement:
         cursor: str | None = None,
         limit: int | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
+        items_view: Literal["notLoaded", "summary", "full"] = "full",
     ) -> TurnPage:
-        """Read one turn page with full public items instead of display summaries.
+        """Read one turn page with the requested item detail.
 
         Args:
             thread_id: Server-owned identity of the thread to read.
             cursor: Opaque continuation cursor, passed through unchanged.
             limit: Optional page-size limit; omitted to use the server default.
             sort_direction: Optional direction; the server defaults to descending.
+            items_view: Item detail; notLoaded retrieves only turn metadata.
 
         Returns:
-            One turn page with complete returned item objects and both cursors.
-            Item text and tool payloads are not converted to presentation events.
+            One turn page and both cursors. Full returns complete item objects;
+            notLoaded returns metadata with empty items. Item text and tool
+            payloads are not converted to presentation events.
 
         Raises:
             CodexConnectionError: The connection is closed or history is invalid.
             TransportError: The request fails or the server rejects it.
         """
         params = _page_params(cursor, limit, sort_direction)
-        params.update({"threadId": thread_id, "itemsView": "full"})
+        params.update({"threadId": thread_id, "itemsView": items_view})
         result = await self._connection.request("thread/turns/list", params)
         return protocol.turn_page(result)
 

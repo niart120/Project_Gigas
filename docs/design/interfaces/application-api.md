@@ -24,9 +24,11 @@ GUIとサービスを接続するPython APIです。全体の責務は[アーキ
 
 `gigas.services.conversations`の`NewConversationTarget(project_id=None)`は、まだ開始していない会話の所属だけを表します。`StoredConversationTarget(thread_id, cwd, project_id=None)`は、公開応答で確認した既存ID・保存作業場所・所属を表します。どちらも選択対象の値であり、接続済み・実行準備済みを意味しません。`None`の所属は未所属です。
 
-`BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の履歴ページ、`HistoryResult(target, page)`は取得開始時の対象と追加ページを保持します。履歴は`TurnPage`の全文項目とcursorをそのまま使い、全件収集や表示用の本文への変換はしません。サービスの読み取り専用`selected_target`は現在の不変な対象参照です。追加ページや閲覧Goal通知の受信時は、その`target is service.selected_target`を確認してください。同じ会話へ選び直した場合も以前の要求結果を採用しません。読み出した参照自体は変化しませんが、現在の選択は非同期に進み得ます。選択変更はサービスのキュー経由で行います。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
+`BrowseResult(thread, goal, history)`は公開metadata・Goal・初回の`HistoryPage`、`HistoryResult(target, page)`は取得開始時の対象と追加の`HistoryPage`を保持します。`HistoryPage.content`は25件までのitem本文と、別に取得したturnの状態・エラーを結合した降順の`TurnPage`です。turn内の本文は時系列順で、全件収集や表示用の本文への変換はしません。`next_cursor`は本文用cursor・状態用cursor・境界turn以降の取得済み状態を持つ不変な`HistoryCursor`です。`load_history(cursor=...)`へそのまま渡し、失敗した場合も同じ値で再試行できます。本文が尽きた後も、状態だけの追加ページが返る場合があります。
 
-履歴の表示部品には`gigas.runtime.codex.history.history_entries(thread_id, page)`を使えます。降順の`TurnPage`を時系列の`HistoryEntry(key, kind, text)`へ変換し、`Transcript.prepend_items(entries)`で既存本文の前へ追加します。重複キーは既存表示を優先し、選択・閲覧位置・ライブの質問操作部を保持します。変換と描画は通信・ゲーム操作・本文保存・過去の要求への回答を行いません。
+サービスの読み取り専用`selected_target`は現在の不変な対象参照です。追加ページや閲覧Goal通知の受信時は、その`target is service.selected_target`を確認してください。同じ会話へ選び直した場合も以前の要求結果を採用しません。読み出した参照自体は変化しませんが、現在の選択は非同期に進み得ます。選択変更はサービスのキュー経由で行います。閲覧結果のactiveなGoalは、ローカルで開始した実行状態ではありません。
+
+履歴の表示部品には`gigas.runtime.codex.history.history_entries(thread_id, page.content)`を使えます。降順のturnと時系列順の本文を`HistoryEntry(key, kind, text)`へ変換し、`Transcript.prepend_items(entries)`で既存本文の前へ追加します。turnの途中でもページを分割でき、重複キーは既存表示を優先し、選択・閲覧位置・ライブの質問操作部を保持します。中断・失敗はturn IDに対応する固定キーで重複を防ぎます。変換と描画は通信・ゲーム操作・本文保存・過去の要求への回答を行いません。
 
 ライブ通知と保存履歴には同じ表示キーを使い、`Transcript`が重複をまとめます。変換対象や履歴と実行の違いは[会話と実行](../functions/conversations.md)、表示形式は[デスクトップUI](../ui/desktop.md)を参照してください。
 

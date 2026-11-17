@@ -23,16 +23,12 @@ def _saved(peer: "FakePeer", cwd: Path, thread_id: str = "stored-1") -> None:
         "project/read",
         {"project": {"id": "project-1", "name": "Project", "roots": [{"path": str(cwd)}]}},
     )
-    peer.responses["thread/turns/list"] = {
-        "data": [
-            {
-                "id": "turn-1",
-                "status": "completed",
-                "items": _items(),
-                "itemsView": "full",
-            }
-        ],
+    peer.responses["thread/items/list"] = {
+        "data": [{"turnId": "turn-1", "item": item} for item in reversed(_items())],
         "nextCursor": "next:/+?",
+    }
+    peer.responses["thread/turns/list"] = {
+        "data": [{"id": "turn-1", "status": "completed", "items": [], "itemsView": "notLoaded"}],
     }
     peer.goal = {
         "objective": "ラッキーを捕獲する",
@@ -96,7 +92,7 @@ def test_selection_reads_full_first_page_and_active_goal_without_execution(
 
             async def release() -> None:
                 releases.append(selection.target)
-                assert len([m for m, _ in peer.calls if m.startswith("thread/")]) == 3
+                assert len([m for m, _ in peer.calls if m.startswith("thread/")]) == 4
 
             result = await selection.select(management, "stored-1", release=release)
             assert selection.target == StoredConversationTarget("stored-1", cwd, "project-1")
@@ -106,15 +102,28 @@ def test_selection_reads_full_first_page_and_active_goal_without_execution(
                 == result.goal
                 == GoalState("ラッキーを捕獲する", "active", 30, 2, 500)
             )
-            assert result.history.turns[0].items == tuple(_items())
-            assert result.history.next_cursor == "next:/+?"
+            assert result.history.content.turns[0].items == tuple(_items())
+            assert result.history.next_cursor is not None
+            assert result.history.next_cursor.item_cursor == "next:/+?"
             assert releases == [NewConversationTarget()]
             assert not selection.busy
             assert not cwd.exists()
             assert [(m, p) for m, p in peer.calls if m.startswith("thread/")] == [
                 ("thread/read", {"threadId": "stored-1", "includeTurns": False}),
                 ("thread/goal/get", {"threadId": "stored-1"}),
-                ("thread/turns/list", {"threadId": "stored-1", "itemsView": "full"}),
+                (
+                    "thread/items/list",
+                    {"threadId": "stored-1", "limit": 25, "sortDirection": "desc"},
+                ),
+                (
+                    "thread/turns/list",
+                    {
+                        "threadId": "stored-1",
+                        "itemsView": "notLoaded",
+                        "limit": 25,
+                        "sortDirection": "desc",
+                    },
+                ),
             ]
             assert not any(m.startswith(("turn/", "mcp")) for m, _ in peer.calls)
 
@@ -122,7 +131,8 @@ def test_selection_reads_full_first_page_and_active_goal_without_execution(
 
 
 @pytest.mark.parametrize(
-    "failed", ["thread/read", "thread/goal/get", "thread/turns/list", "release"]
+    "failed",
+    ["thread/read", "thread/goal/get", "thread/items/list", "thread/turns/list", "release"],
 )
 def test_failed_selection_keeps_previous_target_metadata_and_goal(
     tmp_path: Path, failed: str
@@ -159,7 +169,7 @@ def test_selection_rejects_second_selection_until_initial_history_finishes(tmp_p
         async with _client(tmp_path) as (management, peer):
             selection = ConversationSelection()
             _saved(peer, tmp_path / "stored")
-            peer.gates["thread/turns/list"] = gate = _RequestGate()
+            peer.gates["thread/items/list"] = gate = _RequestGate()
             pending = asyncio.create_task(
                 selection.select(management, "stored-1", release=_released)
             )
@@ -211,7 +221,7 @@ def test_extra_history_returns_its_target_and_cursor_without_blocking_selection(
             first = await selection.select(management, "stored-1", release=_released)
             old_target = selection.target
             peer.calls.clear()
-            peer.gates["thread/turns/list"] = gate = _RequestGate()
+            peer.gates["thread/items/list"] = gate = _RequestGate()
             pending = asyncio.create_task(
                 selection.history(management, cursor=first.history.next_cursor)
             )
@@ -221,14 +231,20 @@ def test_extra_history_returns_its_target_and_cursor_without_blocking_selection(
             gate.set()
             result = await pending
             assert result.target == old_target
-            assert result.page.next_cursor == "next:/+?"
+            assert result.page.next_cursor is not None
+            assert result.page.next_cursor.item_cursor == "next:/+?"
             assert selection.target == NewConversationTarget()
             assert selection.thread is None
             assert selection.goal is None
             assert peer.calls == [
                 (
-                    "thread/turns/list",
-                    {"threadId": "stored-1", "itemsView": "full", "cursor": "next:/+?"},
+                    "thread/items/list",
+                    {
+                        "threadId": "stored-1",
+                        "limit": 25,
+                        "sortDirection": "desc",
+                        "cursor": "next:/+?",
+                    },
                 )
             ]
 

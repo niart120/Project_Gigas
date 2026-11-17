@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from gigas.services.conversations import (
         BrowseGoalEvent,
         ConversationTarget,
+        HistoryCursor,
         ManagementOperation,
         ManagementValue,
     )
@@ -262,7 +263,7 @@ class CodexService:
         """Read saved history without resuming; a running conversation must stop first."""
         self._submit_management("select", lambda c: self._select_conversation(c, thread_id))
 
-    def load_history(self, *, cursor: str | None = None) -> None:
+    def load_history(self, *, cursor: "HistoryCursor | None" = None) -> None:
         """Read one extra page without reserving submission or selection admission.
 
         Results, including failures, are discarded when their selection instance

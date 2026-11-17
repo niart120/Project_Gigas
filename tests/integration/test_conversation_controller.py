@@ -17,6 +17,7 @@ from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from gigas.services.application import ApplicationServiceThread, ProjectResult, ServiceEvent
 from gigas.services.conversations import (
     BrowseGoalEvent,
+    HistoryPage,
     HistoryResult,
     ManagementResult,
     StoredConversationTarget,
@@ -72,7 +73,7 @@ class ConversationPeer(ProjectsPeer):
         elif method == "thread/read":
             assert params is not None
             self.responses[method] = {"thread": self.threads[str(params["threadId"])]}
-        elif method == "thread/turns/list":
+        elif method == "thread/items/list":
             assert params is not None
             older = params.get("cursor") is not None
             if older and self.history_release is not None:
@@ -81,19 +82,22 @@ class ConversationPeer(ProjectsPeer):
             self.responses[method] = {
                 "data": [
                     {
-                        "id": "old" if older else "turn",
-                        "status": "completed",
-                        "itemsView": "full",
-                        "items": [
-                            {
-                                "id": "answer",
-                                "type": "agentMessage",
-                                "text": "以前の本文" if older else "保存された本文",
-                            }
-                        ],
+                        "turnId": "old" if older else "turn",
+                        "item": {
+                            "id": "answer",
+                            "type": "agentMessage",
+                            "text": "以前の本文" if older else "保存された本文",
+                        },
                     }
                 ],
                 "nextCursor": None if older else "opaque:/+?",
+            }
+        elif method == "thread/turns/list":
+            self.responses[method] = {
+                "data": [
+                    {"id": name, "status": "completed", "itemsView": "notLoaded", "items": []}
+                    for name in ("turn", "old")
+                ],
             }
         elif method == "thread/unsubscribe":
             self.responses[method] = {"status": "notLoaded"}
@@ -174,8 +178,8 @@ def test_sidebar_lists_lazily_and_browses_history_without_start_or_resume(
         assert not panel.history_button.isVisible()
         assert not any(m in {"thread/start", "thread/resume", "turn/start"} for m, _ in peer.calls)
         assert (
-            "thread/turns/list",
-            {"threadId": "saved", "itemsView": "full", "cursor": "opaque:/+?"},
+            "thread/items/list",
+            {"threadId": "saved", "limit": 25, "sortDirection": "desc", "cursor": "opaque:/+?"},
         ) in peer.calls
     finally:
         close(qtbot, shell)
@@ -286,7 +290,11 @@ def test_old_history_and_goal_results_do_not_consume_new_target_request(
         panel.history_button.click()
         qtbot.waitUntil(peer.history_entered.is_set)
         shell.service.management_completed.emit(
-            ManagementResult(generation, "history", HistoryResult(old, TurnPage((), None, None)))
+            ManagementResult(
+                generation,
+                "history",
+                HistoryResult(old, HistoryPage(TurnPage((), None, None), None)),
+            )
         )
         shell.service.browse_goal_changed.emit(
             generation, BrowseGoalEvent(old, GoalState("古い目的", "active"))
