@@ -208,7 +208,9 @@ def test_unavailable_or_invalid_whole_sequence_sends_nothing(harness: Harness) -
 
 
 @pytest.mark.parametrize("failure", ["send", "neutral"])
-def test_send_or_release_failure_closes_without_retry(harness: Harness, failure: str) -> None:
+def test_send_or_release_failure_closes_without_retry(
+    harness: Harness, failure: str, caplog: pytest.LogCaptureFixture
+) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
         harness.device.fail_send = failure == "send"
@@ -219,6 +221,10 @@ def test_send_or_release_failure_closes_without_retry(harness: Harness, failure:
         assert result.code == "DEVICE_UNAVAILABLE"
         assert result.completed_steps == 0
         assert result.neutral == "unconfirmed"
+        failures = [r for r in caplog.records if r.__dict__.get("event") == "input.failed"]
+        assert failures
+        assert all(r.__dict__.get("operation_id") == started[0] for r in failures)
+        assert all(r.exc_info is not None for r in failures)
         assert harness.device.calls == ["open", InputState(buttons=("A",)), InputState(), "close"]
         rejected = harness.service.start((press(),))
         assert isinstance(rejected, OperationResult)

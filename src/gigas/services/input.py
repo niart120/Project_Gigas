@@ -1,6 +1,7 @@
 """One input connection and one finite, interruptible operation at a time."""
 
 import asyncio
+import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -8,6 +9,8 @@ from uuid import uuid4
 
 from gigas.game_io.input.models import InputState, InputStep, InvalidSequenceError, validate_state
 from gigas.game_io.input.serial import SerialInput, SerialPort, list_serial_ports
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -184,7 +187,11 @@ class InputService:
                     device = None if config is None else self._factory(config)
                     await self.connect(device)
                 self._config = config
-            except Exception as failure:  # noqa: BLE001 -- input diagnostics belong here.
+            except Exception as failure:
+                logger.exception(
+                    "Input operation failed",
+                    extra={"event": "input.failed", "operation": "_apply_config"},
+                )
                 error = str(failure)
             if self._on_connection_changed is not None:
                 self._on_connection_changed(InputConnectionResult(config, self.connected, error))
@@ -351,7 +358,11 @@ class InputService:
                 await self._close_device()
             else:
                 self._available = True
+                logger.info("Input device connected", extra={"event": "input.connected"})
         except OSError as error:
+            logger.exception(
+                "Input operation failed", extra={"event": "input.failed", "operation": "_connect"}
+            )
             raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
 
     def stop(self) -> asyncio.Task[OperationResult] | None:
@@ -411,6 +422,9 @@ class InputService:
         try:
             await self._close_device()
         except OSError as error:
+            logger.exception(
+                "Input operation failed", extra={"event": "input.failed", "operation": "close"}
+            )
             raise InputServiceError("DEVICE_UNAVAILABLE", str(error)) from error
         if isinstance(outcome, OperationResult):
             _require_released(outcome)
@@ -420,6 +434,7 @@ class InputService:
         if self._device is not None:
             await self._device.close()
             self._device = None
+            logger.info("Input device closed", extra={"event": "input.disconnected"})
 
     def start(
         self, sequence: tuple[InputStep, ...]
@@ -496,7 +511,16 @@ class InputService:
                     raise asyncio.CancelledError  # noqa: TRY301 -- preserve completed write.
         except asyncio.CancelledError:
             result = replace(result, code="INTERRUPTED", message="手動入力を停止しました")
-        except Exception as error:  # noqa: BLE001 -- recover input before reporting failure.
+        except Exception as error:
+            logger.exception(
+                "Input operation failed",
+                extra={
+                    "event": "input.failed",
+                    "operation": "_execute_manual",
+                    "operation_id": result.operation_id,
+                    "phase": result.phase,
+                },
+            )
             failed = True
             result = replace(result, code="DEVICE_UNAVAILABLE", message=str(error))
         if result.neutral == "unconfirmed" and not neutral_attempted:
@@ -504,6 +528,15 @@ class InputService:
                 await _settle_io(device.send(InputState()))
                 result = replace(result, neutral="sent")
             except OSError as error:
+                logger.exception(
+                    "Input operation failed",
+                    extra={
+                        "event": "input.failed",
+                        "operation": "_execute_manual",
+                        "operation_id": result.operation_id,
+                        "phase": result.phase,
+                    },
+                )
                 result = replace(
                     result, code="DEVICE_UNAVAILABLE", phase="neutral", message=str(error)
                 )
@@ -512,6 +545,15 @@ class InputService:
             try:
                 await _settle_io(self._close_device())
             except OSError as error:
+                logger.exception(
+                    "Input operation failed",
+                    extra={
+                        "event": "input.failed",
+                        "operation": "_execute_manual",
+                        "operation_id": result.operation_id,
+                        "phase": result.phase,
+                    },
+                )
                 result = replace(result, message=f"{result.message}; 接続終了失敗: {error}")
         return result
 
@@ -547,7 +589,16 @@ class InputService:
             result = replace(result, phase="")
         except asyncio.CancelledError:
             result = replace(result, code="INTERRUPTED", message="操作が停止されました")
-        except Exception as error:  # noqa: BLE001 - release input before reporting failure.
+        except Exception as error:
+            logger.exception(
+                "Input operation failed",
+                extra={
+                    "event": "input.failed",
+                    "operation": "_execute",
+                    "operation_id": result.operation_id,
+                    "phase": result.phase,
+                },
+            )
             transport_failed = True
             result = replace(result, code="DEVICE_UNAVAILABLE", message=str(error))
         if result.neutral == "unconfirmed" and not neutral_attempted:
@@ -555,6 +606,15 @@ class InputService:
                 await _settle_io(device.send(InputState()))
                 result = replace(result, neutral="sent")
             except OSError as error:
+                logger.exception(
+                    "Input operation failed",
+                    extra={
+                        "event": "input.failed",
+                        "operation": "_execute",
+                        "operation_id": result.operation_id,
+                        "phase": result.phase,
+                    },
+                )
                 result = replace(
                     result, code="DEVICE_UNAVAILABLE", phase="neutral", message=str(error)
                 )
@@ -565,6 +625,15 @@ class InputService:
             try:
                 await _settle_io(self._close_device())
             except OSError as error:
+                logger.exception(
+                    "Input operation failed",
+                    extra={
+                        "event": "input.failed",
+                        "operation": "_execute",
+                        "operation_id": result.operation_id,
+                        "phase": result.phase,
+                    },
+                )
                 result = replace(result, message=f"{result.message}; 接続終了失敗: {error}")
         return result
 

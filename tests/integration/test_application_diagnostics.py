@@ -10,7 +10,26 @@ from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
 from gigas.app.diagnostics import ApplicationDiagnostics
+from gigas.app.settings_worker import SettingsIO, SettingsWorker
+from gigas.storage.diagnostics import DiagnosticSession
 from gigas.ui.notifications import NotificationCenter
+
+
+def test_settings_failure_keeps_exception_and_path(tmp_path: Path, qtbot: QtBot) -> None:
+    session = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
+    session.start()
+    worker = SettingsWorker(tmp_path, SettingsIO())
+    try:
+        with qtbot.waitSignal(worker.completed) as result:
+            worker.perform("load", None)
+        assert result.args[0].error
+    finally:
+        session.close()
+    rows = [json.loads(line) for line in session.path.read_text(encoding="utf-8").splitlines()]
+    failure = next(row for row in rows if row.get("event") == "settings.failed")
+    assert failure["path"] == str(tmp_path)
+    assert failure["operation"] == "load"
+    assert "Traceback" in json.dumps(failure)
 
 
 def test_initial_failure_reaches_existing_notification_center(tmp_path: Path, qtbot: QtBot) -> None:
