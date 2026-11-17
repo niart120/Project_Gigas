@@ -106,9 +106,7 @@ def test_rotation_retains_current_and_nine_backups(tmp_path: Path) -> None:
     assert sorted(r["number"] for r in rows) == list(range(20, 30))
 
 
-def test_failed_deletion_is_retried(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failed_deletion_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = tmp_path / "20260101T000000Z_123"
     run.mkdir()
     (run / ".lock").touch()

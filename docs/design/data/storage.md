@@ -7,6 +7,7 @@ GIGASの設定、Codexが管理する会話、ゲーム中の作業資料、ゲ�
 | データ | 保存先 | 所有者・用途 |
 |---|---|---|
 | アプリ設定 | `%LOCALAPPDATA%/GIGAS/settings.toml` | GIGAS。機器・表示・エージェントの設定 |
+| 共通診断ログ | 設定ファイルと同じ親フォルダーの`logs/<UTC開始日時>_<PID>/` | GIGAS。操作・状態変化・異常の調査。全Project共通 |
 | Project・会話・標準自動記憶・認証 | 設定ファイルと同じ親フォルダーの`codex_home/` | Codex App Server。GIGASは公開APIで操作・参照する |
 | Projectの攻略資料 | Projectに登録した作業フォルダー | エージェントと利用者が編集する自由形式の資料 |
 | 未所属会話の作業資料 | 設定ファイルと同じ親フォルダーの`unassigned/<UUID>/` | 新しい未所属会話ごとにGIGASが作業フォルダーを用意する |
@@ -69,6 +70,8 @@ PNGを一時ファイルから確定した後、観測行をJSONLへ追記する
 `.gigas.lock`のOSロックで同じ保存先を使うwriter同士を排他する。切断・終了時は受付を閉じ、投入済みの符号化・保存を回収してからwriterを閉じる。保持期限・容量上限・自動削除はなく、利用者が整理する場合は書き込みを終了してから扱う。
 
 ## 実装の入口
+
+診断ログの形式・保持・失敗時の扱いは[診断ログ仕様](diagnostics.md)、調査手順は[診断ガイド](../../guides/diagnostics.md)を参照する。ゲーム記録の`events.jsonl`とは別の保存先であり、診断ログの自動整理はゲーム記録やCodex専用homeへ適用しない。
 
 - [設定保存](../../../src/gigas/storage/settings.py): TOMLの読込・検証・置換。
 - [作業場所の解決](../../../src/gigas/services/_workspaces.py)と[会話資源](../../../src/gigas/services/_conversation_resources.py): 作業場所とthreadごとの記録先。
