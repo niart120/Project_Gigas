@@ -44,7 +44,7 @@ def create_connection(
     for key, value in config_overrides(options.execution_settings).items():
         command.extend(["--config", f"{key}={json.dumps(value)}"])
     command.extend(["app-server", "--listen", "stdio://"])
-    env: dict[str, str] = {}
+    env: dict[str, str] = {"RUST_LOG": "warn", "LOG_FORMAT": "json"}
     if codex_home is not None:
         codex_home.mkdir(parents=True, exist_ok=True)
         env["CODEX_HOME"] = str(codex_home)
