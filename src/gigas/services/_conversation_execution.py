@@ -1,6 +1,7 @@
 """Conversation admission and orchestration over a connection and owned resources."""
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -27,6 +28,8 @@ from gigas.runtime.codex.transport import RpcError, RpcNotification, ServerReque
 from gigas.services._conversation_goals import GoalTracker
 from gigas.services._conversation_preparation import PreparationAttempt, ThreadPreparation
 from gigas.services.input import InputServiceError, OperationResult
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -566,6 +569,21 @@ class ConversationExecution:
             self._publish()
         elif event.method in {"turn/started", "turn/completed"}:
             turn_id, status = protocol.turn_notification(params)
+            turn_data = params.get("turn")
+            error = turn_data.get("error") if isinstance(turn_data, dict) else None
+            logger.log(
+                logging.ERROR if error is not None or status == "failed" else logging.INFO,
+                "Received turn lifecycle notification",
+                extra={
+                    "event": "codex.turn_started"
+                    if event.method == "turn/started"
+                    else "codex.turn_completed",
+                    "thread_id": self._thread_id,
+                    "turn_id": turn_id,
+                    "status": status,
+                    "details": error,
+                },
+            )
             if self._turn_reply is not None:
                 self._turn_reply.seen.add(turn_id)
                 self._turn_reply.changed.set()
@@ -597,13 +615,36 @@ class ConversationExecution:
                 self._emit(DialogueEvent("turn_completed", {"status": status}, turn_id))
             self._publish()
         elif event.method in {"thread/goal/updated", "thread/goal/cleared"}:
+            previous_status = self._goal.status if self._goal is not None else None
             self._goals.observe(
                 protocol.goal_state(
                     params.get("goal") if event.method.endswith("updated") else None
                 )
             )
+            status = self._goal.status if self._goal is not None else None
+            if status != previous_status:
+                logger.info(
+                    "Received Goal status change",
+                    extra={
+                        "event": "codex.goal_changed",
+                        "thread_id": self._thread_id,
+                        "previous_status": previous_status,
+                        "status": status,
+                    },
+                )
             self._emit(GoalEvent(self._goal))
             self._publish()
+        elif event.method == "error":
+            logger.error(
+                "Received turn error notification",
+                extra={
+                    "event": "codex.turn_error",
+                    "thread_id": self._thread_id,
+                    "turn_id": params.get("turnId"),
+                    "details": params.get("error"),
+                    "will_retry": params.get("willRetry"),
+                },
+            )
         elif self._turn is not None and params.get("turnId") == self._turn.id:
             for item in self._turn.content.accept(event.method, params):
                 self._emit(item)
