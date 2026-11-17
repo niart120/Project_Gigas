@@ -64,6 +64,34 @@ def test_initialization_failure_is_reported(tmp_path: Path) -> None:
     assert failures[0][0] == session.path
 
 
+def test_initialization_failure_redacts_fallback_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "logs").write_text("blocked")
+    session = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
+    session.start()
+    try:
+        logging.getLogger("gigas.test").error("fallback Bearer hidden-credential")
+    finally:
+        session.close()
+    output = capsys.readouterr().err
+    assert "fallback" in output
+    assert "hidden-credential" not in output
+
+
+def test_library_success_traffic_is_not_recorded_but_warnings_are(tmp_path: Path) -> None:
+    session = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
+    session.start()
+    try:
+        logging.getLogger("httpx").info("successful request")
+        logging.getLogger("httpx").warning("upstream failure")
+        logging.getLogger("gigas.test").info("operation completed")
+    finally:
+        session.close()
+    rows = [json.loads(line) for line in session.path.read_text(encoding="utf-8").splitlines()]
+    assert [r["message"] for r in rows] == ["upstream failure", "operation completed"]
+
+
 def test_rotation_failure_notifies_once_then_records_recovery(tmp_path: Path) -> None:
     failures: list[str] = []
     path = tmp_path / "gigas.jsonl"
@@ -85,6 +113,34 @@ def test_rotation_failure_notifies_once_then_records_recovery(tmp_path: Path) ->
     all_text = "".join(p.read_text(encoding="utf-8") for p in tmp_path.glob("gigas.jsonl*"))
     assert "logging.recovered" in all_text
     assert "failed" in all_text
+
+
+def test_write_failure_redacts_notice_and_recovers_on_next_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_write(_text: str) -> int:
+        message = "disk full Bearer private-disk-token"
+        raise OSError(message)
+
+    failures: list[str] = []
+    path = tmp_path / "gigas.jsonl"
+    handler = _FileHandler(path, failures.append)
+    handler.maxBytes = 0
+    original = handler.stream
+    record = logging.LogRecord("gigas.test", logging.ERROR, __file__, 1, "diagnostic", (), None)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(original, "write", fail_write)
+            handler.handle(record)
+            handler.handle(record)
+        assert len(failures) == 1
+        assert "private-disk-token" not in failures[0]
+        handler.handle(record)
+    finally:
+        handler.close()
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 2
+    assert rows[1]["event"] == "logging.recovered"
 
 
 def test_rotation_retains_current_and_nine_backups(tmp_path: Path) -> None:

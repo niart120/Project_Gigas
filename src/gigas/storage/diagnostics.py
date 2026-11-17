@@ -121,7 +121,7 @@ class DiagnosticSession:
         self._notify = on_failure
         self._lock_file: BinaryIO | None = None
         self._handler: _FileHandler | None = None
-        self._queue_handler: QueueHandler | None = None
+        self._entry_handler: logging.Handler | None = None
         self._listener: QueueListener | None = None
         self._previous_level = logging.getLogger().level
 
@@ -132,27 +132,39 @@ class DiagnosticSession:
             self._lock_file = _lock(self.path.parent / ".lock")
             self._handler = _FileHandler(self.path, self._failure)
             pending: queue.SimpleQueue[logging.LogRecord] = queue.SimpleQueue()
-            self._queue_handler = QueueHandler(pending)
-            self._queue_handler.setLevel(logging.INFO)
+            self._entry_handler = QueueHandler(pending)
             self._listener = QueueListener(pending, self._handler)
             self._listener.start()
-            logging.getLogger().addHandler(self._queue_handler)
-            logging.getLogger().setLevel(logging.INFO)
         except OSError as error:
             self._failure(str(error))
             if self._lock_file is not None:
                 self._lock_file.close()
                 self._lock_file = None
-            return
+            self._entry_handler = (
+                logging.StreamHandler(sys.stderr)
+                if sys.stderr is not None
+                else logging.NullHandler()
+            )
+            self._entry_handler.setFormatter(DiagnosticFormatter())
+        self._entry_handler.setLevel(logging.INFO)
+        self._entry_handler.addFilter(
+            lambda record: (
+                record.name == "gigas"
+                or record.name.startswith("gigas.")
+                or record.levelno >= logging.WARNING
+            )
+        )
+        logging.getLogger().addHandler(self._entry_handler)
+        logging.getLogger().setLevel(logging.INFO)
         with suppress(OSError):
             clean_old_runs(self.root)
 
     def close(self) -> None:
         """Drain and close logging; call outside the GUI thread after services stop."""
-        if self._queue_handler is not None:
-            logging.getLogger().removeHandler(self._queue_handler)
-            self._queue_handler.close()
-            self._queue_handler = None
+        if self._entry_handler is not None:
+            logging.getLogger().removeHandler(self._entry_handler)
+            self._entry_handler.close()
+            self._entry_handler = None
             logging.getLogger().setLevel(self._previous_level)
         if self._listener is not None:
             self._listener.stop()

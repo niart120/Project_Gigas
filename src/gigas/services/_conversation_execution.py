@@ -95,9 +95,11 @@ class ConversationExecution:
         settings: "ExecutionSettings",
         closing: "Callable[[], bool]",
         request_close: "Callable[[], asyncio.Task[None]]",
+        connection_id: int | None = None,
     ) -> None:
         """Bind a new conversation before opening the connection."""
         self._connection = connection
+        self._connection_id = connection_id
         self._resources = resources
         self._inputs = inputs
         self._emit = emit
@@ -579,6 +581,7 @@ class ConversationExecution:
                     if event.method == "turn/started"
                     else "codex.turn_completed",
                     "thread_id": self._thread_id,
+                    "connection_id": self._connection_id,
                     "turn_id": turn_id,
                     "status": status,
                     "details": error,
@@ -627,6 +630,7 @@ class ConversationExecution:
                     "Received Goal status change",
                     extra={
                         "event": "codex.goal_changed",
+                        "connection_id": self._connection_id,
                         "thread_id": self._thread_id,
                         "previous_status": previous_status,
                         "status": status,
@@ -639,6 +643,7 @@ class ConversationExecution:
                 "Received turn error notification",
                 extra={
                     "event": "codex.turn_error",
+                    "connection_id": self._connection_id,
                     "thread_id": self._thread_id,
                     "turn_id": params.get("turnId"),
                     "details": params.get("error"),

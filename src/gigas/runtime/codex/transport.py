@@ -554,6 +554,7 @@ class StdioTransport:
                     "event": "codex.rpc_failed",
                     "rpc_method": method,
                     "rpc_id": request_id,
+                    "child_pid": self._process.get_pid() if self._process is not None else None,
                     "details": error,
                 },
             )
@@ -566,7 +567,12 @@ class StdioTransport:
             return
         self._closed = TransportClosed(reason)
         logger.info(
-            "Codex transport closed", extra={"event": "codex.transport_closed", "reason": reason}
+            "Codex transport closed",
+            extra={
+                "event": "codex.transport_closed",
+                "reason": reason,
+                "child_pid": self._process.get_pid() if self._process is not None else None,
+            },
         )
         for _, future in self._pending.values():
             if not future.done():

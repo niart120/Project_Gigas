@@ -544,8 +544,22 @@ class CodexService:
                 if self._connection is connection and self._conversation is not None:
                     execution = self._conversation
                     if isinstance(event, RpcNotification) and execution.snapshot.thread_id is None:
+                        previous = self._selection.goal
                         goal = self._selection.receive_goal(event)
                         if goal is not None:
+                            before = previous.status if previous is not None else None
+                            after = goal.goal.status if goal.goal is not None else None
+                            if before != after:
+                                logger.info(
+                                    "Received browsing Goal status change",
+                                    extra={
+                                        "event": "codex.goal_changed",
+                                        "connection_id": generation,
+                                        "thread_id": goal.target.thread_id,
+                                        "previous_status": before,
+                                        "status": after,
+                                    },
+                                )
                             self.browse_goal_changed(generation, goal)
                     execution.receive(event)
 
@@ -572,6 +586,7 @@ class CodexService:
                 or self._conversation is not execution
             ),
             request_close=lambda: self._begin_close(connection, execution),
+            connection_id=self._active_generation,
         )
         return execution
 
