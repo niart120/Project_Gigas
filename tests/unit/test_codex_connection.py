@@ -957,6 +957,8 @@ def test_launch_enables_public_plan_tool(tmp_path: Path, monkeypatch: "MonkeyPat
         )
         assert cwd == tmp_path
         assert isinstance(env, dict)
+        assert env["RUST_LOG"] == "warn"
+        assert env["LOG_FORMAT"] == "json"
         commands.append(command)
         return FakePeer()
 

@@ -5,10 +5,39 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from gigas.runtime.codex.transport import RpcNotification, _ProcessProtocol
+import pytest
+
+from gigas.runtime.codex.transport import (
+    RpcNotification,
+    StdioTransport,
+    TransportError,
+    _ProcessProtocol,
+)
 from gigas.storage.diagnostics import DiagnosticSession
 from tests.integration.test_conversation_control import goal
 from tests.integration.test_conversation_execution import Conversation
+
+
+def test_process_start_failure_keeps_os_exception(tmp_path: Path) -> None:
+    session = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
+    session.start()
+
+    async def scenario() -> None:
+        transport = StdioTransport((str(tmp_path / "missing-codex.exe"),), tmp_path)
+        try:
+            with pytest.raises(TransportError):
+                await transport.start()
+        finally:
+            await transport.close()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        session.close()
+    rows = [json.loads(line) for line in session.path.read_text(encoding="utf-8").splitlines()]
+    failure = next(r for r in rows if r.get("event") == "codex.start_failed")
+    assert "FileNotFoundError" in failure["message"]
+
 
 if TYPE_CHECKING:
     from gigas.runtime.codex.transport import JsonObject

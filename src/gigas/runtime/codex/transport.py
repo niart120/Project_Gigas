@@ -333,6 +333,7 @@ class StdioTransport:
                 creationflags=flags,
             )
         except (OSError, ValueError, TypeError):
+            logger.exception("Codex process start failed", extra={"event": "codex.start_failed"})
             self._finish("Process start failed")
             message = "Process start failed"
             raise TransportError(message) from None
@@ -498,6 +499,13 @@ class StdioTransport:
                 stdin.write(data)
                 await protocol.drain()
             except (ConnectionError, OSError, TransportError):
+                logger.exception(
+                    "Codex transport write failed",
+                    extra={
+                        "event": "codex.write_failed",
+                        "child_pid": process.get_pid() if process is not None else None,
+                    },
+                )
                 self._finish("Write failed")
                 message = "Write failed"
                 raise TransportError(message) from None
@@ -512,9 +520,11 @@ class StdioTransport:
                 if self._closed is None:
                     self._route(_decode_frame(raw))
         except (TransportError, ValueError, RecursionError):
+            logger.exception("Invalid Codex RPC frame", extra={"event": "codex.frame_failed"})
             self._finish("Invalid RPC frame")
             await self._discard_stream(protocol.stdout)
         except (ConnectionError, OSError):
+            logger.exception("Codex transport read failed", extra={"event": "codex.read_failed"})
             self._finish("Read failed")
         else:
             self._finish("Peer closed stdout")
