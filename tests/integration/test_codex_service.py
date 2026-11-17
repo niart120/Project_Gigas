@@ -1595,8 +1595,10 @@ def test_question_and_answer_delivery_do_not_suspend_input_and_stop_joins_delive
 
 
 def test_goal_delete_preserves_turn_and_common_stop_preserves_objective(
-    qtbot: QtBot, tmp_path: Path
+    qtbot: QtBot, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    caplog.set_level("INFO", logger="gigas.services.codex")
+
     class GoalPeer(FakePeer):
         async def request(self, method: str, params: JsonObject | None) -> JsonValue:
             result = await super().request(method, params)
@@ -1671,6 +1673,23 @@ def test_goal_delete_preserves_turn_and_common_stop_preserves_objective(
             params for method, params in reversed(peer.calls) if method == "thread/goal/set"
         )
         assert resumed == {"threadId": "thread-1", "status": "active", "origin": "user"}
+        records = [r.__dict__ for r in caplog.records if r.name == "gigas.services.codex"]
+        for operation in ("stop", "goal_resume"):
+            requested = [
+                r
+                for r in records
+                if r.get("event") == "codex.operation_requested" and r.get("operation") == operation
+            ]
+            completed = [
+                r
+                for r in records
+                if r.get("event") == "codex.operation_completed" and r.get("operation") == operation
+            ]
+            assert len(requested) == len(completed) == 1
+            assert requested[0]["connection_id"] == completed[0]["connection_id"]
+            assert requested[0]["thread_id"] == completed[0]["thread_id"] == "thread-1"
+            assert completed[0]["error"] == ""
+        assert "クチバシティへ向かう" not in caplog.text
         assert peer.goal is not None
         assert peer.goal["objective"] == "クチバシティへ向かう"
         assert not any(method == "turn/start" for method, _ in peer.calls)
