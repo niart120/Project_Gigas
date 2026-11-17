@@ -167,8 +167,9 @@ def test_invalid_window_size_preset_cannot_overwrite_existing_file(
     [
         ("auto", False, "original"),
         ("hd", True, "hd"),
-        ("full_hd", True, "sd"),
+        ("full_hd", True, "960x540"),
         ("full_hd", False, "full_hd"),
+        ("hd", False, "640x360"),
         ("wqhd", True, "hd"),
         ("four_k", False, "full_hd"),
     ],
@@ -177,7 +178,7 @@ def test_capture_resolution_and_preview_letterbox_round_trip_independently(
     tmp_path: Path,
     resolution: str,
     letterbox: bool,
-    observation: Literal["original", "full_hd", "hd", "sd"],
+    observation: Literal["original", "full_hd", "hd", "960x540", "640x360"],
 ) -> None:
     path = tmp_path / "settings.toml"
     path.write_text(
@@ -289,3 +290,12 @@ def test_valid_boolean_save_cannot_overwrite_an_invalid_existing_integer(
         save_settings(path, replace(Settings(), **{field: replacement}))
 
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_legacy_sd_observation_resolution_is_replaced_on_save(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('[observation]\nresolution = "sd"\n', encoding="utf-8")
+    values = load_settings(path)
+    assert values.observation_resolution == "960x540"
+    save_settings(path, values)
+    assert tomllib.loads(path.read_text(encoding="utf-8"))["observation"]["resolution"] == "960x540"

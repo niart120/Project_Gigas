@@ -311,7 +311,7 @@ class CodexService:
         """Apply a size to later observations on the owning loop without reconnecting.
 
         Args:
-            resolution: Validated application setting: original, full_hd, hd, or sd.
+            resolution: Validated observation image size from application settings.
         """
         self._resources.set_resolution(resolution)
 

@@ -113,7 +113,7 @@ class SettingsDialog(QDialog):
             ("自動", "auto"),
             ("4K", "four_k"),
             ("WQHD", "wqhd"),
-            ("FullHD", "full_hd"),
+            ("Full HD", "full_hd"),
             ("HD", "hd"),
         ):
             self.capture_resolution.addItem(label, key)
@@ -123,9 +123,10 @@ class SettingsDialog(QDialog):
         self.observation_resolution = QComboBox(self)
         for label, key in (
             ("オリジナル", "original"),
-            ("FullHD", "full_hd"),
+            ("Full HD", "full_hd"),
             ("HD", "hd"),
-            ("SD", "sd"),
+            ("960×540", "960x540"),  # noqa: RUF001 -- image dimensions
+            ("640×360", "640x360"),  # noqa: RUF001 -- image dimensions
         ):
             self.observation_resolution.addItem(label, key)
         self.observation_resolution.setCurrentIndex(self.observation_resolution.findData("full_hd"))
