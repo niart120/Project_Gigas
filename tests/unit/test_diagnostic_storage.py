@@ -4,6 +4,8 @@ import json
 import logging
 from pathlib import Path
 
+import pytest
+
 from gigas.storage.diagnostics import DiagnosticSession, _FileHandler, _lock, clean_old_runs
 
 
@@ -83,3 +85,45 @@ def test_rotation_failure_notifies_once_then_records_recovery(tmp_path: Path) ->
     all_text = "".join(p.read_text(encoding="utf-8") for p in tmp_path.glob("gigas.jsonl*"))
     assert "logging.recovered" in all_text
     assert "failed" in all_text
+
+
+def test_rotation_retains_current_and_nine_backups(tmp_path: Path) -> None:
+    handler = _FileHandler(tmp_path / "gigas.jsonl", lambda _: pytest.fail("unexpected failure"))
+    assert handler.maxBytes == 10 * 1024 * 1024
+    assert handler.backupCount == 9
+    handler.maxBytes = 256
+    try:
+        for number in range(30):
+            record = logging.LogRecord("gigas.test", logging.INFO, __file__, 1, "x" * 100, (), None)
+            record.number = number
+            handler.handle(record)
+    finally:
+        handler.close()
+    files = list(tmp_path.glob("gigas.jsonl*"))
+    assert len(files) == 10
+    assert {p.name for p in files} == {"gigas.jsonl", *(f"gigas.jsonl.{n}" for n in range(1, 10))}
+    rows = [json.loads(line) for p in files for line in p.read_text(encoding="utf-8").splitlines()]
+    assert sorted(r["number"] for r in rows) == list(range(20, 30))
+
+
+def test_failed_deletion_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = tmp_path / "20260101T000000Z_123"
+    run.mkdir()
+    (run / ".lock").touch()
+    log = run / "gigas.jsonl"
+    log.write_text("{}\n")
+    unlink = Path.unlink
+
+    def deny(path: Path) -> None:
+        if path == log:
+            raise PermissionError
+        unlink(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", deny)
+        clean_old_runs(tmp_path, keep=0)
+    assert log.exists()
+    clean_old_runs(tmp_path, keep=0)
+    assert not run.exists()

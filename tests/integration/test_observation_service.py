@@ -98,7 +98,11 @@ def test_record_failure_reaches_shared_failure_callback(
         recording.submit_dialogue("dialogue.message", "公開応答")
         await recording.drain()
         assert len(failures) == 2
-        assert "operation-1" in caplog.text
+        entries = [r for r in caplog.records if r.__dict__.get("event") == "recording.failed"]
+        assert len(entries) == 2
+        assert entries[0].__dict__["reference"] == "operation-1"
+        assert entries[0].__dict__["path"] == str(writer.path)
+        assert entries[0].exc_info is not None
 
     try:
         asyncio.run(scenario())

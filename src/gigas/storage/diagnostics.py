@@ -48,9 +48,12 @@ def clean_old_runs(root: Path, *, keep: int = 10) -> None:
         for path in sorted(root.iterdir()):
             if not _RUN_NAME.fullmatch(path.name) or path.is_symlink() or path.is_junction():
                 continue
-            if not path.is_dir() or not (path / ".lock").is_file():
+            if not path.is_dir():
                 continue
             try:
+                # A previous deletion can have removed the lock before rmdir failed.
+                if not (path / ".lock").is_file() and any(path.iterdir()):
+                    continue
                 with _lock(path / ".lock"):
                     inactive.append(path)
             except OSError:
@@ -66,7 +69,8 @@ def clean_old_runs(root: Path, *, keep: int = 10) -> None:
                     for entry in entries
                 ):
                     continue
-                for entry in entries:
+                # Keep the ownership marker if deleting a log fails partway through.
+                for entry in sorted(entries, key=lambda item: item.name == ".lock"):
                     entry.unlink()
                 path.rmdir()
 
