@@ -114,6 +114,7 @@ class ConversationExecution:
         self._sending: _Submission | None = None
         self._stopping: _Stop | None = None
         self._turn_reply: _TurnReply | None = None
+        self._goal_tier_confirmation: tuple[str, asyncio.Future[None]] | None = None
 
     @property
     def loaded(self) -> bool:
@@ -213,7 +214,12 @@ class ConversationExecution:
             self._sending = None
             self._publish()
 
-    async def _prepare(self, submission: _Submission) -> str:
+    async def _prepare(self, submission: _Submission, service_tier: str | None) -> str:
+        if (
+            service_tier is not None
+            and service_tier not in self._connection.selection.speeds.values()
+        ):
+            raise CodexConnectionError("選択した速度は現在のモデルでは利用できません")
         if submission.starts_execution:
             try:
                 await self._inputs.release_manual()
@@ -221,11 +227,15 @@ class ConversationExecution:
                 message = f"実行開始前の入力解除に失敗しました: {error}"
                 raise CodexConnectionError(message) from error
         return await self._preparation.prepare(
-            self._settings, self.start_input, submission.preparation
+            self._settings, self.start_input, submission.preparation, service_tier=service_tier
         )
 
-    async def send(self, prompt: str) -> str | None:
+    async def send(self, prompt: str, service_tier: str | None = None) -> str | None:
         """Submit ordinary or additional text once through turn/start.
+
+        Args:
+            prompt: User message.
+            service_tier: Selected speed for this and subsequent turns.
 
         Returns:
             Accepted turn ID, or None when stop canceled preparation before submission.
@@ -239,7 +249,7 @@ class ConversationExecution:
 
         async def submit(submission: _Submission) -> str | None:
             try:
-                thread_id = await self._prepare(submission)
+                thread_id = await self._prepare(submission, service_tier)
             except asyncio.CancelledError:
                 if self._stopping is not None or self._closing():
                     return None
@@ -248,18 +258,20 @@ class ConversationExecution:
                 return None
             submission.submitted = True
             self._emit(TextEvent(uuid4().hex, prompt, "user", True))
-            return await self._send_turn(thread_id, prompt)
+            return await self._send_turn(thread_id, prompt, service_tier)
 
         return await self._submit(submit, starts_execution=True)
 
-    async def _send_turn(self, thread_id: str, prompt: str) -> str:
+    async def _send_turn(self, thread_id: str, prompt: str, service_tier: str | None) -> str:
         reply = self._turn_reply = _TurnReply()
         if self._turn is not None:
             reply.seen.add(self._turn.id)
         try:
             result = await self._connection.request(
                 "turn/start",
-                protocol.turn_start_params(thread_id, prompt, self._connection.selection),
+                protocol.turn_start_params(
+                    thread_id, prompt, self._connection.selection, service_tier=service_tier
+                ),
             )
             try:
                 accepted = protocol.turn_id(result)
@@ -275,14 +287,22 @@ class ConversationExecution:
             if self._turn_reply is reply:
                 self._turn_reply = None
 
-    async def set_goal(self, objective: str) -> bool:
-        """Create a Goal or edit its objective without resetting an existing state or budget."""
+    async def set_goal(self, objective: str, service_tier: str | None = None) -> bool:
+        """Create a Goal or edit its objective without resetting its state or budget.
+
+        Args:
+            objective: User's Goal text.
+            service_tier: Selected speed for a newly activated Goal.
+        """
         if not objective.strip():
             raise CodexConnectionError("目標が空です")
 
         async def submit(submission: _Submission) -> bool:
+            loaded = self.loaded
             try:
-                thread_id = await self._prepare(submission)
+                thread_id = await self._prepare(submission, service_tier)
+                if loaded and self._goal is None:
+                    await self._set_goal_service_tier(thread_id, service_tier)
             except asyncio.CancelledError:
                 if self._stopping is not None or self._closing():
                     return False
@@ -303,15 +323,22 @@ class ConversationExecution:
 
         return await self._submit(submit, starts_execution=not self.loaded or self._goal is None)
 
-    async def resume_goal(self) -> bool:
-        """Request active for the retained objective without rewriting objective or budget."""
+    async def resume_goal(self, service_tier: str | None = None) -> bool:
+        """Request active for the retained objective without rewriting objective or budget.
+
+        Args:
+            service_tier: Selected speed to apply before resuming the Goal.
+        """
         goal = self._goal if self._thread_id is not None else self._selection.goal
         if goal is None or goal.status in {"active", "complete"}:
             raise CodexConnectionError("再開できる目標がありません")
 
         async def submit(submission: _Submission) -> bool:
+            loaded = self.loaded
             try:
-                await self._prepare(submission)
+                thread_id = await self._prepare(submission, service_tier)
+                if loaded:
+                    await self._set_goal_service_tier(thread_id, service_tier)
             except asyncio.CancelledError:
                 if self._stopping is not None or self._closing():
                     return False
@@ -331,6 +358,24 @@ class ConversationExecution:
             return True
 
         return await self._submit(submit, starts_execution=True)
+
+    async def _set_goal_service_tier(self, thread_id: str, service_tier: str | None) -> None:
+        if service_tier is None or self._stopping is not None or self._closing():
+            return
+        confirmation = asyncio.get_running_loop().create_future()
+        self._goal_tier_confirmation = (service_tier, confirmation)
+        try:
+            await self._connection.request(
+                "thread/settings/update", {"threadId": thread_id, "serviceTier": service_tier}
+            )
+            # The RPC queues the update. Goal can schedule a turn once the change takes effect.
+            await asyncio.wait_for(confirmation, timeout=10)
+        except TimeoutError:
+            raise CodexConnectionError(
+                "Codexの実行速度の変更を確認できません。速度を選び直して再試行してください"
+            ) from None
+        finally:
+            self._goal_tier_confirmation = None
 
     async def clear_goal(self) -> None:
         """Withdraw the objective without interrupting its turn or device input."""
@@ -562,7 +607,17 @@ class ConversationExecution:
         params = event.params or {}
         if self._thread_id is None or params.get("threadId") != self._thread_id:
             return
-        if event.method == "serverRequest/resolved":
+        if event.method == "thread/settings/updated":
+            if self._goal_tier_confirmation is not None:
+                tier, confirmation = self._goal_tier_confirmation
+                settings = params.get("threadSettings")
+                if (
+                    isinstance(settings, dict)
+                    and settings.get("serviceTier") == tier
+                    and not confirmation.done()
+                ):
+                    confirmation.set_result(None)
+        elif event.method == "serverRequest/resolved":
             request_id = params.get("requestId")
             if isinstance(request_id, str | int) and not isinstance(request_id, bool):
                 request = self._requests.resolve_rpc_id(request_id)

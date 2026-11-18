@@ -115,6 +115,7 @@ class FakePeer:
                 "approvalPolicy": params["approvalPolicy"],
                 "approvalsReviewer": params["approvalsReviewer"],
                 "model": params["model"],
+                "serviceTier": params.get("serviceTier"),
                 "reasoningEffort": config["model_reasoning_effort"],
                 "cwd": params["cwd"],
                 "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],

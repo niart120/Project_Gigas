@@ -373,24 +373,34 @@ class ApplicationServiceThread(QThread):
         """
         self._enqueue(lambda: self.codex.set_execution_settings(settings))
 
-    def send(self, prompt: str) -> None:
+    def send(self, prompt: str, service_tier: str | None = None) -> None:
         """Submit ordinary or additional text through the same turn/start path.
 
         Args:
             prompt: User text passed unchanged to conversation execution.
+            service_tier: Speed captured when the user submitted the message.
         """
         context = _OperationContext(self._generation, "send")
-        self._enqueue(lambda: self.codex.send(prompt), context)
+        self._enqueue(lambda: self.codex.send(prompt, service_tier), context)
 
-    def set_goal(self, objective: str) -> None:
-        """Submit the objective through the conversation's shared send operation."""
+    def set_goal(self, objective: str, service_tier: str | None = None) -> None:
+        """Submit the objective through the conversation's shared send operation.
+
+        Args:
+            objective: User's Goal text.
+            service_tier: Speed for a newly activated Goal.
+        """
         context = _OperationContext(self._generation, "goal_set")
-        self._enqueue(lambda: self.codex.set_goal(objective), context)
+        self._enqueue(lambda: self.codex.set_goal(objective, service_tier), context)
 
-    def resume_goal(self) -> None:
-        """Request active status without replacing the retained objective."""
+    def resume_goal(self, service_tier: str | None = None) -> None:
+        """Request active status without replacing the retained objective.
+
+        Args:
+            service_tier: Speed to apply before resuming the Goal.
+        """
         context = _OperationContext(self._generation, "goal_resume")
-        self._enqueue(self.codex.resume_goal, context)
+        self._enqueue(lambda: self.codex.resume_goal(service_tier), context)
 
     def clear_goal(self) -> None:
         """Withdraw the Goal without interrupting the current turn or input."""

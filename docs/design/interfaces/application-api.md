@@ -101,6 +101,8 @@ GUIスレッドから`login()`、`setup_windows_sandbox()`、`send(prompt)`、`a
 
 `SessionStatus`は接続・認証、`ConversationStatus`はthread・turn・Goalと送信・停止・回答待ちの表示に使います。Goalの変更は対応する通知の反映まで同じ送信taskで扱い、無変化応答ならそのまま終了します。遅い応答で後続のGoal通知を巻き戻しません。実行環境の準備結果も開始受付ではなく、完了通知と準備状態の確認後に返します。
 
+`send`・`set_goal`・`resume_goal`は`service_tier`で速度を受け取れます。GUIは送信時点の選択を渡します。読み込み済みでactiveなGoalの目的を編集する場合、その編集で速度は切り替わりません。速度の適用順は[通信と実行設定](codex.md#threadの実行設定)を参照してください。
+
 通常指示・追加指示・`goal_set`の`ServiceResult.message`は`MessageResult(outcome, turn_id)`です。`accepted`は公開応答での受付、`not_sent`は未配送または明確な拒否、`unknown`は受付不明を表します。通常送信・追加指示の`accepted`には確認したturn IDが入り、Goal送信は`accepted`でも`turn_id=None`です。どちらもturnの完了・指示の遵守を意味しません。
 
 resumeの結果と指示本文の受付は別です。本文が`not_sent`でもresumeによるGoal・turnが開始済みの場合があります。再開要求待機中の共通停止はその要求と早期turnを回収し、明示切断は接続・MCP・所有taskを終了します。

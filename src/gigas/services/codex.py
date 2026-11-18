@@ -332,13 +332,22 @@ class CodexService:
         if self._conversation is not None:
             self._conversation.set_execution_settings(settings)
 
-    def set_goal(self, objective: str) -> None:
-        """Submit the objective through the conversation's shared send operation."""
-        self._submit("goal_set", lambda execution: execution.set_goal(objective))
+    def set_goal(self, objective: str, service_tier: str | None = None) -> None:
+        """Submit the objective through the conversation's shared send operation.
 
-    def resume_goal(self) -> None:
-        """Request active status without replacing the retained objective."""
-        self._submit("goal_resume", lambda execution: execution.resume_goal())
+        Args:
+            objective: User's Goal text.
+            service_tier: Speed for a newly activated Goal.
+        """
+        self._submit("goal_set", lambda execution: execution.set_goal(objective, service_tier))
+
+    def resume_goal(self, service_tier: str | None = None) -> None:
+        """Request active status without replacing the retained objective.
+
+        Args:
+            service_tier: Speed to apply before resuming the Goal.
+        """
+        self._submit("goal_resume", lambda execution: execution.resume_goal(service_tier))
 
     def clear_goal(self) -> None:
         """Withdraw the Goal without interrupting the current turn or input."""
@@ -358,13 +367,14 @@ class CodexService:
             "setup_windows_sandbox", lambda connection: connection.setup_windows_sandbox()
         )
 
-    def send(self, prompt: str) -> None:
+    def send(self, prompt: str, service_tier: str | None = None) -> None:
         """Submit ordinary or additional text through the same turn/start path.
 
         Args:
             prompt: User text passed unchanged to conversation execution.
+            service_tier: Speed requested for this and subsequent turns.
         """
-        self._submit("send", lambda execution: execution.send(prompt))
+        self._submit("send", lambda execution: execution.send(prompt, service_tier))
 
     def answer(
         self, token: str, *, decision: str | None = None, answers: "Mapping[str, str] | None" = None

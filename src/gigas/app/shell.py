@@ -140,10 +140,17 @@ class ApplicationShell(QObject):
         panel.login_requested.connect(self.service.login)
         panel.sandbox_requested.connect(self.service.setup_windows_sandbox)
         panel.model_requested.connect(self.service.select_model)
-        panel.goal_requested.connect(self.service.set_goal)
-        panel.goal_resume_requested.connect(self.service.resume_goal)
+        # Capture the menu choice on the GUI thread, before queuing an execution operation.
+        panel.goal_requested.connect(
+            lambda objective: self.service.set_goal(objective, panel.composer.service_tier)
+        )
+        panel.goal_resume_requested.connect(
+            lambda: self.service.resume_goal(panel.composer.service_tier)
+        )
         panel.goal_clear_requested.connect(self.service.clear_goal)
-        panel.send_requested.connect(self.service.send)
+        panel.send_requested.connect(
+            lambda prompt: self.service.send(prompt, panel.composer.service_tier)
+        )
         panel.interrupt_requested.connect(self.interrupt)
         panel.answer_requested.connect(self._answer_codex)
         for requested in (

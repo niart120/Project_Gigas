@@ -35,14 +35,14 @@ class _ModelButton(QPushButton):
         width = max(
             hint.width(), ceil(QFontMetricsF(self.font()).horizontalAdvance(self.text())) + 20
         )
-        return QSize(min(240, width), hint.height())
+        return QSize(min(360, width), hint.height())
 
     def paintEvent(self, event: "QPaintEvent") -> None:  # noqa: N802 -- Qt override
         del event
         option = QStyleOptionButton()
         self.initStyleOption(option)
         option.text = self.fontMetrics().elidedText(
-            self.text(), Qt.TextElideMode.ElideRight, max(0, self.width() - 20)
+            self.text(), Qt.TextElideMode.ElideMiddle, max(0, self.width() - 20)
         )
         painter = QPainter(self)
         self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
@@ -145,6 +145,7 @@ class MessageComposer(QFrame):
         actions.addWidget(self.send_button)
         layout.addLayout(actions)
         self.selection: ModelSelection | None = None
+        self._speed = "Standard"
         self.popup = QFrame(self, Qt.WindowType.Popup)
         self.popup.setFrameShape(QFrame.Shape.StyledPanel)
         form = QFormLayout(self.popup)
@@ -158,12 +159,16 @@ class MessageComposer(QFrame):
         )
         self.effort_choice = QComboBox(self.popup)
         self.effort_choice.setPlaceholderText("推論レベルを選択")
+        self.speed_choice = QComboBox(self.popup)
+        self.speed_choice.setAccessibleName("速度")
         self.model_choice.setAccessibleName("モデル")
         self.effort_choice.setAccessibleName("推論レベル")
         form.addRow("モデル", self.model_choice)
         form.addRow("推論レベル", self.effort_choice)
+        form.addRow("速度", self.speed_choice)
         self.model_choice.activated.connect(self._choose_model)
         self.effort_choice.activated.connect(self._apply_model)
+        self.speed_choice.activated.connect(self._choose_speed)
         self.model_button.clicked.connect(self._open_models)
         self.set_choices(None)
         self.render_actions(
@@ -184,9 +189,14 @@ class MessageComposer(QFrame):
         elif self.selection is not None and not effort:
             value = f"{model} · 推論レベルを選択"
         else:
-            value = " · ".join(part for part in (model, effort) if part)
+            value = f"{model} · {effort} · {self._speed}" if model and effort else ""
         self.model_button.setText(value or "未接続")
-        self.model_button.setAccessibleName(f"モデル・推論レベルの設定 {value}".rstrip())
+        self.model_button.setAccessibleName(f"モデル・推論レベル・速度の設定 {value}".rstrip())
+
+    @property
+    def service_tier(self) -> str:
+        """Return the selected speed's request value at submission time."""
+        return self.selection.speeds.get(self._speed, "default") if self.selection else "default"
 
     def set_choices(self, selection: ModelSelection | None) -> None:
         """Display the connection's acknowledged next-turn selection."""
@@ -194,6 +204,8 @@ class MessageComposer(QFrame):
         if selection is None:
             self.popup.hide()
         else:
+            if selection.model and self._speed not in selection.speeds:
+                self._speed = "Standard"
             self._populate_models()
         self.set_model(selection.model if selection else "", selection.effort if selection else "")
 
@@ -207,6 +219,9 @@ class MessageComposer(QFrame):
         self.model_choice.blockSignals(False)
         self._model_changed()
         self.effort_choice.setCurrentIndex(self.effort_choice.findText(self.selection.effort))
+        self.speed_choice.clear()
+        self.speed_choice.addItems(list(self.selection.speeds))
+        self.speed_choice.setCurrentText(self._speed)
 
     def _open_models(self) -> None:
         if self.selection is None:
@@ -236,6 +251,11 @@ class MessageComposer(QFrame):
     def _choose_model(self) -> None:
         self._model_changed()
         self._apply_model()
+
+    def _choose_speed(self) -> None:
+        if self.selection is not None and self.speed_choice.isEnabled():
+            self._speed = self.speed_choice.currentText()
+            self.set_model(self.selection.model, self.selection.effort)
 
     def _apply_model(self) -> None:
         if self.effort_choice.count():

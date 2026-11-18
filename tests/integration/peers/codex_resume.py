@@ -11,6 +11,7 @@ def execution_resume_result(params: JsonObject, thread: JsonObject) -> JsonObjec
     return {
         "thread": thread,
         "model": params["model"],
+        "serviceTier": params.get("serviceTier"),
         "reasoningEffort": config["model_reasoning_effort"],
         "cwd": params["cwd"],
         "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],

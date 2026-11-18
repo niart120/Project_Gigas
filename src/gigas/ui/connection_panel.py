@@ -689,6 +689,9 @@ class ConnectionPanel(QWidget):
             self.composer.popup.hide()
         self.composer.model_choice.setEnabled(accepting)
         self.composer.effort_choice.setEnabled(accepting)
+        self.composer.speed_choice.setEnabled(
+            accepting and bool(self._status.model) and (conversation.turn_id is None or goal_active)
+        )
         self.composer.model_button.setEnabled(
             accepting
             and self.composer.selection is not None

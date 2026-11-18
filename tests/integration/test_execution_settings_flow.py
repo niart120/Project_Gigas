@@ -57,11 +57,13 @@ def _assert_execution(params: JsonObject, *, enabled: bool, model: str, effort: 
 
 
 @pytest.mark.parametrize("saved_conversation", [False, True], ids=["new", "browse"])
+@pytest.mark.parametrize("fast_mode_disabled", [False, True], ids=["fast-enabled", "fast-disabled"])
 def test_saved_ui_settings_and_model_choices_reach_start_resume_and_live_history(
-    qtbot: QtBot, tmp_path: Path, *, saved_conversation: bool
+    qtbot: QtBot, tmp_path: Path, *, saved_conversation: bool, fast_mode_disabled: bool
 ) -> None:
     with conversation_gui(qtbot, tmp_path) as session:
         panel, peer = session.panel, session.peer
+        peer.fast_mode_disabled = fast_mode_disabled
         assert not session.command("connect", panel.connect_action.trigger).error
         if saved_conversation:
             peer.goal = {
@@ -91,6 +93,7 @@ def test_saved_ui_settings_and_model_choices_reach_start_resume_and_live_history
         method = "thread/resume" if saved_conversation else "thread/start"
         params = session.params(method)
         assert len(params) == 1
+        assert params[0]["serviceTier"] == "default"
         _assert_execution(params[0], enabled=False, model="other", effort="low")
         methods = [name for name, _ in peer.calls]
         assert methods.index(method) < methods.index("turn/start")
@@ -120,6 +123,7 @@ def test_saved_ui_settings_and_model_choices_reach_start_resume_and_live_history
         turns = session.params("turn/start")
         assert len(turns) == 2
         assert all(turn["model"] == "other" and turn["effort"] == "low" for turn in turns)
+        assert all(turn["serviceTier"] == "default" for turn in turns)
         if saved_conversation:
             assert peer.goal is not None
             assert peer.goal["status"] == "active"
@@ -160,7 +164,7 @@ def test_loaded_model_selection_waits_for_update_and_retains_selection_on_reject
         assert panel.draft == "未送信の原稿"
         release.set()
         qtbot.waitUntil(composer.model_button.isEnabled)
-        assert composer.model_button.text() == "other · medium"
+        assert composer.model_button.text() == "other · medium · Standard"
         assert session.params("thread/settings/update") == [
             {"threadId": "thread-1", "model": "other", "effort": "medium"}
         ]
@@ -171,7 +175,7 @@ def test_loaded_model_selection_waits_for_update_and_retains_selection_on_reject
             lambda: composer.effort_choice.activated.emit(composer.effort_choice.currentIndex()),
         )
         assert result.error
-        assert composer.model_button.text() == "other · medium"
+        assert composer.model_button.text() == "other · medium · Standard"
         assert composer.model_button.isEnabled()
         assert panel.draft == "未送信の原稿"
         assert "codex" in session.shell.window.notifications.notices
@@ -184,3 +188,90 @@ def test_loaded_model_selection_waits_for_update_and_retains_selection_on_reject
         assert not session.command("send", panel.send_button.click).error
         assert session.params("turn/start")[-1]["model"] == "other"
         assert session.params("turn/start")[-1]["effort"] == "medium"
+
+
+@pytest.mark.parametrize("running_turn", [True, False], ids=["steer", "new-turn"])
+def test_goal_speed_change_is_submitted_only_with_additional_chat(
+    qtbot: QtBot, tmp_path: Path, *, running_turn: bool
+) -> None:
+    with conversation_gui(qtbot, tmp_path) as session:
+        panel, peer = session.panel, session.peer
+        peer.responses["model/list"] = {
+            "data": [
+                {
+                    "model": "supported",
+                    "isDefault": True,
+                    "defaultReasoningEffort": "medium",
+                    "supportedReasoningEfforts": [{"reasoningEffort": "medium"}],
+                    "serviceTiers": [
+                        {"id": "priority", "name": "Fast"},
+                        {"id": "ultrafast", "name": "Ultrafast"},
+                    ],
+                },
+            ],
+            "nextCursor": None,
+        }
+        assert not session.command("connect", panel.connect_action.trigger).error
+        composer = panel.composer
+        composer.model_button.click()
+        assert composer.speed_choice.currentText() == "Standard"
+        composer.speed_choice.setCurrentText("Fast")
+        composer.speed_choice.activated.emit(composer.speed_choice.currentIndex())
+        composer.popup.hide()
+        composer.goal_mode.click()
+        panel.prompt.setPlainText("ゲームの目標")
+        assert not session.command("goal_set", panel.send_button.click).error
+        assert session.params("thread/start")[-1]["serviceTier"] == "priority"
+        if running_turn:
+            session.emit(
+                RpcNotification(
+                    "turn/started",
+                    {"threadId": "thread-1", "turn": {"id": "turn-1", "status": "inProgress"}},
+                )
+            )
+            qtbot.waitUntil(lambda: panel.status.text() == "実行中")
+        composer.model_button.click()
+        assert composer.speed_choice.isEnabled()
+        composer.speed_choice.setCurrentText("Ultrafast")
+        composer.speed_choice.activated.emit(composer.speed_choice.currentIndex())
+        composer.popup.hide()
+        assert not session.params("thread/settings/update")
+        assert not session.params("turn/start")
+        composer.goal_mode.setChecked(False)
+        panel.prompt.setPlainText("追加の指示")
+        assert not session.command("send", panel.send_button.click).error
+        (turn,) = session.params("turn/start")
+        assert turn["serviceTier"] == "ultrafast"
+        assert "serviceTierForTurn" not in turn
+        assert not session.params("turn/interrupt")
+
+
+def test_loaded_goal_resume_waits_for_speed_confirmation(qtbot: QtBot, tmp_path: Path) -> None:
+    with conversation_gui(qtbot, tmp_path) as session:
+        panel, peer = session.panel, session.peer
+        assert not session.command("connect", panel.connect_action.trigger).error
+        panel.composer.goal_mode.click()
+        panel.prompt.setPlainText("ゲームの目標")
+        assert not session.command("goal_set", panel.send_button.click).error
+        assert not session.command("stop", panel.interrupt_button.click).error
+        assert peer.goal is not None
+        assert peer.goal["status"] == "paused"
+        goal_mutations_before_resume = len(session.params("thread/goal/set"))
+
+        def confirm_speed() -> None:
+            panel.plan_panel.resume_button.click()
+            qtbot.waitUntil(lambda: bool(session.params("thread/settings/update")))
+            assert session.params("thread/settings/update") == [
+                {"threadId": "thread-1", "serviceTier": "default"}
+            ]
+            assert len(session.params("thread/goal/set")) == goal_mutations_before_resume
+            session.emit(
+                RpcNotification(
+                    "thread/settings/updated",
+                    {"threadId": "thread-1", "threadSettings": {"serviceTier": "default"}},
+                )
+            )
+
+        assert not session.command("goal_resume", confirm_speed).error
+        assert len(session.params("thread/goal/set")) == goal_mutations_before_resume + 1
+        assert peer.goal["status"] == "active"

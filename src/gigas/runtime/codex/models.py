@@ -374,11 +374,17 @@ class TurnStarted:
 
 @dataclass(frozen=True, slots=True)
 class ModelChoice:
-    """A catalog model and its supported reasoning levels."""
+    """A catalog model with reasoning levels and advertised speed-to-tier pairs."""
 
     model: str
     efforts: tuple[str, ...]
     default_effort: str
+    service_tiers: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def speeds(self) -> dict[str, str]:
+        """Map the speed labels to App Server request values."""
+        return {"Standard": "default", **dict(self.service_tiers)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,6 +394,12 @@ class ModelSelection:
     choices: tuple[ModelChoice, ...]
     model: str
     effort: str
+
+    @property
+    def speeds(self) -> dict[str, str]:
+        """Return the speed choices of the currently selected model."""
+        choice = next((choice for choice in self.choices if choice.model == self.model), None)
+        return choice.speeds if choice else {"Standard": "default"}
 
 
 type GoalStatus = Literal[

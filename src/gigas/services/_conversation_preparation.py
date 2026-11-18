@@ -21,7 +21,7 @@ if TYPE_CHECKING:
         ModelSelection,
         ThreadConfiguration,
     )
-    from gigas.runtime.codex.transport import JsonObject
+    from gigas.runtime.codex.transport import JsonObject, JsonValue
     from gigas.services._conversation_resources import ConversationResources
     from gigas.services._conversation_selection import ConversationSelection
     from gigas.services._game_io_tools import InputStart
@@ -74,6 +74,8 @@ class ThreadPreparation:
         settings: "ExecutionSettings",
         start_input: "InputStart",
         attempt: PreparationAttempt,
+        *,
+        service_tier: str | None = None,
     ) -> str:
         """Prepare new execution or resume saved execution once, preserving its workspace.
 
@@ -129,10 +131,17 @@ class ThreadPreparation:
             )
             if isinstance(target, StoredConversationTarget):
                 params = protocol.thread_resume_params(
-                    target.thread_id, configuration, selection, config, settings=settings
+                    target.thread_id,
+                    configuration,
+                    selection,
+                    config,
+                    settings=settings,
+                    service_tier=service_tier,
                 )
                 task = asyncio.create_task(
-                    self._resume(target, configuration, selection, settings, params, attempt),
+                    self._resume(
+                        target, configuration, selection, settings, params, attempt, config
+                    ),
                     name="gigas-thread-resume",
                 )
                 attempt.resume_task = task
@@ -144,11 +153,16 @@ class ThreadPreparation:
                     raise
                 return target.thread_id
             params = protocol.thread_start_params(
-                configuration, selection, config, settings=settings
+                configuration, selection, config, settings=settings, service_tier=service_tier
             )
             result = await self._connection.request("thread/start", params)
             self.thread_id = protocol.validate_thread(
-                result, configuration, selection, settings=settings
+                result,
+                configuration,
+                selection,
+                settings=settings,
+                service_tier=service_tier,
+                server_config=config,
             )
             self.loaded = True
             self._selection.adopt_started(
@@ -169,12 +183,20 @@ class ThreadPreparation:
         settings: "ExecutionSettings",
         params: "JsonObject",
         attempt: PreparationAttempt,
+        server_config: "JsonValue",
     ) -> None:
         self.thread_id = target.thread_id
         self._activate(self._selection.goal)
         attempt.resume_submitted = True
         result = await self._connection.request("thread/resume", params)
+        service_tier = params.get("serviceTier")
         protocol.validate_thread(
-            result, configuration, selection, settings=settings, expected_thread_id=target.thread_id
+            result,
+            configuration,
+            selection,
+            settings=settings,
+            expected_thread_id=target.thread_id,
+            service_tier=service_tier if isinstance(service_tier, str) else None,
+            server_config=server_config,
         )
         self.loaded = True
