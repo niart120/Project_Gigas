@@ -31,6 +31,15 @@ from gigas.services.input import InputServiceError, OperationResult
 
 logger = logging.getLogger(__name__)
 
+_TOKEN_COUNT_FIELDS = (
+    "inputTokens",
+    "cachedInputTokens",
+    "cacheWriteInputTokens",
+    "outputTokens",
+    "reasoningOutputTokens",
+    "totalTokens",
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
 
@@ -607,7 +616,9 @@ class ConversationExecution:
         params = event.params or {}
         if self._thread_id is None or params.get("threadId") != self._thread_id:
             return
-        if event.method == "thread/settings/updated":
+        if event.method == "thread/tokenUsage/updated":
+            self._record_token_usage(params)
+        elif event.method == "thread/settings/updated":
             if self._goal_tier_confirmation is not None:
                 tier, confirmation = self._goal_tier_confirmation
                 settings = params.get("threadSettings")
@@ -720,6 +731,18 @@ class ConversationExecution:
                     and isinstance(item_id := item.get("id"), str)
                 ):
                     self._file_changes(item_id, item.get("changes"))
+
+    def _record_token_usage(self, params: "JsonObject") -> None:
+        turn_id = params.get("turnId")
+        usage = params.get("tokenUsage")
+        if not isinstance(turn_id, str) or not turn_id or not isinstance(usage, dict):
+            return
+        total = usage.get("total")
+        if not isinstance(total, dict):
+            return
+        counts = {key: value for key in _TOKEN_COUNT_FIELDS if type(value := total.get(key)) is int}
+        if counts:
+            self._resources.record_token_usage(turn_id, counts)
 
     def _file_changes(self, item_id: str, changes: "JsonValue") -> None:
         if self._turn is not None:

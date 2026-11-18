@@ -47,6 +47,15 @@ class RecordingService:
         """Submit an input event without waiting; report failures through callbacks/logging."""
         self._submit(partial(self._writer.record_input, event), event.operation_id)
 
+    def submit_token_usage(self, turn_id: str, total: dict[str, int]) -> None:
+        """Queue a snapshot with the other records without waiting for disk I/O.
+
+        Args:
+            turn_id: Turn associated with the usage update.
+            total: Cumulative token counts reported for the thread.
+        """
+        self._submit(partial(self._writer.record_token_usage, turn_id, total.copy()), turn_id)
+
     def submit_observation(
         self,
         observation: "Observation",

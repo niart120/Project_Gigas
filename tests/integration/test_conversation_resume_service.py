@@ -37,7 +37,7 @@ class _WaitingResume(ResumePeer):
         return result
 
 
-def test_early_resume_message_and_mcp_observation_share_saved_records_before_reply(
+def test_early_resume_notifications_and_mcp_observation_share_saved_records_before_reply(
     qtbot: QtBot,
     tmp_path: Path,
 ) -> None:
@@ -53,6 +53,31 @@ def test_early_resume_message_and_mcp_observation_share_saved_records_before_rep
         assert not s.manage("select", lambda: s.service.select_conversation("stored-1")).error
         s.service.send("after resume")
         qtbot.waitUntil(peer.entered.is_set)
+        total: dict[str, int] = {
+            "inputTokens": 800,
+            "cachedInputTokens": 640,
+            "cacheWriteInputTokens": 32,
+            "outputTokens": 200,
+            "reasoningOutputTokens": 120,
+            "totalTokens": 1000,
+        }
+        usage: JsonObject = {
+            "threadId": "stored-1",
+            "turnId": "previous-turn",
+            "tokenUsage": {
+                "total": {**total, "unexpected": "private usage text"},
+                "last": {"totalTokens": 100},
+                "modelContextWindow": 128_000,
+            },
+        }
+        updates: list[JsonObject] = [
+            {**usage, "threadId": "unrelated"},
+            {**usage, "tokenUsage": {"total": {"totalTokens": True}}},
+            usage,
+            usage,
+        ]
+        for update in updates:
+            s.notify(RpcNotification("thread/tokenUsage/updated", update))
         s.notify(
             RpcNotification(
                 "turn/started",
@@ -112,6 +137,11 @@ def test_early_resume_message_and_mcp_observation_share_saved_records_before_rep
             json.loads(line)
             for line in (records / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
+        usage_rows = [e for e in events if e["type"] == "codex.token_usage_updated"]
+        assert [e["payload"] for e in usage_rows] == [
+            {"turn_id": "previous-turn", "total": total}
+        ] * 2
+        assert all(e["schema_version"] == 1 and e["recorded_at"].endswith("Z") for e in usage_rows)
         assert any(
             e["type"] == "dialogue.message" and e["payload"]["text"] == "early fact" for e in events
         )

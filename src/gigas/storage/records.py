@@ -155,6 +155,21 @@ class GameIoRecordWriter:
             kind, payload = input_record(event)
             self._append_event(kind, payload)
 
+    def record_token_usage(self, turn_id: str, total: dict[str, int]) -> None:
+        """Append cumulative token counts for one received notification.
+
+        Args:
+            turn_id: Turn associated with the usage update.
+            total: Cumulative token counts reported for the thread.
+
+        Raises:
+            RecordBusyError: Another synchronous operation owns the writer.
+            RecordError: The writer is closed or the append fails.
+        """
+        with self._operation():
+            self._require_open()
+            self._append_event("codex.token_usage_updated", {"turn_id": turn_id, "total": total})
+
     def record(self, observation: "Observation") -> None:
         """Publish the original PNG bytes and append their observation metadata.
 
