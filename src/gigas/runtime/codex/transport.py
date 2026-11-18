@@ -1,7 +1,9 @@
 """Single-reader stdio transport for the Codex app-server protocol."""
 
 import asyncio
+import codecs
 import json
+import logging
 import math
 import os
 import subprocess
@@ -20,6 +22,7 @@ type RpcId = str | int
 
 MAX_RECEIVE_FRAME_BYTES = 2 * 1024 * 1024
 MAX_SEND_FRAME_BYTES = 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class TransportError(RuntimeError):
@@ -164,9 +167,13 @@ class _ProcessProtocol(asyncio.SubprocessProtocol):
         self._paused = False
         self._stdin_closed = False
         self._draining: asyncio.Future[None] | None = None
+        self._stderr_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._stderr_parts: list[str] = []
+        self._child_pid: int | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         if isinstance(transport, asyncio.SubprocessTransport):
+            self._child_pid = transport.get_pid()
             stdout = transport.get_pipe_transport(1)
             if isinstance(stdout, asyncio.ReadTransport):
                 self.stdout.set_transport(stdout)
@@ -174,7 +181,31 @@ class _ProcessProtocol(asyncio.SubprocessProtocol):
     def pipe_data_received(self, fd: int, data: bytes) -> None:
         if fd == 1:
             self.stdout.feed_data(data)
-        # stderr is intentionally drained here without retaining its contents.
+        elif fd == 2:
+            self._stderr_text(self._stderr_decoder.decode(data))
+
+    def _stderr_text(self, text: str) -> None:
+        lines = text.split("\n")
+        self._stderr_parts.append(lines[0])
+        for line in lines[1:]:
+            self._log_stderr("".join(self._stderr_parts).rstrip("\r"))
+            self._stderr_parts = [line]
+
+    def _log_stderr(self, text: str) -> None:
+        if not text:
+            return
+        try:
+            details = json.loads(text)
+        except (ValueError, RecursionError):
+            details = text
+        level = logging.WARNING
+        if isinstance(details, dict) and details.get("level") == "ERROR":
+            level = logging.ERROR
+        logger.log(
+            level,
+            "App Server diagnostic output",
+            extra={"event": "codex.stderr", "child_pid": self._child_pid, "details": details},
+        )
 
     def pipe_connection_lost(self, fd: int, exc: Exception | None) -> None:
         if fd == 1:
@@ -185,6 +216,10 @@ class _ProcessProtocol(asyncio.SubprocessProtocol):
         elif fd == 0:
             self._stdin_closed = True
             self.resume_writing()
+        elif fd == 2:
+            self._stderr_text(self._stderr_decoder.decode(b"", final=True))
+            self._log_stderr("".join(self._stderr_parts))
+            self._stderr_parts.clear()
 
     def process_exited(self) -> None:
         if not self.exited.done():
@@ -298,6 +333,7 @@ class StdioTransport:
                 creationflags=flags,
             )
         except (OSError, ValueError, TypeError):
+            logger.exception("Codex process start failed", extra={"event": "codex.start_failed"})
             self._finish("Process start failed")
             message = "Process start failed"
             raise TransportError(message) from None
@@ -463,6 +499,13 @@ class StdioTransport:
                 stdin.write(data)
                 await protocol.drain()
             except (ConnectionError, OSError, TransportError):
+                logger.exception(
+                    "Codex transport write failed",
+                    extra={
+                        "event": "codex.write_failed",
+                        "child_pid": process.get_pid() if process is not None else None,
+                    },
+                )
                 self._finish("Write failed")
                 message = "Write failed"
                 raise TransportError(message) from None
@@ -477,9 +520,11 @@ class StdioTransport:
                 if self._closed is None:
                     self._route(_decode_frame(raw))
         except (TransportError, ValueError, RecursionError):
+            logger.exception("Invalid Codex RPC frame", extra={"event": "codex.frame_failed"})
             self._finish("Invalid RPC frame")
             await self._discard_stream(protocol.stdout)
         except (ConnectionError, OSError):
+            logger.exception("Codex transport read failed", extra={"event": "codex.read_failed"})
             self._finish("Read failed")
         else:
             self._finish("Peer closed stdout")
@@ -513,6 +558,16 @@ class StdioTransport:
             if not isinstance(code, int) or isinstance(code, bool):
                 message = "Invalid RPC error code"
                 raise TransportError(message)
+            logger.error(
+                "RPC request failed",
+                extra={
+                    "event": "codex.rpc_failed",
+                    "rpc_method": method,
+                    "rpc_id": request_id,
+                    "child_pid": self._process.get_pid() if self._process is not None else None,
+                    "details": error,
+                },
+            )
             future.set_exception(RpcError(code, method))
         else:
             future.set_result(frame["result"])
@@ -521,6 +576,14 @@ class StdioTransport:
         if self._closed is not None:
             return
         self._closed = TransportClosed(reason)
+        logger.info(
+            "Codex transport closed",
+            extra={
+                "event": "codex.transport_closed",
+                "reason": reason,
+                "child_pid": self._process.get_pid() if self._process is not None else None,
+            },
+        )
         for _, future in self._pending.values():
             if not future.done():
                 future.set_exception(TransportError(reason))

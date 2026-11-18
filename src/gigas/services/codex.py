@@ -1,6 +1,7 @@
 """Codex connection, conversation and result ownership on the caller's asyncio loop."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -35,8 +36,10 @@ from gigas.services.codex_models import (
     ServiceResult,
 )
 from gigas.services.conversations import ManagementResult, StoredConversationTarget
-from gigas.services.input import InputService, OperationResult
+from gigas.services.input import InputService, InputServiceError, OperationResult
 from gigas.services.projects import ProjectFolderStatus
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -416,12 +419,32 @@ class CodexService:
         This is an application coordination boundary; it emits no command result
         and does not release unrelated input when there is no conversation.
         """
-        task = self._project_task
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        if self._conversation is not None:
-            await self._conversation.stop()
+        command = _OperationContext(self._active_generation, "stop")
+        fields = self._operation_fields(command)
+        logger.info("Codex execution stop requested", extra=fields)
+        try:
+            task = self._project_task
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            if self._conversation is not None:
+                await self._conversation.stop()
+        except (CodexConnectionError, InputServiceError) as error:
+            logger.error(  # noqa: TRY400 -- the owning boundary already logged the cause
+                "Codex execution stop failed",
+                extra={**fields, "event": "codex.operation_failed", "error": str(error)},
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "Codex execution stop did not complete",
+                extra={**fields, "event": "codex.operation_failed"},
+            )
+            raise
+        logger.info(
+            "Codex execution stopped",
+            extra={**fields, "event": "codex.operation_completed", "error": ""},
+        )
 
     def disconnect_runtime(self) -> None:
         """Close the current connection while keeping the service loop available."""
@@ -440,6 +463,7 @@ class CodexService:
         self._start_operation(context, lambda: self._invoke_connection(context, call))
 
     def _start_operation(self, context: _OperationContext, call: _OperationCall) -> None:
+        logger.info("Codex operation requested", extra=self._operation_fields(context))
         if self._ending:
             self._reject_submission(context)
             return
@@ -469,6 +493,10 @@ class CodexService:
             goal_accepted = result is True
             turn_id = result if isinstance(result, str) else None
         except asyncio.CancelledError:
+            logger.info(
+                "Codex operation cancelled",
+                extra=self._operation_fields(command, "codex.operation_cancelled"),
+            )
             if command.operation in {"stop", "disconnect"}:
                 self._complete(command, "停止・切断の完了を確認できない", "unknown")
                 return
@@ -493,7 +521,11 @@ class CodexService:
             error = str(failure)
             outcome = "not_sent"
             failure_id = failure.failure_id
-        except Exception:  # noqa: BLE001 -- sanitize the service/GUI boundary
+        except Exception:
+            logger.exception(
+                "Codex operation failed",
+                extra=self._operation_fields(command, "codex.operation_failed"),
+            )
             error = "Codex操作に失敗"
             outcome = "unknown"
         self._complete(command, error, outcome, failure_id, turn_id, goal_accepted)
@@ -510,8 +542,22 @@ class CodexService:
                 if self._connection is connection and self._conversation is not None:
                     execution = self._conversation
                     if isinstance(event, RpcNotification) and execution.snapshot.thread_id is None:
+                        previous = self._selection.goal
                         goal = self._selection.receive_goal(event)
                         if goal is not None:
+                            before = previous.status if previous is not None else None
+                            after = goal.goal.status if goal.goal is not None else None
+                            if before != after:
+                                logger.info(
+                                    "Received browsing Goal status change",
+                                    extra={
+                                        "event": "codex.goal_changed",
+                                        "connection_id": generation,
+                                        "thread_id": goal.target.thread_id,
+                                        "previous_status": before,
+                                        "status": after,
+                                    },
+                                )
                             self.browse_goal_changed(generation, goal)
                     execution.receive(event)
 
@@ -538,6 +584,7 @@ class CodexService:
                 or self._conversation is not execution
             ),
             request_close=lambda: self._begin_close(connection, execution),
+            connection_id=self._active_generation,
         )
         return execution
 
@@ -657,7 +704,11 @@ class CodexService:
                 await self._close_connection()
         except CodexConnectionError as failure:
             error = str(failure)
-        except Exception:  # noqa: BLE001 -- public boundary must not expose upstream text.
+        except Exception:
+            logger.exception(
+                "Conversation management failed",
+                extra={"event": "codex.management_failed", "operation": operation},
+            )
             error = "会話管理の操作に失敗しました"
         finally:
             if self._project_task is owner:
@@ -666,6 +717,16 @@ class CodexService:
             target is not self._selection.target or generation != self._active_generation
         ):
             return
+        if error:
+            logger.warning(
+                "Conversation management rejected",
+                extra={
+                    "event": "codex.management_result",
+                    "operation": operation,
+                    "connection_id": generation,
+                    "error": error,
+                },
+            )
         self.management_completed(ManagementResult(generation, operation, value, error, project_id))
 
     def _require_management(self, generation: int) -> CodexConnection:
@@ -771,8 +832,19 @@ class CodexService:
             path = project.root
         except CodexConnectionError as failure:
             error = str(failure)
-        except Exception as failure:  # noqa: BLE001 -- sanitize unexpected failures at GUI boundary
+        except Exception as failure:
+            logger.exception("Project selection failed", extra={"event": "codex.project_failed"})
             error = recording_reason(failure)
+        if error:
+            logger.warning(
+                "Project selection rejected",
+                extra={
+                    "event": "codex.project_result",
+                    "connection_id": generation,
+                    "path": str(path),
+                    "error": error,
+                },
+            )
         self.project_completed(ProjectResult(generation, path, project, error))
 
     async def _select_project(
@@ -847,6 +919,10 @@ class CodexService:
                 raise CodexConnectionError(message)
 
     def _reject_submission(self, command: _OperationContext) -> None:
+        logger.info(
+            "Codex operation not started",
+            extra=self._operation_fields(command, "codex.operation_rejected"),
+        )
         result = rejected_result(command)
         if result is not None:
             self.completed(result)
@@ -860,9 +936,33 @@ class CodexService:
         turn_id: str | None = None,
         goal_accepted: bool = False,
     ) -> None:
+        fields = self._operation_fields(command, "codex.operation_completed")
+        fields.update(
+            error=error,
+            outcome=outcome,
+            failure_id=failure_id,
+            turn_id=turn_id,
+            goal_accepted=goal_accepted,
+        )
+        logger.log(
+            logging.ERROR if error else logging.INFO, "Codex operation completed", extra=fields
+        )
         self.completed(
             operation_result(command, error, outcome, failure_id, turn_id, goal_accepted)
         )
+
+    def _operation_fields(
+        self, command: _OperationContext, event: str = "codex.operation_requested"
+    ) -> dict[str, object]:
+        fields: dict[str, object] = {
+            "event": event,
+            "connection_id": command.generation,
+            "operation": command.operation,
+        }
+        if command.generation == self._active_generation and self._conversation is not None:
+            state = self._conversation.snapshot
+            fields.update(thread_id=state.thread_id, turn_id=state.turn_id)
+        return fields
 
 
 async def _finish_io[T](operation: "Coroutine[object, object, T]") -> T:

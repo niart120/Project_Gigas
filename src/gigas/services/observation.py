@@ -1,9 +1,12 @@
 """Latest and post-operation observations with shared background persistence."""
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 from gigas.game_io.observation import Observation, ObservationError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,8 +29,8 @@ class ObservationService:
         recording: Application-owned persistence service shared with input and chat.
         resolution: Image size used by the next observation; defaults to FullHD.
         on_save_error: Optional callback receiving the observation and storage
-            exception on this event loop. It must return promptly. Without a
-            callback, failures are logged with the observation ID and archive path.
+            exception on this event loop. It must return promptly. Failures are
+            also logged with the observation ID and archive path.
 
     Attributes:
         resolution: Applied size for subsequent observations. Each observe call
@@ -65,17 +68,34 @@ class ObservationService:
         """
         if self._worker is not None and not self._worker.done():
             message = "観測画像の符号化中です"
+            logger.warning(message, extra={"event": "observation.rejected", "code": "BUSY"})
             raise ObservationError("BUSY", message)
         snapshot = self._reader.snapshot()
         if snapshot.phase != "streaming" or snapshot.frame is None:
             message = "観測できる映像がありません"
+            logger.warning(
+                message, extra={"event": "observation.rejected", "code": "DEVICE_UNAVAILABLE"}
+            )
             raise ObservationError("DEVICE_UNAVAILABLE", message)
         self._worker = asyncio.create_task(self._encode(snapshot.frame, self.resolution))
         self._worker.add_done_callback(_retrieve_exception)
         return await asyncio.shield(self._worker)
 
     async def _encode(self, frame: "Frame", resolution: "ObservationResolution") -> Observation:
-        observation = await asyncio.to_thread(Observation.from_frame, frame, resolution=resolution)
+        try:
+            observation = await asyncio.to_thread(
+                Observation.from_frame, frame, resolution=resolution
+            )
+        except Exception:
+            logger.exception(
+                "Observation encoding failed",
+                extra={
+                    "event": "observation.failed",
+                    "generation": frame.generation,
+                    "frame_sequence": frame.sequence,
+                },
+            )
+            raise
         self._recording.submit_observation(observation, on_error=self._on_save_error)
         return observation
 

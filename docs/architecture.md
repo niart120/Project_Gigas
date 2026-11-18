@@ -49,10 +49,13 @@ flowchart LR
 | 設定I/O用のQThread | `SettingsWorker`による設定ファイルの読込・保存 |
 | `ApplicationServiceThread`のQThread | 一つのasyncioループでCodex接続、会話、入力、ゲームMCP、観測・保存の受付を実行 |
 | 映像監視スレッド | `CaptureService`が取得子プロセスの状態・期限を監視し、最新Frameを保持 |
+| 診断ログの保存スレッド | `QueueListener`が共通診断ログをJSON整形・認証情報除外・サイズ回転して保存 |
 | 映像取得子プロセス | OpenCVによるデバイス列挙・接続・フレーム取得。取得中は最大一つの子プロセスが機器を所有 |
 | Codex app-serverプロセス | モデル実行、会話・Project・Goal・標準自動記憶の管理 |
 
 PNG符号化や保存、ポート列挙などの同期処理は`asyncio.to_thread()`で実行する。シリアル通信は`SerialInput`の単一ワーカーに送り、書込とcloseの順序を維持する。
+
+診断ログは`app/diagnostics.py`が起動と通知を接続し、`storage/diagnostics.py`がキュー・ファイル・保持を所有する。入力停止と機器・会話資源の解放後、専用の終了スレッドでログの保存待ちを回収してQtの終了へ進む。記録範囲と制約は[診断ログ仕様](design/data/diagnostics.md)に記載する。
 
 ## 映像とゲーム操作の経路
 

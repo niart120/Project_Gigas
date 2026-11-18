@@ -160,7 +160,7 @@ class GameIoRecordWriter:
 
         Args:
             observation: Final image and source metadata from Observation.from_frame.
-                Only its obs-UUID4 identifier is checked to fix the destination.
+                Only its canonical UUID7 identifier is checked to fix the destination.
                 The image is not encoded or decoded again.
 
         Raises:
@@ -255,13 +255,11 @@ def _append_row(path: Path, row: bytes) -> None:
 
 
 def _observation_id(value: str) -> str:
-    if not value.startswith("obs-"):
-        raise RecordError("観測画像の保存先IDはobs-で始まる必要があります")
     try:
-        identifier = UUID(value[4:])
+        identifier = UUID(value)
     except ValueError as error:
         message = f"観測画像の保存先IDが不正です: {error}"
         raise RecordError(message) from error
-    if identifier.version != 4 or value != f"obs-{identifier}":
-        raise RecordError("観測画像の保存先IDはobs-と小文字・ハイフン付きUUID4が必要です")
+    if identifier.version != 7 or value != str(identifier):
+        raise RecordError("観測画像の保存先IDは小文字・ハイフン付きUUID7が必要です")
     return value

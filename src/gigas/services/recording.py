@@ -85,8 +85,14 @@ class RecordingService:
                 await asyncio.to_thread(operation)
         except Exception as error:
             # Persistence failure is reported independently of input execution.
-            if on_error is None:
-                logger.exception("Recording failed: %s (%s)", reference, self._writer.path)
+            logger.exception(
+                "Recording failed",
+                extra={
+                    "event": "recording.failed",
+                    "reference": reference,
+                    "path": str(self._writer.path),
+                },
+            )
             for callback in (self.on_failure, on_error):
                 if callback is not None:
                     try:

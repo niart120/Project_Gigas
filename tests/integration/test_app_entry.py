@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -49,7 +50,12 @@ QApplication.exec = staticmethod(run_loop)
     assert result.returncode == 0, result.stderr
     # The module must actually enter Qt; a no-op entry never stops the timer.
     assert "GIGAS_WINDOW_CLOSED" in result.stdout
-    assert list(tmp_path.iterdir()) == []
+    logs = list((tmp_path / "GIGAS" / "logs").glob("*/gigas.jsonl"))
+    assert len(logs) == 1
+    rows = [json.loads(line) for line in logs[0].read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event"] == "app.starting"
+    assert rows[-1]["event"] == "app.stopped"
+    assert not (tmp_path / "GIGAS" / "settings.toml").exists()
 
 
 @pytest.mark.parametrize("failure", ["path", "before_thread", "io_thread_start", "after_thread"])
@@ -89,4 +95,13 @@ ApplicationShell.start = fail_start
     assert "Traceback" not in result.stderr
     assert "QThread: Destroyed" not in result.stderr
     assert ("LOCALAPPDATA" if failure == "path" else "RuntimeError") in result.stderr
-    assert list(tmp_path.iterdir()) == []
+    if failure == "path":
+        assert list(tmp_path.iterdir()) == []
+    else:
+        logs = list((tmp_path / "GIGAS" / "logs").glob("*/gigas.jsonl"))
+        assert len(logs) == 1
+        rows = [json.loads(line) for line in logs[0].read_text(encoding="utf-8").splitlines()]
+        errors = [row for row in rows if row.get("event") == "app.failed"]
+        assert len(errors) == 1
+        assert "RuntimeError: injected startup failure" in errors[0]["message"]
+        assert rows[-1]["event"] == "app.stopped"

@@ -2,6 +2,8 @@
 
 import sys
 
+from gigas.diagnostics import redactor
+
 
 def main() -> int:
     """Run the desktop application and return its process exit code.
@@ -16,5 +18,6 @@ def main() -> int:
 
         return run()
     except Exception as error:  # noqa: BLE001 -- process entry boundary
-        sys.stderr.write(f"GIGAS: {type(error).__name__}: {error}\n")
+        if sys.stderr is not None:
+            sys.stderr.write(redactor.clean(f"GIGAS: {type(error).__name__}: {error}\n"))
         return 1

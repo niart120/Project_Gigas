@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 import cv2
 import numpy as np
@@ -65,7 +66,10 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
         second = Observation.from_frame(frame)
         writer.record(first)
         writer.record(second)
-        assert first.observation_id != second.observation_id
+        assert UUID(first.observation_id).version == 7
+        assert first.observation_id == str(UUID(first.observation_id))
+        assert first.image_path == f"observations/{first.observation_id}.png"
+        assert first.observation_id < second.observation_id
         assert first.captured_at == frame.captured_at
         assert (first.source_frame.generation, first.source_frame.sequence) == (2, 7)
         assert (first.source_frame.width, first.source_frame.height) == (width, height)

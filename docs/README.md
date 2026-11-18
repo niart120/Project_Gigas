@@ -16,11 +16,12 @@
 | 画面と操作 | [デスクトップGUI](design/ui/desktop.md) |
 | Codexとの接続 | [通信と実行設定](design/interfaces/codex.md)、[接続・管理API](design/interfaces/codex-api.md)、[アプリケーションサービスAPI](design/interfaces/application-api.md) |
 | 映像・入力との接続 | [映像取得API](design/interfaces/video-api.md)、[入力API](design/interfaces/input-api.md)、[ゲームI/O MCP](design/interfaces/observation-mcp.md) |
-| データと保存 | [データの配置・所有](design/data/storage.md)、[観測・記録APIと保存形式](design/data/recorded-observation.md) |
+| データと保存 | [データの配置・所有](design/data/storage.md)、[観測・記録APIと保存形式](design/data/recorded-observation.md)、[診断ログ](design/data/diagnostics.md) |
 
 ## 利用・開発の手順
 
 - [起動](../README.md)、[設定](guides/settings.md)、[映像プレビュー](guides/video.md)、[Codexとゲーム操作](guides/codex.md)
 - [開発環境と検査](guides/development.md)、[実接続の確認手順](guides/verification.md)、[配布と公開](guides/publishing.md)
+- [異常時の記録確認](guides/diagnostics.md)
 
 過去の設計・計画・検証記録は[アーカイブ](../spec/archive/README.md)、完了した作業の詳細は[完了資料](../spec/complete/)にあります。開発エージェントの運用は[AGENTS.md](../AGENTS.md)を参照してください。

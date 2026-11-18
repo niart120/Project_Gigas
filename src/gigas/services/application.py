@@ -1,6 +1,7 @@
 """Qt delivery and the lifetime of services sharing one background asyncio loop."""
 
 import asyncio
+import logging
 from threading import Lock
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,8 @@ from gigas.services.input import (
     InputServiceError,
     OperationResult,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -208,7 +211,11 @@ class ApplicationServiceThread(QThread):
         try:
             with asyncio.Runner() as runner:
                 runner.run(self._serve())
-        except Exception:  # noqa: BLE001 -- thread boundary must not expose exception secrets
+        except Exception:
+            logger.exception(
+                "Application service operation failed",
+                extra={"event": "service.failed", "operation": "run"},
+            )
             self.shutdown_error = "接続サービスの終了失敗"
         finally:
             with self._lock:
@@ -259,8 +266,16 @@ class ApplicationServiceThread(QThread):
                     return
                 await self.inputs.apply_config()
         except CodexConnectionError as error:
+            logger.warning(
+                "Application service operation failed",
+                extra={"event": "service.failed", "operation": "_apply_input", "error": str(error)},
+            )
             self.inputs.reject_config(str(error))
-        except Exception:  # noqa: BLE001 -- don't expose upstream exception text.
+        except Exception:
+            logger.exception(
+                "Application service operation failed",
+                extra={"event": "service.failed", "operation": "_apply_input"},
+            )
             self.inputs.reject_config("入力接続を変更する前の停止に失敗しました")
         finally:
             self._publish_manual()
@@ -268,7 +283,11 @@ class ApplicationServiceThread(QThread):
     async def _refresh_input_ports(self) -> None:
         try:
             ports = await self.inputs.list_ports()
-        except Exception as error:  # noqa: BLE001 -- discovery failure must reach the GUI.
+        except Exception as error:
+            logger.exception(
+                "Application service operation failed",
+                extra={"event": "service.failed", "operation": "_refresh_input_ports"},
+            )
             self.input_ports.emit((), str(error))
         else:
             self.input_ports.emit(ports, "")
@@ -399,6 +418,10 @@ class ApplicationServiceThread(QThread):
         self._enqueue(lambda: self._track(asyncio.create_task(self._stop(context))), context)
 
     async def _stop(self, context: _OperationContext) -> None:
+        logger.info(
+            "Application stop requested",
+            extra={"event": "service.stop_requested", "connection_id": context.generation},
+        )
         self._stops_pending += 1
         operation = self.inputs.stop()
         self._publish_manual()
@@ -416,11 +439,24 @@ class ApplicationServiceThread(QThread):
                         raise InputServiceError(outcome.code, outcome.message)
         except (CodexConnectionError, InputServiceError) as failure:
             error = str(failure)
-        except Exception:  # noqa: BLE001 -- sanitize the application result boundary.
+        except Exception:
+            logger.exception(
+                "Application service operation failed",
+                extra={"event": "service.failed", "operation": "_stop"},
+            )
             error = "停止の完了を確認できません"
         finally:
             self._stops_pending -= 1
             self._publish_manual()
+        logger.log(
+            logging.ERROR if error else logging.INFO,
+            "Application stop completed",
+            extra={
+                "event": "service.stop_completed",
+                "connection_id": context.generation,
+                "error": error,
+            },
+        )
         self.completed.emit(ServiceResult(context.generation, "stop", error))
 
     def disconnect_runtime(self) -> None:
@@ -447,6 +483,7 @@ class ApplicationServiceThread(QThread):
         self._enqueue(lambda: self.codex.answer(token, decision=decision, answers=answers), context)
 
     async def _serve(self) -> None:
+        asyncio.get_running_loop().set_exception_handler(self._loop_exception)
         self._done = asyncio.Event()
         with self._lock:
             self._loop = asyncio.get_running_loop()
@@ -459,9 +496,11 @@ class ApplicationServiceThread(QThread):
         await self._done.wait()
         try:
             await self.codex.close()
+            logger.info("Codex resources closed", extra={"event": "service.codex_closed"})
         finally:
             try:
                 await self.inputs.close()
+                logger.info("Input resources closed", extra={"event": "service.input_closed"})
             finally:
                 pending = list(self._tasks)
                 for task in pending:
@@ -470,7 +509,25 @@ class ApplicationServiceThread(QThread):
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._task_finished)
+
+    def _task_finished(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error(
+                "Application service task failed",
+                exc_info=error,
+                extra={"event": "service.task_failed", "task_name": task.get_name()},
+            )
+
+    @staticmethod
+    def _loop_exception(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        error = context.get("exception")
+        logger.error(
+            "Uncaught service-loop exception",
+            exc_info=error if isinstance(error, BaseException) else None,
+            extra={"event": "service.uncaught_exception", "details": context.get("message")},
+        )
 
     def _reject_submission(self, command: _OperationContext) -> None:
         result = rejected_result(command)

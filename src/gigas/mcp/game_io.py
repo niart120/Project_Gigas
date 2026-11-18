@@ -14,6 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
+from gigas.diagnostics import redactor
 from gigas.game_io.input.config import PROTOCOLS
 from gigas.game_io.input.models import InvalidSequenceError, parse_sequence
 from gigas.game_io.observation import ObservationError
@@ -69,6 +70,7 @@ class GameIoMcpServer:
         self._act_call = act
         self._name = f"gigas_{uuid4().hex}"
         self._authorization = f"Bearer {secrets.token_urlsafe(32)}"
+        redactor.register(self._authorization.removeprefix("Bearer "))
         self._url = ""
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None

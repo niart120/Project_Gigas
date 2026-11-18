@@ -1,5 +1,6 @@
 """Coordinate the application views and settings operations."""
 
+import logging
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -633,6 +634,15 @@ class ApplicationShell(QObject):
         self.requested.emit(self.operation, request.snapshot or self.baseline)
 
     def _apply_saved(self, request: _SettingsRequest, settings: Settings) -> None:
+        logging.getLogger(__name__).info(
+            "Applying saved settings",
+            extra={
+                "event": "settings.apply_requested",
+                "path": str(self.path),
+                "capture_requested": request.capture,
+                "input_requested": request.input_apply,
+            },
+        )
         self.baseline = settings
         self.ready = True
         if self.dialog is not None and self.dialog.isVisible():

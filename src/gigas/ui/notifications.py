@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 from gigas.ui.elided_label import ElidedLabel
 from gigas.ui.geometry import fit_to_screen
 
-type NoticeSource = Literal["settings", "video", "input", "codex", "recording", "shutdown"]
+type NoticeSource = Literal[
+    "settings", "video", "input", "codex", "recording", "shutdown", "logging"
+]
 
 _SOURCES: dict[NoticeSource, str] = {
     "settings": "設定",
@@ -30,6 +32,7 @@ _SOURCES: dict[NoticeSource, str] = {
     "codex": "Codex",
     "recording": "記録",
     "shutdown": "終了",
+    "logging": "診断ログ",
 }
 
 

@@ -1,5 +1,6 @@
 """Single-owner settings I/O on a Qt worker thread."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class SettingsWorker(QObject):
     @Slot(str, object)
     def perform(self, operation: str, snapshot: object) -> None:
         """Execute one request and emit exactly one success or failure result."""
+        fields = {"operation": operation, "path": str(self._path)}
         try:
             if operation == "load":
                 values = self._io.load(self._path)
@@ -77,9 +81,18 @@ class SettingsWorker(QObject):
                 self.completed.emit(OperationResult(error="Invalid settings request"))
                 return
         except SettingsError as error:
+            logger.exception(
+                "Settings operation failed", extra={**fields, "event": "settings.failed"}
+            )
             details = "\n".join((str(error), *getattr(error, "__notes__", ())))
             self.completed.emit(OperationResult(error=details))
-        except Exception as error:  # noqa: BLE001 -- every worker failure must reach the GUI
+        except Exception as error:
+            logger.exception(
+                "Settings operation failed", extra={**fields, "event": "settings.failed"}
+            )
             self.completed.emit(OperationResult(error=f"{type(error).__name__}: {self._path}"))
         else:
+            logger.info(
+                "Settings operation completed", extra={**fields, "event": "settings.completed"}
+            )
             self.completed.emit(OperationResult(settings=values))

@@ -208,7 +208,9 @@ def test_unavailable_or_invalid_whole_sequence_sends_nothing(harness: Harness) -
 
 
 @pytest.mark.parametrize("failure", ["send", "neutral"])
-def test_send_or_release_failure_closes_without_retry(harness: Harness, failure: str) -> None:
+def test_send_or_release_failure_closes_without_retry(
+    harness: Harness, failure: str, caplog: pytest.LogCaptureFixture
+) -> None:
     async def scenario() -> None:
         await harness.service.connect(harness.device)
         harness.device.fail_send = failure == "send"
@@ -219,6 +221,10 @@ def test_send_or_release_failure_closes_without_retry(harness: Harness, failure:
         assert result.code == "DEVICE_UNAVAILABLE"
         assert result.completed_steps == 0
         assert result.neutral == "unconfirmed"
+        failures = [r for r in caplog.records if r.__dict__.get("event") == "input.failed"]
+        assert failures
+        assert all(r.__dict__.get("operation_id") == started[0] for r in failures)
+        assert all(r.exc_info is not None for r in failures)
         assert harness.device.calls == ["open", InputState(buttons=("A",)), InputState(), "close"]
         rejected = harness.service.start((press(),))
         assert isinstance(rejected, OperationResult)
@@ -442,3 +448,21 @@ def test_stop_during_completed_write_preserves_delivery_and_connection(
         await harness.close()
 
     asyncio.run(scenario())
+
+
+def test_connection_failure_records_cause_once(caplog: pytest.LogCaptureFixture) -> None:
+    class UnavailableDevice(Device):
+        async def open(self) -> None:
+            message = "port unavailable"
+            raise OSError(message)
+
+    async def scenario() -> None:
+        service = InputService(factory=lambda _: UnavailableDevice())
+        service.request_config(resolve_serial_config("COM7", "ch552", None))
+        await service.apply_config()
+        await service.close()
+
+    asyncio.run(scenario())
+    failures = [r for r in caplog.records if r.__dict__.get("event") == "input.failed"]
+    assert len(failures) == 1
+    assert failures[0].exc_info is not None

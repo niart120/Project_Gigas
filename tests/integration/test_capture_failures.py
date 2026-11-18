@@ -1,3 +1,4 @@
+import json
 import multiprocessing
 import time
 from multiprocessing.process import BaseProcess
@@ -12,6 +13,7 @@ from gigas.game_io.capture import _process as process_module
 from gigas.game_io.capture import service as capture_module
 from gigas.game_io.capture._process import SharedSlot
 from gigas.game_io.capture.config import CaptureOptions
+from gigas.storage.diagnostics import DiagnosticSession
 from tests.integration.peers.capture_peer import (
     PeerBackend,
     hanging_after_list_worker,
@@ -23,6 +25,29 @@ if TYPE_CHECKING:
     from multiprocessing.context import BaseContext
 
     from gigas.game_io.capture.service import _Session
+
+
+def test_worker_exception_reaches_diagnostic_file_without_changing_display(tmp_path: Path) -> None:
+    diagnostics = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
+    diagnostics.start()
+    service = CaptureService(backend_factory=PeerBackend())
+    service.start()
+    try:
+        assert service.connect(CaptureOptions("path-a", 16, 16))
+        state = wait_for(service, lambda s: s.phase == "error")
+        assert state.error == "映像取得処理が失敗"
+    finally:
+        service.shutdown()
+        service.join(5)
+        diagnostics.close()
+    assert not service.is_alive()
+    rows = [json.loads(line) for line in diagnostics.path.read_text(encoding="utf-8").splitlines()]
+    failure = next(r for r in rows if r.get("event") == "capture.worker_failed")
+    assert "ValueError: unexpected selected index" in failure["details"]
+    assert "Traceback" in failure["details"]
+    stopped = next(r for r in rows if r.get("event") == "capture.worker_stopped")
+    assert stopped["child_pid"] == failure["child_pid"]
+    assert stopped["exit_code"] == 0
 
 
 def test_worker_startup_deadline_invalidates_request_and_reaps_process() -> None:
