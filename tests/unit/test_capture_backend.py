@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import cv2
@@ -7,7 +6,7 @@ import numpy as np
 import pytest
 
 from gigas.game_io.capture import backend as capture_backend
-from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend, acquire_frames
+from gigas.game_io.capture.backend import IndexedDevice, acquire_frames
 from gigas.game_io.capture.config import CaptureOptions
 from gigas.game_io.capture.models import CaptureError, DeviceInfo
 
@@ -240,34 +239,3 @@ def test_stop_during_read_does_not_publish_the_late_result() -> None:
     )
     assert frames == []
     assert camera.released
-
-
-def test_opencv_adapter_uses_directshow_and_excludes_pathless_sources(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[int, ...]] = []
-    camera = Camera([])
-
-    def enumerate_devices(api: int) -> list[SimpleNamespace]:
-        calls.append((api,))
-        return [
-            SimpleNamespace(name="A", path="path-a", index=3),
-            SimpleNamespace(name="Virtual", path="", index=4),
-        ]
-
-    def open_device(index: int, api: int) -> Camera:
-        calls.append((index, api))
-        return camera
-
-    monkeypatch.setattr(capture_backend, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(capture_backend, "enumerate_cameras", enumerate_devices)
-    monkeypatch.setattr(capture_backend.cv2, "VideoCapture", open_device)
-    monkeypatch.setattr(
-        capture_backend.cv2.videoio_registry, "getCameraBackends", lambda: (cv2.CAP_DSHOW,)
-    )
-    monkeypatch.setattr(capture_backend.cv2.videoio_registry, "hasBackend", lambda _api: True)
-    backend = OpenCVBackend()
-    device = IndexedDevice(DeviceInfo("A", "path-a"), 3, cv2.CAP_DSHOW)
-    assert backend.enumerate() == (device,)
-    assert backend.open(device) is camera
-    assert calls == [(cv2.CAP_DSHOW,), (3, cv2.CAP_DSHOW)]

@@ -4,6 +4,28 @@ from gigas.runtime.codex.transport import JsonObject, JsonValue, RpcNotification
 from tests.unit.test_codex_connection import FakePeer
 
 
+def execution_resume_result(params: JsonObject, thread: JsonObject) -> JsonObject:
+    """Confirm execution settings for the resumed thread."""
+    config = params["config"]
+    assert isinstance(config, dict)
+    return {
+        "thread": thread,
+        "model": params["model"],
+        "reasoningEffort": config["model_reasoning_effort"],
+        "cwd": params["cwd"],
+        "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
+        "approvalPolicy": params["approvalPolicy"],
+        "approvalsReviewer": params["approvalsReviewer"],
+        "sandbox": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": False,
+            "excludeTmpdirEnvVar": True,
+            "excludeSlashTmp": True,
+        },
+    }
+
+
 class ResumePeer(FakePeer):
     """Return current execution settings and issue public Goal/turn notifications."""
 
@@ -20,24 +42,9 @@ class ResumePeer(FakePeer):
         result = await super().request(method, params)
         if method == "thread/resume" and method not in self.responses:
             assert params is not None
-            config = params["config"]
-            assert isinstance(config, dict)
-            return {
-                "thread": {"id": params["threadId"], "projectId": self.project_id},
-                "model": params["model"],
-                "reasoningEffort": config["model_reasoning_effort"],
-                "cwd": params["cwd"],
-                "runtimeWorkspaceRoots": params["runtimeWorkspaceRoots"],
-                "approvalPolicy": params["approvalPolicy"],
-                "approvalsReviewer": params["approvalsReviewer"],
-                "sandbox": {
-                    "type": "workspaceWrite",
-                    "writableRoots": [],
-                    "networkAccess": False,
-                    "excludeTmpdirEnvVar": True,
-                    "excludeSlashTmp": True,
-                },
-            }
+            return execution_resume_result(
+                params, {"id": params["threadId"], "projectId": self.project_id}
+            )
         if method == "turn/start":
             assert params is not None
             self.events.put_nowait(

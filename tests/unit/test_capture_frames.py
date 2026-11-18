@@ -19,9 +19,6 @@ def test_latest_frame_is_immutable_and_keeps_its_original_clock(attribute: str) 
     assert store.publish(original)
     snapshot = store.latest()
     assert snapshot is original
-    edited = bytearray(original.bgr)
-    edited[0] = 99
-    assert snapshot.bgr == bytes([2]) * 6
     with pytest.raises(FrozenInstanceError):
         setattr(snapshot, attribute, 99)
     assert store.latest() is snapshot

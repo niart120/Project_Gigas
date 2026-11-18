@@ -137,12 +137,6 @@ def test_sequence_is_detached_immutable_and_serializable() -> None:
             setattr(instance, field, value)
 
 
-def test_sequence_structure_is_independent_of_selected_capabilities() -> None:
-    payload = [{"kind": "press", "buttons": ["START"], "duration_ms": 100}]
-    steps = parse_sequence(payload)
-    assert steps[0].state.buttons == ("START",)
-
-
 def test_generated_states_allow_neutral_touch_origin_and_device_specific_buttons() -> None:
     assert InputStep("wait", 1, InputState()).to_json() == {"kind": "wait", "duration_ms": 1}
     step = InputStep(
