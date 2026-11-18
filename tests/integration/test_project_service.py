@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def test_delete_refreshes_saved_workspace_after_an_external_member_update(
         assert session.service.selected_target == StoredConversationTarget("thread-0", root, None)
 
 
-def test_changed_selection_workspace_never_prepares_the_old_recording_directory(
+def test_send_after_project_move_resumes_same_thread_and_records_at_new_root(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
     peer = ProjectPeer(tmp_path)
@@ -83,10 +84,29 @@ def test_changed_selection_workspace_never_prepares_the_old_recording_directory(
         peer.project = replace(peer.project, root=root)
         for member in peer.members.values():
             member["cwd"] = str(root)
-        session.command("send", lambda: session.service.send("Continue"))
+        result = session.command("send", lambda: session.service.send("Continue"))
+        assert not result.error
+        assert result.message is not None
+        assert result.message.outcome == "accepted"
         assert not (tmp_path / "records").exists()
         resumed = [params for method, params in peer.calls if method == "thread/resume"]
-        assert all(params is not None and params["cwd"] == str(root) for params in resumed)
+        assert len(resumed) == 1
+        params = resumed[0]
+        assert params is not None
+        assert (params["threadId"], params["cwd"], params["runtimeWorkspaceRoots"]) == (
+            "thread-0",
+            str(root),
+            [str(root)],
+        )
+        turns = [p for method, p in peer.calls if method == "turn/start"]
+        assert len(turns) == 1
+        assert turns[0] is not None
+        assert turns[0]["threadId"] == "thread-0"
+    log = root / "records" / "thread-0" / "events.jsonl"
+    rows = [json.loads(line) for line in log.read_bytes().splitlines()]
+    assert [row["payload"]["text"] for row in rows if row["type"] == "dialogue.submitted"] == [
+        "Continue"
+    ]
 
 
 def test_unfinished_project_cannot_start_a_new_thread_after_reconnect(

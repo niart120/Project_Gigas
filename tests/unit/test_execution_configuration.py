@@ -38,8 +38,12 @@ def test_launch_and_thread_use_execution_settings_without_suppressing_standard_i
         command: list[str], cwd: "Path", env: dict[str, str], *, unset_env: tuple[str, ...] = ()
     ) -> FakePeer:
         assert cwd == tmp_path
-        assert isinstance(env, dict)
-        assert unset_env
+        assert env["RUST_LOG"] == "warn"
+        assert env["LOG_FORMAT"] == "json"
+        assert unset_env == (
+            "CODEX_WINDOWS_REGISTERED_CORE",
+            "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY",
+        )
         for index, arg in enumerate(command):
             if arg == "--config":
                 key, value = command[index + 1].split("=", 1)

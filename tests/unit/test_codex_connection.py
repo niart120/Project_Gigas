@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from gigas.runtime.codex import launch
 from gigas.runtime.codex.connection import (
     CodexConnection,
     CodexConnectionError,
@@ -33,8 +32,6 @@ from gigas.runtime.codex.transport import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from _pytest.monkeypatch import MonkeyPatch
 
     from gigas.runtime.codex.connection import RuntimeEvent
 
@@ -155,12 +152,13 @@ class FakePeer:
             self.terminals.remove(str(params["processId"]))
             return {"terminated": True}
         if method == "turn/start":
+            assert params is not None
             if self.auto_turn_started:
                 self.events.put_nowait(
                     RpcNotification(
                         "turn/started",
                         {
-                            "threadId": "thread-1",
+                            "threadId": params["threadId"],
                             "turn": {"id": "turn-1", "status": "inProgress"},
                         },
                     )
@@ -943,29 +941,6 @@ def test_login_completion_before_start_response_does_not_leave_stale_url(tmp_pat
         await connection.close()
 
     _run(scenario())
-
-
-def test_launch_enables_public_plan_tool(tmp_path: Path, monkeypatch: "MonkeyPatch") -> None:
-    commands: list[list[str]] = []
-
-    def transport(
-        command: list[str], cwd: Path, env: dict[str, str], *, unset_env: tuple[str, ...] = ()
-    ) -> FakePeer:
-        assert unset_env == (
-            "CODEX_WINDOWS_REGISTERED_CORE",
-            "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY",
-        )
-        assert cwd == tmp_path
-        assert isinstance(env, dict)
-        assert env["RUST_LOG"] == "warn"
-        assert env["LOG_FORMAT"] == "json"
-        commands.append(command)
-        return FakePeer()
-
-    monkeypatch.setattr(launch, "StdioTransport", transport)
-
-    launch.create_connection(ConnectionOptions(tmp_path), lambda _: None)
-    assert "tools.update_plan.enabled=true" in commands[0]
 
 
 def test_close_is_shared_and_survives_caller_cancellation(tmp_path: Path) -> None:

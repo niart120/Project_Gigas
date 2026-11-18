@@ -39,30 +39,60 @@ def sample_frame(width: int = 16, height: int = 16) -> Frame:
         (480, 720, "960x540", 360, 540),
     ],
 )
-def test_record_preserves_pixels_bytes_id_and_source_time(
-    tmp_path: Path,
+def test_observation_resolution_preserves_the_full_frame(
     width: int,
     height: int,
     resolution: Literal["original", "full_hd", "hd", "960x540", "640x360"] | None,
     output_width: int,
     output_height: int,
 ) -> None:
-    writer = GameIoRecordWriter.create(tmp_path / "game")
     frame = sample_frame(width, height)
     if (width, height) != (output_width, output_height):
-        # Four broad color regions reveal cropping, channel swaps and aspect distortion.
+        # Use distinct colors inside the image as well as at each edge.
         pixels = np.zeros((height, width, 3), dtype=np.uint8)
         pixels[: height // 2, : width // 2] = [255, 0, 0]
         pixels[: height // 2, width // 2 :] = [0, 255, 0]
         pixels[height // 2 :, : width // 2] = [0, 0, 255]
         pixels[height // 2 :, width // 2 :] = [255, 255, 255]
+        # Only the original border carries these pixels.
+        pixels[: height // 16, :] = [10, 20, 30]
+        pixels[-(height // 16) :, :] = [40, 50, 60]
+        pixels[:, : width // 16] = [70, 80, 90]
+        pixels[:, -(width // 16) :] = [100, 110, 120]
         frame = replace(frame, bgr=pixels.tobytes())
+    first = (
+        Observation.from_frame(frame)
+        if resolution is None
+        else Observation.from_frame(frame, resolution=resolution)
+    )
+    decoded = cv2.imdecode(np.frombuffer(first.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded.shape == (output_height, output_width, 3)
+    if (width, height) == (output_width, output_height):
+        assert decoded.tobytes() == frame.bgr
+    else:
+        assert decoded[0, output_width // 2].tolist() == [10, 20, 30]
+        assert decoded[-1, output_width // 2].tolist() == [40, 50, 60]
+        assert decoded[output_height // 2, 0].tolist() == [70, 80, 90]
+        assert decoded[output_height // 2, -1].tolist() == [100, 110, 120]
+        assert decoded[output_height // 4, output_width // 4].tolist() == [255, 0, 0]
+        assert decoded[output_height // 4, 3 * output_width // 4].tolist() == [0, 255, 0]
+        assert decoded[3 * output_height // 4, output_width // 4].tolist() == [0, 0, 255]
+        assert decoded[3 * output_height // 4, 3 * output_width // 4].tolist() == [
+            255,
+            255,
+            255,
+        ]
+    assert len(first.png_bytes) <= 32 * 1024 * 1024
+
+
+def test_record_preserves_bytes_identity_and_source_time(tmp_path: Path) -> None:
+    width, height = 640, 480
+    output_width, output_height = 480, 360
+    frame = sample_frame(width, height)
+    writer = GameIoRecordWriter.create(tmp_path / "game")
     try:
-        first = (
-            Observation.from_frame(frame)
-            if resolution is None
-            else Observation.from_frame(frame, resolution=resolution)
-        )
+        first = Observation.from_frame(frame, resolution="640x360")
         second = Observation.from_frame(frame)
         writer.record(first)
         writer.record(second)
@@ -79,23 +109,6 @@ def test_record_preserves_pixels_bytes_id_and_source_time(
             "image/png",
         )
         assert (writer.path / first.image_path).read_bytes() == first.png_bytes
-        decoded = cv2.imdecode(np.frombuffer(first.png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-        assert decoded is not None
-        assert decoded.shape == (output_height, output_width, 3)
-        if (width, height) == (output_width, output_height):
-            assert decoded.tobytes() == frame.bgr
-        else:
-            assert decoded[0, 0].tolist() == [255, 0, 0]
-            assert decoded[0, -1].tolist() == [0, 255, 0]
-            assert decoded[-1, 0].tolist() == [0, 0, 255]
-            assert decoded[-1, -1].tolist() == [255, 255, 255]
-            assert decoded[output_height // 4, output_width // 4].tolist() == [255, 0, 0]
-            assert decoded[3 * output_height // 4, 3 * output_width // 4].tolist() == [
-                255,
-                255,
-                255,
-            ]
-        assert len(first.png_bytes) <= 32 * 1024 * 1024
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]

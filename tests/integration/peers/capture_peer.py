@@ -13,14 +13,10 @@ from gigas.game_io.capture._process import Channel, SharedSlot, WorkerMessage, s
 from gigas.game_io.capture.backend import IndexedDevice
 from gigas.game_io.capture.models import DeviceInfo, Frame
 
-_original_publish = SharedSlot.publish
 
-
-def _die_with_lock(self: SharedSlot, frame: Frame) -> None:
-    if frame.sequence >= 3:
-        self.lock.acquire()
-        os._exit(17)
-    _original_publish(self, frame)
+def _die_with_lock(self: SharedSlot, frame: Frame) -> None:  # noqa: ARG001 -- SharedSlot.publish signature
+    self.lock.acquire()
+    os._exit(17)
 
 
 def _entered(marker: str, operation: str) -> None:
@@ -33,12 +29,17 @@ class PeerCamera:
     """Produce numbered solid frames and record release without a device."""
 
     def __init__(
-        self, marker: str, scenario: str = "normal", actual_size: tuple[int, int] | None = None
+        self,
+        marker: str,
+        scenario: str = "normal",
+        actual_size: tuple[int, int] | None = None,
+        fault_trigger: Path | None = None,
     ) -> None:
         """Prepare the test marker and requested dimensions."""
         self.marker = marker
         self.width, self.height = actual_size or (16, 16)
         self.actual_size = actual_size
+        self.fault_trigger = fault_trigger
         self.sequence = 0
         self.scenario = scenario
 
@@ -58,9 +59,12 @@ class PeerCamera:
 
     def read(self) -> tuple[bool, object]:
         """Pace numbered frames so cancellation can race with a pending read."""
-        if self.sequence == 3:
+        inject_fault = self.fault_trigger.exists() if self.fault_trigger else self.sequence == 3
+        if inject_fault:
             _entered(self.marker, "read")
-            if self.scenario == "hang-read":
+            if self.scenario == "lock-death":
+                SharedSlot.publish = _die_with_lock
+            elif self.scenario == "hang-read":
                 time.sleep(3600)
             elif self.scenario == "crash-read":
                 os._exit(19)
@@ -89,18 +93,17 @@ class PeerBackend:
     marker: str = ""
     scenario: str = "normal"
     actual_size: tuple[int, int] | None = None
+    fault_trigger: Path | None = None
 
     def __call__(self) -> "PeerBackend":
         """Instantiate the adapter within the spawned interpreter."""
-        if self.scenario == "lock-death":
-            SharedSlot.publish = _die_with_lock
         return self
 
     def enumerate(self) -> tuple[IndexedDevice, ...]:
         """Provide two same-name identities to exercise path selection."""
-        if self.scenario == "slow-enumerate":
-            time.sleep(1.5)
-        elif self.scenario == "hang-enumerate":
+        if self.scenario == "hang-enumerate" and (
+            self.fault_trigger is None or self.fault_trigger.exists()
+        ):
             _entered(self.marker, "enumerate")
             time.sleep(3600)
         if self.marker:
@@ -122,7 +125,7 @@ class PeerBackend:
         if self.marker:
             with Path(self.marker + ".opened").open("a", encoding="utf-8") as stream:
                 stream.write("opened\n")
-        return PeerCamera(self.marker, self.scenario, self.actual_size)
+        return PeerCamera(self.marker, self.scenario, self.actual_size, self.fault_trigger)
 
 
 def oversized_control_worker(

@@ -14,6 +14,7 @@ from gigas.game_io.capture.models import CaptureError, DeviceInfo
 @pytest.mark.parametrize(
     ("platform", "apis"),
     [
+        ("win32", (cv2.CAP_DSHOW,)),
         ("win32", (cv2.CAP_DSHOW, cv2.CAP_MSMF)),
         ("linux", (cv2.CAP_V4L2, cv2.CAP_GSTREAMER)),
         ("darwin", (cv2.CAP_AVFOUNDATION,)),
@@ -47,6 +48,7 @@ def test_platform_candidates_pair_each_current_index_with_its_api(
     backend = OpenCVBackend()
     candidates = backend.enumerate()
     path = "stable:identity" if platform == "linux" else "identity"
+    assert all(device.info.path for device in candidates)
     selected = module.select_candidates(candidates, path)
     assert [(item.backend, item.index) for item in selected] == [
         (api, position + 3) for position, api in enumerate(apis)

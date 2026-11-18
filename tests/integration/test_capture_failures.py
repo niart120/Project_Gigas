@@ -4,6 +4,7 @@ import time
 from multiprocessing.process import BaseProcess
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -50,19 +51,36 @@ def test_worker_exception_reaches_diagnostic_file_without_changing_display(tmp_p
     assert stopped["exit_code"] == 0
 
 
-def test_worker_startup_deadline_invalidates_request_and_reaps_process() -> None:
+def test_hung_enumeration_times_out_and_next_refresh_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "capture"
+    fault = tmp_path / "fail"
+    fault.touch()
+    offset = 0
+    monkeypatch.setattr(
+        capture_module, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + offset)
+    )
     service = CaptureService(
-        backend_factory=PeerBackend(scenario="slow-enumerate"),
-        timeouts=CaptureTimeouts(startup=0.15, frame=0.2, stop=0.1, terminate=0.3),
+        backend_factory=PeerBackend(str(marker), "hang-enumerate", fault_trigger=fault),
+        timeouts=CaptureTimeouts(startup=60, stop=0.1, terminate=2),
     )
     service.start()
     try:
         assert service.refresh_devices()
-        state = wait_for(service, lambda snapshot: snapshot.phase == "error", timeout=1)
+        wait_for(service, lambda _: Path(str(marker) + ".entered.enumerate").exists())
+        offset = 61
+        state = wait_for(service, lambda snapshot: snapshot.phase == "error")
         assert state.devices_revision == 0
         assert state.frame is None
         assert state.cleanup == "forced"
-        assert state.error
+        assert state.error == "映像取得の開始期限切れ"
+        fault.unlink()
+        assert service.refresh_devices()
+        refreshed = wait_for(
+            service, lambda snapshot: snapshot.phase == "idle" and snapshot.devices_revision == 1
+        )
+        assert [device.path for device in refreshed.devices] == ["path-a", "path-b"]
     finally:
         service.shutdown()
         service.join(3)
@@ -135,16 +153,25 @@ def test_blocked_native_boundary_is_forced_closed_after_explicit_stop(
 
 
 @pytest.mark.parametrize(
-    "scenario", ["hang-read", "crash-read", "failed-read", "lock-death", "changed-size"]
+    ("scenario", "error", "cleanup"),
+    [
+        ("hang-read", "映像フレーム待機期限切れ", "forced"),
+        ("crash-read", "取得子プロセスの異常終了 (19)", "none"),
+        ("failed-read", "映像フレームの取得失敗", "graceful"),
+        ("lock-death", "取得子プロセスの異常終了 (17)", "none"),
+        ("changed-size", "取得中に映像寸法が変化", "graceful"),
+    ],
 )
 def test_failed_acquisition_invalidates_image_and_fresh_generation_can_connect(
     tmp_path: Path,
     scenario: str,
+    error: str,
+    cleanup: str,
 ) -> None:
-    marker = tmp_path / "release.txt"
+    fault = tmp_path / "fail"
     service = CaptureService(
-        backend_factory=PeerBackend(str(marker), scenario),
-        timeouts=CaptureTimeouts(startup=5, frame=0.15, stop=0.1, terminate=1),
+        backend_factory=PeerBackend(scenario=scenario, fault_trigger=fault),
+        timeouts=CaptureTimeouts(startup=8, frame=2, stop=1, terminate=2),
     )
     service.start()
     options = CaptureOptions("path-b", 16, 16)
@@ -152,17 +179,12 @@ def test_failed_acquisition_invalidates_image_and_fresh_generation_can_connect(
         assert service.connect(options)
         first = wait_for(service, lambda state: state.frame is not None).frame
         assert first is not None
-        failed = wait_for(service, lambda state: state.phase == "error", timeout=3)
+        fault.touch()
+        failed = wait_for(service, lambda state: state.phase == "error")
         assert failed.frame is None
-        assert failed.error
-        assert failed.cleanup == (
-            "forced"
-            if scenario == "hang-read"
-            else "graceful"
-            if scenario in {"failed-read", "changed-size"}
-            else "none"
-        )
-        service._factory = PeerBackend(str(marker))
+        assert error in failed.error
+        assert failed.cleanup == cleanup
+        fault.unlink()
         assert service.connect(options)
         second = wait_for(service, lambda state: state.frame is not None).frame
         assert second is not None

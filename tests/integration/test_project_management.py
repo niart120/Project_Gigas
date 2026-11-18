@@ -9,6 +9,7 @@ from gigas.runtime.codex.management import ProjectInfo
 from gigas.runtime.codex.models import ConnectionOptions, ExecutionSettings
 from gigas.runtime.codex.transport import JsonObject, JsonValue, TransportError
 from gigas.services._project_management import ProjectManagement
+from tests.integration.peers.codex_resume import execution_resume_result
 from tests.unit.test_codex_connection import FakePeer
 from tests.unit.test_codex_history import _thread
 
@@ -97,6 +98,10 @@ class ProjectPeer(FakePeer):
             }
         elif method == "thread/unsubscribe":
             self.responses[method] = {"status": "unsubscribed"}
+        elif method == "thread/resume" and params.get("sandbox") == "workspace-write":
+            self.responses[method] = execution_resume_result(
+                params, dict(self.members[str(params["threadId"])])
+            )
         elif method == "thread/resume":
             tid = str(params["threadId"])
             if tid == self.reject_thread:
