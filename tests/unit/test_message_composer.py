@@ -100,3 +100,20 @@ def test_composer_unselected_catalog_does_not_choose_first_entry(qtbot: QtBot) -
     assert composer.effort_choice.currentIndex() == -1
     assert composer.effort_choice.count() == 2
     assert picked == []
+
+
+def test_composer_keeps_speed_across_reconnect_and_compatible_model_change(qtbot: QtBot) -> None:
+    composer = MessageComposer()
+    qtbot.addWidget(composer)
+    choices = (
+        ModelChoice("first", ("low",), "low", (("Fast", "priority"),)),
+        ModelChoice("second", ("low",), "low", (("Fast", "fast"),)),
+    )
+    composer.set_choices(ModelSelection(choices, "first", "low"))
+    composer.speed_choice.setCurrentText("Fast")
+    composer.speed_choice.activated.emit(composer.speed_choice.currentIndex())
+    assert composer.service_tier == "priority"
+    composer.set_choices(None)
+    composer.set_choices(ModelSelection(choices, "second", "low"))
+    assert composer.speed_choice.currentText() == "Fast"
+    assert composer.service_tier == "fast"

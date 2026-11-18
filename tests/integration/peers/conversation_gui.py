@@ -57,6 +57,7 @@ class ConversationGuiPeer(ResumePeer):
         )
         self.update_entered = Event()
         self.update_release: Event | None = None
+        self.fast_mode_disabled = False
 
     async def request(self, method: str, params: JsonObject | None) -> JsonValue:
         """Use the existing resume fixture, delaying only an explicitly held update."""
@@ -65,7 +66,15 @@ class ConversationGuiPeer(ResumePeer):
             if not await asyncio.to_thread(self.update_release.wait, 5):
                 message = "model update was not released"
                 raise TimeoutError(message)
-        return await super().request(method, params)
+        result = await super().request(method, params)
+        if not self.fast_mode_disabled or not isinstance(result, dict):
+            return result
+        config = result.get("config")
+        if method == "config/read" and isinstance(config, dict):
+            return {**result, "config": {**config, "features": {"fast_mode": False}}}
+        if method in {"thread/start", "thread/resume"} and result.get("serviceTier") == "default":
+            return {**result, "serviceTier": None}
+        return result
 
 
 class ConversationGui:

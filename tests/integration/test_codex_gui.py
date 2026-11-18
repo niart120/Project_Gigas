@@ -1203,7 +1203,7 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     panel.activate(1)
     selection = ModelSelection(
         (
-            ModelChoice("first", ("low", "high"), "low"),
+            ModelChoice("first", ("low", "high"), "low", (("Fast", "priority"),)),
             ModelChoice("second", ("medium",), "medium"),
         ),
         "first",
@@ -1211,7 +1211,6 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     )
     panel.handle_event(ServiceEvent(1, selection))
     _ready(panel, 1, "first", "high")
-    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
     panel.handle_result(ServiceResult(1, "connect"))
     panel.prompt.setPlainText("原稿を残す")
     composer = panel.composer
@@ -1219,6 +1218,12 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     panel.model_requested.connect(lambda model, effort: picked.append((model, effort)))
     composer.model_button.click()
     assert composer.popup.isVisible()
+    assert composer.speed_choice.currentText() == "Standard"
+    composer.speed_choice.setCurrentText("Fast")
+    composer.speed_choice.activated.emit(composer.speed_choice.currentIndex())
+    assert composer.service_tier == "priority"
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    assert not composer.speed_choice.isEnabled()
     assert picked == []
     composer.effort_choice.setCurrentText("low")
     composer.effort_choice.activated.emit(composer.effort_choice.currentIndex())
@@ -1230,12 +1235,14 @@ def test_model_popup_selects_next_turn_and_preserves_draft(qtbot: QtBot) -> None
     composer.model_choice.activated.emit(composer.model_choice.currentIndex())
     assert composer.effort_choice.count() == 1
     assert picked == [("second", "medium")]
-    assert composer.model_button.text() == "first · low"
+    assert composer.model_button.text() == "first · low · Fast"
     assert not composer.model_button.isEnabled()
     assert composer.interrupt_button.isEnabled()
     panel.handle_event(ServiceEvent(1, ModelSelection(selection.choices, "second", "medium")))
     panel.handle_result(ServiceResult(1, "select_model"))
-    assert composer.model_button.text() == "second · medium"
+    assert composer.model_button.text() == "second · medium · Standard"
+    assert composer.speed_choice.count() == 1
+    assert composer.service_tier == "default"
     assert composer.popup.isVisible()
     qtbot.keyClick(composer.popup, Qt.Key.Key_Escape)
     assert not composer.popup.isVisible()

@@ -21,7 +21,7 @@ App Serverの起動と会話の開始・再開では`features.prefer_mxc = true`
 | `thread/resume` | 保存されたID・作業場所で実行を再開。履歴の閲覧とは別 |
 | `turn/start` | 通常依頼と実行中の追加指示を提出 |
 | `thread/goal/set`・`thread/goal/clear` | 目的の作成・編集・再開・削除と、共通停止時の休止 |
-| `thread/settings/update` | ロード済み会話の次回以降のモデル・推論レベルを更新 |
+| `thread/settings/update` | ロード済み会話の次回以降のモデル・推論レベルを更新。Goal開始・再開前には速度も指定 |
 | `turn/interrupt` | 実行中turnを中断 |
 
 操作結果と通知を照合して実行状態を反映する。送信の受付応答は、指示への遵守やゲームへの入力反映を示すものではない。Goal変更は対応する公開通知を確認し、遅い応答によって新しい通知の値を巻き戻さない。
@@ -37,6 +37,10 @@ App Serverの起動と会話の開始・再開では`features.prefer_mxc = true`
 ## threadの実行設定
 
 新規開始と再開には、作業場所、現在のモデル・推論レベル、準備開始時の実行設定、GIGASが開いたゲームMCPの接続先を渡す。開始・再開の応答ではthread ID、Project所属、作業場所、モデル、承認方法、sandboxの実効値を照合する。
+
+速度の候補は`model/list`のモデル別`serviceTiers`から取得する。`Standard`は`default`、`Fast`と`Ultrafast`は候補のIDを`serviceTier`で渡す。`thread/start`・`thread/resume`の応答では指定した速度と照合する。App Serverの`fast_mode`が無効な場合は、`Standard`の応答値として`null`も受け付ける。読み込み済みの会話でGoalを作成・再開するときは、`thread/settings/update`を送り、`thread/settings/updated`で速度を確認してからGoalをactiveにする。
+
+通常依頼と追加指示は`turn/start.serviceTier`で速度を指定する。指示が新規turnを始める場合はそのturnから、進行中turnに入る場合は次のturnから使う。いずれも後続の自動turnへ引き継ぐ。
 
 | 項目 | 現在の設定 |
 |---|---|

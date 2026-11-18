@@ -23,6 +23,25 @@ def _text(value: "JsonValue") -> str:
     raise ValueError("Codexの応答形式が不正")
 
 
+def _service_tiers(model: "JsonObject") -> tuple[tuple[str, str], ...]:
+    tiers = model.get("serviceTiers")
+    if not isinstance(tiers, list):
+        return ()
+    by_name: dict[str, str] = {}
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        tier_id = tier.get("id")
+        name = tier.get("name")
+        if not isinstance(tier_id, str) or not tier_id or tier_id == "default":
+            continue
+        if tier_id in {"priority", "fast"} or name == "Fast":
+            by_name.setdefault("Fast", tier_id)
+        elif tier_id == "ultrafast" or name == "Ultrafast":
+            by_name.setdefault("Ultrafast", tier_id)
+    return tuple((name, by_name[name]) for name in ("Fast", "Ultrafast") if name in by_name)
+
+
 class ModelCatalog:
     """Validate choices and retain only the confirmed immutable selection."""
 
@@ -84,6 +103,7 @@ class ModelCatalog:
                         _text(model.get("model")),
                         tuple(_text(_object(level).get("reasoningEffort")) for level in levels),
                         _text(model.get("defaultReasoningEffort")),
+                        _service_tiers(model),
                     )
                 )
         catalog = tuple(choices)

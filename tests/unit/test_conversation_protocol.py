@@ -88,6 +88,7 @@ def _thread_result(configuration: ThreadConfiguration) -> "JsonObject":
     return {
         "thread": {"id": "thread-1", "projectId": configuration.project_id},
         "model": "selected-model",
+        "serviceTier": "priority",
         "reasoningEffort": "high",
         "cwd": str(configuration.cwd),
         "runtimeWorkspaceRoots": [str(configuration.cwd)],
@@ -117,6 +118,7 @@ def test_confirmed_thread_returns_only_its_identity(
         selection,
         settings=ExecutionSettings(),
         expected_thread_id=expected_thread_id,
+        service_tier="priority",
     ) == ("thread-1")
 
 
@@ -126,6 +128,8 @@ def test_confirmed_thread_returns_only_its_identity(
         {"approvalPolicy": "never"},
         {"approvalsReviewer": "user"},
         {"model": "different-model"},
+        {"serviceTier": None},
+        {"serviceTier": "default"},
         {"reasoningEffort": "low"},
         {"reasoningEffort": None},
         {"cwd": "other-directory"},
@@ -148,6 +152,26 @@ def test_thread_rejects_unconfirmed_configuration(tmp_path: "Path", override: "J
             configuration,
             selection,
             settings=ExecutionSettings(),
+            service_tier="priority",
+        )
+
+
+@pytest.mark.parametrize(
+    ("service_tier", "fast_mode", "reported_tier"),
+    [("default", True, None), ("default", False, "priority"), ("ultrafast", False, None)],
+)
+def test_thread_rejects_unconfirmed_speed(
+    tmp_path: "Path", service_tier: str, fast_mode: bool, reported_tier: str | None
+) -> None:
+    configuration = ThreadConfiguration(tmp_path)
+    with pytest.raises(CodexConnectionError, match="実行速度"):
+        protocol.validate_thread(
+            {**_thread_result(configuration), "serviceTier": reported_tier},
+            configuration,
+            ModelSelection((), "selected-model", "high"),
+            settings=ExecutionSettings(),
+            service_tier=service_tier,
+            server_config={"config": {"features": {"fast_mode": fast_mode}}},
         )
 
 

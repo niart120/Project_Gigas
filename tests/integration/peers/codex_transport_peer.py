@@ -191,6 +191,7 @@ def dialogue() -> None:
             result = {
                 "thread": {"id": thread_id, "projectId": params["projectId"]},
                 "model": params["model"],
+                "serviceTier": params["serviceTier"],
                 "reasoningEffort": params["config"]["model_reasoning_effort"],
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": params["approvalsReviewer"],
@@ -303,6 +304,7 @@ def dialogue() -> None:
     assert additional["method"] == "turn/start"
     assert additional["params"] == {
         "threadId": thread_id,
+        "serviceTier": "default",
         "input": [{"type": "text", "text": "質問は保留し、門の前で止まる"}],
         "model": "fixture-model",
         "effort": "low",

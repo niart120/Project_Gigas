@@ -30,6 +30,7 @@ def thread_start_params(
     server_config: "JsonValue",
     *,
     settings: "ExecutionSettings",
+    service_tier: str | None = None,
 ) -> "JsonObject":
     """Build one thread request using the prepared workspace and runtime configuration.
 
@@ -38,6 +39,7 @@ def thread_start_params(
         selection: Confirmed model selection from the connection's catalog.
         server_config: Complete config/read response for the workspace.
         settings: Execution options captured before preparation began.
+        service_tier: Selected speed's wire value, if explicitly supplied.
 
     Returns:
         Parameters for thread/start with an explicit Project assignment. The workspace
@@ -51,6 +53,7 @@ def thread_start_params(
     """
     return {
         **_thread_params(configuration, selection, server_config, settings),
+        **service_tier_params(service_tier),
         "projectId": configuration.project_id,
         "ephemeral": False,
     }
@@ -63,6 +66,7 @@ def thread_resume_params(
     server_config: "JsonValue",
     *,
     settings: "ExecutionSettings",
+    service_tier: str | None = None,
 ) -> "JsonObject":
     """Build an ID-based resume request with current settings and no history hydration.
 
@@ -73,6 +77,7 @@ def thread_resume_params(
         selection: Confirmed model and effort captured for this preparation.
         server_config: Complete config/read response for the existing workspace.
         settings: Execution options captured before preparation began.
+        service_tier: Selected speed's wire value, if explicitly supplied.
 
     Returns:
         Parameters for thread/resume with excludeTurns enabled. The caller owns
@@ -85,6 +90,7 @@ def thread_resume_params(
     """
     return {
         **_thread_params(configuration, selection, server_config, settings),
+        **service_tier_params(service_tier),
         "threadId": _text(thread_id),
         "excludeTurns": True,
     }
@@ -128,6 +134,8 @@ def validate_thread(
     *,
     settings: "ExecutionSettings",
     expected_thread_id: str | None = None,
+    service_tier: str | None = None,
+    server_config: "JsonValue" = None,
 ) -> str:
     """Return the thread ID after confirming the requested execution boundaries.
 
@@ -137,6 +145,8 @@ def validate_thread(
         selection: Model selection submitted with the request.
         settings: The same immutable options used to construct the request.
         expected_thread_id: Required identity for resume; None accepts the new ID from start.
+        service_tier: Explicit speed to verify in the response.
+        server_config: Workspace config/read response used for preparation, if available.
 
     Returns:
         Confirmed thread identity, without adopting execution state.
@@ -145,6 +155,17 @@ def validate_thread(
         CodexConnectionError: The response omits or changes the requested settings.
     """
     response = _object(result)
+    if service_tier is not None:
+        reported_tier = response.get("serviceTier")
+        if reported_tier != service_tier and not (
+            service_tier == "default"
+            and "serviceTier" in response
+            and reported_tier is None
+            and _fast_mode_disabled(server_config)
+        ):
+            raise CodexConnectionError(
+                "Codexの実行速度が要求と一致しません。速度を選び直してください"
+            )
     thread = _object(response.get("thread"))
     sandbox = _object(response.get("sandbox"))
     expected_sandbox: JsonObject = {
@@ -170,13 +191,28 @@ def validate_thread(
     return _text(thread.get("id"))
 
 
-def turn_start_params(thread_id: str, prompt: str, selection: "ModelSelection") -> "JsonObject":
+def _fast_mode_disabled(server_config: "JsonValue") -> bool:
+    # App Server reports a null effective tier for Standard when Fast mode is disabled.
+    config = server_config.get("config") if isinstance(server_config, dict) else None
+    features = config.get("features") if isinstance(config, dict) else None
+    return isinstance(features, dict) and features.get("fast_mode") is False
+
+
+def service_tier_params(service_tier: str | None) -> "JsonObject":
+    """Omit the speed override when the caller has no explicit choice."""
+    return {} if service_tier is None else {"serviceTier": service_tier}
+
+
+def turn_start_params(
+    thread_id: str, prompt: str, selection: "ModelSelection", *, service_tier: str | None = None
+) -> "JsonObject":
     """Build turn/start input for both ordinary and additional messages.
 
     The server chooses whether to start a turn or intervene in the current one.
     The caller owns admission and validates nonempty user input before preparation.
     """
     return {
+        **service_tier_params(service_tier),
         "threadId": thread_id,
         "input": [{"type": "text", "text": prompt}],
         "model": selection.model,
