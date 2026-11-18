@@ -51,6 +51,7 @@ Projectのフォルダー変更は登録rootと所属チャットのcwdを公開
 |---|---|
 | `dialogue.submitted` | 利用者が提出した本文。受付成功を表す記録ではない |
 | `dialogue.message` | Codexの確定message本文。途中の進捗報告も含む |
+| `codex.token_usage_updated` | App Serverが報告したスレッド累計と通知の`turn_id` |
 | `input.operation_started` | 受け付けた操作列と`operation_id` |
 | `input.operation_finished` | 同じ`operation_id`に対する入力結果。観測できた場合は`observation_id`を含む |
 | `observation.recorded` | `observation_id`、画像の相対パス、取得時刻、元画像と出力画像の寸法 |
@@ -63,7 +64,7 @@ Projectのフォルダー変更は登録rootと所属チャットのcwdを公開
 
 ## 書き込みと失敗
 
-`RecordingService`が一つのwriterへの画像・入力・本文の保存を直列化する。観測結果の返却や入力・停止処理は保存完了を待たず、保存失敗は通知・ログで伝える。保存に失敗しても、返却済みの画像や完了済みの入力結果は変えない。
+`RecordingService`が一つのwriterへの画像・入力・本文・トークン使用量の保存を直列化する。トークン使用量は記録先が開いている会話について、`thread/tokenUsage/updated`の受信時に保存キューへ渡す。再開時の再通知や同じ値の通知もそれぞれ追記する。観測結果の返却や入力・停止処理は保存完了を待たず、保存失敗は通知・ログで伝える。保存に失敗しても、返却済みの画像や完了済みの入力結果は変えない。
 
 PNGを一時ファイルから確定した後、観測行をJSONLへ追記する。両者は一括更新ではないため、JSONLの追記失敗時には画像だけが残ることがある。既存の行・画像の検査や自動修復は行わず、新しい記録は続けて受け付ける。
 

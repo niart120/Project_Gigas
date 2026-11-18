@@ -187,6 +187,16 @@ class ConversationResources:
         if self._recording is not None:
             self._recording.submit_dialogue(kind, text)
 
+    def record_token_usage(self, turn_id: str, total: dict[str, int]) -> None:
+        """Queue received usage for the thread that owns these records.
+
+        Args:
+            turn_id: Turn associated with the App Server notification.
+            total: Cumulative token counts reported by App Server.
+        """
+        if self._recording is not None:
+            self._recording.submit_token_usage(turn_id, total)
+
     def report_failure(self, error: BaseException) -> None:
         """Report a failure with the current record destination or workspace."""
         path = self._writer.path if self._writer is not None else self._cwd

@@ -48,7 +48,9 @@ with TemporaryDirectory(dir=Path.cwd()) as temporary:
 
 各メソッドは成功時に`None`を返します。`record_dialogue(kind, text)`のkindは`dialogue.submitted`または`dialogue.message`です。提出の受付結果や最終回答をwriterが判定することはありません。`record_input(event)`の開始と結果はoperation_idで対応付け、画像があればobservation_idを残します。`record(observation)`は元のPNG bytesを再符号化せずに保存し、同じIDの画像が既にあれば上書きを拒否します。
 
-JSONLの共通項目は`schema_version: 1`、行組立時のUTC時刻`recorded_at`、`type`、`payload`です。本文payloadは`{"text": "本文"}`だけです。入力開始payloadはoperation_idと操作配列sequence、結果payloadはoperation_id・result・completed_steps・input_sent・neutral、指定されたobservation_idと空でないphase・reasonです。観測payloadはobservation_id・captured_at・image_path・image・source_frameを持ち、imageとsource_frameはそれぞれwidth・heightだけです。captured_atは元Frameの取得時刻を保持します。イベント連番、Project・thread・turn・eventのID、取得サービスのgeneration・sequence、MIMEは保存しません。
+JSONLの共通項目は`schema_version: 1`、行組立時のUTC時刻`recorded_at`、`type`、`payload`です。本文payloadは`{"text": "本文"}`だけです。入力開始payloadはoperation_idと操作配列sequence、結果payloadはoperation_id・result・completed_steps・input_sent・neutral、指定されたobservation_idと空でないphase・reasonです。観測payloadはobservation_id・captured_at・image_path・image・source_frameを持ち、imageとsource_frameはそれぞれwidth・heightだけです。captured_atは元Frameの取得時刻を保持します。イベント連番、Project・thread・eventのID、取得サービスのgeneration・sequence、MIMEは保存しません。
+
+`record_token_usage(turn_id, total)`は`codex.token_usage_updated`の行を追記します。payloadには`turn_id`と`total`を保存します。`total`にはApp Serverが報告した`inputTokens`、`cachedInputTokens`、`cacheWriteInputTokens`、`outputTokens`、`reasoningOutputTokens`、`totalTokens`のうち取得できた整数値が入ります。`recorded_at`はGIGASでの書き込み時刻です。
 
 追記は標準ライブラリでJSON一行と改行を末尾へ書きます。既存の壊れた行や末尾に改行がなくても検査・修復せず、そのまま追記します。その結果、新しい行も読めなくなる可能性があります。復旧は利用者がwriter終了後に行ってください。記録のJSON化・UTF-8変換、画像公開、JSONLのopen・write・closeの失敗や短いwriteは`RecordError`で通知し、次の新しい記録は受け付けます。失敗した記録を自動再送せず、JSONL失敗前に公開した画像も残します。
 
