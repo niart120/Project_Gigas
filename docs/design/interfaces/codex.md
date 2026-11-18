@@ -8,6 +8,8 @@ GIGASアプリは専用のCodex homeを使う。認証情報・会話・Project�
 
 接続は`initialize`と`initialized`、アカウント確認、モデル一覧取得を行う。ログインとWindows実行環境の準備は別の操作で、接続しただけでは会話を開始しない。未認証や無効な既定モデルでも接続を維持し、利用者がログイン・選択し直せる。
 
+App Serverの起動と会話の開始・再開では`features.prefer_mxc = true`を渡し、Windowsで利用できる場合はMXCを優先する。作業領域・通信・承認の権限は別途指定する。
+
 子プロセスには`RUST_LOG=warn`と`LOG_FORMAT=json`を明示し、標準エラーをGIGASの[共通診断ログ](../data/diagnostics.md)へ取り込む。JSON以外の初期化出力、分割されたUTF-8、改行のない末尾も扱う。通信受信側ではファイル保存を待たない。RPCエラーのコード・追加情報、ターン失敗、受信したGoal状態変化も記録するが、通常のRPC本文や会話本文は記録しない。Codex内部のDBやログの保持はApp Serverの管理に任せる。
 
 ## 使用する会話・管理操作

@@ -25,6 +25,7 @@ def config_overrides(settings: "ExecutionSettings") -> "JsonObject":
         "tools.update_plan.enabled": True,
         "approval_policy": "on-request",
         "approvals_reviewer": settings.approvals_reviewer,
+        "features.prefer_mxc": True,
         "sandbox_mode": "workspace-write",
         "sandbox_workspace_write.writable_roots": [],
         "sandbox_workspace_write.network_access": False,
