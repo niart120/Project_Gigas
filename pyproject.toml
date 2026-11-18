@@ -23,7 +23,7 @@ dependencies = [
     "cv2-enumerate-cameras==1.4.0",
     "mcp==2.3.0",
     "numpy==2.5.4",
-    "openai-codex-cli-bin==0.167.0",
+    "openai-codex-cli-bin==0.170.0",
     "opencv-python-headless==4.14.0.94",
     "pyserial==3.5",
     "pyside6-essentials==6.12.0",
