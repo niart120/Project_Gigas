@@ -64,6 +64,7 @@ def test_thread_preparation_uses_workspace_assignment_and_replaces_inherited_mcp
         "model_reasoning_effort": "high",
         "web_search": "disabled",
         "features.memories": False,
+        "features.prefer_mxc": True,
         "mcp_servers.existing.enabled": False,
         'mcp_servers."name.with.dot".enabled': False,
         **configuration.mcp_config,

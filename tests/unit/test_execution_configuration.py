@@ -72,6 +72,7 @@ def test_launch_and_thread_use_execution_settings_without_suppressing_standard_i
         "tools.update_plan.enabled": True,
         "approval_policy": "on-request",
         "approvals_reviewer": reviewer,
+        "features.prefer_mxc": True,
         "sandbox_mode": "workspace-write",
         "sandbox_workspace_write.writable_roots": [],
         "sandbox_workspace_write.network_access": False,
