@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from gigas.runtime.codex.transport import JsonObject, JsonValue
     from gigas.services._conversation_resources import ConversationResources
     from gigas.services._conversation_selection import ConversationSelection
-    from gigas.services._game_io_tools import InputStart
+    from gigas.services._game_io_tools import TrackedInputStart as InputStart
 
 
 @dataclass(slots=True)

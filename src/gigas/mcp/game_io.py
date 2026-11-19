@@ -13,6 +13,7 @@ import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+from pydantic import StrictInt
 
 from gigas.diagnostics import redactor
 from gigas.game_io.input.config import PROTOCOLS
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 
     from gigas.game_io.input.models import InputStep
     from gigas.game_io.observation import Observation
+    from gigas.services._game_io_tools import GameOperations, ToolOutcome
 
 
 TOOL_TIMEOUT_SECONDS = 300
@@ -58,16 +60,20 @@ class GameIoMcpServer:
     Args:
         observe: Fetch the latest image from this conversation's resources.
         act: Admit input and compose its outcome with observation or observation failure.
+        operations: Resolve the current conversation owner for dispatch and periodic sampling.
     """
 
     def __init__(
         self,
         observe: "Callable[[], Awaitable[Observation]]",
         act: ActCall,
+        *,
+        operations: "Callable[[], GameOperations | None] | None" = None,
     ) -> None:
         """Prepare a connection-specific name and token without opening a listener."""
         self._observe_call = observe
         self._act_call = act
+        self._operations = operations
         self._name = f"gigas_{uuid4().hex}"
         self._authorization = f"Bearer {secrets.token_urlsafe(32)}"
         redactor.register(self._authorization.removeprefix("Bearer "))
@@ -145,6 +151,20 @@ class GameIoMcpServer:
                     open_world_hint=True,
                 ),
             )(self._act_and_observe)
+            if self._operations is not None:
+                mcp.tool(
+                    name="dispatch",
+                    description="Start input and return dispatch_id for poll or cancel. "
+                    "Stops at turn end. A concurrent sequence returns BUSY.\n"
+                    + self._steps_description(),
+                    structured_output=False,
+                )(self._dispatch)
+                mcp.tool(
+                    name="poll",
+                    structured_output=False,
+                    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False),
+                )(self._poll)
+                mcp.tool(name="cancel", structured_output=False)(self._cancel)
             app = mcp.streamable_http_app(
                 json_response=True,
                 stateless_http=True,
@@ -217,7 +237,7 @@ class GameIoMcpServer:
         return handle
 
     async def _observe(self) -> CallToolResult:
-        """Return the latest game image and its observation identity."""
+        """Return the latest cached game image and its observation_id."""
         try:
             observation = await self._observe_call()
         except ObservationError as error:
@@ -226,27 +246,55 @@ class GameIoMcpServer:
 
     @staticmethod
     def _input_description() -> str:
-        buttons = sorted({button for protocol in PROTOCOLS for button in protocol.buttons})
         return (
-            "Execute a finite nonempty sequence and return the latest cached game image with "
-            "operation_id and observation_id. The image may predate the input. "
-            "Each step is {kind: 'press' or 'wait', duration_ms: positive integer}. "
-            "press holds a complete state then releases it; buttons is an array of names. "
-            "Do not repeat buttons or combine opposite directions. "
-            "left_stick and right_stick are {x: -100..100, y: -100..100}; "
-            "right/down are positive. Omitted inputs are released or centered. "
-            "touch: {x: 0..319, y: 0..239}, independent of observation image coordinates. "
-            f"Known buttons across supported devices: {', '.join(buttons)}. "
-            "Available inputs depend on the connected device; an unsupported input rejects "
-            "the entire sequence before sending any input. "
-            "press requires input; wait accepts only kind and duration_ms. "
-            "The whole sequence is validated before sending. "
-            f"The request deadline is {TOOL_TIMEOUT_SECONDS} seconds. "
-            "An error or timeout may follow partial execution; never automatically resend "
-            "the sequence. Observe again before deciding what to do. "
+            "Run the sequence and return the latest cached image, which may predate the input. "
+            "Set capture_interval_ms for periodic images (32 maximum including the final image). "
+            f"Request deadline: {TOOL_TIMEOUT_SECONDS} seconds.\n"
+            + GameIoMcpServer._steps_description()
         )
 
-    async def _act_and_observe(self, sequence: list[object]) -> CallToolResult:
+    @staticmethod
+    def _steps_description() -> str:
+        buttons = sorted({button for protocol in PROTOCOLS for button in protocol.buttons})
+        return (
+            "sequence: nonempty array of steps, each with a positive integer duration_ms.\n"
+            "- kind='press': hold the specified inputs. Omitted inputs are neutral. "
+            "Consecutive presses switch directly: A → A holds A; A → wait → A presses twice.\n"
+            "- kind='wait': release all inputs for duration_ms. Takes only kind and duration_ms. "
+            "Sequence end also releases all inputs.\n"
+            "Each press needs at least one input. buttons is an array of unique names per step; "
+            "opposite directions cannot be combined. "
+            "left_stick/right_stick: {x: -100..100, y: -100..100} (right/down positive). "
+            "touch: {x: 0..319, y: 0..239} in device coordinates.\n"
+            f"Button names across devices: {', '.join(buttons)}. "
+            "Unsupported inputs reject the whole sequence before execution."
+        )
+
+    async def _dispatch(self, sequence: list[object]) -> CallToolResult:
+        try:
+            steps = parse_sequence(sequence)
+        except InvalidSequenceError as error:
+            return _error_result({"code": "INVALID_SEQUENCE", "message": str(error)})
+        ops = self._operations() if self._operations else None
+        return _tool_result(ops.dispatch(steps)) if ops else _unavailable()
+
+    async def _poll(self, dispatch_id: str) -> CallToolResult:
+        """Get current progress and screen, or the retained final result."""
+        ops = self._operations() if self._operations else None
+        if ops is None:
+            return _unavailable()
+        return await asyncio.to_thread(_tool_result, await ops.query(dispatch_id, cancel=False))
+
+    async def _cancel(self, dispatch_id: str) -> CallToolResult:
+        """Stop this dispatched sequence and return its release outcome and latest screen."""
+        ops = self._operations() if self._operations else None
+        if ops is None:
+            return _unavailable()
+        return await asyncio.to_thread(_tool_result, await ops.query(dispatch_id, cancel=True))
+
+    async def _act_and_observe(
+        self, sequence: list[object], capture_interval_ms: StrictInt | None = None
+    ) -> CallToolResult:
         """Validate input, delegate admission, and format the composed outcome."""
         observation: Observation | ObservationError | None = None
         try:
@@ -256,6 +304,22 @@ class GameIoMcpServer:
         else:
             try:
                 async with asyncio.timeout(TOOL_TIMEOUT_SECONDS):
+                    if capture_interval_ms is not None:
+                        duration = sum(step.duration_ms for step in steps)
+                        minimum = (duration + 31) // 32
+                        if capture_interval_ms < minimum:
+                            return _error_result(
+                                {
+                                    "code": "INVALID_INTERVAL",
+                                    "min_interval_ms": minimum,
+                                    "message": f"撮影間隔には {minimum} ms 以上を指定してください",
+                                }
+                            )
+                        ops = self._operations() if self._operations else None
+                        if ops is None:
+                            return _unavailable()
+                        outcome = await ops.execute(steps, capture_interval_ms)
+                        return await asyncio.to_thread(_tool_result, outcome)
                     result, observation = await self._act_call(steps)
             except TimeoutError:
                 # InputService owns cancellation and any pending release.
@@ -283,6 +347,8 @@ class GameIoMcpServer:
             "neutral": result.neutral,
             "message": result.message,
         }
+        if result.interrupted:
+            metadata["interrupted"] = True
         if result.operation_id is not None:
             metadata["operation_id"] = result.operation_id
         if isinstance(observation, ObservationError):
@@ -305,7 +371,19 @@ class GameIoMcpServer:
 def _observation_result(
     observation: "Observation", operation_id: str | None = None
 ) -> CallToolResult:
-    metadata: dict[str, object] = {
+    metadata = _image_metadata(observation)
+    if operation_id is not None:
+        metadata["operation_id"] = operation_id
+    return CallToolResult(
+        content=[
+            _image_content(observation),
+            TextContent(type="text", text=json.dumps(metadata, ensure_ascii=False)),
+        ]
+    )
+
+
+def _image_metadata(observation: "Observation") -> dict[str, object]:
+    return {
         "observation_id": observation.observation_id,
         "captured_at": observation.captured_at.isoformat().replace("+00:00", "Z"),
         "source_frame": asdict(observation.source_frame),
@@ -315,18 +393,37 @@ def _observation_result(
             "height": observation.height,
         },
     }
-    if operation_id is not None:
-        metadata["operation_id"] = operation_id
-    return CallToolResult(
-        content=[
-            ImageContent(
-                type="image",
-                data=base64.b64encode(observation.png_bytes).decode("ascii"),
-                mime_type=observation.mime_type,
-            ),
-            TextContent(type="text", text=json.dumps(metadata, ensure_ascii=False)),
-        ]
+
+
+def _image_content(observation: "Observation") -> ImageContent:
+    return ImageContent(
+        type="image",
+        data=base64.b64encode(observation.png_bytes).decode("ascii"),
+        mime_type=observation.mime_type,
     )
+
+
+def _unavailable() -> CallToolResult:
+    return _error_result({"code": "INPUT_DISABLED", "message": "操作列の受付が利用できません"})
+
+
+def _tool_result(outcome: "ToolOutcome") -> CallToolResult:
+    metadata = dict(outcome.metadata)
+    reply = CallToolResult(content=[], is_error=outcome.error)
+    samples = []
+    for slot in outcome.samples:
+        details = slot.metadata()
+        if slot.image:
+            reply.content.append(_image_content(slot.image))
+            details.update(_image_metadata(slot.image))
+        samples.append(details)
+    if samples:
+        metadata["samples"] = samples
+    if outcome.image:
+        reply.content.append(_image_content(outcome.image))
+        metadata.update(_image_metadata(outcome.image))
+    reply.content.append(TextContent(type="text", text=json.dumps(metadata, ensure_ascii=False)))
+    return reply
 
 
 def _error_result(metadata: dict[str, object]) -> CallToolResult:

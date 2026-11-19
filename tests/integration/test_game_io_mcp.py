@@ -17,7 +17,7 @@ from gigas.game_io.input.models import InputState, InputStep
 from gigas.game_io.observation import Observation, ObservationError, ObservationResolution
 from gigas.mcp import game_io as mcp_module
 from gigas.mcp.game_io import GameIoMcpServer
-from gigas.services._game_io_tools import act_and_observe
+from gigas.services._game_io_tools import GameOperations, act_and_observe
 from gigas.services.input import OperationResult
 from gigas.services.observation import ObservationService
 from gigas.services.recording import RecordingService
@@ -135,7 +135,8 @@ def server_for(h: Harness) -> GameIoMcpServer:
             recording=h.recording,
         )
 
-    return GameIoMcpServer(h.observations.observe, execute)
+    operations = GameOperations(h.service.start, h.observations, h.recording)
+    return GameIoMcpServer(h.observations.observe, execute, operations=lambda: operations)
 
 
 @pytest.fixture
@@ -168,7 +169,7 @@ def test_http_act_returns_its_observation_and_operation(
                     server.url, json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"}
                 )
                 tools = {tool["name"]: tool for tool in catalog.json()["result"]["tools"]}
-                assert tools.keys() == {"observe", "act_and_observe"}
+                assert tools.keys() == {"observe", "act_and_observe", "dispatch", "poll", "cancel"}
                 tool = tools["act_and_observe"]
                 assert tool["annotations"] == {
                     "readOnlyHint": False,

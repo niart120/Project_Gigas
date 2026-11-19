@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from gigas.game_io.observation import ObservationError
 from gigas.mcp.game_io import TOOL_TIMEOUT_SECONDS, GameIoMcpServer
 from gigas.runtime.codex.models import ThreadConfiguration
-from gigas.services._game_io_tools import act_and_observe
+from gigas.services._game_io_tools import GameOperations, act_and_observe
 from gigas.services._workspaces import _require_directory, resolve_workspace
 from gigas.services.input import OperationResult
 from gigas.services.observation import ObservationService
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from gigas.game_io.input.models import InputStep
     from gigas.game_io.observation import Observation, ObservationResolution
     from gigas.runtime.codex.management import CodexManagement
-    from gigas.services._game_io_tools import InputStart
+    from gigas.services._game_io_tools import TrackedInputStart as InputStart
     from gigas.storage.records import DialogueRecordType
 
 
@@ -45,6 +45,8 @@ class ConversationResources:
         self._observations: ObservationService | None = None
         self._recording: RecordingService | None = None
         self._mcp: GameIoMcpServer | None = None
+        self._operations: GameOperations | None = None
+        self.dispatch_allowed: Callable[[], bool] | None = None
         self._resolution: ObservationResolution = "full_hd"
 
     @property
@@ -119,7 +121,11 @@ class ConversationResources:
         self, cwd: "Path", start_input: "InputStart", *, project_id: str | None
     ) -> ThreadConfiguration:
         if self._mcp is None:
-            self._mcp = GameIoMcpServer(self._observe, partial(self._act, start_input=start_input))
+            self._mcp = GameIoMcpServer(
+                self._observe,
+                partial(self._act, start_input=start_input),
+                operations=partial(self._operations_for, start_input),
+            )
             try:
                 await self._mcp.start()
             except BaseException:
@@ -134,11 +140,19 @@ class ConversationResources:
                 prefix + "url": endpoint["url"],
                 prefix + "http_headers": dict(endpoint["http_headers"]),
                 prefix + "enabled": True,
-                prefix + "enabled_tools": ["observe", "act_and_observe"],
+                prefix + "enabled_tools": [
+                    "observe",
+                    "act_and_observe",
+                    "dispatch",
+                    "poll",
+                    "cancel",
+                ],
                 prefix + "required": True,
                 prefix + "startup_timeout_sec": 10,
                 prefix + "tool_timeout_sec": TOOL_TIMEOUT_SECONDS,
                 prefix + "tools.act_and_observe.approval_mode": "approve",
+                prefix + "tools.dispatch.approval_mode": "approve",
+                prefix + "tools.cancel.approval_mode": "approve",
             },
             project_id=project_id,
         )
@@ -182,6 +196,20 @@ class ConversationResources:
             self.report_failure(error)
             raise
 
+    def _operations_for(self, start_input: "InputStart") -> GameOperations | None:
+        if (
+            self._operations is None
+            and self._observations is not None
+            and self._recording is not None
+        ):
+            self._operations = GameOperations(
+                start_input,
+                self._observations,
+                self._recording,
+                dispatch_allowed=self.dispatch_allowed,
+            )
+        return self._operations
+
     def record_dialogue(self, kind: "DialogueRecordType", text: str) -> None:
         """Queue an already selected body without interpreting submission acceptance."""
         if self._recording is not None:
@@ -202,6 +230,11 @@ class ConversationResources:
         path = self._writer.path if self._writer is not None else self._cwd
         self._failed("", str(path) if path is not None else "", recording_reason(error))
 
+    def stop_dispatch(self) -> None:
+        """Release input dispatched by the departing turn."""
+        if self._operations:
+            self._operations.stop_dispatch()
+
     async def close_endpoint(self) -> None:
         """Close HTTP intake while the service joins the runtime independently."""
         if self._mcp is not None:
@@ -218,6 +251,11 @@ class ConversationResources:
                     raise
                 self._mcp = None
         finally:
+            if self._operations:
+                self.stop_dispatch()
+                if self._operations.finishing:
+                    await asyncio.shield(self._operations.finishing)
+                self._operations = None
             if self._observations is not None:
                 try:
                     await self._observations.drain()

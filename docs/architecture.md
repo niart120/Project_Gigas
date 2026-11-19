@@ -65,7 +65,7 @@ GUIの`VideoController`はタイマーで状態と最新画像を取り出す。
 
 MCPの`observe`は最新キャッシュを取り出し、`ObservationService`が出力解像度に合わせてPNGへ変換する。`act_and_observe`は、有限の入力列が正常終了してから最新キャッシュを観測する。どちらも観測のたびに映像機器を開き直す構成ではない。
 
-ゲームMCPはGIGASと同じプロセス・サービスループ上で動き、会話の実行資源としてlocalhostのHTTPリスナーを持つ。Codexには接続先と認証ヘッダーを渡し、`observe`と`act_and_observe`を公開する。呼出しの契約は[ゲームI/O仕様](design/functions/game-io.md)と[MCP仕様](design/interfaces/observation-mcp.md)を参照。
+ゲームMCPはGIGASと同じプロセス・サービスループ上で動き、会話の実行資源としてlocalhostのHTTPリスナーを持つ。Codexには接続先と認証ヘッダーを渡し、`observe`、`act_and_observe`、`dispatch`、`poll`、`cancel`を公開する。呼出しの契約は[ゲームI/O仕様](design/functions/game-io.md)と[MCP仕様](design/interfaces/observation-mcp.md)を参照。
 
 ## 会話と保存の境界
 

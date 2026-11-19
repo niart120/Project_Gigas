@@ -13,7 +13,7 @@ steps = parse_sequence(
 )
 ```
 
-`press`は完全状態を保持してから解除する入力、`wait`は未押下での待機を表します。時間は正の整数ミリ秒です。配列の要素数、入力時間、合計時間の固定上限は設けません。無限生成器、期限なしhold、未知の項目、小数・文字列・boolの時間や座標は`InvalidSequenceError`で拒否します。未知・非対応ボタンと非対応touchは、サービスの開始前検査で列全体を`INVALID_SEQUENCE`として拒否します。
+`press`は指定した完全状態を保持し、次の`press`へ直接切り替えます。同じ入力を押し直すときは`wait`を挟みます。`wait`の開始時と列の正常終了時に全解除し、中断・送信失敗時にも押下が残り得る場合は解除を試みます。時間は正の整数ミリ秒です。配列の要素数、入力時間、合計時間の固定上限は設けません。無限生成器、期限なしhold、未知の項目、小数・文字列・boolの時間や座標は`InvalidSequenceError`で拒否します。未知・非対応ボタンと非対応touchは、サービスの開始前検査で列全体を`INVALID_SEQUENCE`として拒否します。
 
 ボタンは重複なしの名前配列です。`UP/RIGHT/DOWN/LEFT`は隣接2方向まで同時指定でき、反対方向は拒否します。左右stickは`{"x": -100..100, "y": -100..100}`、右と下が正で、省略時は中心です。3DSのtouchは`{"x": 0..319, "y": 0..239}`、省略またはnullで解除を表し、映像の座標とは独立しています。入力のないpressは拒否します。
 
@@ -71,11 +71,11 @@ finally:
     await service.close()
 ```
 
-`start(sequence)`へはparserの戻り値、または生成済みInputStepの非空tupleを渡します。サービスは共通条件や非空条件を検査し直しません。同期的に受付とtask登録を行い、受理時は`(operation_id, task)`、拒否時はoperation_idのない`OperationResult`を返します。別の列が解除中まで含めて実行中なら`BUSY`、機器が使用不能なら`INPUT_DISABLED`です。待ち行列や自動再送はありません。機器能力は入力前に列全体へ確認します。
+`start(sequence, progress=None)`へはparserの戻り値、または生成済みInputStepの非空tupleを渡します。サービスは共通条件や非空条件を検査し直しません。同期的に受付とtask登録を行い、受理時は`(operation_id, task)`、拒否時はoperation_idのない`OperationResult`を返します。別の列が解除中まで含めて実行中なら`BUSY`、機器が使用不能なら`INPUT_DISABLED`です。待ち行列や自動再送はありません。機器能力は入力前に列全体へ確認します。
 
 返されたtaskは`asyncio.shield`で待ちます。要求を取り消す場合は、捕捉したそのtaskが未完了かつ取消し未要求のときだけ`cancel()`し、同じtaskから送信・解除の結果を回収します。後から始まった別の操作へ取消しを送ってはいけません。開始前の取消しではtaskが`CancelledError`で終わり、入力は送られません。
 
-`OperationResult`は入力だけの結果です。`code`、`phase`、`operation_id`、`completed_steps`、`input_sent`、`neutral`、`message`を持ち、観測画像は含みません。`code="OK"`は列と解除の処理が完了した意味で、実機のACKやゲームへの反映を保証しません。開始済みpress・neutralの全byte送出が確認できた場合は、取消し中でも`sent`として結果へ残します。
+`OperationResult`は入力だけの結果です。`code`、`phase`、`operation_id`、`completed_steps`、`interrupted`、`input_sent`、`neutral`、`message`を持ち、観測画像は含みません。`code="OK"`は列と解除の処理が完了した意味で、実機のACKやゲームへの反映を保証しません。開始済みpress・neutralの全byte送出が確認できた場合は、取消し中でも`sent`として結果へ残します。
 
 `stop()`は有限操作taskには一度だけ取消しを要求し、手動操作には終了を要求します。どちらも捕捉した`asyncio.Task[OperationResult]`を返します。操作がなければ`None`です。停止呼出し側がこのtaskを保持すれば、通常の完了処理が入力サービスの現在枠を解放した後も、対象の解除結果を回収できます。`await drain_input()`は開始済みwriteと必要なneutral送出まで待ち、`OperationResult`を返します。操作なし・coroutine開始前の取消しでは`None`です。この待機の取消しで入力taskを放棄しません。正常な停止後は、同じ入力接続で新しい操作列を開始できます。会話全体の停止中に新規要求を拒否するのは、会話の受付側の責務です。
 
