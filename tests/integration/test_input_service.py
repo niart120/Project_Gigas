@@ -219,13 +219,19 @@ def test_send_or_release_failure_closes_without_retry(
         assert isinstance(started, tuple)
         result = await started[1]
         assert result.code == "DEVICE_UNAVAILABLE"
-        assert result.completed_steps == 0
+        assert result.completed_steps == (2 if failure == "neutral" else 0)
         assert result.neutral == "unconfirmed"
         failures = [r for r in caplog.records if r.__dict__.get("event") == "input.failed"]
         assert failures
         assert all(r.__dict__.get("operation_id") == started[0] for r in failures)
         assert all(r.exc_info is not None for r in failures)
-        assert harness.device.calls == ["open", InputState(buttons=("A",)), InputState(), "close"]
+        presses = [InputState(buttons=("A",)), InputState(buttons=("B",))]
+        assert harness.device.calls == [
+            "open",
+            *presses[: 2 if failure == "neutral" else 1],
+            InputState(),
+            "close",
+        ]
         rejected = harness.service.start((press(),))
         assert isinstance(rejected, OperationResult)
         assert rejected.code == "INPUT_DISABLED"
@@ -402,9 +408,11 @@ def test_close_rejects_input_while_draining_operation() -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("write_number", [2, 3], ids=["press", "neutral"])
+@pytest.mark.parametrize(
+    ("write_number", "total_writes"), [(2, 3), (3, 4), (4, 4)], ids=["press", "switch", "neutral"]
+)
 def test_stop_during_completed_write_preserves_delivery_and_connection(
-    harness: Harness, write_number: int
+    harness: Harness, write_number: int, total_writes: int
 ) -> None:
     entered, release = Event(), Event()
 
@@ -444,7 +452,7 @@ def test_stop_during_completed_write_preserves_delivery_and_connection(
         assert result.completed_steps == write_number - 2
         assert harness.service.connected
         assert not port.closed
-        assert port.writes == 3
+        assert port.writes == total_writes
         await harness.close()
 
     asyncio.run(scenario())

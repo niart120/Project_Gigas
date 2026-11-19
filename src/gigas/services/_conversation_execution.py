@@ -119,6 +119,7 @@ class ConversationExecution:
         self._preparation = ThreadPreparation(connection, resources, selection, self._activate)
         self._goals = GoalTracker()
         self._turn: _Turn | None = None
+        resources.dispatch_allowed = lambda: self._turn is not None
         self._requests = HumanRequests()
         self._sending: _Submission | None = None
         self._stopping: _Stop | None = None
@@ -561,7 +562,7 @@ class ConversationExecution:
             raise CodexConnectionError("回答の配送結果が不明です") from outcome
 
     def start_input(
-        self, sequence: "tuple[InputStep, ...]"
+        self, sequence: "tuple[InputStep, ...]", progress: "Callable[[int], None] | None" = None
     ) -> "tuple[str, asyncio.Task[OperationResult]] | OperationResult":
         """Synchronously reject closing/stopping requests or register input with its owner."""
         if (
@@ -571,7 +572,7 @@ class ConversationExecution:
             or self._stopping is not None
         ):
             return OperationResult("INPUT_DISABLED", message="会話を停止・切断しています")
-        return self._inputs.start(sequence)
+        return self._inputs.start(sequence, progress)
 
     def receive(self, event: "RuntimeEvent") -> None:
         """Apply a notification or request promptly without waiting for sends or stop."""
@@ -658,6 +659,7 @@ class ConversationExecution:
                 self._turn_reply.changed.set()
             if event.method == "turn/started":
                 if self._turn is None or self._turn.id != turn_id:
+                    self._resources.stop_dispatch()
                     self._turn = _Turn(
                         turn_id, TurnContent(turn_id), asyncio.get_running_loop().create_future()
                     )
@@ -678,6 +680,7 @@ class ConversationExecution:
                 if not turn.terminal.done():
                     turn.terminal.set_result(None)
                 if self._turn is turn:
+                    self._resources.stop_dispatch()
                     self._turn = None
                 for request in self._requests.finish(turn_id):
                     self._emit(RequestResolved(request.token))
@@ -780,6 +783,7 @@ class ConversationExecution:
         """Wake notification waiters as failures before the service closes resources."""
         self._cancel_preparation()
         self._requests.cancel_unsubmitted()
+        self._resources.stop_dispatch()
         self._goals.closing()
         if self._turn_reply is not None:
             self._turn_reply.changed.set()

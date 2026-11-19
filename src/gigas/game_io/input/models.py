@@ -93,7 +93,7 @@ class InputStep:
     """One complete press or neutral wait with a positive integer duration.
 
     Args:
-        kind: press holds state before release; wait holds neutral.
+        kind: press holds the complete state until the next step; wait holds neutral.
         duration_ms: PC-side waiting time in milliseconds, without a fixed maximum.
         state: Complete state. A press must contain input; a wait must be neutral.
 

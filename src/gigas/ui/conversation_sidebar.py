@@ -62,6 +62,9 @@ class ConversationHeading(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.title, 1)
         row.addWidget(self.loading)
+        self.play_history = QPushButton("プレイ履歴", self)
+        self.play_history.hide()
+        row.addWidget(self.play_history)
         layout.addWidget(self.project)
         layout.addLayout(row)
 

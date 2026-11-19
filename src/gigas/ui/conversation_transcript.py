@@ -62,8 +62,15 @@ def _activity_label(activity: "ActivityEvent") -> tuple[str, str]:
     target = activity.title.splitlines()[0] if activity.title else ""
     if activity.kind == "mcpToolCall" and "/" in target:
         server, target = target.rsplit("/", 1)
-        if server.startswith("gigas_") and target in {"observe", "act_and_observe"}:
-            return ("画面取得" if target == "observe" else "入力・画面取得"), ""
+        labels = {
+            "observe": "画面取得",
+            "act_and_observe": "入力・画面取得",
+            "dispatch": "操作開始",
+            "poll": "操作状況",
+            "cancel": "操作中止",
+        }
+        if server.startswith("gigas_") and target in labels:
+            return labels[target], ""
     return name, target
 
 

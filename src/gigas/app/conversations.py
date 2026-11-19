@@ -20,6 +20,7 @@ from gigas.services.conversations import (
 from gigas.ui.confirmation import draft_confirmation
 from gigas.ui.conversation_sidebar import thread_title
 from gigas.ui.notifications import Notice
+from gigas.ui.play_history import PlayHistory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,6 +74,7 @@ class ConversationController(QObject):
         self.sidebar.projects_more_requested.connect(self._list_projects)
         self.sidebar.threads_more_requested.connect(self._list_threads)
         self.panel.history_button.clicked.connect(self._load_history)
+        self.panel.heading.play_history.clicked.connect(self._play_history)
         self.panel.state_changed.connect(self._render)
         service.management_completed.connect(self._management_complete)
         service.browse_goal_changed.connect(self._browse_goal)
@@ -453,7 +455,19 @@ class ConversationController(QObject):
         self._history_pending = None
         self.panel.cancel_loading()
 
+    def _play_history(self) -> None:
+        target = self._target
+        if (
+            isinstance(target, StoredConversationTarget)
+            and target.cwd.joinpath(target.thread_id).name == target.thread_id
+            and target.thread_id not in {"", ".", ".."}
+        ):
+            PlayHistory(target.cwd / "records" / target.thread_id, self.window).show()
+
     def _render(self) -> None:
+        self.panel.heading.play_history.setVisible(
+            isinstance(self._target, StoredConversationTarget) and self._selection_pending is None
+        )
         listing = self._available and self.panel.can_list_conversations
         if listing and not self._listed:
             self._listed = True

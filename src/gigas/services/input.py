@@ -72,6 +72,14 @@ class OperationResult:
     input_sent: Literal["none", "sent", "unknown"] = "none"
     neutral: Literal["not_needed", "sent", "unconfirmed"] = "not_needed"
     message: str = ""
+    interrupted: bool = False
+
+    @property
+    def status(self) -> Literal["completed", "interrupted", "failed"]:
+        """Describe input execution even when its subsequent release failed."""
+        if self.interrupted or self.code == "INTERRUPTED":
+            return "interrupted"
+        return "completed" if self.code == "OK" else "failed"
 
 
 @dataclass(slots=True)
@@ -434,11 +442,12 @@ class InputService:
             logger.info("Input device closed", extra={"event": "input.disconnected"})
 
     def start(
-        self, sequence: tuple[InputStep, ...]
+        self, sequence: tuple[InputStep, ...], progress: "Callable[[int], None] | None" = None
     ) -> tuple[str, asyncio.Task[OperationResult]] | OperationResult:
         """Admit a finite sequence and register its task without yielding.
 
         Args:
+            progress: Called on the owning loop with the number of completed holds or waits.
             sequence: Nonempty tuple of constructed InputStep values. Common
                 invariants and nonemptiness are not revalidated here; every
                 state is checked against the selected device's capabilities.
@@ -462,7 +471,7 @@ class InputService:
         except InvalidSequenceError as error:
             return OperationResult("INVALID_SEQUENCE", message=str(error))
         operation_id = f"operation-{uuid4()}"
-        task = asyncio.create_task(self._execute(sequence, device, operation_id))
+        task = asyncio.create_task(self._execute(sequence, device, operation_id, progress))
         self._operation = task
         task.add_done_callback(self._release_operation)
         if self._on_busy_changed is not None:
@@ -559,33 +568,48 @@ class InputService:
         sequence: tuple[InputStep, ...],
         device: InputDevice,
         operation_id: str,
+        progress: "Callable[[int], None] | None",
     ) -> OperationResult:
         result = OperationResult("OK", "input", operation_id)
+        neutral = InputState()
+        held = neutral
         neutral_attempted = False
         transport_failed = False
         try:
             for step in sequence:
-                result = replace(result, phase="input")
-                if step.kind == "press":
-                    neutral_attempted = False
-                    result = replace(result, input_sent="unknown", neutral="unconfirmed")
+                if step.state != held:
+                    neutral_attempted = step.kind == "wait"
+                    if neutral_attempted:
+                        result = replace(result, phase="neutral")
+                    else:
+                        result = replace(
+                            result, phase="input", input_sent="unknown", neutral="unconfirmed"
+                        )
                     cancelled = await _settle_io(device.send(step.state))
-                    result = replace(result, input_sent="sent")
+                    held = step.state
+                    if neutral_attempted:
+                        result = replace(result, neutral="sent")
+                    else:
+                        result = replace(result, input_sent="sent")
                     if cancelled:
-                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
-                    await _wait(step.duration_ms)
-                    neutral_attempted = True
-                    cancelled = await _settle_io(device.send(InputState()))
-                    result = replace(result, neutral="sent")
-                    if cancelled:
-                        result = replace(result, completed_steps=result.completed_steps + 1)
-                        raise asyncio.CancelledError  # noqa: TRY301 - retain delivery before interruption.
-                else:
-                    await _wait(step.duration_ms)
+                        raise asyncio.CancelledError  # noqa: TRY301
+                result = replace(result, phase="input")
+                await _wait(step.duration_ms)
                 result = replace(result, completed_steps=result.completed_steps + 1)
+                if progress is not None:
+                    progress(result.completed_steps)
+            if result.neutral == "unconfirmed":
+                neutral_attempted = True
+                result = replace(result, phase="neutral")
+                cancelled = await _settle_io(device.send(neutral))
+                result = replace(result, neutral="sent")
+                if cancelled:
+                    raise asyncio.CancelledError  # noqa: TRY301
             result = replace(result, phase="")
         except asyncio.CancelledError:
-            result = replace(result, code="INTERRUPTED", message="操作が停止されました")
+            result = replace(
+                result, code="INTERRUPTED", interrupted=True, message="操作が停止されました"
+            )
         except Exception as error:
             logger.exception(
                 "Input operation failed",
@@ -613,7 +637,10 @@ class InputService:
                     },
                 )
                 result = replace(
-                    result, code="DEVICE_UNAVAILABLE", phase="neutral", message=str(error)
+                    result,
+                    code="DEVICE_UNAVAILABLE",
+                    phase="neutral",
+                    message=f"{result.message}; 解除失敗: {error}",
                 )
                 transport_failed = True
         if result.neutral == "unconfirmed":
@@ -647,7 +674,7 @@ async def _settle_io(operation: "Coroutine[object, object, None]") -> bool:
 
 
 def _require_released(result: OperationResult) -> None:
-    if result.code not in {"OK", "INTERRUPTED"}:
+    if result.code not in {"OK", "INTERRUPTED"} or result.neutral == "unconfirmed":
         raise InputServiceError(result.code, result.message or "入力の解除を確認できません")
 
 

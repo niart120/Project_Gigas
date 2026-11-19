@@ -27,12 +27,13 @@ class OperationFinished:
     Attributes:
         operation_id: Corresponding operation start.
         result: Input execution result: completed, interrupted, or failed.
-        completed_steps: Steps finished through neutral delivery or wait completion.
+        completed_steps: Steps whose specified hold or wait duration finished.
         observation_id: Finalized observation ID, even when its PNG save later fails.
         phase: Failed or cancelled stage, including observe after completed input.
         reason: Cause of interruption or failure; empty for ordinary completion.
         input_sent: none, sent, or unknown for attempted state delivery.
         neutral: not_needed, sent, or unconfirmed; sent is not physical verification.
+        samples: Ordered scheduled captures. Missing image IDs mark missed captures.
     """
 
     operation_id: str
@@ -43,6 +44,7 @@ class OperationFinished:
     reason: str = ""
     input_sent: Literal["none", "sent", "unknown"] = "none"
     neutral: Literal["not_needed", "sent", "unconfirmed"] = "not_needed"
+    samples: tuple[dict[str, object], ...] = ()
 
 
 type InputEvent = OperationStarted | OperationFinished
@@ -62,6 +64,8 @@ def input_record(event: InputEvent) -> tuple[str, dict[str, object]]:
             input_sent=event.input_sent,
             neutral=event.neutral,
         )
+        if event.samples:
+            payload["samples"] = list(event.samples)
         if event.observation_id is not None:
             payload["observation_id"] = event.observation_id
         if event.phase:
