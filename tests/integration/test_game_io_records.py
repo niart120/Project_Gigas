@@ -229,6 +229,7 @@ def test_encoding_failure_does_not_disable_the_writer(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("failure", ["collision", "publish"])
+@pytest.mark.usefixtures("distinct_observation_times")
 def test_image_failure_preserves_previous_image_and_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -279,8 +280,10 @@ def test_jsonl_failure_after_image_publication_keeps_the_image(
         "../escaped",
         "obs-../../escaped",
         "obs-019aa000-0000-7000-8000-000000000000",
-        "019AA000-0000-7000-8000-000000000000",
-        "019aa000-0000-4000-8000-000000000000",
+        "019aa000-0000-7000-8000-000000000000",
+        "20261118T030402-9960Z",
+        "20260230T030402-996Z",
+        "20261118t030402-996z",
     ],
 )
 def test_image_id_cannot_escape_the_record_destination(tmp_path: Path, identifier: str) -> None:

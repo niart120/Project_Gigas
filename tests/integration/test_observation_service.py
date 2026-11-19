@@ -110,6 +110,7 @@ def test_record_failure_reaches_shared_failure_callback(
         writer.close()
 
 
+@pytest.mark.usefixtures("distinct_observation_times")
 def test_observe_uses_cached_frame_and_retains_its_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -145,6 +146,7 @@ def test_observe_uses_cached_frame_and_retains_its_time(
 @pytest.mark.parametrize(
     ("boundary", "save_fails"), [("encode", False), ("publish", False), ("publish", True)]
 )
+@pytest.mark.usefixtures("distinct_observation_times")
 def test_save_is_independent_and_cancellation_retains_work_until_drain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, *, save_fails: bool
 ) -> None:
