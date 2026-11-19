@@ -29,6 +29,8 @@
 
 成功時は完成PNGのimage contentと、`observation_id`、`captured_at`、`source_frame`、`image`のJSON text contentを返します。入力時は`operation_id`を添えます。MCPで画像を再符号化せず、保存も同じObservationを使います。画像ファイルが応答時点で保存済みであることは保証しません。
 
+`observation_id`はPNG符号化完了時のUTC時刻を表す`YYYYMMDDTHHMMSS-mmmZ`形式です。同じミリ秒の観測には同じ値が入ります。画像名と保存時の扱いは[記録付き観測API](../data/recorded-observation.md#画像と入力結果)を参照してください。
+
 失敗は画像なしの`isError: true`とし、`code`・`message`を返します。入力要求では判明した`phase`、`completed_steps`、`input_sent`、`neutral`、受理した操作の`operation_id`も返します。観測だけが失敗した場合はMCPのcodeとphaseに観測エラーを示し、入力の完了要素数・送出・解除結果を保持します。保存失敗は既に返した応答を変更せず、記録側の診断通知で扱います。
 
 ## 待機期限と停止

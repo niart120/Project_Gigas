@@ -466,6 +466,7 @@ def test_http_deadline_returns_unknown_result_and_leaves_input_cleanup_owned(
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("distinct_observation_times")
 def test_http_observations_return_same_images_before_saving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

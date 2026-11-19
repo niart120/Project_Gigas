@@ -1,15 +1,13 @@
 """Immutable agent images encoded from the latest capture frame."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, Self
 
 import cv2
 import numpy as np
-from uuid6 import uuid7
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from gigas.game_io.capture.models import Frame
 
 MAX_PNG_BYTES = 32 * 1024 * 1024
@@ -52,7 +50,7 @@ class Observation:
     """One encoded agent image and its source metadata, not yet necessarily saved.
 
     Attributes:
-        observation_id: Canonical UUID7 identifier without a prefix.
+        observation_id: UTC generation time in YYYYMMDDTHHMMSS-mmmZ format.
         captured_at: Original host acquisition time, not encoding or saving time.
         source_frame: Source identifiers and dimensions without source pixels.
         png_bytes: Final PNG bytes shared by storage and MCP image encoding.
@@ -61,7 +59,7 @@ class Observation:
     """
 
     observation_id: str
-    captured_at: "datetime"
+    captured_at: datetime
     source_frame: FrameSource
     png_bytes: bytes
     width: int
@@ -129,8 +127,10 @@ class Observation:
         if not success or encoded is None or not 0 < encoded.nbytes <= MAX_PNG_BYTES:
             message = "観測画像を32 MiB以内のPNGに符号化できません"
             raise ObservationError("OBSERVATION_ENCODING_ERROR", message)
+        generated_at = datetime.now(UTC)
+        observation_id = f"{generated_at:%Y%m%dT%H%M%S}-{generated_at.microsecond // 1000:03d}Z"
         return cls(
-            str(uuid7()),
+            observation_id,
             frame.captured_at,
             FrameSource(frame.generation, frame.sequence, frame.width, frame.height),
             encoded.tobytes(),

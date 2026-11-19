@@ -3,15 +3,16 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
-from uuid import UUID
+from unittest.mock import Mock
 
 import cv2
 import numpy as np
 import pytest
 
+from gigas.game_io import observation as observation_module
 from gigas.game_io.capture.models import Frame
 from gigas.game_io.observation import Observation
-from gigas.storage.records import GameIoRecordWriter
+from gigas.storage.records import GameIoRecordWriter, RecordError
 
 
 def sample_frame(width: int = 16, height: int = 16) -> Frame:
@@ -86,20 +87,35 @@ def test_observation_resolution_preserves_the_full_frame(
     assert len(first.png_bytes) <= 32 * 1024 * 1024
 
 
-def test_record_preserves_bytes_identity_and_source_time(tmp_path: Path) -> None:
+def test_record_preserves_bytes_identity_and_source_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    generated_at = datetime(2026, 11, 18, 3, 4, 2, 996_789, tzinfo=UTC)
+    clock = Mock(wraps=datetime)
+    clock.now.side_effect = [
+        generated_at,
+        generated_at.replace(microsecond=996_999),
+        generated_at.replace(microsecond=997_000),
+        generated_at.replace(microsecond=998_000),
+    ]
+    monkeypatch.setattr(observation_module, "datetime", clock)
     width, height = 640, 480
     output_width, output_height = 480, 360
     frame = sample_frame(width, height)
     writer = GameIoRecordWriter.create(tmp_path / "game")
     try:
         first = Observation.from_frame(frame, resolution="640x360")
+        collision = Observation.from_frame(frame)
         second = Observation.from_frame(frame)
+        clock.now.assert_called_with(UTC)
+        assert first.observation_id == collision.observation_id == "20261118T030402-996Z"
+        assert second.observation_id == "20261118T030402-997Z"
+        assert collision.png_bytes != first.png_bytes
         writer.record(first)
+        with pytest.raises(RecordError):
+            writer.record(collision)
         writer.record(second)
-        assert UUID(first.observation_id).version == 7
-        assert first.observation_id == str(UUID(first.observation_id))
-        assert first.image_path == f"observations/{first.observation_id}.png"
-        assert first.observation_id < second.observation_id
+        assert first.image_path == "observations/20261118T030402-996Z.png"
         assert first.captured_at == frame.captured_at
         assert (first.source_frame.generation, first.source_frame.sequence) == (2, 7)
         assert (first.source_frame.width, first.source_frame.height) == (width, height)
@@ -125,16 +141,27 @@ def test_record_preserves_bytes_identity_and_source_time(tmp_path: Path) -> None
     finally:
         writer.close()
     log = writer.path / "events.jsonl"
+    legacy_id = "019aa000-0000-7000-8000-000000000000"
+    legacy_path = f"observations/{legacy_id}.png"
+    legacy_record = records[0] | {
+        "payload": records[0]["payload"] | {"observation_id": legacy_id, "image_path": legacy_path}
+    }
+    with log.open("ab") as stream:
+        stream.write(json.dumps(legacy_record).encode("utf-8") + b"\n")
     original = log.read_bytes()
     (writer.path / first.image_path).unlink()
+    legacy_image = writer.path / legacy_path
+    legacy_image.write_bytes(first.png_bytes)
     reopened = GameIoRecordWriter.open(writer.path)
     try:
         assert log.read_bytes() == original
         reopened.record(Observation.from_frame(frame))
         assert log.read_bytes().startswith(original)
+        assert legacy_image.read_bytes() == first.png_bytes
+        assert not (writer.path / first.image_path).exists()
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
-        assert len(records) == 3
+        assert len(records) == 4
     finally:
         reopened.close()

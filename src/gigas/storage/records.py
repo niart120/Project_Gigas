@@ -1,6 +1,7 @@
 """Single-owner game I/O records without project or conversation management."""
 
 import json
+import re
 import sys
 from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime
@@ -8,7 +9,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import Lock
 from typing import TYPE_CHECKING, Literal, Self
-from uuid import UUID
 
 from gigas.storage.input_events import input_record
 
@@ -175,7 +175,7 @@ class GameIoRecordWriter:
 
         Args:
             observation: Final image and source metadata from Observation.from_frame.
-                Only its canonical UUID7 identifier is checked to fix the destination.
+                Its UTC timestamp identifier is checked to fix the destination.
                 The image is not encoded or decoded again.
 
         Raises:
@@ -270,11 +270,11 @@ def _append_row(path: Path, row: bytes) -> None:
 
 
 def _observation_id(value: str) -> str:
+    message = "観測画像の保存先IDには YYYYMMDDTHHMMSS-mmmZ 形式の UTC 時刻が必要です"
+    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}-[0-9]{3}Z", value):
+        raise RecordError(message)
     try:
-        identifier = UUID(value)
+        datetime.strptime(value, "%Y%m%dT%H%M%S-%f%z")
     except ValueError as error:
-        message = f"観測画像の保存先IDが不正です: {error}"
         raise RecordError(message) from error
-    if identifier.version != 7 or value != str(identifier):
-        raise RecordError("観測画像の保存先IDは小文字・ハイフン付きUUID7が必要です")
     return value
