@@ -1,6 +1,7 @@
 """Private spawn entry and bounded shared-memory frame transport."""
 
 import json
+import sys
 import traceback
 from contextlib import suppress
 from dataclasses import dataclass
@@ -9,8 +10,10 @@ from multiprocessing.shared_memory import SharedMemory
 from struct import Struct
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from gigas.game_io.capture.backend import acquire_frames, device_catalog
+from gigas.game_io.capture.backend import OpenCVBackend, acquire_frames, device_catalog
+from gigas.game_io.capture.config import PONKAN_LABEL, PONKAN_SOURCE
 from gigas.game_io.capture.models import CaptureError, DeviceInfo, Frame
+from gigas.game_io.capture.ponkan_source import detect_ponkan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,7 +52,7 @@ class Channel(Protocol):
 class WorkerMessage:
     """A small state notification; images never travel through the pipe."""
 
-    kind: Literal["devices", "candidates", "started", "released", "error"]
+    kind: Literal["devices", "ponkan", "candidates", "started", "released", "error"]
     devices: "tuple[DeviceInfo, ...]" = ()
     error: str = ""
     candidates: tuple[int, ...] = ()
@@ -84,7 +87,7 @@ def receive_message(channel: Channel) -> WorkerMessage:
     if not isinstance(value, dict):
         raise CaptureError(error)
     kind = value.get("kind")
-    if kind not in ("devices", "candidates", "started", "released", "error"):
+    if kind not in ("devices", "ponkan", "candidates", "started", "released", "error"):
         raise CaptureError(error)
     raw_devices = value.get("devices")
     if not isinstance(raw_devices, list) or len(raw_devices) > 64:
@@ -103,7 +106,11 @@ def receive_message(channel: Channel) -> WorkerMessage:
         raise CaptureError(error)
     match kind:
         case "devices":
-            return WorkerMessage("devices", devices=tuple(devices))
+            return WorkerMessage("devices", devices=tuple(devices), error=message)
+        case "ponkan":
+            if len(devices) > 1 or any(device.path != PONKAN_SOURCE for device in devices):
+                raise CaptureError(error)
+            return WorkerMessage("ponkan", devices=tuple(devices))
         case "candidates":
             candidates, backend = value.get("candidates"), value.get("backend")
             if (
@@ -229,9 +236,27 @@ def worker_main(
     slot = None
     try:
         backend = factory()
+        board = DeviceInfo(PONKAN_LABEL, PONKAN_SOURCE)
+
+        def report_catalog(devices: tuple[DeviceInfo, ...], camera_warning: str = "") -> None:
+            warning = ""
+            # An injected device backend supplies its own catalog without touching real USB.
+            if sys.platform == "win32" and isinstance(backend, OpenCVBackend):
+                detected, warning = detect_ponkan()
+                if detected:
+                    devices = (*devices, board)
+            detail = "\n".join(item for item in (camera_warning, warning) if item)
+            send_message(status, WorkerMessage("devices", devices=devices, error=detail))
+
         if options is None:
-            devices = device_catalog(backend.enumerate())
-            send_message(status, WorkerMessage("devices", devices=devices))
+            try:
+                cameras = device_catalog(backend.enumerate())
+            except Exception as exc:
+                if sys.platform != "win32" or not isinstance(backend, OpenCVBackend):
+                    raise
+                report_catalog((), f"カメラの列挙に失敗しました: {exc}")
+            else:
+                report_catalog(cameras)
         elif memory_name is not None and lock is not None:
             slot = SharedSlot(SharedMemory(name=memory_name), lock)
             started = False
@@ -250,8 +275,9 @@ def worker_main(
                 lambda: _stop_requested(stop),
                 publish,
                 lambda: send_message(status, WorkerMessage("released")),
-                enumerated=lambda devices: send_message(
-                    status, WorkerMessage("devices", devices=devices)
+                enumerated=report_catalog,
+                detected_board=lambda found: send_message(
+                    status, WorkerMessage("ponkan", devices=(board,) if found else ())
                 ),
                 candidates=lambda apis, backend: send_message(
                     status, WorkerMessage("candidates", candidates=apis, backend=backend)

@@ -373,7 +373,6 @@ class ApplicationShell(QObject):
         if self.dialog is not None and self.dialog.isVisible():
             self.dialog.set_capture_devices(
                 self.video.devices,
-                searching=self.video.discovering,
                 error=self.video.discovery_error,
             )
 
@@ -381,7 +380,6 @@ class ApplicationShell(QObject):
         self.window.set_capture_devices(
             self.video.devices,
             self.baseline.capture_device,
-            searching=self.video.discovering,
             error=self.video.discovery_error,
             enabled=self._can_edit and (self.dialog is None or not self.dialog.isVisible()),
         )

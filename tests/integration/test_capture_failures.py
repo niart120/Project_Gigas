@@ -28,6 +28,56 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.service import _Session
 
 
+def test_stalled_catalog_does_not_end_capture_and_can_be_retried(tmp_path: Path) -> None:
+    trigger = tmp_path / "stall"
+    marker = tmp_path / "video"
+    service = CaptureService(
+        backend_factory=PeerBackend(str(marker), "hang-enumerate", fault_trigger=trigger),
+        timeouts=CaptureTimeouts(startup=3, stop=0.15),
+    )
+    service.start()
+    try:
+        assert service.connect(CaptureOptions("path-b", 16, 16))
+        initial = wait_for(service, lambda s: s.frame is not None)
+        assert initial.frame is not None
+        trigger.touch()
+        assert service.refresh_devices()
+        failed = wait_for(service, lambda s: bool(s.catalog_warning))
+        assert failed.phase == "streaming"
+        assert failed.generation == initial.generation
+        assert failed.frame is not None
+        assert failed.frame.sequence > initial.frame.sequence
+        assert failed.devices == initial.devices
+        assert failed.devices_revision == initial.devices_revision
+        assert not failed.error
+        trigger.unlink()
+        assert service.refresh_devices()
+        retried = wait_for(service, lambda s: s.devices_revision > failed.devices_revision)
+        assert not retried.catalog_warning
+        assert retried.phase == "streaming"
+
+        entered = tmp_path / "video.entered.enumerate"
+        entered.unlink()
+        trigger.touch()
+        assert service.refresh_devices()
+        wait_for(service, lambda s: s.catalog_searching and entered.exists())
+        service.disconnect()
+        wait_for(service, lambda s: s.phase == "idle")
+        trigger.unlink()
+        assert service.connect(CaptureOptions("path-b", 16, 16))
+        again = wait_for(service, lambda s: s.frame is not None and not s.catalog_searching)
+        assert again.generation > initial.generation
+        assert again.devices_revision == retried.devices_revision + 1
+        assert not again.catalog_warning
+        assert service.refresh_devices()
+        service.shutdown()
+    finally:
+        service.shutdown()
+        service.join(8)
+    assert not service.is_alive()
+    assert not service.snapshot().catalog_searching
+
+
 def test_worker_exception_reaches_diagnostic_file_without_changing_display(tmp_path: Path) -> None:
     diagnostics = DiagnosticSession(tmp_path / "settings.toml", lambda *_: None)
     diagnostics.start()

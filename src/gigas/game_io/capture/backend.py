@@ -11,8 +11,9 @@ import cv2
 import numpy as np
 from cv2_enumerate_cameras import enumerate_cameras
 
-from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.config import PONKAN_SOURCE, CaptureOptions
 from gigas.game_io.capture.models import CaptureError, DeviceInfo, Frame
+from gigas.game_io.capture.ponkan_source import open_ponkan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,6 +178,7 @@ def acquire_frames(
     enumerated: "Callable[[tuple[DeviceInfo, ...]], None] | None" = None,
     candidates: "Callable[[tuple[int, ...], int], None] | None" = None,
     api_preference: int | None = None,
+    detected_board: "Callable[[bool], None] | None" = None,
 ) -> None:
     """Resolve a device, acquire validated frames, and always release its handle.
 
@@ -191,6 +193,7 @@ def acquire_frames(
         enumerated: Optional notification of selectable identities from the same
             enumeration used to resolve the device, before selection and opening.
         candidates: Receives at most two matching API identifiers and the chosen API.
+        detected_board: Receives the result of the ponkan connection preflight.
         api_preference: Explicit API to re-resolve for a retry, or None for the first
             matching candidate. A missing API never substitutes another candidate.
 
@@ -198,6 +201,22 @@ def acquire_frames(
         CaptureError: Selection, opening, or reading fails, pixels are not uint8 BGR
             within 16..3840 by 16..2160, or dimensions change after the first frame.
     """
+    if options.device_path == PONKAN_SOURCE:
+        if sys.platform != "win32":
+            message = "3DS 映像取得には Windows が必要です"
+            raise CaptureError(message)
+        if stopped():
+            return
+        with open_ponkan(stopped, released, detected_board) as reader:
+            if reader is None:
+                return
+
+            def read_ponkan() -> tuple[bool, object]:
+                return True, reader.read()
+
+            _stream_frames(read_ponkan, generation, stopped, publish, ponkan=True)
+        return
+
     devices = backend.enumerate()
     identities = device_catalog(devices)
     if enumerated is not None:
@@ -230,45 +249,62 @@ def acquire_frames(
             camera.set(cv2.CAP_PROP_FRAME_WIDTH, options.width)
             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, options.height)
         camera.set(cv2.CAP_PROP_FPS, options.fps)
-        sequence = 0
-        dimensions: tuple[int, int] | None = None
-        while not stopped():
-            success, pixels = camera.read()
-            tick = monotonic_ns()
-            captured_at = datetime.now(UTC)
-            if stopped():
-                return
-            if not success:
-                message = "映像フレームの取得失敗"
-                raise CaptureError(message)
-            if (
-                not isinstance(pixels, np.ndarray)
-                or pixels.dtype != np.uint8
-                or pixels.ndim != 3
-                or pixels.shape[2] != 3
-                or not 16 <= pixels.shape[1] <= 3840
-                or not 16 <= pixels.shape[0] <= 2160
-            ):
-                message = "取得映像は幅16〜3840・高さ16〜2160のuint8 BGR画像が必要"
-                raise CaptureError(message)
-            height, width, _channels = pixels.shape
-            if dimensions is not None and dimensions != (width, height):
-                message = "取得中に映像寸法が変化したため停止。再接続が必要"
-                raise CaptureError(message)
-            dimensions = (width, height)
-            sequence += 1
-            publish(
-                Frame(
-                    pixels.tobytes(),
-                    width,
-                    height,
-                    generation,
-                    sequence,
-                    captured_at,
-                    tick,
-                )
-            )
+        _stream_frames(camera.read, generation, stopped, publish)
     finally:
         camera.release()
         if released is not None:
             released()
+
+
+def _stream_frames(
+    read: "Callable[[], tuple[bool, object]]",
+    generation: int,
+    stopped: "Callable[[], bool]",
+    publish: "Callable[[Frame], None]",
+    *,
+    ponkan: bool = False,
+) -> None:
+    sequence = 0
+    dimensions: tuple[int, int] | None = (400, 480) if ponkan else None
+    while not stopped():
+        success, pixels = read()
+        tick = monotonic_ns()
+        captured_at = datetime.now(UTC)
+        if stopped():
+            return
+        if ponkan and pixels is None:
+            continue
+        if not success:
+            message = "映像フレームの取得失敗"
+            raise CaptureError(message)
+        if (
+            not isinstance(pixels, np.ndarray)
+            or pixels.dtype != np.uint8
+            or pixels.ndim != 3
+            or pixels.shape[2] != 3
+            or not 16 <= pixels.shape[1] <= 3840
+            or not 16 <= pixels.shape[0] <= 2160
+        ):
+            message = "取得映像は幅16〜3840・高さ16〜2160のuint8 BGR画像が必要"
+            raise CaptureError(message)
+        height, width, _channels = pixels.shape
+        if dimensions is not None and dimensions != (width, height):
+            message = (
+                f"取得映像の寸法が不正 ({width}x{height}、期待値 {dimensions[0]}x{dimensions[1]})"
+                if ponkan
+                else "取得中に映像寸法が変化したため停止。再接続が必要"
+            )
+            raise CaptureError(message)
+        dimensions = (width, height)
+        sequence += 1
+        publish(
+            Frame(
+                pixels.tobytes(),
+                width,
+                height,
+                generation,
+                sequence,
+                captured_at,
+                tick,
+            )
+        )

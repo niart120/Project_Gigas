@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractButton,
     QCheckBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.input.config import PROTOCOLS, get_protocol, resolve_baudrate
 from gigas.storage.settings import Settings
 from gigas.ui.capture_choices import capture_device_choices
@@ -101,7 +102,7 @@ class SettingsDialog(QDialog):
         selection = QHBoxLayout()
         selection.addWidget(self.capture_choices, 1)
         selection.addWidget(self.capture_refresh_button)
-        self.capture_discovery_status = QLabel(self)
+        self.capture_discovery_status = QLabel("列挙失敗", self)
         self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
         self.capture_discovery_status.hide()
         selection.addWidget(self.capture_discovery_status)
@@ -196,6 +197,8 @@ class SettingsDialog(QDialog):
             button.setDefault(False)
         actions.rejected.connect(self.reject)
         layout.addWidget(actions)
+        self.capture_choices.currentIndexChanged.connect(self._sync_camera_controls)
+        self._sync_capture_choice("")
 
     def _tab(self, title: str) -> QFormLayout:
         scroll = QScrollArea(self.tabs)
@@ -244,19 +247,15 @@ class SettingsDialog(QDialog):
         self,
         devices: "tuple[DeviceInfo, ...]",
         *,
-        searching: bool = False,
         error: str = "",
     ) -> None:
         """Refresh candidates without changing the edited device or other fields.
 
         Args:
             devices: Latest successful catalog with stable identifiers.
-            searching: Whether enumeration is in progress.
             error: Current enumeration failure, available through notification details.
         """
-        state = "列挙失敗" if error else "検索中" if searching else ""
-        self.capture_discovery_status.setText(state)
-        self.capture_discovery_status.setVisible(bool(state))
+        self.capture_discovery_status.setVisible(bool(error))
         devices = tuple(device for device in devices if device.path)
         if devices != self._devices:
             selected = str(self.capture_choices.currentData() or "")
@@ -267,11 +266,23 @@ class SettingsDialog(QDialog):
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
             self.capture_choices.addItem("未接続", "")
-            for label, path in capture_device_choices(self._devices):
+            for label, path in capture_device_choices(self._devices, selected):
                 self.capture_choices.addItem(label, path)
-            if self.capture_choices.findData(selected) < 0:
-                self.capture_choices.addItem(selected, selected)
-            self.capture_choices.setCurrentIndex(self.capture_choices.findData(selected))
+            index = self.capture_choices.findData(selected)
+            self.capture_choices.setCurrentIndex(index)
+            if selected == PONKAN_SOURCE and all(d.path != selected for d in self._devices):
+                model = self.capture_choices.model()
+                if isinstance(model, QStandardItemModel):
+                    model.item(index).setEnabled(False)
+
+        self._sync_camera_controls()
+
+    def _sync_camera_controls(self) -> None:
+        enabled = (
+            self.capture_choices.isEnabled() and self.capture_choices.currentData() != PONKAN_SOURCE
+        )
+        self.capture_fps.setEnabled(enabled)
+        self.capture_resolution.setEnabled(enabled)
 
     def set_serial_ports(
         self,
@@ -391,11 +402,9 @@ class SettingsDialog(QDialog):
             self.serial_baudrate,
             self.serial_refresh_button,
             self.capture_choices,
-            self.capture_fps,
             self.preview_fps,
             self.capture_refresh_button,
             self.window_size_preset,
-            self.capture_resolution,
             self.observation_resolution,
             self.preview_mode,
             self.show_reasoning,
@@ -404,3 +413,4 @@ class SettingsDialog(QDialog):
             self.approvals_reviewer,
         ):
             field.setEnabled(enabled)
+        self._sync_camera_controls()

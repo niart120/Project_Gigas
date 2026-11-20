@@ -25,7 +25,12 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     dialog = shell.dialog
     assert dialog is not None
     assert capture.refreshes == 1
-    assert dialog.capture_discovery_status.text() == "検索中"
+    assert dialog.capture_discovery_status.isHidden()
+    assert all(
+        action.isSeparator() or action in shell.window.video_device_actions.values()
+        for action in shell.window.video_menu.actions()
+        if action.isVisible()
+    )
     assert dialog.capture_choices.currentData() == "path-b"
     assert not dialog.capture_refresh_button.isEnabled()
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
@@ -39,7 +44,7 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     qtbot.waitUntil(pulse.is_set)
 
     capture.complete_enumeration(error="enumeration failed")
-    qtbot.waitUntil(lambda: dialog.capture_discovery_status.text() == "列挙失敗")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
     assert dialog.capture_choices.currentData() == "path-b"
     assert dialog.capture_choices.currentData() == "path-b"
     assert shell.window.notifications.notices["video"].details == "enumeration failed"
@@ -103,7 +108,7 @@ def test_catalog_result_does_not_hide_unconfirmed_worker_cleanup(
     capture.state = replace(
         capture.state, phase="error", cleanup="unconfirmed", error="worker cleanup failed"
     )
-    qtbot.waitUntil(lambda: dialog.capture_discovery_status.text() == "列挙失敗")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
     assert dialog.capture_choices.currentData() == "path-b"
     assert (
         dialog.capture_choices.itemText(dialog.capture_choices.findData("path-b")) == "Saved camera"
@@ -112,7 +117,7 @@ def test_catalog_result_does_not_hide_unconfirmed_worker_cleanup(
     assert not dialog.capture_refresh_button.isEnabled()
 
 
-def test_streaming_settings_use_cached_devices_without_interrupting_preview(
+def test_streaming_settings_refresh_preserves_preview_and_unsaved_selection(
     video_shell: tuple[ApplicationShell, ControlledCapture], qtbot: QtBot
 ) -> None:
     shell, capture = video_shell
@@ -141,7 +146,17 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
             == QColor("lime")
         )
     )
-    assert capture.refreshes == 0
+    assert dialog.capture_refresh_button.isEnabled()
+    dialog.capture_refresh_button.click()
+    assert not dialog.capture_refresh_button.isEnabled()
+    capture.complete_enumeration(error="catalog failure")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
+    assert shell.window.notifications.notices["video"].details == "catalog failure"
+    assert dialog.capture_refresh_button.isEnabled()
+    dialog.capture_refresh_button.click()
+    capture.complete_enumeration((DeviceInfo("New camera", "path-c"),))
+    qtbot.waitUntil(lambda: dialog.capture_choices.findData("path-c") >= 0)
+    assert capture.refreshes == 2
     assert capture.disconnects == 0
     assert len(capture.connections) == 1
     assert capture.state.generation == 1
@@ -150,7 +165,7 @@ def test_streaming_settings_use_cached_devices_without_interrupting_preview(
     assert shell.baseline.capture_device == "path-b"
     assert load_settings(shell.path) == shell.baseline
     assert dialog.values().preview_fps == 60
-    assert not dialog.capture_refresh_button.isEnabled()
+    assert dialog.capture_refresh_button.isEnabled()
 
 
 def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
@@ -171,7 +186,7 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
         assert not marker.with_suffix(".txt.opened").exists()
         dialog = shell.dialog
         assert dialog is not None
-        qtbot.waitUntil(lambda: dialog.capture_choices.count() == 3)
+        qtbot.waitUntil(lambda: dialog.capture_choices.findData("path-b") >= 0)
         shell.apply_settings(replace(shell.baseline, capture_device="path-b"))
         qtbot.waitUntil(lambda: service.snapshot().frame is not None)
         first = service.snapshot().frame
@@ -186,9 +201,10 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
                 and frame.sequence >= first.sequence + 5
             )
         )
+        qtbot.waitUntil(lambda: service.snapshot().devices_revision == 3)
         assert service.snapshot().generation == first.generation
         assert marker.with_suffix(".txt.enumerated").read_text(encoding="utf-8") == (
-            "enumerated\nenumerated\n"
+            "enumerated\nenumerated\nenumerated\n"
         )
         assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
     finally:

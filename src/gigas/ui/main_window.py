@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.input.config import PROTOCOLS
 from gigas.game_io.input.serial import SerialPort
 from gigas.ui.capture_choices import capture_device_choices
@@ -206,7 +207,8 @@ class MainWindow(QMainWindow):
         ):
             self.codex_menu.addAction(action)
         self.video_menu.addSeparator()
-        self._catalog_status = self.video_menu.addAction("未確認")
+        self._catalog_status = self.video_menu.addAction("列挙失敗")
+        self._catalog_status.setVisible(False)
         self._catalog_status.setEnabled(False)
         self.video_menu.addSeparator()
         self.video_device_actions: dict[str, QAction] = {}
@@ -300,7 +302,6 @@ class MainWindow(QMainWindow):
         devices: "tuple[DeviceInfo, ...]",
         selected_device: str,
         *,
-        searching: bool,
         error: str,
         enabled: bool,
     ) -> None:
@@ -310,13 +311,10 @@ class MainWindow(QMainWindow):
             devices: Latest successful catalog, shared with the settings dialog.
             selected_device: Saved device path, or empty for no capture. A saved
                 identity missing from the catalog remains represented.
-            searching: Whether discovery and its cleanup are pending.
             error: Current catalog failure, shown as a short state here.
             enabled: Whether selecting a device may save and apply settings.
         """
-        choices = (("未接続", ""), *capture_device_choices(devices))
-        if selected_device not in {path for _label, path in choices}:
-            choices += ((selected_device, selected_device),)
+        choices = (("未接続", ""), *capture_device_choices(devices, selected_device))
         if choices != self._video_choices:
             for action in self._video_device_group.actions():
                 self.video_menu.removeAction(action)
@@ -331,6 +329,8 @@ class MainWindow(QMainWindow):
                 action.setToolTip(f"<qt>{escape(label)}</qt>")
                 action.setData(path)
                 action.setCheckable(True)
+                if path == PONKAN_SOURCE:
+                    action.setEnabled(any(device.path == path for device in devices))
                 action.triggered.connect(
                     lambda _checked=False, selected=path: self.capture_device_requested.emit(
                         selected
@@ -342,9 +342,7 @@ class MainWindow(QMainWindow):
             self._video_choices = choices
         self.video_device_actions[selected_device].setChecked(True)
         self._video_device_group.setEnabled(enabled)
-        state = "列挙失敗" if error else "検索中" if searching else ""
-        self._catalog_status.setText(state)
-        self._catalog_status.setVisible(bool(state))
+        self._catalog_status.setVisible(bool(error))
 
     def set_window_size_state(self, key: str, *, enabled: bool) -> None:
         """Reflect the saved selection and whether a new save can be requested."""

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from gigas.game_io.capture._process import SharedSlot, receive_message, worker_main
 from gigas.game_io.capture.backend import OpenCVBackend
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.capture.frames import FrameStore
 from gigas.game_io.capture.models import CaptureError
 
@@ -58,7 +59,7 @@ class CaptureSnapshot:
 
     Attributes:
         phase: Current connection or device-list operation.
-        devices: Last successfully enumerated selectable identities.
+        devices: Latest catalog, including the currently streaming source.
         devices_revision: Zero before enumeration; increments for successful explicit
             lists and the enumeration used when connecting.
         frame: Latest valid immutable image, or None during stop and after failure.
@@ -67,6 +68,9 @@ class CaptureSnapshot:
         cleanup: Whether native release or forced process termination was confirmed.
         backend: Explicit OpenCV API identifier chosen by the current or last worker,
             or None before selection. Zero is reserved for injected test adapters.
+        catalog_warning: Device-list failure or partial result from the latest search.
+        catalog_searching: An independent search is running alongside capture.
+        catalog_cleanup_unconfirmed: Search resources could not be released.
         diagnostics: Bounded attempt failure reasons in order, retained after a
             successful fallback and reset on the next request. Intermediate failures
             do not populate error; each request tries at most two APIs.
@@ -83,6 +87,9 @@ class CaptureSnapshot:
     cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
     backend: int | None = None
     diagnostics: tuple[str, ...] = ()
+    catalog_warning: str = ""
+    catalog_searching: bool = False
+    catalog_cleanup_unconfirmed: bool = False
 
 
 class CaptureReader:
@@ -133,18 +140,8 @@ class _Session:
     cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
 
 
-class CaptureService(Thread):
-    """Own a monitor thread and at most one spawned device worker.
-
-    Construction creates no threads or device handles. Call start once, then submit
-    requests from any host thread. All request methods return without waiting for a
-    device. After shutdown, use is_alive and join(0) to observe monitor completion.
-
-    Args:
-        backend_factory: Picklable factory instantiated in the child; tests can replace
-            the device boundary while exercising the actual process transport.
-        timeouts: Startup, missing-frame, graceful-stop, and force-exit deadlines.
-    """
+class _WorkerMonitor(Thread):
+    """Supervise one device operation at a time, including bounded native cleanup."""
 
     def __init__(
         self,
@@ -159,7 +156,6 @@ class CaptureService(Thread):
         self._condition = Condition()
         self._frames = FrameStore()
         self._state = CaptureSnapshot()
-        self._pending: tuple[str, CaptureOptions | None] | None = None
         self._closing = False
         self._cancel = False
         self._retained: list[object] = []
@@ -168,47 +164,6 @@ class CaptureService(Thread):
         """Return current state and the immutable latest image without device I/O."""
         with self._condition:
             return replace(self._state, frame=self._frames.latest())
-
-    def reader(self) -> CaptureReader:
-        """Return a new read-only handle sharing this service's latest state.
-
-        Readers do not start acquisition or consume frames from one another. Keep
-        connection and shutdown ownership with this service; use separate readers
-        for preview and observation processing.
-        """
-        return CaptureReader(self.snapshot)
-
-    def refresh_devices(self) -> bool:
-        """Start enumeration unless busy, shutting down, or cleanup is unconfirmed."""
-        return self._request(None)
-
-    def connect(self, options: "CaptureOptions") -> bool:
-        """Accept a connection only when idle with no unconfirmed previous cleanup."""
-        return self._request(options)
-
-    def _request(self, options: "CaptureOptions | None") -> bool:
-        with self._condition:
-            if (
-                self._closing
-                or self._state.phase not in ("idle", "error")
-                or self._state.cleanup == "unconfirmed"
-            ):
-                return False
-            generation = self._state.generation + (options is not None)
-            self._cancel = False
-            self._pending = ("enumerate" if options is None else "capture", options)
-            self._frames.begin(generation)
-            self._state = replace(
-                self._state,
-                phase="enumerating" if options is None else "connecting",
-                generation=generation,
-                error="",
-                cleanup="none",
-                backend=None,
-                diagnostics=(),
-            )
-            self._condition.notify_all()
-            return True
 
     def disconnect(self) -> None:
         """Invalidate the image immediately and asynchronously release the current worker."""
@@ -229,22 +184,6 @@ class CaptureService(Thread):
             self._frames.invalidate()
             self._state = replace(self._state, phase="stopping")
             self._condition.notify_all()
-
-    def run(self) -> None:
-        """Serve requests until shutdown, confining all device calls to child processes."""
-        while True:
-            with self._condition:
-                while not self._closing:
-                    if self._pending is not None:
-                        _operation, options = self._pending
-                        self._pending = None
-                        generation = self._state.generation
-                        break
-                    self._condition.wait()
-                else:
-                    self._state = replace(self._state, phase="closed")
-                    return
-            self._run_request(options, generation)
 
     def _run_request(self, options: "CaptureOptions | None", generation: int) -> None:
         started = time.monotonic()
@@ -293,6 +232,8 @@ class CaptureService(Thread):
                 diagnostics = self._state.diagnostics
                 if session.error:
                     label = str(session.backend) if session.backend is not None else "未選択"
+                    if options is not None and options.device_path == PONKAN_SOURCE:
+                        label = "ponkan"
                     diagnostics += (f"取得方式 {label}: {session.error}",)
                 remaining = tuple(api for api in allowed if api not in attempted)
                 retry = (
@@ -414,13 +355,18 @@ class CaptureService(Thread):
                 session.status_closed = True
                 break
             with self._condition:
-                if message.kind == "devices":
+                if message.kind in {"devices", "ponkan"}:
+                    devices = message.devices
+                    if message.kind == "ponkan":
+                        cameras = tuple(d for d in self._state.devices if d.path != PONKAN_SOURCE)
+                        devices = (*cameras, *devices)
                     if session.slot is None:
                         session.listed = True
                     if not self._cancel:
                         self._state = replace(
                             self._state,
-                            devices=message.devices,
+                            devices=devices,
+                            catalog_warning=message.error,
                             devices_revision=self._state.devices_revision + 1,
                         )
                 elif message.kind == "candidates":
@@ -588,3 +534,195 @@ class CaptureService(Thread):
                 "error": session.error,
             },
         )
+
+
+class _CatalogSearch(_WorkerMonitor):
+    """Supervise one enumeration and deliver its result after worker cleanup."""
+
+    def __init__(
+        self,
+        owner: "CaptureService",
+        generation: int,
+    ) -> None:
+        """Prepare a one-shot search belonging to this connection generation."""
+        super().__init__(backend_factory=owner._factory, timeouts=owner._timeouts)
+        self.name = "gigas-catalog-monitor"
+        self.owner = owner
+        self.generation = generation
+
+    def run(self) -> None:
+        """Publish the completed enumeration to its owner."""
+        try:
+            self._run_request(None, self.generation)
+        finally:
+            self.owner._finish_search(self)
+
+
+class CaptureService(_WorkerMonitor):
+    """Own one capture session and allow one concurrent catalog search.
+
+    Construction creates no threads or device handles. Call start once, then submit
+    requests from any host thread. All request methods return without waiting for a
+    device. After shutdown, use is_alive and join(0) to observe monitor completion.
+
+    Args:
+        backend_factory: Picklable factory instantiated in the child; tests can replace
+            the device boundary while exercising the actual process transport.
+        timeouts: Startup, missing-frame, graceful-stop, and force-exit deadlines.
+    """
+
+    def __init__(
+        self,
+        *,
+        backend_factory: "Callable[[], CaptureBackend]" = OpenCVBackend,
+        timeouts: CaptureTimeouts | None = None,
+    ) -> None:
+        """Prepare capture and discovery without opening devices."""
+        super().__init__(backend_factory=backend_factory, timeouts=timeouts)
+        self._pending: tuple[str, CaptureOptions | None] | None = None
+        self._search: _CatalogSearch | None = None
+        self._device_path = ""
+        self._active_device: DeviceInfo | None = None
+
+    def reader(self) -> CaptureReader:
+        """Return a new read-only handle sharing this service's latest state.
+
+        Readers do not start acquisition or consume frames from one another. Keep
+        connection and shutdown ownership with this service; use separate readers
+        for preview and observation processing.
+        """
+        return CaptureReader(self.snapshot)
+
+    def _request(self, options: "CaptureOptions | None") -> bool:
+        with self._condition:
+            if (
+                self._closing
+                or self._state.phase not in ("idle", "error")
+                or self._state.cleanup == "unconfirmed"
+            ):
+                return False
+            generation = self._state.generation + (options is not None)
+            self._cancel = False
+            self._pending = ("enumerate" if options is None else "capture", options)
+            self._frames.begin(generation)
+            self._state = replace(
+                self._state,
+                phase="enumerating" if options is None else "connecting",
+                generation=generation,
+                error="",
+                cleanup="none",
+                backend=None,
+                diagnostics=(),
+            )
+            self._condition.notify_all()
+            return True
+
+    def connect(self, options: "CaptureOptions") -> bool:
+        """Start capture when the previous capture worker has finished."""
+        with self._condition:
+            if not self._request(options):
+                return False
+            self._device_path = options.device_path
+            self._active_device = None
+            return True
+
+    def refresh_devices(self) -> bool:
+        """Search once, preserving a live capture session and its frame store."""
+        with self._condition:
+            if self._closing or self._search is not None or self._state.catalog_cleanup_unconfirmed:
+                return False
+            if self._state.phase != "streaming":
+                return self._request(None)
+            if self._active_device is None:
+                self._active_device = next(
+                    (d for d in self._state.devices if d.path == self._device_path), None
+                )
+            search = _CatalogSearch(self, self._state.generation)
+            self._search = search
+            try:
+                search.start()
+            except RuntimeError:
+                self._search = None
+                self._state = replace(
+                    self._state, catalog_warning="映像機器の検索を開始できませんでした"
+                )
+                logger.exception("Failed to start catalog monitor")
+            return True
+
+    def snapshot(self) -> CaptureSnapshot:
+        """Include the active source in the catalog for the lifetime of its stream."""
+        with self._condition:
+            state = super().snapshot()
+            if self._search is not None:
+                state = replace(
+                    state,
+                    catalog_searching=True,
+                    catalog_cleanup_unconfirmed=self._search.snapshot().cleanup == "unconfirmed",
+                )
+            active = self._active_device
+            if (
+                state.phase == "streaming"
+                and active is not None
+                and all(device.path != active.path for device in state.devices)
+            ):
+                state = replace(state, devices=(*state.devices, active))
+            return state
+
+    def _finish_search(self, search: _CatalogSearch) -> None:
+        result = search.snapshot()
+        with self._condition:
+            if result.cleanup == "unconfirmed":
+                self._retained.append(search)
+                self._state = replace(self._state, catalog_cleanup_unconfirmed=True)
+            if self._state.phase == "streaming" and self._state.generation == search.generation:
+                if result.devices_revision and not result.error:
+                    self._state = replace(
+                        self._state,
+                        devices=result.devices,
+                        devices_revision=self._state.devices_revision + 1,
+                    )
+                self._state = replace(
+                    self._state, catalog_warning=result.error or result.catalog_warning
+                )
+            self._search = None
+
+    def disconnect(self) -> None:
+        """Cancel any outstanding search and release the capture worker."""
+        with self._condition:
+            if self._search is not None:
+                self._search.shutdown()
+            super().disconnect()
+
+    def shutdown(self) -> None:
+        """Request shutdown of both workers without waiting for native I/O."""
+        with self._condition:
+            if self._search is not None:
+                self._search.shutdown()
+            super().shutdown()
+
+    def _serve(self) -> None:
+        """Serve requests until shutdown, confining all device calls to child processes."""
+        while True:
+            with self._condition:
+                while not self._closing:
+                    if self._pending is not None:
+                        _operation, options = self._pending
+                        self._pending = None
+                        generation = self._state.generation
+                        break
+                    self._condition.wait()
+                else:
+                    self._state = replace(self._state, phase="closed")
+                    return
+            self._run_request(options, generation)
+
+    def run(self) -> None:
+        """Serve requests and finish both workers before reporting shutdown."""
+        try:
+            self._serve()
+        finally:
+            with self._condition:
+                search = self._search
+            if search is not None:
+                search.shutdown()
+                search.join()

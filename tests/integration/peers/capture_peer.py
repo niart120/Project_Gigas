@@ -109,6 +109,8 @@ class PeerBackend:
         if self.marker:
             with Path(self.marker + ".enumerated").open("a", encoding="utf-8") as stream:
                 stream.write("enumerated\n")
+        if self.scenario == "hide-open-device" and Path(self.marker + ".opened").exists():
+            return (IndexedDevice(DeviceInfo("New camera", "path-c"), 4),)
         return (
             IndexedDevice(DeviceInfo("Capture", "path-a"), 4),
             IndexedDevice(DeviceInfo("Capture", "path-b"), 7),

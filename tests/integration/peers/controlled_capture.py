@@ -30,11 +30,18 @@ class ControlledCapture:
         self.alive = True
 
     def refresh_devices(self) -> bool:
-        """Accept only an idle device enumeration request."""
-        if self.state.phase not in {"idle", "error"} or self.state.cleanup == "unconfirmed":
+        """Enumerate independently of an established capture session."""
+        if (
+            self.state.phase not in {"idle", "error", "streaming"}
+            or self.state.catalog_searching
+            or self.state.cleanup == "unconfirmed"
+        ):
             return False
         self.refreshes += 1
-        self.state = replace(self.state, phase="enumerating")
+        if self.state.phase == "streaming":
+            self.state = replace(self.state, catalog_searching=True)
+        else:
+            self.state = replace(self.state, phase="enumerating")
         if self.auto_enumerate:
             self.complete_enumeration()
         return True
@@ -43,6 +50,15 @@ class ControlledCapture:
         self, devices: tuple[DeviceInfo, ...] = (), *, error: str = ""
     ) -> None:
         """Publish an explicit list result, preserving prior candidates on failure."""
+        if self.state.catalog_searching:
+            self.state = replace(
+                self.state,
+                devices=self.state.devices if error else devices,
+                devices_revision=self.state.devices_revision + (not error),
+                catalog_searching=False,
+                catalog_warning=error,
+            )
+            return
         self.state = replace(
             self.state,
             phase="error" if error else "idle",
