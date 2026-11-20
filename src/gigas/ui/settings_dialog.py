@@ -102,7 +102,7 @@ class SettingsDialog(QDialog):
         selection = QHBoxLayout()
         selection.addWidget(self.capture_choices, 1)
         selection.addWidget(self.capture_refresh_button)
-        self.capture_discovery_status = QLabel(self)
+        self.capture_discovery_status = QLabel("列挙失敗", self)
         self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
         self.capture_discovery_status.hide()
         selection.addWidget(self.capture_discovery_status)
@@ -247,19 +247,15 @@ class SettingsDialog(QDialog):
         self,
         devices: "tuple[DeviceInfo, ...]",
         *,
-        searching: bool = False,
         error: str = "",
     ) -> None:
         """Refresh candidates without changing the edited device or other fields.
 
         Args:
             devices: Latest successful catalog with stable identifiers.
-            searching: Whether enumeration is in progress.
             error: Current enumeration failure, available through notification details.
         """
-        state = "列挙失敗" if error else "検索中" if searching else ""
-        self.capture_discovery_status.setText(state)
-        self.capture_discovery_status.setVisible(bool(state))
+        self.capture_discovery_status.setVisible(bool(error))
         devices = tuple(device for device in devices if device.path)
         if devices != self._devices:
             selected = str(self.capture_choices.currentData() or "")

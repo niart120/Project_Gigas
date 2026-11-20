@@ -25,7 +25,12 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     dialog = shell.dialog
     assert dialog is not None
     assert capture.refreshes == 1
-    assert dialog.capture_discovery_status.text() == "検索中"
+    assert dialog.capture_discovery_status.isHidden()
+    assert all(
+        action.isSeparator() or action in shell.window.video_device_actions.values()
+        for action in shell.window.video_menu.actions()
+        if action.isVisible()
+    )
     assert dialog.capture_choices.currentData() == "path-b"
     assert not dialog.capture_refresh_button.isEnabled()
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
@@ -39,7 +44,7 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     qtbot.waitUntil(pulse.is_set)
 
     capture.complete_enumeration(error="enumeration failed")
-    qtbot.waitUntil(lambda: dialog.capture_discovery_status.text() == "列挙失敗")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
     assert dialog.capture_choices.currentData() == "path-b"
     assert dialog.capture_choices.currentData() == "path-b"
     assert shell.window.notifications.notices["video"].details == "enumeration failed"
@@ -103,7 +108,7 @@ def test_catalog_result_does_not_hide_unconfirmed_worker_cleanup(
     capture.state = replace(
         capture.state, phase="error", cleanup="unconfirmed", error="worker cleanup failed"
     )
-    qtbot.waitUntil(lambda: dialog.capture_discovery_status.text() == "列挙失敗")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
     assert dialog.capture_choices.currentData() == "path-b"
     assert (
         dialog.capture_choices.itemText(dialog.capture_choices.findData("path-b")) == "Saved camera"
@@ -145,7 +150,7 @@ def test_streaming_settings_refresh_preserves_preview_and_unsaved_selection(
     dialog.capture_refresh_button.click()
     assert not dialog.capture_refresh_button.isEnabled()
     capture.complete_enumeration(error="catalog failure")
-    qtbot.waitUntil(lambda: dialog.capture_discovery_status.text() == "列挙失敗")
+    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
     assert shell.window.notifications.notices["video"].details == "catalog failure"
     assert dialog.capture_refresh_button.isEnabled()
     dialog.capture_refresh_button.click()
