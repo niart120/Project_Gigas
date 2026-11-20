@@ -398,6 +398,7 @@ def test_plan_updates_do_not_resize_history_or_move_reading_position(
     bar = history.verticalScrollBar()
     assert bar.value() == bar.maximum()
     if reader == "reading":
+        panel.heading.auto_scroll.setChecked(False)
         bar.setValue(bar.maximum() // 2)
     elif reader == "selected":
         selected = history.document().find("ユーザー本文 20")

@@ -96,6 +96,8 @@ class _PaneStatuses(QWidget):
             if pane is None:
                 continue
             minimum = max(0, row.minimumSizeHint().width())
+            if isinstance(pane, ConnectionPanel):
+                minimum = max(minimum, pane.heading.minimumSizeHint().width())
             if pane.minimumWidth() != minimum:
                 pane.setMinimumWidth(minimum)
             left = self.mapFromGlobal(pane.mapToGlobal(QPoint())).x()

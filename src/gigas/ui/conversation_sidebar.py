@@ -6,6 +6,7 @@ from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -62,6 +63,9 @@ class ConversationHeading(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.title, 1)
         row.addWidget(self.loading)
+        self.auto_scroll = QCheckBox("自動スクロール", self)
+        self.auto_scroll.setChecked(True)
+        row.addWidget(self.auto_scroll)
         self.play_history = QPushButton("プレイ履歴", self)
         self.play_history.hide()
         row.addWidget(self.play_history)

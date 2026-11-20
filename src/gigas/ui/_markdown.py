@@ -22,6 +22,8 @@ from PySide6.QtWidgets import QApplication
 if TYPE_CHECKING:
     from PySide6.QtCore import QUrl
 
+    from gigas.ui.transcript import ScrollUpdate
+
 COLORS = {"commentary": "#426b95", "partial_answer": "#735296", "final_answer": "#735296"}
 DARK_COLORS = {"commentary": "#82b2e0", "partial_answer": "#c1a0e5", "final_answer": "#c1a0e5"}
 LABELS = {
@@ -135,6 +137,7 @@ class ParseJob:
     font: QFont
     color: QColor
     background: QColor
+    scroll: "ScrollUpdate"
 
 
 @dataclass(slots=True)

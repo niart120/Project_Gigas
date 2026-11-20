@@ -48,6 +48,65 @@ def _request(panel: ConnectionPanel) -> None:
     )
 
 
+def test_auto_scroll_follows_live_updates_only_when_checked(qtbot: QtBot) -> None:
+    panel = _panel(qtbot)
+    panel.replace_target("未所属", "会話", thread_id="thread")
+    panel.handle_event(ServiceEvent(1, ConversationStatus("thread", "turn")))
+    view = panel.transcript
+    bar = view.verticalScrollBar()
+
+    def update(item_id: str, text: str, *, replace: bool = True) -> None:
+        panel.handle_event(
+            ServiceEvent(1, TextEvent(item_id, text, replace=replace, turn_id="turn"))
+        )
+        qtbot.waitUntil(lambda: view.rendering_idle)
+
+    update("progress", "\n\n".join(f"進捗 {i}" for i in range(60)))
+    assert bar.value() == bar.maximum() > 0
+    bar.setValue(bar.maximum() // 2)
+    update("progress", "\n\n受信した進捗", replace=False)
+    assert bar.value() == bar.maximum()
+
+    toggle = panel.heading.auto_scroll
+    toggle.click()
+    previous_maximum = bar.maximum()
+    update("progress", "\n\n新しい進捗", replace=False)
+    assert bar.value() == previous_maximum < bar.maximum()
+    bar.setValue(bar.maximum() // 2)
+    position = bar.value()
+    update("progress", "\n\n次の進捗", replace=False)
+    assert bar.value() == position
+
+    toggle.click()
+    assert bar.value() == bar.maximum()
+    view.setTextCursor(view.document().find("進捗 10"))
+    position = bar.value()
+    update("progress", "\n\n選択中の進捗", replace=False)
+    assert view.textCursor().selectedText() == "進捗 10"
+    assert bar.value() == position
+    cursor = view.textCursor()
+    cursor.clearSelection()
+    view.setTextCursor(cursor)
+    update("progress", "\n\n選択解除後の進捗", replace=False)
+    assert bar.value() == bar.maximum()
+
+    bar.setValue(bar.maximum() // 2)
+    visible = view.cursorForPosition(QPoint(int(view.document().documentMargin()), 1))
+    y = view.cursorRect(visible).top()
+    earlier = HistoryEntry("earlier", "assistant", "\n\n".join(f"以前 {i}" for i in range(30)))
+    view.prepend_items((earlier,))
+    qtbot.waitUntil(lambda: view.rendering_idle)
+    assert abs(view.cursorRect(visible).top() - y) <= 1
+    assert bar.value() < bar.maximum()
+
+    toggle.click()
+    history = HistoryEntry("history", "assistant", "\n\n".join(f"履歴 {i}" for i in range(60)))
+    panel.replace_target("未所属", "別の会話", thread_id="other", entries=(history,))
+    qtbot.waitUntil(lambda: view.rendering_idle)
+    assert not toggle.isChecked()
+    assert bar.value() == bar.maximum() > 0
+
+
 def test_reconnect_retains_documents_draft_goal_and_expired_cards(qtbot: QtBot) -> None:
     panel = _panel(qtbot)
     goal = GoalState("保存された目的", "active")

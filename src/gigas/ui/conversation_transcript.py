@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QTextFrame,
     QTextFrameFormat,
 )
+from PySide6.QtWidgets import QApplication
 
 from gigas.ui._markdown import (
     COLORS,
@@ -32,7 +33,7 @@ from gigas.ui._markdown import (
     block_snapshot,
     formatted_document,
 )
-from gigas.ui.transcript import Transcript, _Item, _utf16_length
+from gigas.ui.transcript import ScrollUpdate, Transcript, _Item, _utf16_length
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QCloseEvent, QPaintEvent, QResizeEvent, QTextDocument
@@ -110,6 +111,7 @@ class ConversationTranscript(Transcript):
         self._revisions: dict[int, int] = {}
         self._expanded: set[str] = set()
         self._expanded_groups: set[str] = set()
+        self._auto_scroll = True
         super().__init__(parent)
         self._parser = MarkdownQueue(self)
         self._parser.ready.connect(self._parsed)
@@ -128,6 +130,26 @@ class ConversationTranscript(Transcript):
     def shutdown(self) -> None:
         """Stop accepting rendering work as part of application shutdown."""
         self._parser.shutdown()
+
+    def set_auto_scroll(self, enabled: bool) -> None:
+        """Set live following and reveal the tail when enabling it.
+
+        Args:
+            enabled: Whether new content should follow the tail during live updates.
+        """
+        self._auto_scroll = enabled
+        if enabled and not self._reading():
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+    def _reading(self) -> bool:
+        focus = QApplication.focusWidget()
+        return self.textCursor().hasSelection() or (
+            focus is not None and self.viewport().isAncestorOf(focus)
+        )
+
+    def _keep_tail_during_layout(self) -> bool:
+        return self._auto_scroll and not self._reading() and super()._keep_tail_during_layout()
 
     def closeEvent(self, event: "QCloseEvent") -> None:  # noqa: N802
         """Retire the worker when a standalone view is closed."""
@@ -240,9 +262,9 @@ class ConversationTranscript(Transcript):
             return (f"{marker} {title}" + (f"\n\n{details}" if key in self._expanded else ""), "")
         return item.text, {"user": "あなた", "plan": "Plan", "answer": "回答"}.get(item.kind, "")
 
-    def _render_item(self, item: _Item) -> None:
+    def _render_item(self, item: _Item, *, scroll: ScrollUpdate = "preserve") -> None:
         if item.kind != "activity":
-            self._render_one(item)
+            self._render_one(item, scroll=scroll)
             return
         # Only the adjacent activity segment can change grouping after an update.
         items = list(self._items.values())
@@ -272,8 +294,8 @@ class ConversationTranscript(Transcript):
             group = segment[index:end]
             for member in group[1:]:
                 if id(member) in self._rendered:
-                    self._edit(member, None, [])
-            self._render_one(first, group=group if len(group) > 1 else None)
+                    self._edit(member, None, [], scroll=scroll)
+            self._render_one(first, scroll=scroll, group=group if len(group) > 1 else None)
             index = end
 
     def _group_document(self, group: list[_Item]) -> "QTextDocument":
@@ -326,19 +348,21 @@ class ConversationTranscript(Transcript):
             cursor.mergeCharFormat(fmt)
         return doc
 
-    def _render_one(self, item: _Item, *, group: list[_Item] | None = None) -> None:
+    def _render_one(
+        self, item: _Item, *, scroll: ScrollUpdate, group: list[_Item] | None = None
+    ) -> None:
         hidden = item.kind == "reasoning" and (
             not self._reasoning_visible
             or (item.entry is not None and item.entry.completed is False)
         )
         if not item.text or hidden:
             if id(item) in self._rendered:
-                self._edit(item, None, [])
+                self._edit(item, None, [], scroll=scroll)
             item.displayed = ""
             return
         if group is not None:
             doc = self._group_document(group)
-            self._edit(item, doc, block_snapshot(doc))
+            self._edit(item, doc, block_snapshot(doc), scroll=scroll)
             doc.deleteLater()
             return
         source, heading = self._presentation(item)
@@ -354,6 +378,7 @@ class ConversationTranscript(Transcript):
                     QFont(self.font()),
                     color,
                     background,
+                    scroll,
                 )
             )
             return
@@ -378,14 +403,14 @@ class ConversationTranscript(Transcript):
                 cursor.setPosition(body_start + offset)
                 cursor.setPosition(body_start + offset + length, QTextCursor.MoveMode.KeepAnchor)
                 cursor.mergeCharFormat(fmt)
-        self._edit(item, doc, block_snapshot(doc))
+        self._edit(item, doc, block_snapshot(doc), scroll=scroll)
         doc.deleteLater()
 
     def _parsed(self, result: Parsed) -> None:
         item = next((item for item in self._items.values() if id(item) == result.job.key), None)
         if item is None or result.job.revision != self._revisions.get(id(item), 0):
             return
-        self._edit(item, result.document, result.blocks)
+        self._edit(item, result.document, result.blocks, scroll=result.job.scroll)
         if item.entry is not None and item.entry.completed is not False:
             self._rendered[id(item)].blocks = []
 
@@ -404,13 +429,24 @@ class ConversationTranscript(Transcript):
                 fmt.setBottomMargin(8 + spacing)
                 rendered.frame.setFrameFormat(fmt)
 
-    def _edit(self, item: _Item, parsed: "QTextDocument | None", snapshot: Blocks) -> None:
+    def _edit(
+        self,
+        item: _Item,
+        parsed: "QTextDocument | None",
+        snapshot: Blocks,
+        *,
+        scroll: ScrollUpdate,
+    ) -> None:
         doc = self.document()
         selected = self.textCursor()
         anchor, position = selected.anchor(), selected.position()
         bar = self.verticalScrollBar()
-        following = bar.value() == bar.maximum() and not selected.hasSelection()
-        visible = self.cursorForPosition(QPoint(0, 1))
+        following = not self._reading() and (
+            (scroll == "live" and self._auto_scroll)
+            or (scroll == "initial" and bar.value() == bar.maximum())
+        )
+        # Outside the document margin Qt can return the frame boundary above the view.
+        visible = self.cursorForPosition(QPoint(int(doc.documentMargin()), 1))
         visible_position, visible_y = visible.position(), self.cursorRect(visible).top()
         old_length = doc.characterCount()
         previous = self._rendered.get(id(item))

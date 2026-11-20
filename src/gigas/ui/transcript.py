@@ -1,7 +1,7 @@
 """Item-based conversation text that retains selection and the visible passage."""
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import (
@@ -32,6 +32,9 @@ _HEADINGS = {
     "request": "",
     "answer": "回答",
 }
+
+
+type ScrollUpdate = Literal["live", "initial", "preserve"]
 
 
 @dataclass(slots=True)
@@ -169,7 +172,7 @@ class Transcript(QTextBrowser):
         item = self._item(item_id, kind)
         item.text = item.text + text if append else text
         item.emphasis = ()
-        self._render_item(item)
+        self._render_item(item, scroll="live")
 
     def update_entry(self, entry: "HistoryEntry", *, append: bool = False) -> None:
         """Retain structured public data while rendering the current literal projection.
@@ -182,7 +185,7 @@ class Transcript(QTextBrowser):
         item.text = item.text + entry.text if append else entry.text
         item.entry = replace(entry, text=item.text)
         item.emphasis = ()
-        self._render_item(item)
+        self._render_item(item, scroll="live")
 
     def item_entry(self, item_id: str) -> "HistoryEntry | None":
         """Return retained public data, or None for an absent or local-only item.
@@ -228,7 +231,7 @@ class Transcript(QTextBrowser):
         item = self._item(item_id, "plan")
         item.text = text.removesuffix("\n")
         item.emphasis = tuple(emphasis)
-        self._render_item(item)
+        self._render_item(item, scroll="live")
 
     def set_reasoning_visible(self, visible: bool) -> None:
         """Show or hide received summaries without discarding their bodies.
@@ -246,17 +249,18 @@ class Transcript(QTextBrowser):
             if item.kind == "reasoning":
                 self._render_item(item)
 
-    def prepend_items(self, entries: "tuple[HistoryEntry, ...]") -> None:
+    def prepend_items(self, entries: "tuple[HistoryEntry, ...]", *, initial: bool = False) -> None:
         """Insert an older chronological page while retaining the displayed items.
 
         Already present keys are ignored, preserving newer live text and controls.
         The existing document is edited in place; selection, its direction and
-        visible passage follow the same rules as update_item. An unselected tail
-        remains at the tail. Hidden reasoning is retained for later display.
+        visible passage follow the same rules as update_item. Hidden reasoning is
+        retained for later display.
 
         Args:
             entries: Oldest-first entries from the preceding public history page.
                 Entries retain display data and never create request controls.
+            initial: Whether these entries form the first page of a new view.
         """
         added = {
             entry.key: _Item(entry.kind, 0, text=entry.text, entry=entry)
@@ -265,7 +269,7 @@ class Transcript(QTextBrowser):
         }
         self._items = added | self._items
         for item in added.values():
-            self._render_item(item)
+            self._render_item(item, scroll="initial" if initial else "preserve")
 
     def clear(self) -> None:
         """Discard all received items and delete attached or hidden controls."""
@@ -279,9 +283,7 @@ class Transcript(QTextBrowser):
     def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
         """Keep the tail or visible passage when surrounding controls change size."""
         scrollbar = self.verticalScrollBar()
-        following = (
-            scrollbar.value() == scrollbar.maximum() and not self.textCursor().hasSelection()
-        )
+        following = self._keep_tail_during_layout()
         visible = self.cursorForPosition(QPoint(0, 1))
         visible_y = self.cursorRect(visible).top()
         super().resizeEvent(event)
@@ -340,7 +342,7 @@ class Transcript(QTextBrowser):
 
     def _refresh_controls(self) -> None:
         bar = self.verticalScrollBar()
-        following = bar.value() == bar.maximum() and not self.textCursor().hasSelection()
+        following = self._keep_tail_during_layout()
         visible = self.cursorForPosition(QPoint(0, 1))
         visible_y = self.cursorRect(visible).top()
         self._layout_controls()
@@ -348,6 +350,10 @@ class Transcript(QTextBrowser):
             bar.maximum() if following else bar.value() + self.cursorRect(visible).top() - visible_y
         )
         self._position_controls()
+
+    def _keep_tail_during_layout(self) -> bool:
+        bar = self.verticalScrollBar()
+        return bar.value() == bar.maximum() and not self.textCursor().hasSelection()
 
     def _layout_controls(self) -> None:
         if not self._controls or self._laying_out_controls:
@@ -414,7 +420,8 @@ class Transcript(QTextBrowser):
         item.kind = kind
         return item
 
-    def _render_item(self, item: _Item) -> None:
+    def _render_item(self, item: _Item, *, scroll: ScrollUpdate = "preserve") -> None:
+        del scroll  # The plain view uses the same scroll rules for all edits.
         hidden = item.kind == "reasoning" and not self._reasoning_visible
         heading = (
             f"{_HEADINGS[item.kind]}\n" if self._show_headings and _HEADINGS[item.kind] else ""
