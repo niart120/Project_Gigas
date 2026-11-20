@@ -76,6 +76,8 @@ def test_omitted_and_unknown_fields_use_defaults(tmp_path: Path) -> None:
         ("[project]\nlast_path = 42\n", "last_path"),
         ("[gui]\nshow_reasoning = 1\n", "show_reasoning"),
         ('[gui]\nshow_reasoning = "false"\n', "show_reasoning"),
+        ("[gui]\nauto_archive_days = true\n", "auto_archive_days"),
+        ("[gui]\nauto_archive_days = 8\n", "auto_archive_days"),
     ],
 )
 def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: str) -> None:
@@ -95,6 +97,7 @@ def test_invalid_known_setting_is_rejected(tmp_path: Path, source: str, field: s
         ("auth_method", "api_key"),
         ("show_reasoning", 0),
         ("show_reasoning", "false"),
+        ("auto_archive_days", 5),
     ],
 )
 def test_invalid_setting_cannot_be_saved(tmp_path: Path, field: str, invalid: object) -> None:

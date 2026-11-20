@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
+from gigas.app.archives import ArchiveController
 from gigas.app.conversations import ConversationController
 from gigas.app.projects import ProjectController
 from gigas.app.settings_worker import OperationResult, SettingsIO, SettingsWorker
@@ -178,6 +179,8 @@ class ApplicationShell(QObject):
         self.service.finished.connect(self._service_finished)
         self.conversations = ConversationController(self.window, self.service, self)
         self.projects = ProjectController(self.window, self.service, self.conversations, self)
+        self.archives = ArchiveController(self.conversations)
+        self.projects.archive_project_ready.connect(self.archives.bulk)
         panel.state_changed.connect(self._render)
 
     def start(self) -> None:
@@ -385,6 +388,7 @@ class ApplicationShell(QObject):
             self.baseline.auth_method,
             execution_settings=_execution_settings(self.baseline),
         )
+        self.archives.reset_connection()
         self.conversations.activate(self.service.connect_runtime(options))
         self._render()
 
@@ -494,6 +498,7 @@ class ApplicationShell(QObject):
             return
         if self.dialog is None:
             self.dialog = SettingsDialog(self.path, self.window)
+            self.archives.attach(self.dialog)
             self.dialog.codex_form.insertRow(0, self.window.connection.codex_settings)
             self.window.connection.codex_settings.show()
             self.dialog.save_button.clicked.connect(lambda _checked: self.apply_settings())
@@ -637,6 +642,7 @@ class ApplicationShell(QObject):
             },
         )
         self.baseline = settings
+        self.archives.auto_archive_days = settings.auto_archive_days
         self.ready = True
         if self.dialog is not None and self.dialog.isVisible():
             self.dialog.set_values(
@@ -734,6 +740,7 @@ class ApplicationShell(QObject):
         self.conversations.set_available(
             not closing and not self._service_unavailable, project_pending=self._project_pending
         )
+        self.archives.render(available=not closing and not self._service_unavailable)
         self.window.new_project_action.setEnabled(
             self._can_edit
             and self.conversations.can_switch

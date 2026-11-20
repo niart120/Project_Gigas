@@ -97,6 +97,46 @@ def test_thread_read_returns_metadata_and_missing_workspace_without_resuming(
     asyncio.run(scenario())
 
 
+def test_global_listing_uses_update_order_and_only_explicit_read_states(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with _client(tmp_path) as (client, peer):
+            peer.responses["thread/list"] = {
+                "data": [{**_thread(tmp_path), "id": tid} for tid in ("seen", "unread", "unknown")],
+                "readStates": {
+                    "seen": {"firstUnread": None, "revision": "r1"},
+                    "unread": {"firstUnread": {"type": "threadStart"}, "revision": "r2"},
+                },
+            }
+            page = await client.list_all_threads(
+                archived=False, cursor="next", sort_direction="asc"
+            )
+            assert page.read_ids == {"seen"}
+            assert [thread.is_read for thread in page.threads] == [True, False, None]
+            assert page.threads[1].unread_revision == "r2"
+            assert peer.calls[-1] == (
+                "thread/list",
+                {
+                    "archived": False,
+                    "modelProviders": [],
+                    "sortKey": "updated_at",
+                    "limit": 50,
+                    "sortDirection": "asc",
+                    "cursor": "next",
+                    "useStateDbOnly": True,
+                },
+            )
+            peer.responses["thread/readState/update"] = {
+                "readState": {"firstUnread": None, "revision": "r3"}
+            }
+            await client.mark_read("unread", "r2")
+            assert peer.calls[-1] == (
+                "thread/readState/update",
+                {"threadId": "unread", "expectedRevision": "r2", "operation": {"type": "read"}},
+            )
+
+    asyncio.run(scenario())
+
+
 def test_turn_page_requests_full_items_and_preserves_bodies_and_error_metadata(
     tmp_path: Path,
 ) -> None:

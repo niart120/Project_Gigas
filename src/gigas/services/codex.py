@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -15,7 +16,8 @@ from gigas.runtime.codex.connection import (
 from gigas.runtime.codex.launch import create_connection
 from gigas.runtime.codex.management import CodexManagement
 from gigas.runtime.codex.models import DialogueEvent, ExecutionSettings, TextEvent
-from gigas.runtime.codex.transport import RpcNotification
+from gigas.runtime.codex.transport import RpcError, RpcNotification, TransportError
+from gigas.services import _archive_management as archive
 from gigas.services._conversation_execution import ConversationExecution
 from gigas.services._conversation_resources import ConversationResources, recording_reason
 from gigas.services._conversation_selection import ConversationSelection
@@ -35,7 +37,12 @@ from gigas.services.codex_models import (
     ServiceOperation,
     ServiceResult,
 )
-from gigas.services.conversations import ManagementResult, StoredConversationTarget
+from gigas.services.conversations import (
+    ArchiveResult,
+    ManagementResult,
+    NewConversationTarget,
+    StoredConversationTarget,
+)
 from gigas.services.input import InputService, InputServiceError, OperationResult
 from gigas.services.projects import ProjectFolderStatus
 
@@ -48,7 +55,7 @@ if TYPE_CHECKING:
     from gigas.game_io.capture import CaptureReader
     from gigas.game_io.observation import ObservationResolution
     from gigas.runtime.codex.connection import RuntimeEvent
-    from gigas.runtime.codex.management import ProjectInfo
+    from gigas.runtime.codex.management import ProjectInfo, ThreadInfo
     from gigas.runtime.codex.models import (
         ConnectionEvent,
         ConnectionOptions,
@@ -83,6 +90,8 @@ class _OperationContext:
 
 type _ConversationCall = Callable[[ConversationExecution], Awaitable[str | bool | None]]
 type _OperationCall = Callable[[], Awaitable[str | bool | None]]
+
+_MUTATIONS = frozenset({"project_update", "project_delete", "archive", "auto_archive", "restore"})
 
 
 class CodexService:
@@ -143,6 +152,7 @@ class CodexService:
         self._closing: asyncio.Task[None] | None = None
         self._tasks: dict[asyncio.Task[None], _OperationContext | None] = {}
         self._project_task: asyncio.Task[object] | None = None
+        self._unconfirmed_selected_archive: str | None = None
 
     def connect_runtime(self, options: "ConnectionOptions", generation: int) -> None:
         """Start the connection attempt identified by the application's request number."""
@@ -252,9 +262,98 @@ class CodexService:
         """Read one assignment page; None explicitly requests unassigned threads."""
         self._submit_management(
             "threads",
-            lambda c: CodexManagement(c).list_threads(project_id, cursor=cursor),
+            lambda c: CodexManagement(c).list_threads(
+                project_id, cursor=cursor, limit=5, sort_key="updated_at", sort_direction="desc"
+            ),
             project_id=project_id,
         )
+
+    def list_archived_threads(self, *, cursor: str | None = None) -> None:
+        """Fetch one page of archived threads across all assignments."""
+        self._submit_management(
+            "archived", lambda c: CodexManagement(c).list_all_threads(archived=True, cursor=cursor)
+        )
+
+    def archive_threads(self, project_id: str | None, thread_ids: tuple[str, ...]) -> None:
+        """Archive the confirmed IDs under their expected project assignment."""
+        confirmed: list[ThreadInfo] = []
+        self._submit_management(
+            "archive",
+            lambda c: self._archive_threads(c, project_id, thread_ids, confirmed),
+            project_id=project_id,
+            confirmed=confirmed,
+        )
+
+    def restore_thread(self, thread_id: str) -> None:
+        """Restore a thread to its current assignment without selecting it."""
+        self._submit_management(
+            "restore", lambda c: self._project_manager(c).restore_thread(thread_id)
+        )
+
+    def auto_archive_threads(self, days: int) -> None:
+        """Archive idle, read conversations older than the configured number of days."""
+        confirmed: list[ThreadInfo] = []
+        self._submit_management(
+            "auto_archive",
+            lambda c: self._archive_threads(c, None, (), confirmed, days=days),
+            confirmed=confirmed,
+        )
+
+    async def _archive_threads(
+        self,
+        connection: CodexConnection,
+        project_id: str | None,
+        thread_ids: tuple[str, ...],
+        confirmed: "list[ThreadInfo]",
+        *,
+        days: int | None = None,
+    ) -> None:
+        management = CodexManagement(connection)
+        target = self._selection.target
+        selected_id = target.thread_id if isinstance(target, StoredConversationTarget) else None
+        cutoff = None
+        if days is None:
+            candidates = [(thread_id, project_id) for thread_id in dict.fromkeys(thread_ids)]
+        elif days > 0:
+            cutoff = time.time() - days * 86400
+            candidates = await archive.expired_threads(management, cutoff, selected_id)
+        else:
+            return
+        for thread_id, assignment in candidates:
+            self._require_switch(connection)
+            thread = await management.read_thread(thread_id)
+            self._require_switch(connection)
+            if cutoff is not None and not archive.eligible(thread, cutoff, selected_id):
+                continue
+            if thread.id != thread_id or thread.project_id != assignment:
+                raise CodexConnectionError("チャットの所属が変わりました。一覧を開き直してください")
+            if thread_id == selected_id:
+                await self._release_selection(connection)
+                self._require_switch(connection)
+                self._unconfirmed_selected_archive = thread_id
+            try:
+                await management.archive_thread(thread_id)
+            except RpcError:
+                if self._connection is connection:
+                    self._unconfirmed_selected_archive = None
+                raise
+            except (CodexConnectionError, TransportError):
+                try:
+                    recovered = await archive.find_archived(management, thread_id)
+                except (CodexConnectionError, TransportError) as failure:
+                    message = "アーカイブ結果を確認できません。再接続して一覧を確認してください"
+                    raise ProjectUpdateError(message) from failure
+                if recovered is None:
+                    if self._connection is connection:
+                        self._unconfirmed_selected_archive = None
+                    raise
+                thread = recovered
+            confirmed.append(thread)
+            if self._connection is connection:
+                self._unconfirmed_selected_archive = None
+                if thread_id == selected_id:
+                    self._selection.refresh_thread(thread)
+                self._selection.archived(thread_id)
 
     def new_conversation(self, project_id: str | None = None) -> None:
         """Select an unstarted assignment after releasing an idle prior conversation."""
@@ -574,7 +673,33 @@ class CodexService:
             connection = self._factory(options, receive)
             self._connection = connection
             self._conversation = self._make_execution(connection)
-        await connection.open()
+        pending = self._unconfirmed_selected_archive
+        if pending is None:
+            await connection.open()
+            return
+        # Only an interrupted write to the current selection requires recovery on connect.
+        owner = asyncio.current_task()
+        self._project_task = owner
+        try:
+            await connection.open()
+            archived = await archive.find_archived(CodexManagement(connection), pending)
+            if self._require_management(generation) is connection:
+                if archived is not None:
+                    self._selection.refresh_thread(archived)
+                    target = self._selection.archived(pending)
+                    self.management_completed(
+                        ManagementResult(
+                            generation, "archive_reconciled", ArchiveResult((archived,), target)
+                        )
+                    )
+                self._unconfirmed_selected_archive = None
+        except (Exception, asyncio.CancelledError):
+            if self._connection is connection:
+                await self._close_connection()
+            raise
+        finally:
+            if self._project_task is owner:
+                self._project_task = None
 
     def _make_execution(self, connection: CodexConnection) -> ConversationExecution:
         def emit(event: "ConnectionEvent") -> None:
@@ -659,24 +784,24 @@ class CodexService:
     def _submit_management(
         self,
         operation: "ManagementOperation",
-        call: "Callable[[CodexConnection], Awaitable[ManagementValue]]",
+        call: "Callable[[CodexConnection], Awaitable[ManagementValue | None]]",
         *,
         project_id: str | None = None,
+        confirmed: "list[ThreadInfo] | None" = None,
     ) -> None:
         generation = self._generation
-        self._track(asyncio.create_task(self._manage(generation, operation, call, project_id)))
+        self._track(
+            asyncio.create_task(self._manage(generation, operation, call, project_id, confirmed))
+        )
 
     def _admit_management(
         self, connection: CodexConnection, operation: "ManagementOperation"
     ) -> None:
-        if self._project_task is not None and operation in {
-            "new",
-            "select",
-            "project_update",
-            "project_delete",
-        }:
-            raise CodexConnectionError("プロジェクトの更新が完了していません")
-        if operation in {"project_update", "project_delete"}:
+        if self._project_task is not None and (
+            operation in _MUTATIONS or operation in {"new", "select"}
+        ):
+            raise CodexConnectionError("会話管理の更新が完了していません")
+        if operation in _MUTATIONS:
             self._require_switch(connection)
             if self._selection.busy:
                 raise CodexConnectionError("会話の選択が完了していません")
@@ -685,13 +810,14 @@ class CodexService:
         self,
         generation: int,
         operation: "ManagementOperation",
-        call: "Callable[[CodexConnection], Awaitable[ManagementValue]]",
+        call: "Callable[[CodexConnection], Awaitable[ManagementValue | None]]",
         project_id: str | None,
+        confirmed: "list[ThreadInfo] | None",
     ) -> None:
         target = self._selection.target
         value = None
         error = ""
-        mutation = operation in {"project_update", "project_delete"}
+        mutation = operation in _MUTATIONS
         owner = asyncio.current_task()
         connection = None
         try:
@@ -723,6 +849,16 @@ class CodexService:
         finally:
             if self._project_task is owner:
                 self._project_task = None
+        if confirmed is not None:
+            selection = self._selection.target
+            new_target = (
+                selection
+                if isinstance(selection, NewConversationTarget)
+                and isinstance(target, StoredConversationTarget)
+                and any(thread.id == target.thread_id for thread in confirmed)
+                else None
+            )
+            value = ArchiveResult(tuple(confirmed), new_target)
         if operation == "history" and (
             target is not self._selection.target or generation != self._active_generation
         ):
@@ -780,11 +916,26 @@ class CodexService:
         self, connection: CodexConnection, thread_id: str
     ) -> "ManagementValue":
         self._require_switch(connection)
-        return await self._selection.select(
-            CodexManagement(connection),
+        management = CodexManagement(connection)
+        result = await self._selection.select(
+            management,
             thread_id,
             release=lambda: self._release_selection(connection),
         )
+        revision = result.thread.unread_revision
+        if revision is not None:
+            self._track(asyncio.create_task(self._mark_read(management, thread_id, revision)))
+        return result
+
+    async def _mark_read(self, management: CodexManagement, thread_id: str, revision: str) -> None:
+        """Acknowledge the observed revision without consuming a later unread turn."""
+        try:
+            await management.mark_read(thread_id, revision)
+        except (TransportError, CodexConnectionError):
+            logger.info(
+                "Read state not acknowledged for the viewed revision",
+                extra={"event": "codex.read_state_unconfirmed", "thread_id": thread_id},
+            )
 
     async def _release_selection(self, connection: CodexConnection) -> None:
         execution = self._require_switch(connection)
@@ -860,12 +1011,12 @@ class CodexService:
     async def _select_project(
         self, path: "Path", *, generation: int, create: bool
     ) -> "ProjectInfo":
-        if self._project_task is not None:
-            raise CodexConnectionError("プロジェクトの更新が完了していません")
         connection = self._require_management(generation)
+        self._admit_management(connection, "new")
         execution = self._require_switch(connection)
         target = self._selection.target
         project = await select_project(CodexManagement(connection), path, create=create)
+        self._admit_management(connection, "new")
         if (
             self._require_management(generation) is not connection
             or self._require_switch(connection) is not execution

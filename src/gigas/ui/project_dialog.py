@@ -143,3 +143,33 @@ def project_delete_confirmation(project: "ProjectInfo", parent: QWidget) -> QMes
         buttons.setCenterButtons(True)
     box.setWindowModality(Qt.WindowModality.NonModal)
     return box
+
+
+def archive_confirmation(
+    *, name: str, count: int | None, discard_draft: bool, parent: QWidget
+) -> QMessageBox:
+    """Confirm a chat or a project's fetched count, including draft disposal when necessary.
+
+    Args:
+        name: Name of the chat or project affected.
+        count: Number of chats in a project, or None for a single chat.
+        discard_draft: Whether confirming will discard the current message draft.
+        parent: Main window owning the nonmodal confirmation.
+
+    Returns:
+        A dialog that reports Yes only after explicit confirmation.
+    """
+    box = QMessageBox(parent)
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.setWindowTitle("チャットをアーカイブ" if count is None else "チャットを一括アーカイブ")
+    target = f"「{name}」" if count is None else f"「{name}」のチャット {count} 件"
+    box.setText(f"{target}をアーカイブしますか？")  # noqa: RUF001 -- Japanese question.
+    if discard_draft:
+        box.setInformativeText("開いているチャットの未送信の原稿を破棄します。")
+    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+    box.button(QMessageBox.StandardButton.Yes).setText("アーカイブ")
+    box.button(QMessageBox.StandardButton.Cancel).setText("キャンセル")
+    box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+    box.setEscapeButton(QMessageBox.StandardButton.Cancel)
+    box.setWindowModality(Qt.WindowModality.NonModal)
+    return box

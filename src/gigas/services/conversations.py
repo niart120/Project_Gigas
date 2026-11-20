@@ -107,6 +107,19 @@ class HistoryResult:
     page: HistoryPage
 
 
+@dataclass(frozen=True, slots=True)
+class ArchiveResult:
+    """Confirmed changes, including the completed portion of an interrupted batch.
+
+    Attributes:
+        threads: Archived threads with their assignments at the time of the operation.
+        new_target: New assignment if the selected thread was archived.
+    """
+
+    threads: "tuple[ThreadInfo, ...]"
+    new_target: NewConversationTarget | None
+
+
 type ManagementOperation = Literal[
     "projects",
     "threads",
@@ -117,6 +130,11 @@ type ManagementOperation = Literal[
     "project_folder",
     "project_update",
     "project_delete",
+    "archived",
+    "archive",
+    "archive_reconciled",
+    "auto_archive",
+    "restore",
 ]
 type ManagementValue = (
     ProjectPage
@@ -127,6 +145,8 @@ type ManagementValue = (
     | ProjectDetails
     | ProjectDeleted
     | ProjectFolderStatus
+    | ArchiveResult
+    | ThreadInfo
 )
 
 

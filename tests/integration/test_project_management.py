@@ -84,6 +84,10 @@ class ProjectPeer(FakePeer):
             }
         elif method == "thread/read":
             self.responses[method] = {"thread": dict(self.members[str(params["threadId"])])}
+        elif method == "thread/unarchive":
+            tid = str(params["threadId"])
+            self.archived.remove(tid)
+            self.responses[method] = {"thread": dict(self.members[tid])}
         elif method == "thread/goal/get":
             self.responses[method] = {
                 "goal": {
@@ -206,7 +210,7 @@ def test_partial_update_can_be_reconciled_by_a_new_coordinator(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("reason", ["archived", "active_goal", "second_page"])
+@pytest.mark.parametrize("reason", ["active_goal", "second_page"])
 def test_preflight_failure_does_not_change_registration_or_release_resources(
     tmp_path: Path, reason: str
 ) -> None:
@@ -214,9 +218,7 @@ def test_preflight_failure_does_not_change_registration_or_release_resources(
         root = tmp_path / "new"
         root.mkdir()
         peer = ProjectPeer(tmp_path)
-        if reason == "archived":
-            peer.archived.add("thread-1")
-        elif reason == "active_goal":
+        if reason == "active_goal":
             peer.active_goal = "thread-1"
         else:
             peer.fail_second_page = True
@@ -230,6 +232,63 @@ def test_preflight_failure_does_not_change_registration_or_release_resources(
             assert not any(
                 method in {"thread/resume", "project/update"} for method, _ in peer.calls
             )
+        finally:
+            await connection.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("delete_project", [False, True])
+def test_folder_change_defers_archived_workspace_until_restore(
+    tmp_path: Path, delete_project: bool
+) -> None:
+    async def scenario() -> None:
+        root = tmp_path / "new"
+        root.mkdir()
+        peer = ProjectPeer(tmp_path)
+        peer.archived.add("thread-1")
+        peer.active_goal = "thread-1"
+        manager, connection, _ = await coordinator(peer, tmp_path)
+        try:
+            details = await manager.update(peer.project, name="Changed", root=root)
+            assert [thread.cwd for thread in details.archived] == [tmp_path]
+            assert not details.pending
+            if delete_project:
+                await manager.delete(details.project)
+            before = len(peer.calls)
+            thread = await manager.restore_thread("thread-1")
+            assert thread.id == "thread-1"
+            assert thread.cwd == (tmp_path if delete_project else root)
+            assert thread.project_id == (None if delete_project else details.project.id)
+            assert not peer.archived
+            calls = peer.calls[before:]
+            assert not any(m.startswith(("turn/", "thread/goal/")) for m, _ in calls)
+            resumes = [p for m, p in calls if m == "thread/resume"]
+            assert len(resumes) == (0 if delete_project else 1)
+            if resumes:
+                assert resumes[0] is not None
+                config = resumes[0]["config"]
+                assert isinstance(config, dict)
+                assert config["features.goals"] is False
+        finally:
+            await connection.close()
+
+    asyncio.run(scenario())
+
+
+def test_restore_failure_retains_workspace_mismatch_for_execution_guard(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        peer = ProjectPeer(tmp_path)
+        peer.archived.add("thread-1")
+        peer.members["thread-1"]["cwd"] = str(tmp_path / "old")
+        peer.reject_thread = "thread-1"
+        manager, connection, _ = await coordinator(peer, tmp_path)
+        try:
+            with pytest.raises(CodexConnectionError, match="復元を確認"):
+                await manager.restore_thread("thread-1")
+            details = await manager.inspect(peer.project.id)
+            assert [t.id for t in details.pending] == ["thread-1"]
+            assert not details.archived
         finally:
             await connection.close()
 

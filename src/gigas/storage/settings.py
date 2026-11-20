@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     from gigas.game_io.observation import ObservationResolution
 
+AUTO_ARCHIVE_DAYS = (0, 1, 7, 14, 30, 90)
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -48,6 +50,7 @@ class Settings:
         memory_enabled: Enable Codex memory generation and use together. Saving false
             does not delete any previously stored memory.
         approvals_reviewer: Delegate approval to auto_review, or request the user.
+        auto_archive_days: Archive read chats after this many inactive days. Zero disables it.
     """
 
     capture_device: str = ""
@@ -69,6 +72,7 @@ class Settings:
     memory_enabled: bool = True
     approvals_reviewer: Literal["auto_review", "user"] = "auto_review"
     codex_auto_connect: bool = False
+    auto_archive_days: int = 0
 
 
 class SettingsError(ValueError):
@@ -165,6 +169,7 @@ def _settings_from_document(document: MutableMapping[str, object], path: "Path")
             gui.get("preview_letterbox", True), path, "gui.preview_letterbox"
         ),
         show_reasoning=_boolean(gui.get("show_reasoning", True), path, "gui.show_reasoning"),
+        auto_archive_days=_auto_archive_days(gui.get("auto_archive_days", 0), path),
         web_search_enabled=_boolean(
             agent.get("web_search_enabled", True), path, "agent.web_search_enabled"
         ),
@@ -199,6 +204,9 @@ def save_settings(path: "Path", settings: Settings) -> None:
     serial = _ensure_table(controller, "serial", path)
     agent = _ensure_table(document, "agent", path)
     gui = _ensure_table(document, "gui", path)
+    days = _auto_archive_days(settings.auto_archive_days, path)
+    if gui.get("auto_archive_days") != days:
+        gui["auto_archive_days"] = days
     _set_text(gui, "window_size_preset", _window_size_preset(settings.window_size_preset, path))
     for key, value in (
         ("preview_letterbox", settings.preview_letterbox),
@@ -349,6 +357,13 @@ def _boolean(value: object, path: Path, key: str) -> bool:
         msg = f"{path}: {key} must be a boolean"
         raise SettingsError(msg)
     return value
+
+
+def _auto_archive_days(value: object, path: Path) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value not in AUTO_ARCHIVE_DAYS:
+        msg = f"{path}: gui.auto_archive_days must be one of {AUTO_ARCHIVE_DAYS}"
+        raise SettingsError(msg)
+    return int(value)
 
 
 def _approvals_reviewer(value: object, path: Path) -> Literal["auto_review", "user"]:

@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPalette
+from PySide6.QtGui import QContextMenuEvent, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -104,6 +104,32 @@ class _GroupButton(QToolButton):
         painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
 
 
+class _ThreadList(QListWidget):
+    archive_requested = Signal(str)
+    archive_enabled = False
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802 -- Qt override
+        keyboard = event.reason() == QContextMenuEvent.Reason.Keyboard
+        item = self.currentItem() if keyboard else self.itemAt(event.pos())
+        if item is None or not self.isEnabled() or not self.archive_enabled:
+            return
+        thread_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(thread_id, str):
+            return
+        menu = QMenu(self)
+        action = menu.addAction("アーカイブ")
+
+        def archive() -> None:
+            if self.archive_enabled and self.isEnabled():
+                self.archive_requested.emit(thread_id)
+
+        action.triggered.connect(archive)
+        menu.aboutToHide.connect(menu.deleteLater)
+        position = self.visualItemRect(item).center() if keyboard else event.pos()
+        menu.popup(self.viewport().mapToGlobal(position))
+        event.accept()
+
+
 class _ConversationGroup(QWidget):
     """Display one assignment and its fetched rows, with separate local loading."""
 
@@ -113,6 +139,7 @@ class _ConversationGroup(QWidget):
     more_requested = Signal(str)
     edit_requested = Signal()
     delete_requested = Signal()
+    archive_project_requested = Signal()
 
     def __init__(self, name: str, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -141,8 +168,11 @@ class _ConversationGroup(QWidget):
         self.new_button.clicked.connect(self.new_requested)
         self.menu = QMenu(self)
         self.edit_action = self.menu.addAction("編集")
+        self.archive_action = self.menu.addAction("チャットを一括アーカイブ")
+        self.menu.addSeparator()
         self.delete_action = self.menu.addAction("プロジェクトを削除")
         self.edit_action.triggered.connect(self.edit_requested)
+        self.archive_action.triggered.connect(self.archive_project_requested)
         self.delete_action.triggered.connect(self.delete_requested)
         self.menu_button = QToolButton(self)
         self.menu_button.setText("…")
@@ -165,7 +195,7 @@ class _ConversationGroup(QWidget):
         self.loading = QLabel("読込中", self.content)
         self.empty = QLabel("スレッドはありません", self.content)
         self.empty.setForegroundRole(QPalette.ColorRole.PlaceholderText)
-        self.threads = QListWidget(self.content)
+        self.threads = _ThreadList(self.content)
         self.threads.setFrameShape(QFrame.Shape.NoFrame)
         self.threads.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.threads.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -306,6 +336,8 @@ class ConversationSidebar(QScrollArea):
     threads_more_requested = Signal(object, str)
     edit_requested = Signal(str)
     delete_requested = Signal(str)
+    archive_requested = Signal(object, str)
+    archive_project_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Create an empty unassigned group with conversation actions disabled."""
@@ -342,6 +374,10 @@ class ConversationSidebar(QScrollArea):
         group.opened.connect(lambda: self.group_opened.emit(project_id))
         group.new_requested.connect(lambda: self.new_requested.emit(project_id))
         group.thread_requested.connect(self.thread_requested)
+        group.threads.archive_enabled = self._management_enabled
+        group.threads.archive_requested.connect(
+            lambda thread_id: self.archive_requested.emit(project_id, thread_id)
+        )
         group.more_requested.connect(
             lambda cursor: self.threads_more_requested.emit(project_id, cursor)
         )
@@ -350,6 +386,9 @@ class ConversationSidebar(QScrollArea):
             group.menu_button.setEnabled(self._management_enabled)
             group.edit_requested.connect(lambda: self.edit_requested.emit(project_id))
             group.delete_requested.connect(lambda: self.delete_requested.emit(project_id))
+            group.archive_project_requested.connect(
+                lambda: self.archive_project_requested.emit(project_id)
+            )
         self._rows.addWidget(group)
         self._groups[project_id] = group
         group.set_actions_enabled(self._enabled)
@@ -370,6 +409,7 @@ class ConversationSidebar(QScrollArea):
         """Set project-menu admission independently of list expansion."""
         self._management_enabled = enabled
         for project_id, group in self._groups.items():
+            group.threads.archive_enabled = enabled
             if project_id is not None:
                 group.menu_button.setEnabled(enabled)
 

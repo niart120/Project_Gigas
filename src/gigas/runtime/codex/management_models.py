@@ -52,6 +52,8 @@ class ThreadInfo:
         model: Stored or loaded model, or None when unavailable.
         reasoning_effort: Stored or loaded effort, or None when unavailable.
         status: Complete public runtime-status object; not adopted as local execution state.
+        is_read: Confirmed read state, or None when the server did not supply one.
+        unread_revision: Opaque revision for marking this unread snapshot as read.
     """
 
     id: str
@@ -64,6 +66,8 @@ class ThreadInfo:
     model: str | None
     reasoning_effort: str | None
     status: "JsonObject"
+    is_read: bool | None = None
+    unread_revision: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +83,11 @@ class ThreadPage:
     threads: tuple[ThreadInfo, ...]
     next_cursor: str | None
     backwards_cursor: str | None
+
+    @property
+    def read_ids(self) -> frozenset[str]:
+        """Return the IDs the server explicitly reported as read."""
+        return frozenset(thread.id for thread in self.threads if thread.is_read is True)
 
 
 @dataclass(frozen=True, slots=True)

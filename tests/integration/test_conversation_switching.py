@@ -390,7 +390,17 @@ def test_public_listing_results_keep_scope_and_one_opaque_page(
         if m.endswith("/list") and m.startswith(("project/", "thread/"))
     ] == [
         ("project/list", {"cursor": "projects:/+?"}),
-        ("thread/list", {"cursor": "threads:/+?", "projectId": None, "modelProviders": []}),
+        (
+            "thread/list",
+            {
+                "cursor": "threads:/+?",
+                "projectId": None,
+                "modelProviders": [],
+                "sortKey": "updated_at",
+                "sortDirection": "desc",
+                "limit": 5,
+            },
+        ),
     ]
 
 

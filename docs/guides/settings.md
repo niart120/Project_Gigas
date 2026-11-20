@@ -19,6 +19,7 @@ last_path = ""
 window_size_preset = "full_hd"
 preview_letterbox = true
 show_reasoning = true
+auto_archive_days = 0
 
 [controller.serial]
 port = ""
@@ -45,6 +46,7 @@ approvals_reviewer = "auto_review"
 | `gui.window_size_preset` | 表示サイズ。`hd`・`full_hd`・`wqhd`・`four_k`のいずれか。既定は`full_hd` |
 | `gui.preview_letterbox` | `true`は比率を保ち黒い余白を付ける「レターボックス」、`false`は表示枠へ合わせる「ストレッチ」。取得画像は変更しない |
 | `gui.show_reasoning` | 会話内の公開推論要約を表示する真偽値。既定は`true`。受信は止めない |
+| `gui.auto_archive_days` | 最終更新から自動アーカイブまでの日数。既定は `0`（無効）。`1`・`7`・`14`・`30`・`90` から選べる |
 | `controller.serial.port` | シリアルポート名。例は `COM3` |
 | `controller.serial.protocol` | `ch552`（既定）・`pokecon`・`3ds`のいずれか |
 | `controller.serial.baudrate` | 整数の通信速度。省略時はCH552/PokeConで9600、3DSで115200。CH552は9600、PokeConは9600/19200/38400/57600/115200、3DSは9600/19200/57600/115200から選ぶ |
