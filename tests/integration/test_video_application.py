@@ -94,7 +94,7 @@ def test_apply_saves_then_waits_for_cleanup_before_new_frames(
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: len(capture.connections) == 2)
     assert capture.connections[-1] == CaptureOptions("path-b", fps=30)
-    assert capture.refreshes == 0
+    assert capture.refreshes == 1  # Opening settings searches once while streaming.
     assert shell.video.applying
     capture.stream()
     qtbot.waitUntil(lambda: not shell.video.applying)
@@ -160,7 +160,7 @@ def test_failed_switch_stays_stopped_without_rollback_or_retry(
     for _ in range(3):
         shell.video.timer.timeout.emit()
     assert len(capture.connections) == count == (2 if failure == "new_error" else 1)
-    assert capture.refreshes == 0
+    assert capture.refreshes == 1  # Opening settings searches once while streaming.
 
 
 @pytest.mark.parametrize(("initial", "target"), [("enumerate", "path-b"), ("capture", "")])
@@ -268,7 +268,7 @@ def test_empty_selection_clears_saved_device_and_disconnects(
     capture.complete_disconnect()
     qtbot.waitUntil(lambda: shell.video.apply_state == "complete")
     assert len(capture.connections) == 1
-    assert capture.refreshes == 0
+    assert capture.refreshes == 1  # Opening settings searches once while streaming.
 
 
 def test_reapplying_same_capture_conditions_keeps_connection(qtbot: QtBot) -> None:

@@ -20,14 +20,17 @@
 
 `refresh_devices()`は別の子プロセスで列挙し、`snapshot().devices`と`devices_revision`を更新します。初期revisionは0で、成功した列挙ごとに1増えます。空の列挙成功と未列挙を区別できます。`connect()`でも接続直前の列挙結果を同じ一覧へ反映するため、表示名の取得だけを目的とする追加列挙・機器openは不要です。代替候補を試す場合は再列挙するので、一つの接続要求中にrevisionが複数回増えることがあります。
 
-接続・列挙要求は受付時に`True`を返します。別の要求中や終了中、前の取得の`cleanup`が`unconfirmed`なら`False`です。受付や一覧の更新は接続成功を意味しません。`phase == "streaming"`となり`frame`が得られた時点で、呼出側が実画像を参照できます。
+接続・列挙要求は受付時に`True`を返します。映像取得中も一覧検索を1件受け付けます。接続・切断処理中、検索の重複、終了中、または前の取得の`cleanup`が`unconfirmed`なら`False`です。受付や一覧の更新は接続成功を意味しません。`phase == "streaming"`となり`frame`が得られた時点で、呼出側が実画像を参照できます。
 
 `snapshot()`は変更不能な`CaptureSnapshot`を返します。
 
 | 属性 | 型・意味 |
 |---|---|
 | `phase` | `idle`・`enumerating`・`connecting`・`streaming`・`stopping`・`error`・`closed`のいずれか |
-| `devices` | `tuple[DeviceInfo, ...]`。最後に成功した列挙の機器一覧 |
+| `devices` | `tuple[DeviceInfo, ...]`。最後に成功した列挙の機器一覧。取得中の機器が含まれない場合はその識別子を補う |
+| `catalog_warning` | 機器一覧の部分失敗、または取得と並行した検索の失敗理由。取得の `error` と独立 |
+| `catalog_searching` | 取得と並行する検索の実行中。取得状態は `streaming` を維持 |
+| `catalog_cleanup_unconfirmed` | 並行検索の資源解放が未確認。以降の一覧検索とアプリ終了の完了を保留 |
 | `devices_revision` | `int`。成功した列挙の更新回数 |
 | `frame` | `Frame \| None`。最新の有効な画像。停止要求後・失敗後は`None` |
 | `generation` | `int`。このサービス内の接続世代 |
@@ -60,7 +63,7 @@ OS別の方式選択はカメラ取得層の契約です。アプリの既定設
 
 ## New Nintendo 3DS XL
 
-Windows の固定取得元は設定の `capture.device` と `CaptureOptions.device_path` に `ponkan:n3dsxl` を使います。一覧更新と通常のカメラ列挙時に子プロセスが USB 記述子を読み、対応候補が1台ならカメラ一覧にこの取得元を加えます。明示的な一覧更新でカメラの列挙が失敗した場合も、3DS 基板の検出結果を返します。0台は正常な列挙結果です。複数台やドライバーエラーは `CaptureSnapshot.catalog_warning` で通知し、列挙済みのカメラは選択できます。ponkan の接続時に改めて `list_capture_devices(profile="n3dsxl", backend="auto")` の対応候補が1台なら `open_capture()` を呼びます。個体の識別子を指定する API がないため、列挙と open の間は接続構成を固定します。ドライバー利用不可、0台、複数台、接続失敗は映像診断で確認できます。
+Windows の固定取得元は設定の `capture.device` と `CaptureOptions.device_path` に `ponkan:n3dsxl` を使います。一覧更新と通常のカメラ列挙時に子プロセスが USB 記述子を読み、対応候補が1台ならカメラ一覧にこの取得元を加えます。明示的な一覧更新でカメラの列挙が失敗した場合も、3DS 基板の検出結果を返します。0台は正常な列挙結果です。利用中の 3DS は別プロセスから識別できない場合があるため、取得中はその接続を根拠に候補へ残します。複数台やドライバーエラーは `CaptureSnapshot.catalog_warning` で通知し、列挙済みのカメラは選択できます。ponkan の接続時に改めて `list_capture_devices(profile="n3dsxl", backend="auto")` の対応候補が1台なら `open_capture()` を呼びます。個体の識別子を指定する API がないため、列挙と open の間は接続構成を固定します。ドライバー利用不可、0台、複数台、接続失敗は映像診断で確認できます。
 
 カメラ用の要求寸法と取得FPSは、この取得元では使いません。Windows の標準方式で reader から上下縦結合・BGR の画像を受け取り、幅400×高さ480の Frame として公開します。単発の読み取り期限切れでは次の画像を待ち、画像の途絶は既存のサービス期限で扱います。終了時は子プロセスが reader を閉じます。OpenCV の API 番号を持たないため `snapshot().backend` は `None` です。
 

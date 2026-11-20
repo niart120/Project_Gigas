@@ -146,6 +146,34 @@ def test_direct_connection_reports_device_names_without_an_additional_enumeratio
     assert marker.with_suffix(".txt.opened").read_text(encoding="utf-8") == "opened\n"
 
 
+def test_search_keeps_busy_device_only_while_its_capture_is_active(tmp_path: Path) -> None:
+    service = CaptureService(
+        backend_factory=PeerBackend(str(tmp_path / "capture"), "hide-open-device")
+    )
+    service.start()
+    try:
+        assert service.connect(CaptureOptions("path-b", 16, 16, 60))
+        first = wait_for(service, lambda s: s.frame is not None)
+        assert first.frame is not None
+        assert service.refresh_devices()
+        assert not service.refresh_devices()
+        result = wait_for(service, lambda s: s.devices_revision == 2)
+        assert result.devices == (
+            DeviceInfo("New camera", "path-c"),
+            DeviceInfo("Capture", "path-b"),
+        )
+        assert result.frame is not None
+        assert result.frame.sequence > first.frame.sequence
+        assert result.generation == first.generation
+        service.disconnect()
+        stopped = wait_for(service, lambda s: s.phase == "idle")
+        assert stopped.devices == (DeviceInfo("New camera", "path-c"),)
+    finally:
+        service.shutdown()
+        service.join(6)
+        assert not service.is_alive()
+
+
 def test_shutdown_before_start_rejects_new_requests() -> None:
     service = CaptureService(backend_factory=PeerBackend())
     service.shutdown()

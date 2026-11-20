@@ -27,7 +27,7 @@ class CapturePort(Protocol):
         ...
 
     def refresh_devices(self) -> bool:
-        """Accept one asynchronous enumeration when idle."""
+        """Accept one asynchronous enumeration while idle or streaming."""
         ...
 
     def connect(self, options: CaptureOptions) -> bool:
@@ -99,7 +99,7 @@ class VideoController(QObject):
         self._generation = 0
         self._next_image = 0.0
         self._preview_fps = 30
-        self._last_state: tuple[str, str, str, bool, str, str, int] | None = None
+        self._last_state: tuple[str, str, str, bool, str, str, int, bool, str, bool] | None = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(34)
@@ -128,7 +128,7 @@ class VideoController(QObject):
     @property
     def discovering(self) -> bool:
         """Whether an explicit catalog request is still awaiting worker cleanup."""
-        return self._enumerating
+        return self._enumerating or self._snapshot.catalog_searching
 
     @property
     def discovery_error(self) -> str:
@@ -143,7 +143,9 @@ class VideoController(QObject):
             and not self.applying
             and not self._closing
             and self.service.is_alive()
-            and self._snapshot.phase in {"idle", "error"}
+            and self._snapshot.phase in {"idle", "error", "streaming"}
+            and not self.discovering
+            and not self._snapshot.catalog_cleanup_unconfirmed
             and self._snapshot.cleanup != "unconfirmed"
         )
 
@@ -151,6 +153,8 @@ class VideoController(QObject):
     def shutdown_error(self) -> str:
         """Return the reason shutdown cannot yet be treated as complete."""
         snapshot = self.reader.snapshot()
+        if snapshot.catalog_cleanup_unconfirmed:
+            return "映像機器検索の終了未確認"
         if snapshot.cleanup == "unconfirmed":
             return f"映像終了未確認 · {snapshot.error}" if snapshot.error else "映像終了未確認"
         return ""
@@ -177,12 +181,12 @@ class VideoController(QObject):
         self._available = available
 
     def refresh_devices(self) -> None:
-        """Request enumeration when idle without changing pending settings or video."""
+        """Request enumeration without changing pending settings or video."""
         if self.can_refresh and self.service.refresh_devices():
-            self._begin_attempt("機器確認")
+            if self._snapshot.phase != "streaming":
+                self._begin_attempt("機器確認")
             self._enumerating = True
             self._discovery_error = ""
-            self._request_error = ""
             self._poll()
 
     def apply_capture(self, settings: "Settings") -> None:
@@ -297,23 +301,30 @@ class VideoController(QObject):
             snapshot = self.reader.snapshot()
             self._snapshot = snapshot
         enumerating = self._enumerating
-        if self._enumerating:
+        if self._enumerating and not snapshot.catalog_searching:
             self._discovery_error = snapshot.error or snapshot.catalog_warning
-            if snapshot.phase in {"idle", "error", "closed"} or snapshot.cleanup == "unconfirmed":
+            if (
+                snapshot.phase in {"idle", "error", "closed", "streaming"}
+                or snapshot.cleanup == "unconfirmed"
+            ):
                 self._enumerating = False
-        if snapshot.devices_revision != self._revision:
+        catalog_changed = snapshot.devices_revision != self._revision
+        if catalog_changed:
             self._revision = snapshot.devices_revision
             if not enumerating:
                 self._discovery_error = snapshot.catalog_warning
-            if snapshot.catalog_warning:
-                self.failed.emit(
-                    Notice(
-                        "video",
-                        "映像機器の確認",
-                        "一部の映像機器を選択できません。",
-                        snapshot.catalog_warning,
-                    )
+        if snapshot.catalog_warning and (
+            (catalog_changed and not enumerating)
+            or (enumerating and not self._enumerating and not snapshot.error)
+        ):
+            self.failed.emit(
+                Notice(
+                    "video",
+                    "映像機器の確認",
+                    "一部の映像機器を選択できません。",
+                    snapshot.catalog_warning,
                 )
+            )
         self._notify_failure(snapshot, alive=alive)
         self._render()
         if (
@@ -334,6 +345,9 @@ class VideoController(QObject):
             self.apply_state,
             self._request_error,
             self._revision,
+            self.discovering,
+            self._discovery_error,
+            snapshot.catalog_cleanup_unconfirmed,
         )
         if state != self._last_state:
             self._last_state = state
