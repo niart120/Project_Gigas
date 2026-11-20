@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -12,6 +12,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture.models import DeviceInfo
 from gigas.game_io.input.serial import SerialPort
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.ui.notifications import Notice
 from gigas.ui.settings_dialog import SettingsDialog
 
 
@@ -57,6 +58,39 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
     assert dialog.preview_fps.currentData() == 60
     assert dialog.isModal()
     dialog.close_button.click()
+    qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
+    qtbot.waitUntil(dialog.isVisible)
+
+
+@pytest.mark.parametrize("auxiliary", ["controller", "notifications"])
+def test_settings_shortcut_only_acts_in_main_window(
+    shell: ApplicationShell, qtbot: QtBot, auxiliary: str
+) -> None:
+    shell.window.settings_button.click()
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.close_button.click()
+    if auxiliary == "controller":
+        shell.open_controller()
+        target = shell.controller
+    else:
+        notices = shell.window.notifications
+        notices.publish(Notice("input", "接続失敗", "", "test failure"))
+        notices.entry_action.trigger()
+        target = notices.dialog
+    assert target is not None
+    target.activateWindow()
+    qtbot.waitUntil(lambda: QApplication.activeWindow() is target)
+
+    with qtbot.assertNotEmitted(shell.window.settings_requested):
+        qtbot.keyClick(
+            target.focusWidget() or target, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier
+        )
+    assert not dialog.isVisible()
+    assert QApplication.activeWindow() is target
+
+    shell.window.activateWindow()
+    qtbot.waitUntil(lambda: QApplication.activeWindow() is shell.window)
     qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
     qtbot.waitUntil(dialog.isVisible)
 
@@ -193,11 +227,12 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     if target == "button":
         dialog.close_button.click()
     elif target == "window":
-        dialog.close()
+        assert dialog.close()
     else:
         qtbot.keyClick(dialog, Qt.Key.Key_Escape)
     assert shell.confirmation is None
     assert not dialog.isVisible()
+    assert QApplication.activeModalWidget() is not dialog
     assert not shell.path.exists()
     assert shell.window.isVisible()
     assert shell.baseline.show_reasoning

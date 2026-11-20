@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
+from PySide6.QtGui import QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractButton,
     QCheckBox,
@@ -300,13 +300,8 @@ class SettingsDialog(QDialog):
         self._set_serial_baudrate(None)
         self.changed.emit()
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override
-        """Request closure without discarding edits."""
-        event.ignore()
-        self.reject()
-
     def reject(self) -> None:
-        """Route Escape through the same closure decision as the close button."""
+        """Route Cancel, Escape and the window close button through the owner."""
         self.close_requested.emit()
 
     def values(self) -> Settings:

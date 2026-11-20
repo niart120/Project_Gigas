@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from gigas.app.conversations import ConversationController
 from gigas.app.projects import ProjectController
@@ -530,9 +530,14 @@ class ApplicationShell(QObject):
             self.window.notifications.show_snapshot(notice, parent=self.dialog)
 
     def _cancel_settings(self) -> None:
-        if self.dialog is not None and not self.committed and not self._exit_requested:
+        if (
+            self.dialog is not None
+            and self.dialog.isVisible()
+            and not self.committed
+            and not self._exit_requested
+        ):
             self.window.notifications.close_details()
-            self.dialog.hide()
+            self.dialog.done(QDialog.DialogCode.Rejected)
             self.dialog.set_values(self.baseline)
             self._render()
 
@@ -653,9 +658,9 @@ class ApplicationShell(QObject):
                 settings.serial_port, settings.serial_protocol, settings.serial_baudrate
             )
             self.service.apply_input(config)
-        if request.close_dialog and self.dialog is not None:
+        if request.close_dialog and self.dialog is not None and self.dialog.isVisible():
             self.window.notifications.close_details()
-            self.dialog.hide()
+            self.dialog.accept()
         self._render()
 
     @Slot(object)
@@ -801,9 +806,9 @@ class ApplicationShell(QObject):
 
     def _commit_close(self) -> None:
         self.committed = True
-        if self.dialog is not None:
-            self.dialog.hide()
         self.window.notifications.close_details()
+        if self.dialog is not None and self.dialog.isVisible():
+            self.dialog.done(QDialog.DialogCode.Rejected)
         self.wait_timer.start()
         self.service.shutdown()
         self.video.shutdown()
@@ -872,8 +877,6 @@ class ApplicationShell(QObject):
             return
         self._stopped = True
         self.wait_timer.stop()
-        if self.dialog is not None:
-            self.dialog.hide()
         if self.controller is not None:
             self.controller.close()
         self.window.allow_close = True
