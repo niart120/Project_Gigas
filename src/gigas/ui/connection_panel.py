@@ -101,6 +101,7 @@ class ConnectionPanel(QWidget):
         self._conversation = ConversationStatus()
         self._input_busy = False
         self._project_busy = False
+        self._draft_locked = False
         self._management_availability: tuple[bool, bool] | None = None
         self._pending: set[str] = set()
         self._submitted = ""
@@ -247,9 +248,10 @@ class ConnectionPanel(QWidget):
         self._input_busy = busy
         self._render()
 
-    def set_project_busy(self, busy: bool) -> None:
+    def set_project_busy(self, busy: bool, *, lock_draft: bool = False) -> None:
         """Suspend execution controls during project changes, retaining stop and drafts."""
         self._project_busy = busy
+        self._draft_locked = busy and lock_draft
         self._render()
 
     def begin_loading(self, project: str, title: str) -> None:
@@ -650,7 +652,7 @@ class ConnectionPanel(QWidget):
             ready and goal is not None and goal.status not in {"active", "complete"}
         )
         self.plan_panel.clear_button.setEnabled(accepting and goal is not None)
-        self.prompt.setReadOnly(not available or self._display.loading)
+        self.prompt.setReadOnly(not available or self._display.loading or self._draft_locked)
         for view in self.request_views.values():
             view.refresh(available=self._answers_available)
         running = (

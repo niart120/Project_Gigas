@@ -45,12 +45,15 @@ GIGASが使用する通信・実行設定は[Codex接続仕様](codex.md)、通�
 
 | メソッド | 入力と結果 |
 | --- | --- |
-| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None, archived=None)` | 指定Projectの会話を`ThreadPage`で取得する。project_idの`None`は未所属。全モデルプロバイダーを対象にし、archivedはTrueでアーカイブ済み、Falseで通常、Noneでサーバーの既定条件を使う |
+| `list_all_threads(*, archived, cursor=None, limit=50, sort_direction="desc")` | 全所属から更新順で1ページを取得する |
+| `archive_thread(thread_id)` / `unarchive_thread(thread_id)` | 指定したIDをアーカイブする、または通常一覧に戻す |
+| `mark_read(thread_id, revision)` | 閲覧した版を指定して既読を要求する。後から届いた未読ターンに古い更新を適用しない |
+| `list_threads(project_id, *, cursor=None, limit=None, sort_direction=None, archived=None, sort_key=None)` | 指定Projectの会話を`ThreadPage`で取得する。project_idの`None`は未所属。全モデルプロバイダーを対象にし、archivedはTrueでアーカイブ済み、Falseで通常、Noneでサーバーの既定条件を使う |
 | `read_thread(thread_id)` | `includeTurns=false`で`ThreadInfo`を取得する。本文の一括取得は行わない |
 | `list_turns(thread_id, *, cursor=None, limit=None, sort_direction=None, items_view="full")` | 1ページのturnを`TurnPage`で取得する。`items_view`は`full`・`summary`・`notLoaded`。`notLoaded`は本文を取得せず状態・エラーなどのturn情報を返す |
 | `list_items(thread_id, *, turn_id=None, cursor=None, limit=None, sort_direction=None)` | 1ページの公開itemを`ItemPage`で取得する。`turn_id`指定時はそのturnに絞る |
 
-`ThreadInfo`は`id`、`name`、`preview`、`cwd`、`project_id`、`created_at`・`updated_at`、`model`・`reasoning_effort`、公開`status`を持ちます。タイトルやモデル情報が未提供の場合は`None`のまま返し、代替値を補いません。
+`ThreadInfo`は`id`、`name`、`preview`、`cwd`、`project_id`、`created_at`・`updated_at`、`model`・`reasoning_effort`、公開`status`を持ちます。既読状態は`is_read`、未読の版は`unread_revision`で取得できます。判別できない既読状態や未提供のタイトル・モデルは`None`です。
 
 `TurnInfo`は`id`・`status`、`items`、`items_view`、公開エラー`error`と任意の時刻・所要時間・`root_turn_id`を持ちます。`ThreadItemInfo`は`turn_id`と`item`、任意の`started_at_ms`・`completed_at_ms`を持ちます。itemの本文、画像参照、reasoning、Web検索などの種類別データは、公開されたJSONオブジェクトをそのまま保持します。本文の短縮、表示イベントへの変換、古い質問への回答受付は行いません。
 

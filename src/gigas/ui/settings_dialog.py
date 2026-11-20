@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.input.config import PROTOCOLS, get_protocol, resolve_baudrate
 from gigas.storage.settings import Settings
+from gigas.ui.archived_chats import ArchivedChats
 from gigas.ui.capture_choices import capture_device_choices
 from gigas.ui.layout import WINDOW_SIZE_PRESETS
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 
     from gigas.game_io.capture.models import DeviceInfo
     from gigas.game_io.input.serial import SerialPort
+    from gigas.runtime.codex.management_models import ThreadPage
 
 
 class SettingsDialog(QDialog):
@@ -48,6 +50,8 @@ class SettingsDialog(QDialog):
     capture_refresh_requested = Signal()
     serial_refresh_requested = Signal()
     close_requested = Signal()
+    archived_requested = Signal(object)
+    restore_requested = Signal(str)
 
     def __init__(self, path: "Path", parent: QWidget) -> None:
         """Create the form and action buttons."""
@@ -166,6 +170,11 @@ class SettingsDialog(QDialog):
         self.approvals_reviewer.addItem("自分で承認", "user")
         self.approvals_reviewer.currentIndexChanged.connect(self.changed)
         execution_form.addRow("承認方法", self.approvals_reviewer)
+        self.archive = ArchivedChats(self.tabs)
+        self.archive_tab = self.tabs.addTab(self.archive, "アーカイブ済みチャット")
+        self.archive.days.currentIndexChanged.connect(self.changed)
+        self.archive.page_requested.connect(self.archived_requested)
+        self.archive.restore_requested.connect(self.restore_requested)
         self.status = QLabel(self)
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
@@ -220,6 +229,34 @@ class SettingsDialog(QDialog):
         self._set_rate(field, default)
         field.currentIndexChanged.connect(self.changed)
         return field
+
+    def set_archived_page(
+        self,
+        page: "ThreadPage",
+        *,
+        append: bool = False,
+        project_names: dict[str, str] | None = None,
+    ) -> None:
+        """Display an archive page while retaining edited settings.
+
+        Args:
+            page: Server-ordered rows and continuation cursor.
+            append: Add to the current rows when loading a continuation.
+            project_names: Known display names indexed by project ID.
+        """
+        self.archive.set_page(page, append=append, project_names=project_names or {})
+
+    def set_archive_availability(
+        self, connected: bool, *, busy: bool = False, can_restore: bool = True
+    ) -> None:
+        """Set admission for archived chat requests independently of setting edits.
+
+        Args:
+            connected: Whether the current connection can list archived chats.
+            busy: Whether a list or mutation request is pending.
+            can_restore: Whether the current execution state permits restoration.
+        """
+        self.archive.set_availability(connected, busy=busy, can_restore=can_restore)
 
     @staticmethod
     def _set_rate(field: QComboBox, value: int) -> None:
@@ -322,6 +359,7 @@ class SettingsDialog(QDialog):
             web_search_enabled=self.web_search_enabled.isChecked(),
             memory_enabled=self.memory_enabled.isChecked(),
             approvals_reviewer=self.approvals_reviewer.currentData(),
+            auto_archive_days=int(self.archive.days.currentData()),
         )
 
     def set_values(self, values: Settings) -> None:
@@ -349,6 +387,7 @@ class SettingsDialog(QDialog):
             self.preview_mode.setCurrentIndex(self.preview_mode.findData(values.preview_letterbox))
             self.show_reasoning.setChecked(values.show_reasoning)
             self.web_search_enabled.setChecked(values.web_search_enabled)
+            self.archive.days.setCurrentIndex(self.archive.days.findData(values.auto_archive_days))
             self.memory_enabled.setChecked(values.memory_enabled)
             self.approvals_reviewer.setCurrentIndex(
                 self.approvals_reviewer.findData(values.approvals_reviewer)
@@ -380,6 +419,7 @@ class SettingsDialog(QDialog):
             self.web_search_enabled,
             self.memory_enabled,
             self.approvals_reviewer,
+            self.archive.days,
         ):
             field.setEnabled(enabled)
         self.capture_refresh_button.setEnabled(enabled and capture_refresh)

@@ -73,11 +73,14 @@ class ConversationSelection:
         """
         async with self._selecting():
             await release()
-            target = NewConversationTarget(project_id)
-            self._target = target
-            self._thread = None
-            self._goals = GoalTracker()
-            return target
+            return self._reset(project_id)
+
+    def _reset(self, project_id: str | None) -> NewConversationTarget:
+        target = NewConversationTarget(project_id)
+        self._target = target
+        self._thread = None
+        self._goals = GoalTracker()
+        return target
 
     async def select(
         self,
@@ -126,6 +129,15 @@ class ConversationSelection:
         self._target = StoredConversationTarget(thread_id, cwd, project_id)
         self._thread = None
         self._goals = GoalTracker()
+
+    def archived(self, thread_id: str) -> NewConversationTarget | None:
+        """Leave the archived thread after execution resources have been released."""
+        if (
+            not isinstance(self._target, StoredConversationTarget)
+            or self._target.thread_id != thread_id
+        ):
+            return None
+        return self._reset(self._target.project_id)
 
     def refresh_project(self, project_id: str, root: "Path | None") -> None:
         """Refresh only the selected assignment after a confirmed management change.

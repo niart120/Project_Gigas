@@ -2,7 +2,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QToolButton
+from PySide6.QtGui import QContextMenuEvent
+from PySide6.QtWidgets import QApplication, QMenu, QToolButton
 from pytestqt.qtbot import QtBot
 
 from gigas.runtime.codex.management_models import ProjectInfo, ProjectPage, ThreadInfo, ThreadPage
@@ -154,6 +155,29 @@ def test_listing_can_continue_while_conversation_switching_is_disabled(qtbot: Qt
     assert not group.more_button.isEnabled()
     assert not sidebar.projects_more_button.isEnabled()
     assert group.heading.isEnabled()
+
+
+def test_archive_menu_targets_clicked_thread_without_switching_chats(qtbot: QtBot) -> None:
+    sidebar = _sidebar(qtbot)
+    sidebar.set_management_enabled(True)
+    sidebar.set_threads(None, ThreadPage((_thread("one", None), _thread("two", None)), None, None))
+    sidebar.set_selection(None, "one")
+    group = sidebar._groups[None]
+    selected: list[str] = []
+    sidebar.thread_requested.connect(selected.append)
+    viewport = group.threads.viewport()
+    pos = group.threads.visualItemRect(group.threads.item(1)).center()
+    qtbot.mouseClick(viewport, Qt.MouseButton.RightButton, pos=pos)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, viewport.mapToGlobal(pos))
+    QApplication.sendEvent(viewport, event)
+    menu = QApplication.activePopupWidget()
+    assert isinstance(menu, QMenu)
+    with qtbot.waitSignal(sidebar.archive_requested) as signal:
+        menu.actions()[0].trigger()
+    assert signal.args == [None, "two"]
+    menu.close()
+    assert selected == []
+    assert group.threads.item(0).isSelected()
 
 
 def test_populated_sidebar_keeps_rows_and_groups_together_in_a_tall_window(qtbot: QtBot) -> None:

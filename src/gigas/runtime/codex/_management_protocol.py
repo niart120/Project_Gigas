@@ -40,14 +40,18 @@ def project_page(value: "JsonValue") -> ProjectPage:
 
 def thread_response(value: "JsonValue") -> ThreadInfo:
     """Decode metadata from a thread read response."""
-    return _thread(_object(value).get("thread"))
+    response = _object(value)
+    return _thread(_object(response.get("thread")), response.get("readState"))
 
 
 def thread_page(value: "JsonValue") -> ThreadPage:
     """Decode a thread page and both opaque cursors."""
     result = _object(value)
+    states = result.get("readStates")
+    read_states = states if isinstance(states, dict) else {}
+    rows = (_object(item) for item in _array(result.get("data")))
     return ThreadPage(
-        tuple(_thread(item) for item in _array(result.get("data"))),
+        tuple(_thread(row, read_states.get(_text(row.get("id")))) for row in rows),
         _optional_text(result.get("nextCursor")),
         _optional_text(result.get("backwardsCursor")),
     )
@@ -121,8 +125,18 @@ def _optional_integer(value: "JsonValue") -> int | None:
     return None if value is None else _integer(value)
 
 
-def _thread(value: "JsonValue") -> ThreadInfo:
-    thread = _object(value)
+def _thread(thread: "JsonObject", read_state: "JsonValue") -> ThreadInfo:
+    is_read = None
+    unread_revision = None
+    if isinstance(read_state, dict) and "firstUnread" in read_state:
+        revision = read_state.get("revision")
+        position = read_state["firstUnread"]
+        if isinstance(revision, str) and revision:
+            if position is None:
+                is_read = True
+            elif isinstance(position, dict):
+                is_read = False
+                unread_revision = revision
     cwd = Path(_text(thread.get("cwd")))
     if not cwd.is_absolute():
         raise CodexConnectionError("Codexの会話の作業フォルダーが絶対パスではない")
@@ -139,6 +153,8 @@ def _thread(value: "JsonValue") -> ThreadInfo:
         model=_optional_text(thread.get("model")),
         reasoning_effort=_optional_text(thread.get("reasoningEffort")),
         status=_object(thread.get("status")),
+        is_read=is_read,
+        unread_revision=unread_revision,
     )
 
 

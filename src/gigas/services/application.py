@@ -316,6 +316,22 @@ class ApplicationServiceThread(QThread):
         """Read one assignment page; None explicitly requests unassigned threads."""
         self._enqueue(lambda: self.codex.list_threads(project_id, cursor=cursor))
 
+    def list_archived_threads(self, *, cursor: str | None = None) -> None:
+        """Queue one page of archived threads across project assignments."""
+        self._enqueue(lambda: self.codex.list_archived_threads(cursor=cursor))
+
+    def archive_threads(self, project_id: str | None, thread_ids: tuple[str, ...]) -> None:
+        """Archive the IDs chosen by the user under their confirmed assignment."""
+        self._enqueue(lambda: self.codex.archive_threads(project_id, thread_ids))
+
+    def restore_thread(self, thread_id: str) -> None:
+        """Restore one archived thread while preserving the current selection."""
+        self._enqueue(lambda: self.codex.restore_thread(thread_id))
+
+    def auto_archive_threads(self, days: int) -> None:
+        """Queue the connection-time scan of eligible threads."""
+        self._enqueue(lambda: self.codex.auto_archive_threads(days))
+
     def new_conversation(self, project_id: str | None = None) -> None:
         """Select an unstarted assignment after releasing an idle prior conversation."""
         self._enqueue(lambda: self.codex.new_conversation(project_id))

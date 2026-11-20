@@ -65,6 +65,10 @@ Codex切断では、切断開始時に捕捉した有限操作の終了を待ち
 | メソッド | operationと成功時のvalue |
 |---|---|
 | `probe_project_folder(project)` | `project_folder` / `ProjectFolderStatus`。一覧取得済みの保存値に対する所在確認だけを行う |
+| `list_archived_threads(*, cursor=None)` | `archived` / `ThreadPage`。全所属のアーカイブ済み一覧 |
+| `archive_threads(project_id, thread_ids)` | `archive` / `ArchiveResult`。対象IDの所属を確認し、完了したチャットと選択変更を返す |
+| `auto_archive_threads(days)` | `auto_archive` / `ArchiveResult`。期限を過ぎた既読チャットが対象 |
+| `restore_thread(thread_id)` | `restore` / `ThreadInfo`。現在の所属と作業場所を確認した復元結果 |
 | `inspect_project(project_id)` | `project_inspect` / `ProjectDetails`。登録、通常・アーカイブ済みの全所属、所在確認を返す |
 | `update_project(expected, *, name, root)` | `project_update` / `ProjectDetails`。編集開始時の`ProjectInfo`と照合し、登録と既存チャットを更新する |
 | `delete_project(expected)` | `project_delete` / `ProjectDeleted`。全ページの一覧で登録がないことを確認する |

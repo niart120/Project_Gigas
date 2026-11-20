@@ -108,11 +108,7 @@ class ProjectManagement:
             raise CodexConnectionError(
                 "プロジェクト情報が変わりました。編集画面を開き直してください"
             )
-        rename_only = (
-            root == expected.root
-            and name != expected.name
-            and (not details.pending or bool(details.archived))
-        )
+        rename_only = root == expected.root and name != expected.name and not details.pending
         if rename_only:
             await self.management.update_project(expected.id, name=name)
             self.check()
@@ -123,11 +119,6 @@ class ProjectManagement:
         changing = root != expected.root or bool(details.pending)
         if not changing:
             return details
-        if details.archived:
-            raise CodexConnectionError(
-                "アーカイブ済みチャットを含むプロジェクトのフォルダーは変更できません。"
-                "表示名の変更とプロジェクトの削除は可能です"
-            )
         if details.pending and root != expected.root:
             raise CodexConnectionError(
                 "フォルダー更新が未完了です。現在の登録フォルダーで保存を再試行してください"
@@ -159,7 +150,6 @@ class ProjectManagement:
                 final.project.root != root
                 or final.project.name != name
                 or final.pending
-                or final.archived
                 or {thread.id for thread in final.threads}
                 != {thread.id for thread in details.threads}
             ):
@@ -184,6 +174,64 @@ class ProjectManagement:
             raise ProjectUpdateError(message) from error
         return final
 
+    async def restore_thread(self, thread_id: str) -> "ThreadInfo":
+        """Restore a chat and reconcile its saved workspace with its current project.
+
+        Args:
+            thread_id: ID selected in the archive.
+
+        Returns:
+            Restored metadata with the verified workspace and project assignment.
+
+        Raises:
+            ProjectUpdateError: The restore was submitted but its result could not
+                be verified. Reconnect before retrying.
+        """
+        before = await self.management.read_thread(thread_id)
+        self.check()
+        root = before.cwd
+        if before.project_id is not None:
+            root = (await self.management.read_project(before.project_id)).root
+            self.check()
+            if root != before.cwd:
+                try:
+                    await asyncio.to_thread(_require_directory, root)
+                except OSError as error:
+                    message = (
+                        f"復元先のプロジェクトフォルダーを開けません。"
+                        f"所在とアクセス権限を確認してください: {root}"
+                    )
+                    raise CodexConnectionError(message) from error
+                self.check()
+        try:
+            restored = await self.management.unarchive_thread(thread_id)
+            self.check()
+            if restored.project_id != before.project_id:
+                raise CodexConnectionError("復元中にチャットの所属が変わりました")  # noqa: TRY301
+            if restored.project_id is not None and restored.cwd != root:
+                await self._relocate(restored, root)
+                restored = await self.management.read_thread(thread_id)
+                self.check()
+            if before.project_id is not None:
+                project = await self.management.read_project(before.project_id)
+                self.check()
+                if restored.project_id != project.id or restored.cwd != project.root:
+                    raise CodexConnectionError("復元先のフォルダーを確認できません")  # noqa: TRY301
+        except (CodexConnectionError, TransportError, OSError) as error:
+            if isinstance(error, RpcError) and error.method == "thread/unarchive":
+                message = (
+                    f"Codexがチャットの復元を拒否しました (code {error.code})。"
+                    "アーカイブ済み一覧を開き直して対象を確認してください"
+                )
+                raise CodexConnectionError(message) from error
+            message = (
+                "チャットの復元を確認できません。再接続して通常一覧とアーカイブ済み一覧を"
+                "確認してください。通常一覧に戻り作業場所が一致しない場合は、"
+                "もう一度アーカイブしてから復元してください"
+            )
+            raise ProjectUpdateError(message) from error
+        return restored
+
     async def _unsubscribe(self, thread_id: str) -> None:
         result = await self.connection.request("thread/unsubscribe", {"threadId": thread_id})
         self.check()
@@ -205,6 +253,8 @@ class ProjectManagement:
         # Management loads do not execute tools and must not require Windows write setup.
         # Normal preparation validates workspace-write on explicit execution.
         overrides["sandbox_mode"] = "read-only"
+        # A management resume must never schedule turns for a retained active Goal.
+        overrides["features.goals"] = False
         configuration = config.get("config") if isinstance(config, dict) else None
         if not isinstance(configuration, dict):
             raise CodexConnectionError("Codexの実行設定を取得できません")

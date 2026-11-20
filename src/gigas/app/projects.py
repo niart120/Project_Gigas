@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from gigas.runtime.codex.models import SessionStatus
@@ -29,6 +29,8 @@ class ProjectController(QObject):
         parent: Application shell.
     """
 
+    archive_project_ready = Signal(object)
+
     def __init__(
         self,
         window: "MainWindow",
@@ -49,6 +51,7 @@ class ProjectController(QObject):
         conversations.projects_available.connect(self._probe_projects)
         window.sidebar.edit_requested.connect(lambda pid: self._open(pid, "edit"))
         window.sidebar.delete_requested.connect(lambda pid: self._open(pid, "delete"))
+        window.sidebar.archive_project_requested.connect(lambda pid: self._open(pid, "archive"))
         service.management_completed.connect(self._complete)
         service.received.connect(self._event)
 
@@ -154,6 +157,8 @@ class ProjectController(QObject):
                 if isinstance(details, ProjectDetails) and self.conversations.can_switch:
                     if intent == "edit":
                         self._show_editor(details.project)
+                    elif intent == "archive":
+                        self.archive_project_ready.emit(details)
                     else:
                         self._confirm_delete(details.project)
                 elif value.error:

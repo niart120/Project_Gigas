@@ -41,6 +41,7 @@ class ConversationController(QObject):
     """
 
     projects_available = Signal(object)
+    sidebar_ready = Signal()
 
     def __init__(
         self, window: "MainWindow", service: "ApplicationServiceThread", parent: QObject
@@ -264,6 +265,8 @@ class ConversationController(QObject):
         operation, value = result.operation, result.value
         if operation in {"project_inspect", "project_update", "project_delete", "project_folder"}:
             return
+        if operation in {"archive", "archived", "restore", "auto_archive", "archive_reconciled"}:
+            return
         if operation == "projects":
             if not self._projects_pending:
                 return
@@ -276,6 +279,8 @@ class ConversationController(QObject):
                 self.sidebar.set_projects(value, append=self._projects_append)
                 self.projects_available.emit(value.projects)
                 self._update_heading()
+                if not self._projects_append:
+                    self.sidebar_ready.emit()
         elif operation == "threads":
             if result.project_id not in self._thread_requests:
                 return
@@ -290,7 +295,6 @@ class ConversationController(QObject):
                     thread.id == self._unlisted_target.thread_id for thread in value.threads
                 ):
                     self._unlisted_target = None
-                    self._refresh_threads.discard(result.project_id)
             if result.project_id in self._refresh_threads:
                 self._refresh_threads.remove(result.project_id)
                 self._list_threads(result.project_id)
@@ -363,14 +367,14 @@ class ConversationController(QObject):
                 self._unlisted_target = target
                 self.sidebar.set_selection(target.project_id, target.thread_id)
                 self._update_heading()
-        if isinstance(envelope.event, DialogueEvent) and (
-            envelope.event.kind == "turn_completed"
-            or (
+        if isinstance(envelope.event, DialogueEvent):
+            if envelope.event.kind == "turn_completed":
+                self.refresh_group(self.service.selected_target.project_id)
+            elif (
                 envelope.event.kind in {"message", "activity"}
                 and envelope.event.payload.get("partial") is False
-            )
-        ):
-            self._refresh_unlisted()
+            ):
+                self._refresh_unlisted()
         self._render()
 
     @Slot(object)
@@ -413,7 +417,7 @@ class ConversationController(QObject):
         self._threads.update((thread.id, thread) for thread in threads)
         self.sidebar.upsert_project(project)
         if project.id in self._threads_loaded:
-            self.sidebar.set_threads(project.id, ThreadPage(threads, None, None))
+            self.refresh_group(project.id)
         self._target = self.service.selected_target
         self._history_pending = None
         self.sidebar.set_selection(
@@ -427,6 +431,35 @@ class ConversationController(QObject):
         """Return the currently displayed server registration, if it is still listed."""
         return self._projects.get(project_id)
 
+    def thread_info(self, thread_id: str) -> "ThreadInfo | None":
+        """Return the metadata for a chat row in the sidebar."""
+        return self._threads.get(thread_id)
+
+    def refresh_group(self, project_id: str | None) -> None:
+        """Invalidate the old page cursor and refresh visible rows in server order."""
+        self._threads_loaded.discard(project_id)
+        if project_id in self._thread_requests:
+            self._refresh_threads.add(project_id)
+        elif project_id in self.sidebar.expanded_projects:
+            self._list_threads(project_id)
+
+    def apply_archive(
+        self,
+        threads: "tuple[ThreadInfo, ...]",
+        target: NewConversationTarget | None,
+        *,
+        discard_draft: bool,
+    ) -> None:
+        """Reflect confirmed removals and discard only the archived selection's draft."""
+        if target is not None and target is self.service.selected_target:
+            if discard_draft:
+                self.panel.discard_draft()
+            self._replace_new(target)
+        for thread in threads:
+            self._threads.pop(thread.id, None)
+        for project_id in {thread.project_id for thread in threads}:
+            self.refresh_group(project_id)
+
     def remove_project(self, project_id: str) -> None:
         """Remove a registration and refresh unassigned membership without clearing text."""
         self._projects.pop(project_id, None)
@@ -435,8 +468,7 @@ class ConversationController(QObject):
         self._thread_requests.pop(project_id, None)
         self._target = self.service.selected_target
         self._history_pending = None
-        self._threads_loaded.discard(None)
-        self._list_threads(None)
+        self.refresh_group(None)
         self.sidebar.set_selection(
             self._target.project_id,
             self._target.thread_id if isinstance(self._target, StoredConversationTarget) else None,

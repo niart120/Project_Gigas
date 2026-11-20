@@ -171,6 +171,7 @@ class CodexManagement:
         cursor: str | None = None,
         limit: int | None = None,
         sort_direction: Literal["asc", "desc"] | None = None,
+        sort_key: Literal["updated_at"] | None = None,
         archived: bool | None = None,
     ) -> ThreadPage:
         """Read one page for a Project or for unassigned threads across all providers.
@@ -180,6 +181,7 @@ class CodexManagement:
             cursor: Opaque continuation cursor, passed through unchanged.
             limit: Optional page-size limit; omitted to use the server default.
             sort_direction: Optional direction; the server defaults to descending.
+            sort_key: Optional ordering by the last update timestamp.
             archived: True selects archived threads. None preserves the default listing.
 
         Returns:
@@ -191,10 +193,86 @@ class CodexManagement:
         """
         params = _page_params(cursor, limit, sort_direction)
         params.update({"projectId": project_id, "modelProviders": []})
+        if sort_key is not None:
+            params["sortKey"] = sort_key
         if archived is not None:
             params["archived"] = archived
         result = await self._connection.request("thread/list", params)
         return protocol.thread_page(result)
+
+    async def list_all_threads(
+        self,
+        *,
+        archived: bool,
+        cursor: str | None = None,
+        limit: int = 50,
+        sort_direction: Literal["asc", "desc"] = "desc",
+    ) -> ThreadPage:
+        """Read a page across projects, including unassigned threads.
+
+        Args:
+            archived: Select archived or normal threads.
+            cursor: Continuation from the preceding page of the same list.
+            limit: Maximum number of threads in one response.
+            sort_direction: Order by last update time.
+
+        Returns:
+            Metadata and read states from the server's index.
+        """
+        params = _page_params(cursor, limit, sort_direction)
+        params.update(
+            {
+                "archived": archived,
+                "modelProviders": [],
+                "useStateDbOnly": True,
+                "sortKey": "updated_at",
+            }
+        )
+        return protocol.thread_page(await self._connection.request("thread/list", params))
+
+    async def archive_thread(self, thread_id: str) -> None:
+        """Archive a saved thread without changing its project assignment.
+
+        Args:
+            thread_id: Identity of the chat to archive.
+        """
+        result = await self._connection.request("thread/archive", {"threadId": thread_id})
+        if not isinstance(result, dict):
+            raise CodexConnectionError("Codexのチャットのアーカイブ応答が不正")
+
+    async def unarchive_thread(self, thread_id: str) -> ThreadInfo:
+        """Restore a saved thread and return its current workspace and assignment.
+
+        Args:
+            thread_id: Identity of the archived chat.
+
+        Returns:
+            Metadata of the restored thread.
+        """
+        result = await self._connection.request("thread/unarchive", {"threadId": thread_id})
+        thread = protocol.thread_response(result)
+        if thread.id != thread_id:
+            raise CodexConnectionError("復元したチャットのIDを確認できません")
+        return thread
+
+    async def mark_read(self, thread_id: str, revision: str) -> None:
+        """Mark the viewed revision as read. A conflicting update is not retried.
+
+        Args:
+            thread_id: Identity of the chat whose history was displayed.
+            revision: Opaque revision observed before the history was displayed.
+        """
+        result = await self._connection.request(
+            "thread/readState/update",
+            {"threadId": thread_id, "expectedRevision": revision, "operation": {"type": "read"}},
+        )
+        state = result.get("readState") if isinstance(result, dict) else None
+        if (
+            not isinstance(state, dict)
+            or "firstUnread" not in state
+            or state["firstUnread"] is not None
+        ):
+            raise CodexConnectionError("チャットの既読状態を確認できません")
 
     async def read_thread(self, thread_id: str) -> ThreadInfo:
         """Read saved metadata without loading turns or resuming the thread.
