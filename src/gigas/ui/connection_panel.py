@@ -518,6 +518,7 @@ class ConnectionPanel(QWidget):
         record = RequestRecord(request, len(self.requests) + 1)
         self.requests[request.token] = record
         self.request_views[request.token] = RequestView(record, self.transcript, self._answer)
+        self.transcript.follow_latest()
 
     def _answer(self, token: str, decision: str | None = None) -> None:
         record = self.requests[token]

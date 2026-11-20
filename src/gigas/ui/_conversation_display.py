@@ -30,6 +30,7 @@ class ConversationDisplay(QWidget):
         self.heading = ConversationHeading(self)
         self.heading.hide()
         self.transcript = ConversationTranscript(self)
+        self.heading.auto_scroll.toggled.connect(self.transcript.set_auto_scroll)
         self.transcript.setAccessibleName("会話")
         self.transcript.setFrameShape(QFrame.Shape.NoFrame)
         layout.addWidget(self.heading)
@@ -62,7 +63,7 @@ class ConversationDisplay(QWidget):
     ) -> None:
         """Replace documents only after the caller confirms a different target."""
         self.transcript.clear()
-        self.transcript.prepend_items(entries)
+        self.transcript.prepend_items(entries, initial=True)
         self._target = project, title
         self.thread_id = thread_id
         self.clear_plan()
@@ -87,6 +88,7 @@ class ConversationDisplay(QWidget):
         selected = self.transcript.textCursor()
         scroll = self.transcript.verticalScrollBar().value()
         self.loading = True
+        self.heading.auto_scroll.setEnabled(False)
         self.plan_panel.reasoning.hide()
         self.heading.set_target(project, title, loading=True)
         self.heading.show()
@@ -100,6 +102,7 @@ class ConversationDisplay(QWidget):
     def cancel_loading(self) -> None:
         """Reveal the same documents and confirmed heading after a failed read."""
         self.loading = False
+        self.heading.auto_scroll.setEnabled(True)
         self.plan_panel.reasoning.setVisible(self._show_reasoning)
         for widget in self._contents:
             widget.show()
