@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from gigas.app.settings_worker import SettingsIO
@@ -12,6 +12,7 @@ from gigas.app.shell import ApplicationShell
 from gigas.game_io.capture.models import DeviceInfo
 from gigas.game_io.input.serial import SerialPort
 from gigas.storage.settings import Settings, SettingsError, load_settings, save_settings
+from gigas.ui.notifications import Notice
 from gigas.ui.settings_dialog import SettingsDialog
 
 
@@ -57,6 +58,39 @@ def test_settings_reopens_same_dialog_with_edits(shell: ApplicationShell, qtbot:
     assert dialog.preview_fps.currentData() == 60
     assert dialog.isModal()
     dialog.close_button.click()
+    qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
+    qtbot.waitUntil(dialog.isVisible)
+
+
+@pytest.mark.parametrize("auxiliary", ["controller", "notifications"])
+def test_settings_shortcut_only_acts_in_main_window(
+    shell: ApplicationShell, qtbot: QtBot, auxiliary: str
+) -> None:
+    shell.window.settings_button.click()
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.close_button.click()
+    if auxiliary == "controller":
+        shell.open_controller()
+        target = shell.controller
+    else:
+        notices = shell.window.notifications
+        notices.publish(Notice("input", "接続失敗", "", "test failure"))
+        notices.entry_action.trigger()
+        target = notices.dialog
+    assert target is not None
+    target.activateWindow()
+    qtbot.waitUntil(lambda: QApplication.activeWindow() is target)
+
+    with qtbot.assertNotEmitted(shell.window.settings_requested):
+        qtbot.keyClick(
+            target.focusWidget() or target, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier
+        )
+    assert not dialog.isVisible()
+    assert QApplication.activeWindow() is target
+
+    shell.window.activateWindow()
+    qtbot.waitUntil(lambda: QApplication.activeWindow() is shell.window)
     qtbot.keyClick(shell.window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ControlModifier)
     qtbot.waitUntil(dialog.isVisible)
 
@@ -193,11 +227,12 @@ def test_dirty_dialog_cancel_discards_without_saving_or_confirmation(
     if target == "button":
         dialog.close_button.click()
     elif target == "window":
-        dialog.close()
+        assert dialog.close()
     else:
         qtbot.keyClick(dialog, Qt.Key.Key_Escape)
     assert shell.confirmation is None
     assert not dialog.isVisible()
+    assert QApplication.activeModalWidget() is not dialog
     assert not shell.path.exists()
     assert shell.window.isVisible()
     assert shell.baseline.show_reasoning
@@ -217,14 +252,14 @@ def test_failed_initial_load_preserves_original_and_exposes_details(
     assert not shell.ready
     assert not shell.dialog.save_button.isEnabled()
     assert not shell.window.connection.server_button.isEnabled()
-    shell.dialog.error_details_button.click()
+    shell.dialog.close_button.click()
+    assert not shell.dialog.isVisible()
+    shell.window.notifications.entry_action.trigger()
     details = shell.window.notifications.dialog
     assert details is not None
     assert str(shell.path) in details.details.toPlainText()
     assert shell.path.read_bytes() == original
     details.close()
-    shell.dialog.close_button.click()
-    assert not shell.dialog.isVisible()
 
 
 @pytest.mark.parametrize("shell", [Settings(model="original")], indirect=True)
@@ -370,8 +405,7 @@ def test_serial_editor_keeps_draft_and_resolves_protocol_defaults(
     dialog.set_serial_ports((SerialPort("COM3", "Controller"),))
     assert dialog.serial_port.currentData() == "COM7"
     dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM3"))
-    dialog.set_serial_ports((), searching=True)
-    dialog.set_serial_ports((), error="enumeration failed")
+    dialog.set_serial_ports(())
     assert dialog.serial_port.currentData() == "COM3"
     dialog.serial_protocol.setCurrentIndex(dialog.serial_protocol.findData("3ds"))
     assert dialog.values().serial_baudrate == 115200
@@ -391,3 +425,35 @@ def test_serial_editor_keeps_draft_and_resolves_protocol_defaults(
     assert not dialog.serial_baudrate.isEnabled()
     assert not dialog.serial_refresh_button.isEnabled()
     assert refreshed == [True]
+
+
+def test_serial_refresh_failure_keeps_controls_in_place(
+    shell: ApplicationShell, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested: list[bool] = []
+    monkeypatch.setattr(shell.service, "refresh_input_ports", lambda: requested.append(True))
+    shell.open_settings()
+    dialog = shell.dialog
+    assert dialog is not None
+    dialog.tabs.setCurrentIndex(1)
+    assert not dialog.serial_refresh_button.isEnabled()
+    shell.service.input_ports.emit((SerialPort("COM3", "Controller"),), "")
+    qtbot.waitUntil(dialog.serial_refresh_button.isEnabled)
+    dialog.serial_port.setCurrentIndex(dialog.serial_port.findData("COM3"))
+    dialog.grab()
+    port_geometry = dialog.serial_port.geometry()
+    buttons = [button for button in dialog.findChildren(QPushButton) if button.isVisible()]
+
+    dialog.serial_refresh_button.click()
+    assert requested == [True, True]
+    assert not dialog.serial_refresh_button.isEnabled()
+    dialog.grab()
+    assert dialog.serial_port.geometry() == port_geometry
+    shell.service.input_ports.emit((), "port enumeration failed")
+    qtbot.waitUntil(dialog.serial_refresh_button.isEnabled)
+    dialog.grab()
+
+    assert dialog.serial_port.geometry() == port_geometry
+    assert [button for button in dialog.findChildren(QPushButton) if button.isVisible()] == buttons
+    assert dialog.serial_port.currentData() == "COM3"
+    assert shell.window.notifications.notices["input"].details == "port enumeration failed"

@@ -122,7 +122,7 @@ def test_settings_location_opens_own_directory_and_reports_failure(
         assert details.details.toPlainText() == str(shell.path.parent)
 
 
-def test_save_error_details_remain_accessible_from_settings(
+def test_save_error_keeps_edits_and_main_window_details_available(
     controlled: tuple[ApplicationShell, ControlledIO],
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
@@ -130,68 +130,29 @@ def test_save_error_details_remain_accessible_from_settings(
     shell, io = controlled
     dialog = shell.dialog
     assert dialog is not None
-    assert dialog.error_details_button.isHidden()
+    assert dialog.status.isHidden()
     io.fail = True
     io.release.set()
     dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
     dialog.observation_resolution.setCurrentIndex(dialog.observation_resolution.findData("hd"))
     dialog.save_button.click()
     qtbot.waitUntil(lambda: shell.operation is None)
-    assert dialog.error_details_button.isVisible()
-    dialog.error_details_button.click()
-    details = shell.window.notifications.dialog
-    assert details is not None
-    assert details.isVisible()
-    assert details.parentWidget() is dialog
-    assert details.isModal()
-    assert details.details.toPlainText() == shell.error
+    assert dialog.status.isVisible()
     assert dialog.preview_fps.currentData() == 60
     assert dialog.observation_resolution.currentData() == "hd"
     assert shell.baseline.observation_resolution == "full_hd"
     stopped: list[bool] = []
     monkeypatch.setattr(shell.service, "interrupt", lambda: stopped.append(True))
-    assert not shell.window.connection.disconnect_action.isEnabled()
-    details.close()
     dialog.close_button.click()
+    shell.window.notifications.entry_action.trigger()
+    details = shell.window.notifications.dialog
+    assert details is not None
+    assert details.isVisible()
+    assert details.parentWidget() is shell.window
+    assert not details.isModal()
+    assert details.details.toPlainText() == shell.error
     shell.interrupt()
     assert stopped == [True]
-    assert not details.isVisible()
-
-
-def test_form_details_keep_current_error_after_another_settings_failure(
-    controlled: tuple[ApplicationShell, ControlledIO],
-    qtbot: QtBot,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shell, io = controlled
-    dialog = shell.dialog
-    assert dialog is not None
-    io.fail = True
-    io.release.set()
-    dialog.preview_fps.setCurrentIndex(dialog.preview_fps.findData(60))
-    dialog.save_button.click()
-    qtbot.waitUntil(lambda: shell.operation is None)
-    original = shell.window.notifications.notices["settings"]
-    monkeypatch.setattr(QDesktopServices, "openUrl", lambda _url: False)
-    shell.open_settings()
-    assert shell.dialog is not None
-    shell.dialog.open_folder_button.click()
-    latest = shell.window.notifications.notices["settings"]
-    assert latest is not original
-    details = shell.window.notifications.dialog
-    assert details is not None
-    assert details.notice is latest
-    details.close()
-
-    dialog.error_details_button.click()
-
-    details = shell.window.notifications.dialog
-    assert details is not None
-    assert details.notice is original
-    assert details.details.toPlainText() == shell.error
-    assert shell.window.notifications.notices["settings"] is latest
-    shell.window.notifications.entry_action.trigger()
-    assert details.notice is latest
 
 
 def test_direct_snapshot_preserves_history_and_copy_selection(qtbot: QtBot) -> None:
@@ -215,16 +176,3 @@ def test_direct_snapshot_preserves_history_and_copy_selection(qtbot: QtBot) -> N
     assert details.notice is current
     assert details.details.textCursor().selectedText() == current.details
     assert notices.notices["settings"] is latest
-
-
-def test_device_failure_details_use_latest_notification(
-    controlled: tuple[ApplicationShell, ControlledIO],
-) -> None:
-    shell, _io = controlled
-    notices = shell.window.notifications
-    notices.publish(Notice("input", "接続失敗", "", "old input"))
-    latest = Notice("video", "接続失敗", "", "new video")
-    notices.publish(latest)
-    shell._show_settings_error()
-    assert notices.dialog is not None
-    assert notices.dialog.notice is latest

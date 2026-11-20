@@ -402,6 +402,10 @@ class VideoController(QObject):
                 "映像機器の終了を確認できません。新しい接続は開始できません。"
                 "詳細を確認してください。"
             )
+        elif self._attempt_name == "機器確認":
+            explanation = (
+                "映像機器の一覧を取得できませんでした。設定の「一覧更新」で再試行してください。"
+            )
         elif self._attempt_name == "映像適用":
             explanation = (
                 "設定は保存されましたが、映像への適用に失敗しました。"

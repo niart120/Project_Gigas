@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.settings_action = QAction("設定", self)
         self.addAction(self.settings_action)
         self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
-        self.settings_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.settings_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self.settings_action.setAutoRepeat(False)
         self.settings_action.triggered.connect(self.settings_requested)
         self.settings_action.setIcon(QIcon(str(Path(__file__).with_name("settings.svg"))))

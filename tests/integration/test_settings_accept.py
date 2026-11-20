@@ -49,8 +49,9 @@ def test_ok_closes_after_save_before_first_frame(
     shell, capture = app
     dialog = open_editor(shell, capture)
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-b"))
-    dialog.ok_button.click()
-    qtbot.waitUntil(lambda: not dialog.isVisible())
+    with qtbot.waitSignal(dialog.accepted):
+        dialog.ok_button.click()
+    assert not dialog.isVisible()
     assert load_settings(shell.path).capture_device == "path-b"
     assert capture.snapshot().phase == "connecting"
     assert shell.window.isVisible()

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from gigas.app.conversations import ConversationController
 from gigas.app.projects import ProjectController
@@ -88,7 +88,6 @@ class ApplicationShell(QObject):
         self._input_protocol: InputProtocol | None = None
         self._serial_ports: tuple[SerialPort, ...] = ()
         self._serial_searching = False
-        self._serial_discovery_error = ""
         self.baseline = Settings()
         self._io_request: _SettingsRequest | None = None
         self._pending_codex_connection: bool | None = None
@@ -285,22 +284,16 @@ class ApplicationShell(QObject):
         """Discover serial identifiers without opening them."""
         if self._can_edit and not self._serial_searching:
             self._serial_searching = True
-            self._serial_discovery_error = ""
-            self._update_serial_ports()
+            self._render()
             self.service.refresh_input_ports()
 
     def _update_serial_ports(self) -> None:
         if self.dialog is not None:
-            self.dialog.set_serial_ports(
-                self._serial_ports,
-                searching=self._serial_searching,
-                error=self._serial_discovery_error,
-            )
+            self.dialog.set_serial_ports(self._serial_ports)
 
     @Slot(object, str)
     def _input_ports_received(self, ports: object, error: str) -> None:
         self._serial_searching = False
-        self._serial_discovery_error = error
         if not error and isinstance(ports, tuple):
             self._serial_ports = tuple(port for port in ports if isinstance(port, SerialPort))
         if error:
@@ -371,10 +364,7 @@ class ApplicationShell(QObject):
     @Slot()
     def _update_capture_devices(self) -> None:
         if self.dialog is not None and self.dialog.isVisible():
-            self.dialog.set_capture_devices(
-                self.video.devices,
-                error=self.video.discovery_error,
-            )
+            self.dialog.set_capture_devices(self.video.devices)
 
     def _render_capture_menu(self) -> None:
         self.window.set_capture_devices(
@@ -512,7 +502,6 @@ class ApplicationShell(QObject):
             self.dialog.close_requested.connect(self._cancel_settings)
             self.dialog.capture_refresh_requested.connect(self.refresh_video_devices)
             self.dialog.serial_refresh_requested.connect(self.refresh_input_ports)
-            self.dialog.error_details_button.clicked.connect(self._show_settings_error)
             self.dialog.open_folder_button.clicked.connect(self._open_settings_location)
         if self.dialog.isVisible():
             self.dialog.raise_()
@@ -540,16 +529,15 @@ class ApplicationShell(QObject):
             self.window.notifications.publish(notice)
             self.window.notifications.show_snapshot(notice, parent=self.dialog)
 
-    def _show_settings_error(self) -> None:
-        if self._settings_error_notice is not None:
-            self.window.notifications.show_snapshot(self._settings_error_notice, parent=self.dialog)
-        else:
-            self.window.notifications.show_details(parent=self.dialog)
-
     def _cancel_settings(self) -> None:
-        if self.dialog is not None and not self.committed and not self._exit_requested:
+        if (
+            self.dialog is not None
+            and self.dialog.isVisible()
+            and not self.committed
+            and not self._exit_requested
+        ):
             self.window.notifications.close_details()
-            self.dialog.hide()
+            self.dialog.done(QDialog.DialogCode.Rejected)
             self.dialog.set_values(self.baseline)
             self._render()
 
@@ -670,9 +658,9 @@ class ApplicationShell(QObject):
                 settings.serial_port, settings.serial_protocol, settings.serial_baudrate
             )
             self.service.apply_input(config)
-        if request.close_dialog and self.dialog is not None:
+        if request.close_dialog and self.dialog is not None and self.dialog.isVisible():
             self.window.notifications.close_details()
-            self.dialog.hide()
+            self.dialog.accept()
         self._render()
 
     @Slot(object)
@@ -769,21 +757,14 @@ class ApplicationShell(QObject):
             )
             self.dialog.status.setText(message)
             self.dialog.status.setVisible(bool(message))
-            self.dialog.set_editable(self._can_edit)
-            self.dialog.capture_refresh_button.setEnabled(self._can_edit and self.video.can_refresh)
+            self.dialog.set_editable(
+                self._can_edit,
+                capture_refresh=self.video.can_refresh,
+                serial_refresh=not self._serial_searching,
+            )
             self.dialog.save_button.setEnabled(self._can_edit)
             self.dialog.ok_button.setEnabled(self._can_edit)
             self.dialog.close_button.setEnabled(not closing)
-            self.dialog.error_details_button.setVisible(
-                bool(
-                    self.error
-                    or self.video.discovery_error
-                    or self._serial_discovery_error
-                    or "input" in self.window.notifications.notices
-                )
-                or self.video.apply_state == "failed"
-                or self.video.cleanup_unconfirmed
-            )
 
     def request_close(self) -> None:
         """Interrupt Codex and wait for submitted I/O before confirming shutdown."""
@@ -825,9 +806,9 @@ class ApplicationShell(QObject):
 
     def _commit_close(self) -> None:
         self.committed = True
-        if self.dialog is not None:
-            self.dialog.hide()
         self.window.notifications.close_details()
+        if self.dialog is not None and self.dialog.isVisible():
+            self.dialog.done(QDialog.DialogCode.Rejected)
         self.wait_timer.start()
         self.service.shutdown()
         self.video.shutdown()
@@ -896,8 +877,6 @@ class ApplicationShell(QObject):
             return
         self._stopped = True
         self.wait_timer.stop()
-        if self.dialog is not None:
-            self.dialog.hide()
         if self.controller is not None:
             self.controller.close()
         self.window.allow_close = True
