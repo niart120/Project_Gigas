@@ -60,7 +60,7 @@ OS別の方式選択はカメラ取得層の契約です。アプリの既定設
 
 ## New Nintendo 3DS XL
 
-Windows の固定取得元は設定の `capture.device` と `CaptureOptions.device_path` に `ponkan:n3dsxl` を使います。設定とメニューはカメラ列挙結果にこの選択肢を加えます。接続時の子プロセスで初めて ponkan を読み込み、`list_capture_devices(profile="n3dsxl", backend="auto")` の対応候補が1台なら `open_capture()` を呼びます。個体の識別子を指定する API がないため、列挙と open の間は接続構成を固定します。ドライバー利用不可、0台、複数台、接続失敗は映像診断で確認できます。
+Windows の固定取得元は設定の `capture.device` と `CaptureOptions.device_path` に `ponkan:n3dsxl` を使います。一覧更新と通常のカメラ列挙時に子プロセスが USB 記述子を読み、対応候補が1台ならカメラ一覧にこの取得元を加えます。明示的な一覧更新でカメラの列挙が失敗した場合も、3DS 基板の検出結果を返します。0台は正常な列挙結果です。複数台やドライバーエラーは `CaptureSnapshot.catalog_warning` で通知し、列挙済みのカメラは選択できます。ponkan の接続時に改めて `list_capture_devices(profile="n3dsxl", backend="auto")` の対応候補が1台なら `open_capture()` を呼びます。個体の識別子を指定する API がないため、列挙と open の間は接続構成を固定します。ドライバー利用不可、0台、複数台、接続失敗は映像診断で確認できます。
 
 カメラ用の要求寸法と取得FPSは、この取得元では使いません。Windows の標準方式で reader から上下縦結合・BGR の画像を受け取り、幅400×高さ480の Frame として公開します。単発の読み取り期限切れでは次の画像を待ち、画像の途絶は既存のサービス期限で扱います。終了時は子プロセスが reader を閉じます。OpenCV の API 番号を持たないため `snapshot().backend` は `None` です。
 

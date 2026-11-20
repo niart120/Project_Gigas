@@ -1,3 +1,4 @@
+import multiprocessing
 import sys
 from importlib import import_module
 from types import SimpleNamespace
@@ -7,9 +8,10 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from gigas.game_io.capture.backend import acquire_frames
+from gigas.game_io.capture._process import receive_message, worker_main
+from gigas.game_io.capture.backend import IndexedDevice, OpenCVBackend, acquire_frames
 from gigas.game_io.capture.config import PONKAN_SOURCE, CaptureOptions
-from gigas.game_io.capture.models import CaptureError
+from gigas.game_io.capture.models import CaptureError, DeviceInfo
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import Frame
@@ -109,4 +111,52 @@ def test_dll_load_exit_is_reported_as_discovery_failure(monkeypatch: pytest.Monk
     monkeypatch.setattr(ponkan, "open_capture", opener)
     with pytest.raises(CaptureError, match="D3XX"):
         acquire_frames(CaptureOptions(PONKAN_SOURCE), 1, Mock(), lambda: False, Mock())
+    opener.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("status", "boards", "selectable", "warning"),
+    [
+        ("available", 0, False, ""),
+        ("available", 1, True, ""),
+        ("available", 2, False, "複数"),
+        ("unavailable", 0, False, "ドライバー"),
+    ],
+)
+@pytest.mark.parametrize("camera_fails", [False, True])
+def test_refresh_reports_camera_and_usb_discovery_without_opening(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    boards: int,
+    selectable: bool,
+    warning: str,
+    camera_fails: bool,
+) -> None:
+    camera = DeviceInfo("Camera", "path")
+    cameras = Mock(return_value=(IndexedDevice(camera, 0, 1),))
+    if camera_fails:
+        cameras.side_effect = CaptureError("camera discovery failed")
+    monkeypatch.setattr(OpenCVBackend, "enumerate", cameras)
+    discover = Mock(
+        return_value=SimpleNamespace(
+            backend_status=status, reason=status, devices=[object()] * boards
+        )
+    )
+    opener = Mock()
+    monkeypatch.setattr(ponkan, "list_capture_devices", discover)
+    monkeypatch.setattr(ponkan, "open_capture", opener)
+
+    receiver, sender = multiprocessing.Pipe(duplex=False)
+    with receiver:
+        worker_main(None, 0, None, None, Mock(), sender, OpenCVBackend)
+        message = receive_message(receiver)
+    assert message.kind == "devices"
+    paths = [d.path for d in message.devices]
+    assert paths == ([] if camera_fails else ["path"]) + ([PONKAN_SOURCE] if selectable else [])
+    assert ("camera discovery failed" in message.error) == camera_fails
+    if warning:
+        assert warning in message.error
+    elif not camera_fails:
+        assert not message.error
+    discover.assert_called_once_with(profile="n3dsxl", backend="auto")
     opener.assert_not_called()

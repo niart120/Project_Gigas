@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractButton,
     QCheckBox,
@@ -270,11 +270,14 @@ class SettingsDialog(QDialog):
         with QSignalBlocker(self.capture_choices):
             self.capture_choices.clear()
             self.capture_choices.addItem("未接続", "")
-            for label, path in capture_device_choices(self._devices):
+            for label, path in capture_device_choices(self._devices, selected):
                 self.capture_choices.addItem(label, path)
-            if self.capture_choices.findData(selected) < 0:
-                self.capture_choices.addItem(selected, selected)
-            self.capture_choices.setCurrentIndex(self.capture_choices.findData(selected))
+            index = self.capture_choices.findData(selected)
+            self.capture_choices.setCurrentIndex(index)
+            if selected == PONKAN_SOURCE and all(d.path != selected for d in self._devices):
+                model = self.capture_choices.model()
+                if isinstance(model, QStandardItemModel):
+                    model.item(index).setEnabled(False)
 
         self._sync_camera_controls()
 

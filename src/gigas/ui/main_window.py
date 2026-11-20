@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.input.config import PROTOCOLS
 from gigas.game_io.input.serial import SerialPort
 from gigas.ui.capture_choices import capture_device_choices
@@ -314,9 +315,7 @@ class MainWindow(QMainWindow):
             error: Current catalog failure, shown as a short state here.
             enabled: Whether selecting a device may save and apply settings.
         """
-        choices = (("未接続", ""), *capture_device_choices(devices))
-        if selected_device not in {path for _label, path in choices}:
-            choices += ((selected_device, selected_device),)
+        choices = (("未接続", ""), *capture_device_choices(devices, selected_device))
         if choices != self._video_choices:
             for action in self._video_device_group.actions():
                 self.video_menu.removeAction(action)
@@ -331,6 +330,8 @@ class MainWindow(QMainWindow):
                 action.setToolTip(f"<qt>{escape(label)}</qt>")
                 action.setData(path)
                 action.setCheckable(True)
+                if path == PONKAN_SOURCE:
+                    action.setEnabled(any(device.path == path for device in devices))
                 action.triggered.connect(
                     lambda _checked=False, selected=path: self.capture_device_requested.emit(
                         selected

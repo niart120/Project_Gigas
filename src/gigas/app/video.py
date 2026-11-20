@@ -298,13 +298,22 @@ class VideoController(QObject):
             self._snapshot = snapshot
         enumerating = self._enumerating
         if self._enumerating:
-            self._discovery_error = snapshot.error
+            self._discovery_error = snapshot.error or snapshot.catalog_warning
             if snapshot.phase in {"idle", "error", "closed"} or snapshot.cleanup == "unconfirmed":
                 self._enumerating = False
         if snapshot.devices_revision != self._revision:
             self._revision = snapshot.devices_revision
             if not enumerating:
-                self._discovery_error = ""
+                self._discovery_error = snapshot.catalog_warning
+            if snapshot.catalog_warning:
+                self.failed.emit(
+                    Notice(
+                        "video",
+                        "映像機器の確認",
+                        "一部の映像機器を選択できません。",
+                        snapshot.catalog_warning,
+                    )
+                )
         self._notify_failure(snapshot, alive=alive)
         self._render()
         if (

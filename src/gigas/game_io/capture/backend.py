@@ -178,6 +178,7 @@ def acquire_frames(
     enumerated: "Callable[[tuple[DeviceInfo, ...]], None] | None" = None,
     candidates: "Callable[[tuple[int, ...], int], None] | None" = None,
     api_preference: int | None = None,
+    detected_board: "Callable[[bool], None] | None" = None,
 ) -> None:
     """Resolve a device, acquire validated frames, and always release its handle.
 
@@ -192,6 +193,7 @@ def acquire_frames(
         enumerated: Optional notification of selectable identities from the same
             enumeration used to resolve the device, before selection and opening.
         candidates: Receives at most two matching API identifiers and the chosen API.
+        detected_board: Receives the result of the ponkan connection preflight.
         api_preference: Explicit API to re-resolve for a retry, or None for the first
             matching candidate. A missing API never substitutes another candidate.
 
@@ -205,7 +207,7 @@ def acquire_frames(
             raise CaptureError(message)
         if stopped():
             return
-        with open_ponkan(stopped, released) as reader:
+        with open_ponkan(stopped, released, detected_board) as reader:
             if reader is None:
                 return
 

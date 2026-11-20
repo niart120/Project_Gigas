@@ -1,10 +1,12 @@
 import sys
+from dataclasses import replace
 
 import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
-from gigas.game_io.capture.config import PONKAN_SOURCE
+from gigas.game_io.capture.config import PONKAN_LABEL, PONKAN_SOURCE
+from gigas.game_io.capture.models import DeviceInfo
 from gigas.storage.settings import load_settings
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_app_lifetime import ControlledIO
@@ -87,6 +89,14 @@ def test_ponkan_menu_selection_preserves_camera_settings(
     shell, capture, _io = application
     dialog = shell.dialog
     assert dialog is not None
+    assert dialog.capture_choices.findData(PONKAN_SOURCE) == -1
+    assert PONKAN_SOURCE not in shell.window.video_device_actions
+    capture.state = replace(
+        capture.state,
+        devices=(*capture.state.devices, DeviceInfo(PONKAN_LABEL, PONKAN_SOURCE)),
+        devices_revision=capture.state.devices_revision + 1,
+    )
+    qtbot.waitUntil(lambda: dialog.capture_choices.findData(PONKAN_SOURCE) >= 0)
     camera_settings = dialog.values()
     dialog.close_button.click()
     shell.window.video_device_actions[PONKAN_SOURCE].trigger()
@@ -106,3 +116,14 @@ def test_ponkan_menu_selection_preserves_camera_settings(
     assert dialog.capture_resolution.isEnabled()
     assert dialog.values().capture_fps == camera_settings.capture_fps
     assert dialog.values().capture_resolution == camera_settings.capture_resolution
+    capture.state = replace(
+        capture.state,
+        devices=tuple(d for d in capture.state.devices if d.path != PONKAN_SOURCE),
+        devices_revision=capture.state.devices_revision + 1,
+    )
+    qtbot.waitUntil(lambda: dialog.capture_choices.findData(PONKAN_SOURCE) == -1)
+    dialog.set_values(saved)
+    assert dialog.capture_choices.currentText() == f"{PONKAN_LABEL} (未検出)"
+    assert dialog.values().capture_device == PONKAN_SOURCE
+    dialog.close_button.click()
+    assert not shell.window.video_device_actions[PONKAN_SOURCE].isEnabled()

@@ -1,6 +1,5 @@
 """Consistent display names for capture identities in settings and menus."""
 
-import sys
 from collections import Counter
 from typing import TYPE_CHECKING
 
@@ -10,10 +9,13 @@ if TYPE_CHECKING:
     from gigas.game_io.capture.models import DeviceInfo
 
 
-def capture_device_choices(devices: "tuple[DeviceInfo, ...]") -> tuple[tuple[str, str], ...]:
+def capture_device_choices(
+    devices: "tuple[DeviceInfo, ...]", selected: str = ""
+) -> tuple[tuple[str, str], ...]:
     """Return display-name/path pairs, numbering only duplicate device names.
 
     Args:
+        selected: Keep a missing selection visible, including the saved ponkan profile.
         devices: Current catalog in enumeration order; entries without a path are omitted.
 
     Returns:
@@ -27,6 +29,7 @@ def capture_device_choices(devices: "tuple[DeviceInfo, ...]") -> tuple[tuple[str
         seen[device.name] += 1
         label = f"{device.name} ({seen[device.name]})" if counts[device.name] > 1 else device.name
         choices.append((label, device.path))
-    if sys.platform == "win32":
-        choices.append((PONKAN_LABEL, PONKAN_SOURCE))
+    if selected and all(path != selected for _, path in choices):
+        label = f"{PONKAN_LABEL} (未検出)" if selected == PONKAN_SOURCE else selected
+        choices.append((label, selected))
     return tuple(choices)

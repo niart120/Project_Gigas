@@ -68,6 +68,7 @@ class CaptureSnapshot:
         cleanup: Whether native release or forced process termination was confirmed.
         backend: Explicit OpenCV API identifier chosen by the current or last worker,
             or None before selection. Zero is reserved for injected test adapters.
+        catalog_warning: Partial device-list failure accompanying the latest catalog.
         diagnostics: Bounded attempt failure reasons in order, retained after a
             successful fallback and reset on the next request. Intermediate failures
             do not populate error; each request tries at most two APIs.
@@ -84,6 +85,7 @@ class CaptureSnapshot:
     cleanup: Literal["none", "graceful", "forced", "unconfirmed"] = "none"
     backend: int | None = None
     diagnostics: tuple[str, ...] = ()
+    catalog_warning: str = ""
 
 
 class CaptureReader:
@@ -417,13 +419,18 @@ class CaptureService(Thread):
                 session.status_closed = True
                 break
             with self._condition:
-                if message.kind == "devices":
+                if message.kind in {"devices", "ponkan"}:
+                    devices = message.devices
+                    if message.kind == "ponkan":
+                        cameras = tuple(d for d in self._state.devices if d.path != PONKAN_SOURCE)
+                        devices = (*cameras, *devices)
                     if session.slot is None:
                         session.listed = True
                     if not self._cancel:
                         self._state = replace(
                             self._state,
-                            devices=message.devices,
+                            devices=devices,
+                            catalog_warning=message.error,
                             devices_revision=self._state.devices_revision + 1,
                         )
                 elif message.kind == "candidates":
