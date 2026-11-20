@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 from gigas.game_io.capture.models import CaptureError
 
+PONKAN_SOURCE = "ponkan:n3dsxl"
+PONKAN_LABEL = "New Nintendo 3DS XL (ponkan)"
+
 _CAPTURE_DIMENSIONS: dict[str, tuple[int | None, int | None]] = {
     "auto": (None, None),
     "hd": (1280, 720),

@@ -322,7 +322,6 @@ def test_real_capture_readers_continue_through_display_resize(qtbot: QtBot, tmp_
         assert shell.dialog is not None
         assert shell.dialog.capture_choices.currentData() == "path-b"
         assert shell.dialog.capture_choices.findData("path-a") > 0
-        assert shell.dialog.capture_choices.count() == 3
         pixels = held.bgr
         shell.window.window_size_actions["hd"].trigger()
         qtbot.waitUntil(lambda: shell.operation is None)

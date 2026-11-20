@@ -16,7 +16,7 @@
 - Windows
 - Python `>=3.12,<3.16`（推奨3.13、検証済み3.12・3.13）
 - [`uv`](https://docs.astral.sh/uv/)
-- 設定画面の起動に機器は不要。映像プレビューにはDirectShow対応キャプチャーデバイス、ゲーム入力には[対応するシリアル入力機器](docs/design/interfaces/input-api.md)を使います。
+- 設定画面の起動に機器は不要。映像プレビューにはカメラ取得に対応するキャプチャーデバイスまたは [New Nintendo 3DS XL の対応キャプチャ基板](docs/guides/video.md#new-nintendo-3ds-xl)、ゲーム入力には[対応するシリアル入力機器](docs/design/interfaces/input-api.md)を使います。
 
 ## 起動
 

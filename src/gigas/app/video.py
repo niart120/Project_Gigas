@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from gigas.game_io.capture import CaptureService
-from gigas.game_io.capture.config import CaptureOptions, resolve_capture_options
+from gigas.game_io.capture.config import PONKAN_SOURCE, CaptureOptions, resolve_capture_options
 from gigas.game_io.capture.models import CaptureError
 from gigas.ui.notifications import Notice
 from gigas.ui.video_panel import VideoPanel
@@ -222,7 +222,9 @@ class VideoController(QObject):
         self._poll()
 
     @staticmethod
-    def _capture_key(settings: "Settings") -> tuple[str, int, str]:
+    def _capture_key(settings: "Settings") -> tuple[str] | tuple[str, int, str]:
+        if settings.capture_device == PONKAN_SOURCE:
+            return (PONKAN_SOURCE,)
         return settings.capture_device, settings.capture_fps, settings.capture_resolution
 
     def cancel_pending(self) -> None:

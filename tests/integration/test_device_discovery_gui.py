@@ -171,7 +171,7 @@ def test_real_spawn_discovery_opens_no_video_and_reopen_keeps_capture_running(
         assert not marker.with_suffix(".txt.opened").exists()
         dialog = shell.dialog
         assert dialog is not None
-        qtbot.waitUntil(lambda: dialog.capture_choices.count() == 3)
+        qtbot.waitUntil(lambda: dialog.capture_choices.findData("path-b") >= 0)
         shell.apply_settings(replace(shell.baseline, capture_device="path-b"))
         qtbot.waitUntil(lambda: service.snapshot().frame is not None)
         first = service.snapshot().frame

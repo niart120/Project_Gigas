@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from gigas.game_io.capture._process import SharedSlot, receive_message, worker_main
 from gigas.game_io.capture.backend import OpenCVBackend
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.capture.frames import FrameStore
 from gigas.game_io.capture.models import CaptureError
 
@@ -293,6 +294,8 @@ class CaptureService(Thread):
                 diagnostics = self._state.diagnostics
                 if session.error:
                     label = str(session.backend) if session.backend is not None else "未選択"
+                    if options is not None and options.device_path == PONKAN_SOURCE:
+                        label = "ponkan"
                     diagnostics += (f"取得方式 {label}: {session.error}",)
                 remaining = tuple(api for api in allowed if api not in attempted)
                 retry = (

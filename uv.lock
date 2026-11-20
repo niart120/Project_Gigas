@@ -505,6 +505,7 @@ dependencies = [
     { name = "numpy" },
     { name = "openai-codex-cli-bin" },
     { name = "opencv-python-headless" },
+    { name = "ponkan-python", marker = "sys_platform == 'win32'" },
     { name = "pyserial" },
     { name = "pyside6-essentials" },
     { name = "python-json-logger" },
@@ -532,6 +533,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.5.4" },
     { name = "openai-codex-cli-bin", specifier = "==0.170.0" },
     { name = "opencv-python-headless", specifier = "==4.14.0.94" },
+    { name = "ponkan-python", marker = "sys_platform == 'win32'", specifier = "==0.2.1" },
     { name = "pyserial", specifier = "==3.5" },
     { name = "pyside6-essentials", specifier = "==6.12.0" },
     { name = "python-json-logger", specifier = ">=4.2.0" },
@@ -742,6 +744,17 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516, upload-time = "2025-11-16T16:26:09.482Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160, upload-time = "2025-11-16T16:26:08.402Z" },
+]
+
+[[package]]
+name = "libusb1"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/35/f9d2a990d092d647b47540cd229e1d68432c0f51183484ca189612a4824c/libusb1-3.4.0.tar.gz", hash = "sha256:9cf5638506d54f21bf36550d97ea63189111a23c4d8078f630103a2052135f45", size = 91206, upload-time = "2026-05-16T20:59:19.315Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/64/d4b59444e4d3b6979aa5eb58840634465a24b41a9ab03dcf8434c9b89551/libusb1-3.4.0-py3-none-any.whl", hash = "sha256:e83d034e44c3efe1c4599c6281d34bca50a38c12cab3b7b6217d583161a01ffd", size = 67373, upload-time = "2026-05-16T20:59:13.142Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/55/a838a4278fac4ee49bf670ddc59d621999a1cb2a3188fb13a23609ea4f06/libusb1-3.4.0-py3-none-win32.whl", hash = "sha256:0a1aa1416034690eb9dc9a895eda0fef44d853bca1053eb1de50a5906684846d", size = 129704, upload-time = "2026-05-16T20:59:15.243Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/08/02aecf6dad627534a5835244ece14d7f187ef430354d9b8551199934d059/libusb1-3.4.0-py3-none-win_amd64.whl", hash = "sha256:b7dcc1f324a895af6aac708bc5513a17373f97349cc2ab8a277519c788bd18ca", size = 141212, upload-time = "2026-05-16T20:59:17.286Z" },
 ]
 
 [[package]]
@@ -984,12 +997,35 @@ wheels = [
 ]
 
 [[package]]
+name = "ponkan-python"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "libusb1" },
+    { name = "numpy" },
+    { name = "pyd3xx", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9e/e7/3447a367b8ee28c478af0c8d40da56f0b49ff75670d369db7a115b2dd8b3/ponkan_python-0.2.1.tar.gz", hash = "sha256:838d9450b6427338138ed9fe22ffd8cc5e30bc6ffb570784d6488dd20dfad323", size = 87962, upload-time = "2026-11-20T11:17:04.683Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/0d/5947e116ed7d38c701defeb1d78711f73c7a845a2ac59d9d11925cb82673/ponkan_python-0.2.1-py3-none-any.whl", hash = "sha256:8dbea73641047941f8985001919e2dce690e07d789d2dfc66b340177e7bb7360", size = 70210, upload-time = "2026-11-20T11:17:02.552Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.12"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cb/27/eeb9f307bf07060f3d9f9aa0fb8c15b01bdfded0a941e4b2719c7f94cacd/pycparser-3.12.tar.gz", hash = "sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6", size = 158785, upload-time = "2026-10-22T13:40:03.56Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b6/ae/315bbeee126a769cbde43cf4908acb4b40408d8bf8bbf334dd7368d8dadf/pycparser-3.12-py3-none-any.whl", hash = "sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e", size = 62600, upload-time = "2026-10-22T13:40:02.021Z" },
+]
+
+[[package]]
+name = "pyd3xx"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/18/fe/14d883a8c678b0bf780d2db4666abe11f20bc1d4ed8f258967ded6e7c8e2/pyd3xx-1.2.0.tar.gz", hash = "sha256:c29a49741bbcafa29bfa58e8dda009bda1ff4718ddc915b4fbcdb279c9c9fccc", size = 2642942, upload-time = "2026-09-09T18:02:15.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/4c/b71c3060da0b93afda967657af0068d9e67374d309177361fe34f961cd99/pyd3xx-1.2.0-py3-none-any.whl", hash = "sha256:46a53de9936f7fa204f6ffe45e255ba43ef69146cfb0db2595477ad6c35a51ed", size = 2716914, upload-time = "2026-09-09T18:02:13.079Z" },
 ]
 
 [[package]]

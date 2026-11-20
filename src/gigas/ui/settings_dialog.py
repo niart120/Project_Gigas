@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.game_io.input.config import PROTOCOLS, get_protocol, resolve_baudrate
 from gigas.storage.settings import Settings
 from gigas.ui.capture_choices import capture_device_choices
@@ -196,6 +197,8 @@ class SettingsDialog(QDialog):
             button.setDefault(False)
         actions.rejected.connect(self.reject)
         layout.addWidget(actions)
+        self.capture_choices.currentIndexChanged.connect(self._sync_camera_controls)
+        self._sync_capture_choice("")
 
     def _tab(self, title: str) -> QFormLayout:
         scroll = QScrollArea(self.tabs)
@@ -272,6 +275,15 @@ class SettingsDialog(QDialog):
             if self.capture_choices.findData(selected) < 0:
                 self.capture_choices.addItem(selected, selected)
             self.capture_choices.setCurrentIndex(self.capture_choices.findData(selected))
+
+        self._sync_camera_controls()
+
+    def _sync_camera_controls(self) -> None:
+        enabled = (
+            self.capture_choices.isEnabled() and self.capture_choices.currentData() != PONKAN_SOURCE
+        )
+        self.capture_fps.setEnabled(enabled)
+        self.capture_resolution.setEnabled(enabled)
 
     def set_serial_ports(
         self,
@@ -391,11 +403,9 @@ class SettingsDialog(QDialog):
             self.serial_baudrate,
             self.serial_refresh_button,
             self.capture_choices,
-            self.capture_fps,
             self.preview_fps,
             self.capture_refresh_button,
             self.window_size_preset,
-            self.capture_resolution,
             self.observation_resolution,
             self.preview_mode,
             self.show_reasoning,
@@ -404,3 +414,4 @@ class SettingsDialog(QDialog):
             self.approvals_reviewer,
         ):
             field.setEnabled(enabled)
+        self._sync_camera_controls()

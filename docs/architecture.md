@@ -50,7 +50,7 @@ flowchart LR
 | `ApplicationServiceThread`のQThread | 一つのasyncioループでCodex接続、会話、入力、ゲームMCP、観測・保存の受付を実行 |
 | 映像監視スレッド | `CaptureService`が取得子プロセスの状態・期限を監視し、最新Frameを保持 |
 | 診断ログの保存スレッド | `QueueListener`が共通診断ログをJSON整形・認証情報除外・サイズ回転して保存 |
-| 映像取得子プロセス | OpenCVによるデバイス列挙・接続・フレーム取得。取得中は最大一つの子プロセスが機器を所有 |
+| 映像取得子プロセス | OpenCV によるカメラ列挙・接続、または ponkan による New Nintendo 3DS XL の取得。取得中は最大一つの子プロセスが機器を所有 |
 | Codex app-serverプロセス | モデル実行、会話・Project・Goal・標準自動記憶の管理 |
 
 PNG符号化や保存、ポート列挙などの同期処理は`asyncio.to_thread()`で実行する。シリアル通信は`SerialInput`の単一ワーカーに送り、書込とcloseの順序を維持する。

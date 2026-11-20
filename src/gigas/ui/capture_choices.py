@@ -1,7 +1,10 @@
 """Consistent display names for capture identities in settings and menus."""
 
+import sys
 from collections import Counter
 from typing import TYPE_CHECKING
+
+from gigas.game_io.capture.config import PONKAN_LABEL, PONKAN_SOURCE
 
 if TYPE_CHECKING:
     from gigas.game_io.capture.models import DeviceInfo
@@ -24,4 +27,6 @@ def capture_device_choices(devices: "tuple[DeviceInfo, ...]") -> tuple[tuple[str
         seen[device.name] += 1
         label = f"{device.name} ({seen[device.name]})" if counts[device.name] > 1 else device.name
         choices.append((label, device.path))
+    if sys.platform == "win32":
+        choices.append((PONKAN_LABEL, PONKAN_SOURCE))
     return tuple(choices)

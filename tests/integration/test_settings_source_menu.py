@@ -1,7 +1,10 @@
+import sys
+
 import pytest
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
+from gigas.game_io.capture.config import PONKAN_SOURCE
 from gigas.storage.settings import load_settings
 from tests.integration.peers.controlled_capture import ControlledCapture
 from tests.integration.test_app_lifetime import ControlledIO
@@ -74,3 +77,32 @@ def test_device_menus_apply_only_the_selected_connection(
     assert shell.baseline.serial_baudrate == 115200
     assert len(capture.connections) == before
     assert applied == [None]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows capture source")
+def test_ponkan_menu_selection_preserves_camera_settings(
+    application: tuple[ApplicationShell, ControlledCapture, ControlledIO],
+    qtbot: QtBot,
+) -> None:
+    shell, capture, _io = application
+    dialog = shell.dialog
+    assert dialog is not None
+    camera_settings = dialog.values()
+    dialog.close_button.click()
+    shell.window.video_device_actions[PONKAN_SOURCE].trigger()
+    qtbot.waitUntil(lambda: shell.operation is None)
+    capture.complete_disconnect()
+    qtbot.waitUntil(lambda: capture.connections[-1].device_path == PONKAN_SOURCE)
+    saved = load_settings(shell.path)
+    assert saved.capture_device == PONKAN_SOURCE
+    shell.open_settings()
+    assert dialog.capture_choices.currentData() == PONKAN_SOURCE
+    assert not dialog.capture_fps.isEnabled()
+    assert not dialog.capture_resolution.isEnabled()
+    assert dialog.preview_fps.isEnabled()
+    assert dialog.observation_resolution.isEnabled()
+    dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
+    assert dialog.capture_fps.isEnabled()
+    assert dialog.capture_resolution.isEnabled()
+    assert dialog.values().capture_fps == camera_settings.capture_fps
+    assert dialog.values().capture_resolution == camera_settings.capture_resolution
