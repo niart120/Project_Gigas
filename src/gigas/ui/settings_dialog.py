@@ -102,10 +102,6 @@ class SettingsDialog(QDialog):
         selection = QHBoxLayout()
         selection.addWidget(self.capture_choices, 1)
         selection.addWidget(self.capture_refresh_button)
-        self.capture_discovery_status = QLabel("列挙失敗", self)
-        self.capture_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
-        self.capture_discovery_status.hide()
-        selection.addWidget(self.capture_discovery_status)
         capture_form.addRow("機器", selection)
         self.capture_fps = self._rate_field(60)
         capture_form.addRow("取得FPS", self.capture_fps)
@@ -143,10 +139,6 @@ class SettingsDialog(QDialog):
         serial_selection = QHBoxLayout()
         serial_selection.addWidget(self.serial_port, 1)
         serial_selection.addWidget(self.serial_refresh_button)
-        self.serial_discovery_status = QLabel(self)
-        self.serial_discovery_status.setTextFormat(Qt.TextFormat.PlainText)
-        self.serial_discovery_status.hide()
-        serial_selection.addWidget(self.serial_discovery_status)
         controller_form.addRow("シリアルポート", serial_selection)
         self.serial_protocol = QComboBox(self)
         for protocol in PROTOCOLS:
@@ -179,13 +171,7 @@ class SettingsDialog(QDialog):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status.hide()
-        error_row = QHBoxLayout()
-        error_row.addWidget(self.status, 1)
-        self.error_details_button = QPushButton("詳細…", self)
-        self.error_details_button.setAutoDefault(False)
-        self.error_details_button.hide()
-        error_row.addWidget(self.error_details_button)
-        layout.addLayout(error_row)
+        layout.addWidget(self.status)
         actions = QDialogButtonBox(self)
         self.ok_button = actions.addButton(QDialogButtonBox.StandardButton.Ok)
         self.close_button = actions.addButton(QDialogButtonBox.StandardButton.Cancel)
@@ -243,19 +229,12 @@ class SettingsDialog(QDialog):
                 field.addItem(str(rate), rate)
             field.setCurrentIndex(field.findData(value))
 
-    def set_capture_devices(
-        self,
-        devices: "tuple[DeviceInfo, ...]",
-        *,
-        error: str = "",
-    ) -> None:
+    def set_capture_devices(self, devices: "tuple[DeviceInfo, ...]") -> None:
         """Refresh candidates without changing the edited device or other fields.
 
         Args:
             devices: Latest successful catalog with stable identifiers.
-            error: Current enumeration failure, available through notification details.
         """
-        self.capture_discovery_status.setVisible(bool(error))
         devices = tuple(device for device in devices if device.path)
         if devices != self._devices:
             selected = str(self.capture_choices.currentData() or "")
@@ -284,23 +263,12 @@ class SettingsDialog(QDialog):
         self.capture_fps.setEnabled(enabled)
         self.capture_resolution.setEnabled(enabled)
 
-    def set_serial_ports(
-        self,
-        ports: "tuple[SerialPort, ...]",
-        *,
-        searching: bool = False,
-        error: str = "",
-    ) -> None:
+    def set_serial_ports(self, ports: "tuple[SerialPort, ...]") -> None:
         """Update port candidates while retaining the edited native identifier.
 
         Args:
             ports: Latest successful catalog; enumeration does not open ports.
-            searching: Whether enumeration is in progress.
-            error: Enumeration failure available through notification details.
         """
-        state = "列挙失敗" if error else "検索中" if searching else ""
-        self.serial_discovery_status.setText(state)
-        self.serial_discovery_status.setVisible(bool(state))
         self._serial_ports = tuple(port for port in ports if port.identifier)
         self._sync_serial_choice(str(self.serial_port.currentData() or ""))
 
@@ -394,16 +362,22 @@ class SettingsDialog(QDialog):
                 self.observation_resolution.findData(values.observation_resolution)
             )
 
-    def set_editable(self, enabled: bool) -> None:
-        """Control editing during I/O while retaining copying and dialog closure."""
+    def set_editable(
+        self, enabled: bool, *, capture_refresh: bool = True, serial_refresh: bool = True
+    ) -> None:
+        """Control editing during I/O while retaining copying and dialog closure.
+
+        Args:
+            enabled: Whether settings can be edited and enumeration requested.
+            capture_refresh: Whether the capture service can enumerate devices.
+            serial_refresh: Whether another serial enumeration can start.
+        """
         for field in (
             self.serial_port,
             self.serial_protocol,
             self.serial_baudrate,
-            self.serial_refresh_button,
             self.capture_choices,
             self.preview_fps,
-            self.capture_refresh_button,
             self.window_size_preset,
             self.observation_resolution,
             self.preview_mode,
@@ -413,4 +387,6 @@ class SettingsDialog(QDialog):
             self.approvals_reviewer,
         ):
             field.setEnabled(enabled)
+        self.capture_refresh_button.setEnabled(enabled and capture_refresh)
+        self.serial_refresh_button.setEnabled(enabled and serial_refresh)
         self._sync_camera_controls()

@@ -4,6 +4,7 @@ from threading import Event
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QPushButton
 from pytestqt.qtbot import QtBot
 
 from gigas.app.shell import ApplicationShell
@@ -25,7 +26,10 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     dialog = shell.dialog
     assert dialog is not None
     assert capture.refreshes == 1
-    assert dialog.capture_discovery_status.isHidden()
+    dialog.tabs.setCurrentIndex(1)
+    dialog.grab()
+    device_geometry = dialog.capture_choices.geometry()
+    buttons = [button for button in dialog.findChildren(QPushButton) if button.isVisible()]
     assert all(
         action.isSeparator() or action in shell.window.video_device_actions.values()
         for action in shell.window.video_menu.actions()
@@ -44,23 +48,22 @@ def test_open_enumerates_asynchronously_and_preserves_edits_through_retry(
     qtbot.waitUntil(pulse.is_set)
 
     capture.complete_enumeration(error="enumeration failed")
-    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
-    assert dialog.capture_choices.currentData() == "path-b"
+    qtbot.waitUntil(dialog.capture_refresh_button.isEnabled)
+    dialog.grab()
+    assert dialog.capture_choices.geometry() == device_geometry
+    assert [button for button in dialog.findChildren(QPushButton) if button.isVisible()] == buttons
     assert dialog.capture_choices.currentData() == "path-b"
     assert shell.window.notifications.notices["video"].details == "enumeration failed"
-    assert dialog.capture_refresh_button.isEnabled()
     assert capture.refreshes == 1
 
     dialog.capture_refresh_button.click()
     assert capture.refreshes == 2
     capture.complete_enumeration((DeviceInfo("First", "path-a"),))
     qtbot.waitUntil(lambda: dialog.capture_choices.findData("path-a") >= 0)
-    assert dialog.capture_discovery_status.isHidden()
     dialog.capture_choices.setCurrentIndex(dialog.capture_choices.findData("path-a"))
     dialog.capture_refresh_button.click()
     capture.complete_enumeration(())
     qtbot.waitUntil(lambda: not shell.video.discovering)
-    assert dialog.capture_discovery_status.isHidden()
     assert dialog.values() == replace(
         shell.baseline,
         capture_device="path-a",
@@ -108,7 +111,7 @@ def test_catalog_result_does_not_hide_unconfirmed_worker_cleanup(
     capture.state = replace(
         capture.state, phase="error", cleanup="unconfirmed", error="worker cleanup failed"
     )
-    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
+    qtbot.waitUntil(lambda: "video" in shell.window.notifications.notices)
     assert dialog.capture_choices.currentData() == "path-b"
     assert (
         dialog.capture_choices.itemText(dialog.capture_choices.findData("path-b")) == "Saved camera"
@@ -150,9 +153,8 @@ def test_streaming_settings_refresh_preserves_preview_and_unsaved_selection(
     dialog.capture_refresh_button.click()
     assert not dialog.capture_refresh_button.isEnabled()
     capture.complete_enumeration(error="catalog failure")
-    qtbot.waitUntil(lambda: not dialog.capture_discovery_status.isHidden())
+    qtbot.waitUntil(dialog.capture_refresh_button.isEnabled)
     assert shell.window.notifications.notices["video"].details == "catalog failure"
-    assert dialog.capture_refresh_button.isEnabled()
     dialog.capture_refresh_button.click()
     capture.complete_enumeration((DeviceInfo("New camera", "path-c"),))
     qtbot.waitUntil(lambda: dialog.capture_choices.findData("path-c") >= 0)
