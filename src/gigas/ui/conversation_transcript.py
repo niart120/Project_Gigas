@@ -138,7 +138,11 @@ class ConversationTranscript(Transcript):
             enabled: Whether new content should follow the tail during live updates.
         """
         self._auto_scroll = enabled
-        if enabled and not self._reading():
+        self.follow_latest()
+
+    def follow_latest(self) -> None:
+        """Reveal newly added native controls when live following is enabled."""
+        if self._auto_scroll and not self._reading():
             bar = self.verticalScrollBar()
             bar.setValue(bar.maximum())
 
@@ -148,8 +152,12 @@ class ConversationTranscript(Transcript):
             focus is not None and self.viewport().isAncestorOf(focus)
         )
 
-    def _keep_tail_during_layout(self) -> bool:
-        return self._auto_scroll and not self._reading() and super()._keep_tail_during_layout()
+    def _keep_tail_during_layout(self, *, resizing: bool = False) -> bool:
+        return (
+            (resizing or self._auto_scroll)
+            and not self._reading()
+            and super()._keep_tail_during_layout(resizing=resizing)
+        )
 
     def closeEvent(self, event: "QCloseEvent") -> None:  # noqa: N802
         """Retire the worker when a standalone view is closed."""

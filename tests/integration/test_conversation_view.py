@@ -13,6 +13,7 @@ from gigas.runtime.codex.models import (
     PlanEvent,
     PlanStep,
     Question,
+    RequestResolved,
     SessionStatus,
     TextEvent,
 )
@@ -100,11 +101,37 @@ def test_auto_scroll_follows_live_updates_only_when_checked(qtbot: QtBot) -> Non
     assert bar.value() < bar.maximum()
 
     toggle.click()
-    history = HistoryEntry("history", "assistant", "\n\n".join(f"履歴 {i}" for i in range(60)))
-    panel.replace_target("未所属", "別の会話", thread_id="other", entries=(history,))
+    history = HistoryEntry("history", "user", "\n".join(f"履歴 {i}" for i in range(60)))
+    answer = HistoryEntry("answer", "assistant", "保存済みの回答")
+    panel.begin_loading("未所属", "別の会話")
+    panel.replace_target("未所属", "別の会話", thread_id="other", entries=(history, answer))
+    panel.history_button.show()
     qtbot.waitUntil(lambda: view.rendering_idle)
     assert not toggle.isChecked()
     assert bar.value() == bar.maximum() > 0
+
+
+def test_auto_scroll_follows_a_new_request_but_not_draft_edits(qtbot: QtBot) -> None:
+    panel = _panel(qtbot)
+    panel.replace_target("未所属", "会話", thread_id="old")
+    panel.handle_event(ServiceEvent(1, ConversationStatus("old", "turn")))
+    panel.handle_event(
+        ServiceEvent(1, TextEvent("log", "\n".join(f"進捗 {i}" for i in range(60)), "user"))
+    )
+    bar = panel.transcript.verticalScrollBar()
+    bar.setValue(bar.maximum() // 2)
+    _request(panel)
+    assert bar.value() == bar.maximum() > 0
+
+    bar.setValue(bar.maximum() // 2)
+    position = bar.value()
+    panel.prompt.setPlainText("未送信の下書き")
+    assert bar.value() == position < bar.maximum()
+
+    panel.handle_event(ServiceEvent(1, RequestResolved("old-question")))
+    position = bar.value()
+    panel.prompt.setPlainText("編集した下書き")
+    assert bar.value() == position < bar.maximum()
 
 
 def test_reconnect_retains_documents_draft_goal_and_expired_cards(qtbot: QtBot) -> None:

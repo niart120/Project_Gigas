@@ -172,7 +172,7 @@ class Transcript(QTextBrowser):
         item = self._item(item_id, kind)
         item.text = item.text + text if append else text
         item.emphasis = ()
-        self._render_item(item, scroll="live")
+        self._render_item(item)
 
     def update_entry(self, entry: "HistoryEntry", *, append: bool = False) -> None:
         """Retain structured public data while rendering the current literal projection.
@@ -283,7 +283,7 @@ class Transcript(QTextBrowser):
     def resizeEvent(self, event: "QResizeEvent") -> None:  # noqa: N802 -- Qt override
         """Keep the tail or visible passage when surrounding controls change size."""
         scrollbar = self.verticalScrollBar()
-        following = self._keep_tail_during_layout()
+        following = self._keep_tail_during_layout(resizing=True)
         visible = self.cursorForPosition(QPoint(0, 1))
         visible_y = self.cursorRect(visible).top()
         super().resizeEvent(event)
@@ -351,7 +351,8 @@ class Transcript(QTextBrowser):
         )
         self._position_controls()
 
-    def _keep_tail_during_layout(self) -> bool:
+    def _keep_tail_during_layout(self, *, resizing: bool = False) -> bool:
+        del resizing  # The plain view treats both kinds of layout changes alike.
         bar = self.verticalScrollBar()
         return bar.value() == bar.maximum() and not self.textCursor().hasSelection()
 
