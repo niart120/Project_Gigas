@@ -34,7 +34,7 @@ class CaptureTimeouts:
     """Finite worker deadlines in seconds, configurable for deterministic tests."""
 
     startup: float = 10.0
-    frame: float = 3.0
+    frame: float = 5.0
     stop: float = 2.0
     terminate: float = 2.0
 
@@ -125,7 +125,6 @@ class _Session:
     status: "Channel"
     stop: "Channel"
     slot: SharedSlot | None
-    frame_timeout: float
     released: bool = False
     listed: bool = False
     error: str = ""
@@ -154,8 +153,6 @@ class _WorkerMonitor(Thread):
         super().__init__(name="gigas-capture-monitor", daemon=True)
         self._factory = backend_factory
         self._timeouts = CaptureTimeouts() if timeouts is None else timeouts
-        # DS software can stop producing frames briefly when returning to HOME.
-        self._ponkan_frame_timeout = 5.0 if timeouts is None else timeouts.frame
         self._condition = Condition()
         self._frames = FrameStore()
         self._state = CaptureSnapshot()
@@ -309,10 +306,7 @@ class _WorkerMonitor(Thread):
             stop_reader.close()
             status_writer.close()
             rollback.pop_all()
-        frame_timeout = self._timeouts.frame
-        if options is not None and options.device_path == PONKAN_SOURCE:
-            frame_timeout = self._ponkan_frame_timeout
-        return _Session(process, status_reader, stop_writer, slot, frame_timeout)
+        return _Session(process, status_reader, stop_writer, slot)
 
     def _rollback(self, resource: object, close: "Callable[[], None]") -> None:
         try:
@@ -443,7 +437,7 @@ class _WorkerMonitor(Thread):
             if not cancel and not session.error:
                 if sequence == 0 and not session.listed and now - started >= self._timeouts.startup:
                     session.error = "映像取得の開始期限切れ"
-                elif sequence > 0 and now - progress >= session.frame_timeout:
+                elif sequence > 0 and now - progress >= self._timeouts.frame:
                     session.error = "映像フレーム待機期限切れ"
             if cancel or session.error or session.listed or session.released:
                 session.stop_sent = True

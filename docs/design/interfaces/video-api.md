@@ -83,12 +83,12 @@ Windows の固定取得元は設定の `capture.device` と `CaptureOptions.devi
 
 GUIは終了要求後に`is_alive()`が`False`であり、かつ`snapshot().cleanup`が`unconfirmed`でないことを確認してから`join(0)`を呼びます。スレッドの停止だけでは資源の解放完了を意味しません。取得プロセス・共有領域・制御Pipeは試行ごとに新しく作り、再接続や代替試行に再利用しません。
 
-`CaptureTimeouts(startup=10.0, frame=3.0, stop=2.0, terminate=2.0)`の単位は秒です。各値には正の有限値が必要で、不正値は`CaptureError`になります。
+`CaptureTimeouts(startup=10.0, frame=5.0, stop=2.0, terminate=2.0)`の単位は秒です。各値には正の有限値が必要で、不正値は`CaptureError`になります。
 
 | 属性 | 待つ対象 |
 |---|---|
 | `startup` | 列挙結果、または接続要求全体の最初の画像。代替方式ごとに延長しない |
-| `frame` | 取得開始後の次の新フレーム。サービスの既定はカメラで3秒、ponkanで5秒。`CaptureTimeouts`を明示した場合は両方に指定値を使う |
+| `frame` | 取得開始後の次の新フレーム。すべての取得元に共通 |
 | `stop` | 停止要求後の通常解放。列挙結果受領後の子プロセス終了にも適用 |
 | `terminate` | 強制終了を要求した子プロセスの終了確認 |
 
