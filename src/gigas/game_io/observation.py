@@ -50,7 +50,7 @@ class Observation:
     """One encoded agent image and its source metadata, not yet necessarily saved.
 
     Attributes:
-        observation_id: UTC generation time in YYYYMMDDTHHMMSS-mmmZ format.
+        observation_id: Local generation time in YYYYMMDDTHHMMSS-mmm format.
         captured_at: Original host acquisition time, not encoding or saving time.
         source_frame: Source identifiers and dimensions without source pixels.
         png_bytes: Final PNG bytes shared by storage and MCP image encoding.
@@ -127,8 +127,8 @@ class Observation:
         if not success or encoded is None or not 0 < encoded.nbytes <= MAX_PNG_BYTES:
             message = "観測画像を32 MiB以内のPNGに符号化できません"
             raise ObservationError("OBSERVATION_ENCODING_ERROR", message)
-        generated_at = datetime.now(UTC)
-        observation_id = f"{generated_at:%Y%m%dT%H%M%S}-{generated_at.microsecond // 1000:03d}Z"
+        generated_at = datetime.now(UTC).astimezone()
+        observation_id = f"{generated_at:%Y%m%dT%H%M%S}-{generated_at.microsecond // 1000:03d}"
         return cls(
             observation_id,
             frame.captured_at,

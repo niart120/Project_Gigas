@@ -1,8 +1,8 @@
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 from unittest.mock import Mock
 
 import cv2
@@ -90,13 +90,17 @@ def test_observation_resolution_preserves_the_full_frame(
 def test_record_preserves_bytes_identity_and_source_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    generated_at = datetime(2026, 11, 18, 3, 4, 2, 996_789, tzinfo=UTC)
+    local_timezone = timezone(timedelta(hours=9))
+
+    class ObservationTime(datetime):
+        def astimezone(self, tz: tzinfo | None = None) -> Self:
+            return super().astimezone(tz or local_timezone)
+
+    generated_at = ObservationTime(2026, 11, 17, 18, 4, 2, tzinfo=UTC)
     clock = Mock(wraps=datetime)
     clock.now.side_effect = [
-        generated_at,
-        generated_at.replace(microsecond=996_999),
-        generated_at.replace(microsecond=997_000),
-        generated_at.replace(microsecond=998_000),
+        generated_at.replace(microsecond=microsecond)
+        for microsecond in (996_789, 996_999, 997_000, 998_000)
     ]
     monkeypatch.setattr(observation_module, "datetime", clock)
     width, height = 640, 480
@@ -108,14 +112,14 @@ def test_record_preserves_bytes_identity_and_source_time(
         collision = Observation.from_frame(frame)
         second = Observation.from_frame(frame)
         clock.now.assert_called_with(UTC)
-        assert first.observation_id == collision.observation_id == "20261118T030402-996Z"
-        assert second.observation_id == "20261118T030402-997Z"
+        assert first.observation_id == collision.observation_id == "20261118T030402-996"
+        assert second.observation_id == "20261118T030402-997"
         assert collision.png_bytes != first.png_bytes
         writer.record(first)
         with pytest.raises(RecordError):
             writer.record(collision)
         writer.record(second)
-        assert first.image_path == "observations/20261118T030402-996Z.png"
+        assert first.image_path == "observations/20261118T030402-996.png"
         assert first.captured_at == frame.captured_at
         assert (first.source_frame.generation, first.source_frame.sequence) == (2, 7)
         assert (first.source_frame.width, first.source_frame.height) == (width, height)
@@ -155,13 +159,16 @@ def test_record_preserves_bytes_identity_and_source_time(
     reopened = GameIoRecordWriter.open(writer.path)
     try:
         assert log.read_bytes() == original
+        utc_observation = replace(first, observation_id="20261117T180402-996Z")
+        reopened.record(utc_observation)
         reopened.record(Observation.from_frame(frame))
         assert log.read_bytes().startswith(original)
         assert legacy_image.read_bytes() == first.png_bytes
+        assert (reopened.path / utc_observation.image_path).read_bytes() == first.png_bytes
         assert not (writer.path / first.image_path).exists()
         records = [
             json.loads(line) for line in (writer.path / "events.jsonl").read_bytes().splitlines()
         ]
-        assert len(records) == 4
+        assert len(records) == 5
     finally:
         reopened.close()

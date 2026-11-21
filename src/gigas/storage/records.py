@@ -175,7 +175,7 @@ class GameIoRecordWriter:
 
         Args:
             observation: Final image and source metadata from Observation.from_frame.
-                Its UTC timestamp identifier is checked to fix the destination.
+                Its timestamp identifier is validated before building the path.
                 The image is not encoded or decoded again.
 
         Raises:
@@ -270,11 +270,13 @@ def _append_row(path: Path, row: bytes) -> None:
 
 
 def _observation_id(value: str) -> str:
-    message = "観測画像の保存先IDには YYYYMMDDTHHMMSS-mmmZ 形式の UTC 時刻が必要です"
-    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}-[0-9]{3}Z", value):
+    message = (
+        "観測画像の保存先IDには YYYYMMDDTHHMMSS-mmm または YYYYMMDDTHHMMSS-mmmZ 形式が必要です"
+    )
+    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}-[0-9]{3}Z?", value):
         raise RecordError(message)
     try:
-        datetime.strptime(value, "%Y%m%dT%H%M%S-%f%z")
+        datetime.fromisoformat(value.replace("-", "."))
     except ValueError as error:
         raise RecordError(message) from error
     return value
