@@ -1,19 +1,23 @@
 import json
 import multiprocessing
+import sys
 import time
+from importlib import import_module
 from multiprocessing.process import BaseProcess
 from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 from gigas.game_io.capture import CaptureService, CaptureTimeouts
 from gigas.game_io.capture import _process as process_module
 from gigas.game_io.capture import service as capture_module
 from gigas.game_io.capture._process import SharedSlot
-from gigas.game_io.capture.config import CaptureOptions
+from gigas.game_io.capture.config import PONKAN_SOURCE, CaptureOptions
 from gigas.storage.diagnostics import DiagnosticSession
 from tests.integration.peers.capture_peer import (
     PeerBackend,
@@ -26,6 +30,48 @@ if TYPE_CHECKING:
     from multiprocessing.context import BaseContext
 
     from gigas.game_io.capture.service import _Session
+
+
+def _ponkan_home_transition() -> PeerBackend:
+    """Model two real frames separated by the measured DS-to-HOME gap in the child."""
+    ponkan = import_module("ponkan")
+    pixels = np.zeros((480, 400, 3), dtype=np.uint8)
+    frames = iter((pixels, pixels))
+    resume_at = 0.0
+
+    def read() -> object:
+        nonlocal resume_at
+        time.sleep(0.02)
+        if time.monotonic() < resume_at:
+            return None
+        resume_at = time.monotonic() + 4.007
+        return next(frames, None)
+
+    ponkan.list_capture_devices = Mock(
+        return_value=SimpleNamespace(backend_status="available", devices=[1])
+    )
+    ponkan.open_capture = Mock(return_value=Mock(read=read))
+    return PeerBackend()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows capture source")
+def test_ponkan_resumes_after_home_transition_with_default_watchdog() -> None:
+    service = CaptureService(backend_factory=_ponkan_home_transition)
+    service.start()
+    try:
+        assert service.connect(CaptureOptions(PONKAN_SOURCE))
+        first = wait_for(service, lambda state: state.frame is not None)
+        resumed = wait_for(
+            service, lambda state: state.frame is not None and state.frame.sequence == 2
+        )
+        assert resumed.generation == first.generation
+        assert resumed.phase == "streaming"
+        stalled = wait_for(service, lambda state: state.phase == "error")
+        assert stalled.error == "映像フレーム待機期限切れ"
+        assert stalled.frame is None
+    finally:
+        service.shutdown()
+        service.join(6)
 
 
 def test_stalled_catalog_does_not_end_capture_and_can_be_retried(tmp_path: Path) -> None:
